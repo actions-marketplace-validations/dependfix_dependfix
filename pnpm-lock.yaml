@@ -113,8 +113,8 @@ importers:
         specifier: ^12.11.1
         version: 12.11.1
       bullmq:
-        specifier: ^6.0.9
-        version: 6.0.9(ioredis@6.0.0(supports-color@10.2.2))(pg@8.22.0)
+        specifier: ^6.0.11
+        version: 6.0.11(ioredis@6.0.0(supports-color@10.2.2))(pg@8.22.0)
       cron-parser:
         specifier: ^5.8.1
         version: 5.8.1
@@ -3604,8 +3604,8 @@ packages:
   buffer@6.0.3:
     resolution: {integrity: sha512-FTiCpNxtwiZZHEZbcbTIcZjERVICn9yq/pDFkTl95/AxzD1naBctN7YO68riM/gLSDY7sdrMby8hofADYuuqOA==}
 
-  bullmq@6.0.9:
-    resolution: {integrity: sha512-l7kNlirauwdZrqsViO6owHUAhSSN/aCDkrUwZQ2futIItlbJGAxgU+6IOQtTl5Re39GZJEPU6jelGuY1gQD28w==}
+  bullmq@6.0.11:
+    resolution: {integrity: sha512-nq3WTDqlbSlgJfVFZ56qMZ99BqVBAUl2S+cnLbD3jRWvViWS/vtD22o/ynxYgcOyS2v//wO9AdQHekv18IlucQ==}
     engines: {node: '>=14.17.0'}
     peerDependencies:
       bullmq-otel: '>=2.0.0'
@@ -3970,10 +3970,6 @@ packages:
   crc32-stream@6.0.0:
     resolution: {integrity: sha512-piICUB6ei4IlTv1+653yq5+KoqfBYmj9bw6LqXoOneTMDXk5nM1qt12mFW1caG3LlJXEKW1Bp0WggEmIfQB34g==}
     engines: {node: '>= 14'}
-
-  cron-parser@5.7.0:
-    resolution: {integrity: sha512-iSpDHpwwW/GhIg4JVODYlWUEpMNSimaHvqOhHpOz1W+Y97z1lL1nf+dpcF17cNwFRpTtKN9devgi1fxflp3Phw==}
-    engines: {node: '>=18'}
 
   cron-parser@5.8.1:
     resolution: {integrity: sha512-fVw5nGEkTVmiPKo3fY0j28Thq6jR00VKWyL22llWrsbII4sDHI+8Kx1kcL+QzGQJfCfk64bbMotrgTZRpzYpLQ==}
@@ -11409,9 +11405,9 @@ snapshots:
       base64-js: 1.5.1
       ieee754: 1.2.1
 
-  bullmq@6.0.9(ioredis@6.0.0(supports-color@10.2.2))(pg@8.22.0):
+  bullmq@6.0.11(ioredis@6.0.0(supports-color@10.2.2))(pg@8.22.0):
     dependencies:
-      cron-parser: 5.7.0
+      cron-parser: 5.8.1
       msgpackr: 2.0.5
       node-abort-controller: 3.1.1
       semver: 7.8.5
@@ -11770,10 +11766,6 @@ snapshots:
     dependencies:
       crc-32: 1.2.2
       readable-stream: 4.7.0
-
-  cron-parser@5.7.0:
-    dependencies:
-      luxon: 3.7.2
 
   cron-parser@5.8.1:
     dependencies:
