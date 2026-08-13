@@ -40,7 +40,7 @@
     "docs:preview": "pnpm --filter dependfix-docs preview"
   },
   "devDependencies": {
-    "@lint-md/cli": "2.2.4",
+    "@lint-md/cli": "2.2.5",
     "@types/node": "^26.1.2",
     "@vitest/coverage-v8": "^4.1.10",
     "commitizen": "^4.3.1",

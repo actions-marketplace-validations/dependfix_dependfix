@@ -26,8 +26,8 @@ importers:
   .:
     devDependencies:
       '@lint-md/cli':
-        specifier: 2.2.4
-        version: 2.2.4
+        specifier: 2.2.5
+        version: 2.2.5
       '@types/node':
         specifier: ^26.1.2
         version: 26.1.2
@@ -1235,22 +1235,22 @@ packages:
   '@kwsites/promise-deferred@1.1.1':
     resolution: {integrity: sha512-GaHYm+c0O9MjZRu0ongGBRbinu8gVAMd2UZjji6jVmqKtZluZnptXGWhz1E8j8D2HJ3f/yMxKAUC0b+57wncIw==}
 
-  '@lint-md/cli@2.2.4':
-    resolution: {integrity: sha512-cSdXi6/IlWSe4fkOtb/TTH1clnGGlb8snE6kk0AF3camGLxdy3im7yA1jz759pmZkort22fCxg1s0IKvNJVRnA==}
+  '@lint-md/cli@2.2.5':
+    resolution: {integrity: sha512-uVvh2xfSr2hNSgxeOL2RFmtLTr/yM3X/QoPAbjGrt1gcuw8gn2fSJudnVHkSvfZSwCHZEzJqrN/BfeaIQaVLnA==}
     hasBin: true
 
   '@lint-md/core@2.0.0':
     resolution: {integrity: sha512-DbjU4NhmddVM2GaeUz+f+urFLt0IoTomwJglrRGuUKBCr4udpVe/rnh26R02zQKXm/+ocQ5WfU0iLCCWBsXoYA==}
 
-  '@lint-md/core@2.3.0':
-    resolution: {integrity: sha512-LzMAhmaoIn/jgbaln9by9pMoTAPF8JWyvbUsQgXVzuVdMIfT/Z6wmJz2Gxpd6krkU5KSEIL06iNm+xhGJ3T/qw==}
+  '@lint-md/core@2.3.2':
+    resolution: {integrity: sha512-4lbVhQ36hfMvfYUrkCWdmLYJ3UOyPGgsylKTjOmpdcPhHQH0ebCTDCZmiOs6rLY5dFfhsnMtaQQPVePEGW+m4g==}
     engines: {node: '>=20'}
 
   '@lint-md/parser@0.0.14':
     resolution: {integrity: sha512-kFFq6TowN2MBe+EFctnn6VluPWHV/9i/mHGQG/d5qGcR7EnA7JSURaxw9kQDHG11bwUK+pHOoXjSOp/6VzM/1w==}
 
-  '@lint-md/parser@0.2.0':
-    resolution: {integrity: sha512-goi4GlmfgCfpk26u5MMLwc8qi1StdXc7/VzC2zLsME4d3hprvXAJXYkRCc4b6b9QSGViM3gBb4CmSRqyPWjW9w==}
+  '@lint-md/parser@0.2.1':
+    resolution: {integrity: sha512-tgnfSiid5qxFs+i9gFeJcuQDhWmPNQnVns8G2FwIhE0PhbKglEXiuVvowE3cns+4scRBE+VWI4JXzAvBQYK69g==}
     engines: {node: '>=20'}
 
   '@mapbox/node-pre-gyp@2.0.3':
@@ -3777,8 +3777,8 @@ packages:
     resolution: {integrity: sha512-OkTL9umf+He2DZkUq8f8J9of7yL6RJKI24dVITBmNfZBmri9zYZQrKkuXiKhyfPSu8tUhnVBB1iKXevvnlR4Ww==}
     engines: {node: '>= 12'}
 
-  commander@9.4.1:
-    resolution: {integrity: sha512-5EEkTNyHNGFPD2H+c/dXXfQZYa/scCKasxWcXJaWnNJ99pnQN9Vnmqow+p+PlFPE63Q6mThaZws1T+HxfpgtPw==}
+  commander@9.5.0:
+    resolution: {integrity: sha512-KRs7WVDKg86PWiuAqhDrAQnTXZKraVcCc6vFdL14qrZ/DcWwuRo7VoiYXalXO7S5GKpqYiVEwCbgFDfxNHKJBQ==}
     engines: {node: ^12.20.0 || >=14}
 
   commitizen@4.3.2:
@@ -5515,6 +5515,10 @@ packages:
     resolution: {integrity: sha512-RPimw/7aMdv2oqRrxKwvZXcPfwBrn/JZ2xYcY9Hus/6LaS3VOAKVWKWgNLCFSiOm1ESXinjsDlidVU7JlnCN2A==}
     engines: {node: 20 || >=22}
 
+  lru-cache@11.5.2:
+    resolution: {integrity: sha512-4pfM1Ff0x50o0tQwb5ucw/RzNyD0/YJME6IVcStalZuMWxdt3sR3huStTtxz4PUmvZfRguvDejasvQ2kifR11g==}
+    engines: {node: 20 || >=22}
+
   lru-cache@5.1.1:
     resolution: {integrity: sha512-KpNARQA3Iwv+jTA0utUVVbrh+Jlrr1Fv0e56GGzAFOXN7dk/FviaDW8LHmK52DlcH4WP2n6gI8vN1aesBFgo9w==}
 
@@ -5766,8 +5770,8 @@ packages:
     resolution: {integrity: sha512-z0yWI+4FDrrweS8Zmt4Ej5HdJmky15+L2e6Wgn3+iK5fWzb6T3fhNFq2+MeTRb064c6Wr4N/wv0DzQTjNzHNGQ==}
     engines: {node: '>=10'}
 
-  minimatch@10.2.4:
-    resolution: {integrity: sha512-oRjTw/97aTBN0RHbYCdtF1MQfvusSIBQM0IZEgzl6426+8jSC0nF1a/GmnVLpfB9yyr6g6FTqWqiZVbxrtaCIg==}
+  minimatch@10.2.6:
+    resolution: {integrity: sha512-vpLQEs+VLCr1nU0BXS07maYoFwlDAH0gngQuuttxIwutDFEMHq2blX+8vpgxDdK3J1PwjCJiep77OitTZ4Ll1A==}
     engines: {node: 18 || 20 || >=22}
 
   minimatch@3.1.5:
@@ -8989,11 +8993,11 @@ snapshots:
 
   '@kwsites/promise-deferred@1.1.1': {}
 
-  '@lint-md/cli@2.2.4':
+  '@lint-md/cli@2.2.5':
     dependencies:
-      '@lint-md/core': 2.3.0
+      '@lint-md/core': 2.3.2
       chalk: 4.1.2
-      commander: 9.4.1
+      commander: 9.5.0
       glob: 11.1.0
       piscina: 5.3.0
       strip-ansi: 6.0.1
@@ -9006,9 +9010,9 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@lint-md/core@2.3.0':
+  '@lint-md/core@2.3.2':
     dependencies:
-      '@lint-md/parser': 0.2.0
+      '@lint-md/parser': 0.2.1
 
   '@lint-md/parser@0.0.14(supports-color@10.2.2)':
     dependencies:
@@ -9022,7 +9026,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@lint-md/parser@0.2.0':
+  '@lint-md/parser@0.2.1':
     dependencies:
       '@types/mdast': 3.0.15
 
@@ -10616,7 +10620,7 @@ snapshots:
       '@typescript-eslint/types': 8.65.0
       '@typescript-eslint/visitor-keys': 8.65.0
       debug: 4.4.3(supports-color@10.2.2)
-      minimatch: 10.2.4
+      minimatch: 10.2.6
       semver: 7.8.5
       tinyglobby: 0.2.17
       ts-api-utils: 2.5.0(typescript@6.0.3)
@@ -11567,7 +11571,7 @@ snapshots:
 
   commander@8.3.0: {}
 
-  commander@9.4.1: {}
+  commander@9.5.0: {}
 
   commitizen@4.3.2(@types/node@26.1.2)(typescript@6.0.3):
     dependencies:
@@ -12785,7 +12789,7 @@ snapshots:
     dependencies:
       foreground-child: 3.3.1
       jackspeak: 4.2.3
-      minimatch: 10.2.4
+      minimatch: 10.2.6
       minipass: 7.1.3
       package-json-from-dist: 1.0.1
       path-scurry: 2.0.2
@@ -13471,6 +13475,8 @@ snapshots:
 
   lru-cache@11.5.1: {}
 
+  lru-cache@11.5.2: {}
+
   lru-cache@5.1.1:
     dependencies:
       yallist: 3.1.1
@@ -13911,7 +13917,7 @@ snapshots:
 
   mimic-response@3.1.0: {}
 
-  minimatch@10.2.4:
+  minimatch@10.2.6:
     dependencies:
       brace-expansion: 5.0.9
 
@@ -14574,7 +14580,7 @@ snapshots:
 
   path-scurry@2.0.2:
     dependencies:
-      lru-cache: 11.5.1
+      lru-cache: 11.5.2
       minipass: 7.1.3
 
   path-to-regexp@8.4.2: {}
