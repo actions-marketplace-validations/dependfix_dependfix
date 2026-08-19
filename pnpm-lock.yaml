@@ -210,8 +210,8 @@ importers:
         specifier: ^0.2.2
         version: 0.2.2
       dayjs:
-        specifier: ^1.11.21
-        version: 1.11.21
+        specifier: ^1.11.22
+        version: 1.11.22
       dotenv:
         specifier: ^17.4.2
         version: 17.4.2
@@ -4076,6 +4076,9 @@ packages:
 
   dayjs@1.11.21:
     resolution: {integrity: sha512-98IT+HOahAisibz/yjKbzuOBwYcjJ7BCLPzARyHiyEBmRz4fatF+KPJszEHXsGYjUG234aH/cOjW1wwTbKUZlA==}
+
+  dayjs@1.11.22:
+    resolution: {integrity: sha512-1YRnxzt/AabP3GHxnaB9/b+ZScCKu5TeF+co+BWG+lnWVIwEcTFc1FVE0WLNmNO3sA6GGXL40i5qkHfbLzpwrg==}
 
   db0@0.3.4:
     resolution: {integrity: sha512-RiXXi4WaNzPTHEOu8UPQKMooIbqOEyqA1t7Z6MsdxSCeb8iUC9ko3LcmsLmeUt2SM5bctfArZKkRQggKZz7JNw==}
@@ -11921,6 +11924,8 @@ snapshots:
       is-data-view: 1.0.2
 
   dayjs@1.11.21: {}
+
+  dayjs@1.11.22: {}
 
   db0@0.3.4(better-sqlite3@12.11.1)(mysql2@3.23.2(@types/node@26.1.2)):
     optionalDependencies:
