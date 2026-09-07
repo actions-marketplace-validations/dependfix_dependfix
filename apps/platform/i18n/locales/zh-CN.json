@@ -4,7 +4,10 @@
         "nav": {
             "dashboard": "仪表板",
             "repos": "仓库",
+            "scans": "扫描",
             "alerts": "告警",
+            "envEvents": "环境事件",
+            "prChecks": "PR Checks",
             "schedules": "定时计划",
             "batchRuns": "批量运行",
             "credentials": "凭据",
@@ -26,7 +29,9 @@
             "refresh": "刷新",
             "back": "返回",
             "submit": "提交",
-            "search": "搜索"
+            "search": "搜索",
+            "details": "详情",
+            "actions": "操作"
         },
         "dialog": {
             "confirmTitle": "确认操作",
@@ -49,6 +54,7 @@
             "converged": "已收敛",
             "pending": "未处理"
         },
+        "superseded": "已关闭",
         "status": {
             "enabled": "已启用",
             "disabled": "已禁用",
@@ -75,6 +81,11 @@
         },
         "severity": {
             "all": "全部"
+        },
+        "role": {
+            "admin": "管理员",
+            "orgAdmin": "组织管理员",
+            "viewer": "观察者"
         }
     },
     "repos": {
@@ -96,6 +107,7 @@
         "colActions": "操作",
         "notLinked": "未关联",
         "platformContainer": "平台容器",
+        "sandboxContainer": "独立沙箱容器",
         "githubAction": "GitHub Action",
         "privateRepo": "私有",
         "publicRepo": "公开",
@@ -123,15 +135,36 @@
         "batchMode": "扫描模式",
         "batchSeverity": "严重级别阈值",
         "batchStart": "开始扫描",
+        "scanConfigHeader": "扫描配置（{owner}/{name}）",
+        "scanConfigHeaderEmpty": "扫描配置",
+        "scanConfigTarget": "目标仓库",
         "importTitle": "批量导入仓库",
         "importCredential": "GitHub 凭据",
         "importCredentialPlaceholder": "选择凭据",
+        "importDefaultCredential": "默认关联凭据",
+        "importDefaultCredentialPlaceholder": "选择凭据（留空不关联）",
+        "importDefaultCredentialHint": "导入后所有仓库自动关联到所选凭据；留空不关联，可在仓库列表手动编辑",
         "importRefresh": "刷新仓库列表",
         "importSelectAll": "全选（{count}）",
         "importSelectedCount": "已选 {count} 个",
         "importSelect": "导入所选",
         "importNoRepos": "未获取到仓库列表（凭据无权访问或没有匹配仓库）",
         "importSelectCredential": "请先选择 GitHub 凭据",
+        "importFilterFork": "仓库类型",
+        "importFilterForkSource": "仅非 fork",
+        "importFilterForkAll": "全部（含 fork）",
+        "importFilterVisibility": "可见性",
+        "importFilterVisibilityAll": "全部可见性",
+        "importFilterVisibilityPublic": "仅公开",
+        "importFilterVisibilityPrivate": "仅私有",
+        "importFilterSearch": "搜索",
+        "importFilterSearchPlaceholder": "搜索仓库名或描述",
+        "importPaginationPageInfo": "第 {current} / {page} 页",
+        "importPaginationPageSize": "每页 {size} 个",
+        "importPaginationTotalCount": "共 {total} 个仓库",
+        "importCachedAt": "缓存于 {minutes} 分钟前",
+        "importFromCache": "从缓存加载",
+        "importFreshRefreshed": "已强制刷新",
         "scanStatusQueryFailed": "扫描状态查询失败，可在扫描历史中查看",
         "scanCompleted": "扫描完成，可在扫描历史中查看结果",
         "scanDuplicate": "该仓库已有进行中的扫描任务",
@@ -185,8 +218,16 @@
         "fieldNamePlaceholder": "如 每周一凌晨扫描",
         "fieldCron": "cron 表达式 *",
         "fieldCronHint": "5 段（分 时 日 月 周）或 6 段（含秒），如 0 2 * * 1 = 每周一 02:00；建议间隔不小于 1 小时",
+        "cronPreviewTitle": "下次触发（按当前时区，next 3）",
+        "cronInvalid": {
+            "empty": "请输入 cron 表达式",
+            "invalidFieldCount": "cron 表达式必须为 5 段或 6 段（分 时 日 月 周 / 秒 分 时 日 月 周）",
+            "parseError": "cron 表达式语法非法"
+        },
         "fieldTimezone": "时区（可选）",
-        "fieldTimezonePlaceholder": "Asia/Shanghai，留空用服务器本地时区",
+        "fieldTimezonePlaceholder": "搜索 IANA 时区（如 Asia/Shanghai）",
+        "timezoneHint": "默认跟随浏览器（{default}）；留空使用服务器本地时区",
+        "timezoneEmpty": "未找到匹配项",
         "fieldSelector": "仓库选择策略",
         "fieldTag": "标签",
         "fieldTagPlaceholder": "如 frontend（命中仓库的 tags 包含该标签）",
@@ -275,6 +316,15 @@
         "fixedCount": "已修复",
         "latestRun": "最近扫描",
         "severityTitle": "告警按严重级别",
+        "chartTitle": "图表",
+        "severityChartTitle": "告警分布",
+        "fixRateChartTitle": "修复率",
+        "topPackagesChartTitle": "Top-10 告警包",
+        "chartEmpty": "暂无数据",
+        "fixRateLabel": "已修复",
+        "fixRateRemaining": "未修复",
+        "fixRateValue": "{percent}%",
+        "packageTruncated": "完整包名见 tooltip",
         "errors": {
             "loadFailed": "加载失败：{message}"
         }
@@ -347,6 +397,7 @@
         "errors": {
             "loadFailed": "加载失败：{message}",
             "roleUpdateFailed": "角色更新失败：{message}",
+            "cannotSelfModify": "不能修改自己的角色，请联系其他管理员操作",
             "enableFailed": "启用失败：{message}",
             "disableFailed": "禁用失败：{message}",
             "statusUpdateFailed": "状态更新失败：{message}",
@@ -371,17 +422,117 @@
         "filterSeverity": "严重级别",
         "filterSource": "来源",
         "filterApply": "筛选",
+        "filter": {
+            "includeSuperseded": "显示已解决"
+        },
         "severityAll": "全部级别",
         "sourceAll": "全部来源",
+        "sourceCodeQuality": "Code Quality",
         "colRepository": "仓库",
         "colSeverity": "严重级别",
         "colPackage": "包/规则",
         "colSource": "来源",
+        "colIdentifiers": "漏洞标识",
+        "colRuleId": "规则标识",
         "colFixable": "可修复",
         "colRecommended": "推荐版本",
         "colStatus": "状态",
         "colLink": "链接",
         "view": "查看",
+        "groupHeaderCount": "（{count} 条告警）",
+        "viewMode": "视图",
+        "viewModePackage": "按包",
+        "viewModeRepository": "按项目",
+        "viewModeNone": "原始列表",
+        "repositoryUnknown": "未知仓库",
+        "colOccurrenceCount": "出现次数",
+        "colLastSeenAt": "最近发现",
+        "colFirstSeenAt": "首次发现",
+        "detailRunsTitle": "该告警关联的扫描运行（共 {total} 个）",
+        "detailRunId": "运行 ID",
+        "detailRunStatus": "状态",
+        "detailRunStartedAt": "开始时间",
+        "detailRunDuration": "耗时",
+        "runDurationSeconds": "{seconds} 秒",
+        "detailRunMode": "模式",
+        "detailRunThreshold": "严重级别阈值",
+        "detailRunExecutor": "执行器",
+        "detailRunAlertsFound": "告警数",
+        "detailRunOpen": "查看 PR",
+        "detailRunEmpty": "无关联扫描运行",
+        "fixNow": {
+            "action": "立即修复此仓库",
+            "success": "已对运行 {runId} 触发修复；跳转扫描历史查看进度",
+            "failed": "触发修复失败：{message}"
+        },
+        "errors": {
+            "loadFailed": "加载失败：{message}"
+        }
+    },
+    "prChecks": {
+        "title": "PR Check 监测",
+        "subtitle": "监测 dependfix / dependabot PR 的 CI Test check 状态",
+        "empty": "暂无 PR Check 数据（需先在定时计划中创建 pr-check 类型 schedule 并启用）",
+        "allRepositories": "全部仓库",
+        "filterRepository": "仓库",
+        "filterAlertFiring": "Alert 状态",
+        "alertFiringAll": "全部",
+        "alertFiringTrue": "仅 firing",
+        "alertFiringFalse": "仅已 ack",
+        "colRepository": "仓库",
+        "colPrNumber": "PR",
+        "colAuthor": "作者",
+        "colConclusion": "结论",
+        "colLastPolledAt": "最近轮询",
+        "colStatus": "Alert",
+        "colLink": "链接",
+        "colActions": "操作",
+        "repositoryUnknown": "未知仓库",
+        "ack": {
+            "action": "Ack 关闭告警",
+            "success": "已 ack PR #{prNumber}",
+            "failed": "Ack 失败：{message}",
+            "confirm": "确认关闭 PR #{prNumber} 的告警？"
+        },
+        "summary": {
+            "total": "总数",
+            "firing": "Firing",
+            "acked": "已 ack"
+        },
+        "errors": {
+            "loadFailed": "加载失败：{message}"
+        }
+    },
+    "envEvents": {
+        "title": "环境事件",
+        "subtitle": "sandbox / docker / runtime 环境变化告警（含通知状态）",
+        "empty": "暂无环境事件（sandbox 启动降级或运行时失败时自动记录）",
+        "filterType": "事件类型",
+        "filterSeverity": "严重级别",
+        "filterNotified": "通知状态",
+        "filterFrom": "起始时间",
+        "filterTo": "结束时间",
+        "filterApply": "筛选",
+        "typeAll": "全部类型",
+        "severityAll": "全部级别",
+        "notifiedAll": "全部",
+        "notifiedYes": "已通知",
+        "notifiedNo": "未通知",
+        "colType": "类型",
+        "colSeverity": "级别",
+        "colRepository": "仓库",
+        "colMessage": "详情",
+        "colNotified": "通知",
+        "colTime": "发生时间",
+        "severityInfo": "提示",
+        "severityWarn": "警告",
+        "severityError": "错误",
+        "severityCritical": "严重",
+        "typeSandboxUnavailable": "沙箱不可用",
+        "typeSandboxDegraded": "沙箱降级",
+        "typeDockerDaemonDown": "Docker 守护进程停止",
+        "expand": "展开",
+        "collapse": "收起",
         "errors": {
             "loadFailed": "加载失败：{message}"
         }
@@ -412,6 +563,21 @@
         "fieldTokenPlaceholderNew": "ghp_... / github_pat_...",
         "howToGet": "如何获取？",
         "githubDocs": "GitHub 官方文档：管理个人访问令牌",
+        "fieldAppId": "App ID *",
+        "fieldAppIdPlaceholder": "如 123456",
+        "fieldInstallationId": "Installation ID *",
+        "fieldInstallationIdPlaceholder": "如 7890123",
+        "fieldPrivateKey": "PEM 私钥 *",
+        "fieldPrivateKeyEdit": "PEM 私钥（留空不修改）",
+        "fieldPrivateKeyPlaceholder": "粘贴 PEM 内容或上传 .pem 文件",
+        "fieldBotLogin": "Bot 用户名（可选）",
+        "fieldBotLoginPlaceholder": "如 dependfix-bot[bot]",
+        "pemFingerprint": "公钥指纹",
+        "pemFingerprintHint": "如需与 GitHub App 设置页面对照，请运行：openssl rsa -in {pem} -pubout -outform DER \\| openssl sha256 -binary \\| openssl base64",
+        "pemUpload": "上传 .pem 文件",
+        "pemValid": "PEM 合法",
+        "pemInvalid": "PEM 非法",
+        "githubAppDocs": "如何创建 GitHub App",
         "fieldNote": "备注",
         "success": {
             "updated": "凭据已更新",
@@ -451,38 +617,42 @@
             "running": "执行中",
             "completed": "成功",
             "failed": "失败",
-            "dispatched": "已触发"
+            "dispatched": "已触发",
+            "dispatchedPrFailed": "PR 创建失败（分支已推）"
         },
-        "colRepo": "仓库",
-        "colStatus": "状态",
-        "colExecutor": "执行方式",
-        "colAlerts": "告警数",
-        "colResult": "结果",
+        "openRunPrFailedHint": "PR 创建失败，分支已推；点击上方链接手动开 PR",
         "openRun": "打开运行",
         "subEmpty": "暂无下属扫描记录",
+        "forceFail": "强制完成",
+        "forceFailConfirm": "确定要强制完成此批次吗？所有运行中的子任务将被标记为失败（无法撤销）。",
         "errors": {
             "loadFailed": "加载失败：{message}",
-            "detailLoadFailed": "详情加载失败：{message}"
+            "detailLoadFailed": "详情加载失败：{message}",
+            "forceFailFailed": "强制完成失败：{message}"
         }
     },
     "runs": {
         "title": "扫描历史",
         "back": "返回",
-        "empty": "暂无扫描记录",
+        "empty": "暂无扫描运行",
+        "colRepo": "仓库",
         "colStatus": "状态",
         "colMode": "模式",
         "colThreshold": "阈值",
-        "colExecutor": "执行方式",
+        "colExecutor": "执行器",
         "colStartedAt": "开始时间",
         "colAlerts": "告警数",
         "colFixed": "已修复",
+        "colResult": "结果",
         "colActions": "操作",
         "statusCompleted": "已完成",
         "statusFailed": "失败",
         "statusDispatched": "已触发",
         "statusRunning": "执行中",
+        "statusDegraded": "已降级",
         "actionViewActionRun": "查看 Action 运行",
         "actionViewDetail": "查看详情",
+        "backToList": "返回列表",
         "dialogTitle": "扫描详情",
         "detailEmpty": "本次扫描无告警明细",
         "colPackage": "包",
@@ -492,9 +662,189 @@
         "colRecommended": "推荐版本",
         "colLink": "链接",
         "view": "查看",
+        "errorTitle": "扫描执行失败（{code}）",
+        "errorNoDetail": "本次扫描执行失败，但未记录错误详情，请查看系统日志。",
+        "paginatorInfo": "第 {first} - {last} 条 / 共 {total} 条",
+        "logsTitle": "执行日志",
+        "logsCopy": "复制日志",
+        "logsEmpty": "暂无执行日志",
         "errors": {
             "loadFailed": "加载失败：{message}",
             "detailLoadFailed": "详情加载失败：{message}"
+        }
+    },
+    "scans": {
+        "title": "扫描",
+        "subtitle": "跨仓库扫描历史：汇总卡片、按仓库聚合、全运行分页列表",
+        "repoFilterActive": "已按仓库过滤：{owner}/{name}",
+        "clearFilter": "清除过滤",
+        "summary": {
+            "totalRuns": "总运行数",
+            "totalAlerts": "告警总数",
+            "totalFixed": "已修复总数",
+            "lastRunAt": "最近扫描"
+        },
+        "byRepo": {
+            "title": "按仓库",
+            "empty": "暂无仓库活动",
+            "colOwner": "所有者",
+            "colName": "仓库",
+            "colRuns": "运行数",
+            "colAlerts": "告警",
+            "colFixed": "已修复",
+            "colLastRun": "最近运行",
+            "colLastStatus": "最近状态",
+            "colActions": "操作",
+            "actionFilterThis": "仅查看此仓库"
+        },
+        "runList": {
+            "title": "全部运行",
+            "empty": "该范围内暂无扫描运行",
+            "errors": {
+                "loadFailed": "加载失败：{message}",
+                "summaryFailed": "汇总加载失败：{message}"
+            }
+        },
+        "errors": {
+            "loadFailed": "加载失败：{message}"
+        }
+    },
+    "serverErrors": {
+        "UNAUTHORIZED": {
+            "zh-CN": "未登录或会话已过期",
+            "en": "Not signed in or session expired"
+        },
+        "FORBIDDEN": {
+            "zh-CN": "没有权限执行该操作",
+            "en": "You do not have permission to perform this action"
+        },
+        "RESOURCE_NOT_IN_ORG": {
+            "zh-CN": "资源不属于当前组织",
+            "en": "Resource does not belong to current organization"
+        },
+        "REPO_NOT_FOUND": {
+            "zh-CN": "仓库不存在",
+            "en": "Repository not found"
+        },
+        "REPO_DUPLICATE": {
+            "zh-CN": "该仓库已存在",
+            "en": "Repository already exists"
+        },
+        "REPO_ID_MISSING": {
+            "zh-CN": "缺少仓库 id",
+            "en": "Repository id is required"
+        },
+        "REPO_VALIDATION_FAILED": {
+            "zh-CN": "参数校验失败",
+            "en": "Request validation failed"
+        },
+        "SCAN_RUN_NOT_FOUND": {
+            "zh-CN": "扫描记录不存在",
+            "en": "Scan run not found"
+        },
+        "RUN_ID_MISSING": {
+            "zh-CN": "缺少运行 id",
+            "en": "Run id is required"
+        },
+        "RUNS_VALIDATION_FAILED": {
+            "zh-CN": "查询参数校验失败",
+            "en": "Invalid query parameters"
+        },
+        "REUSE_RUN_NOT_IN_REPO": {
+            "zh-CN": "复用的扫描记录不属于当前仓库",
+            "en": "Reused scan run does not belong to this repository"
+        },
+        "REUSE_RUN_RUNNING": {
+            "zh-CN": "该扫描正在执行中，请等待完成后复用",
+            "en": "Scan is currently running, please wait for completion before reusing"
+        },
+        "SCAN_PENDING_MERGED": {
+            "zh-CN": "该仓库已有进行中的扫描任务，本次触发已合并",
+            "en": "A scan is already in progress for this repository; this trigger has been merged"
+        },
+        "SCAN_ALREADY_COMPLETED": {
+            "zh-CN": "扫描已完成，请在扫描历史中查看",
+            "en": "Scan already completed, please check scan history"
+        },
+        "CREDENTIAL_NOT_FOUND": {
+            "zh-CN": "凭据不存在",
+            "en": "Credential not found"
+        },
+        "CREDENTIAL_ID_MISSING": {
+            "zh-CN": "缺少凭据 id",
+            "en": "Credential id is required"
+        },
+        "CREDENTIAL_VALIDATION_FAILED": {
+            "zh-CN": "参数校验失败",
+            "en": "Request validation failed"
+        },
+        "SCHEDULE_NOT_FOUND": {
+            "zh-CN": "定时计划不存在",
+            "en": "Schedule not found"
+        },
+        "SCHEDULE_ID_MISSING": {
+            "zh-CN": "缺少计划 id",
+            "en": "Schedule id is required"
+        },
+        "SCHEDULE_VALIDATION_FAILED": {
+            "zh-CN": "参数校验失败",
+            "en": "Request validation failed"
+        },
+        "PR_CHECK_NOT_FOUND": {
+            "zh-CN": "PR check 记录不存在",
+            "en": "PR check record not found"
+        },
+        "PR_CHECK_ID_MISSING": {
+            "zh-CN": "缺少 PR check id",
+            "en": "PR check id is required"
+        },
+        "PR_CHECK_ACK_VALIDATION_FAILED": {
+            "zh-CN": "参数校验失败",
+            "en": "Request validation failed"
+        },
+        "BATCH_RUN_ID_MISSING": {
+            "zh-CN": "缺少批量运行 id",
+            "en": "Batch run id is required"
+        },
+        "BATCH_RUN_NOT_FOUND": {
+            "zh-CN": "批量运行不存在",
+            "en": "Batch run not found"
+        },
+        "REPOS_BATCH_VALIDATION_FAILED": {
+            "zh-CN": "参数校验失败",
+            "en": "Request validation failed"
+        },
+        "REPOS_BATCH_SCAN_VALIDATION_FAILED": {
+            "zh-CN": "参数校验失败",
+            "en": "Request validation failed"
+        },
+        "REPOS_BATCH_SCAN_NO_REPO": {
+            "zh-CN": "所选仓库不存在或不属于当前组织",
+            "en": "Selected repositories do not exist or do not belong to current organization"
+        },
+        "IMPORTABLE_CREDENTIAL_ID_MISSING": {
+            "zh-CN": "缺少 credentialId",
+            "en": "credentialId is required"
+        },
+        "IMPORTABLE_AFFILIATION_INVALID": {
+            "zh-CN": "affiliation 仅支持 owner / collaborator / organization_member",
+            "en": "affiliation must be one of owner, collaborator, organization_member"
+        },
+        "GITHUB_API_AUTH_FAILED": {
+            "zh-CN": "GitHub Token 无权访问仓库列表（请检查凭据权限）",
+            "en": "GitHub token does not have permission to access repository list"
+        },
+        "GITHUB_API_FETCH_FAILED": {
+            "zh-CN": "拉取 GitHub 仓库失败：{message}",
+            "en": "Failed to fetch GitHub repositories: {message}"
+        },
+        "METHOD_NOT_ALLOWED": {
+            "zh-CN": "请求方法不被允许",
+            "en": "Method not allowed"
+        },
+        "UNKNOWN": {
+            "zh-CN": "未知错误",
+            "en": "Unknown error"
         }
     }
 }

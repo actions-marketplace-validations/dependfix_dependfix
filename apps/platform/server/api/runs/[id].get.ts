@@ -2,14 +2,16 @@ import { ScanRun } from '#server/entities/scan-run'
 import { ScanResult } from '#server/entities/scan-result'
 import { ensureDatabaseInitialized } from '#server/database'
 import { requireAuth } from '#server/utils/guard'
+import { createLocalizedError } from '#server/utils/localized-error'
+import { parseLogEntries, formatLogEntries } from '#server/utils/memory-logger'
 
-/** GET /api/runs/[id]：扫描详情（含结果明细） */
+/** GET /api/runs/[id]：扫描详情（含结果明细 + 执行日志） */
 export default defineEventHandler(async (event) => {
     await requireAuth(event)
 
     const id = getRouterParam(event, 'id') as string
     if (!id) {
-        throw createError({ statusCode: 400, statusMessage: 'Bad Request', message: '缺少运行 id' })
+        throw createLocalizedError(event, { statusCode: 400, code: 'RUN_ID_MISSING' })
     }
 
     const ds = await ensureDatabaseInitialized()
@@ -21,13 +23,17 @@ export default defineEventHandler(async (event) => {
         relations: { repository: true },
     })
     if (!run) {
-        throw createError({ statusCode: 404, statusMessage: 'Not Found', message: '扫描记录不存在' })
+        throw createLocalizedError(event, { statusCode: 404, code: 'SCAN_RUN_NOT_FOUND' })
     }
 
     const results = await resultRepo.find({
         where: { scanRunId: run.id },
         order: { severity: 'ASC' },
     })
+
+    // 解析执行日志
+    const logEntries = parseLogEntries(run.logsJson)
+    const logsText = logEntries.length > 0 ? formatLogEntries(logEntries) : null
 
     return {
         id: run.id,
@@ -58,5 +64,7 @@ export default defineEventHandler(async (event) => {
             fixStatus: r.fixStatus,
             errorMessage: r.errorMessage,
         })),
+        logs: logEntries,
+        logsText,
     }
 })

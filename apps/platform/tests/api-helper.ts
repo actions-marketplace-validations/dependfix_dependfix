@@ -28,13 +28,21 @@ export const makeEvent = (
     return event
 }
 
-/** 调用 handler 并断言抛出的 h3 错误（{ statusCode, statusMessage, message }） */
-export const expectError = async (promise: Promise<unknown>, statusCode: number): Promise<Record<string, unknown>> => {
+/**
+ * 调用 handler 并断言抛出的 h3 错误（{ statusCode, statusMessage, message, data }）。
+ *
+ * 返回类型放宽为 `Record<string, any>`（test helper 上下文，any 风险可控）：
+ * - 支持 `err.data?.code` / `err.data?.field` 等强契约字段断言（todo.md §M17.4 commit 2 audit Reject 根因 —
+ *   原 `Record<string, unknown>` 在 strict 模式下索引访问得到 `{}` 导致 TS2339 × 6）
+ * - h3 1.15 createError 序列化保证 `data` 字段透传，`data.code` 由 localized-error.ts createLocalizedError 强契约写入
+ * - 测试环境而非生产代码，any 风险圈定在 vitest 单测范围
+ */
+export const expectError = async (promise: Promise<unknown>, statusCode: number): Promise<Record<string, any>> => {
     try {
         await promise
         throw new Error(`expected handler to throw ${statusCode}`)
     } catch (e) {
-        const err = e as Record<string, unknown>
+        const err = e as Record<string, any>
         if (err.statusCode !== statusCode) {
             // 非 h3 错误原样抛出（保持测试可读）
             throw e
@@ -43,11 +51,20 @@ export const expectError = async (promise: Promise<unknown>, statusCode: number)
     }
 }
 
-/** 内存 SQLite 隔离（每个测试文件独立 worker，DataSource 单例各自初始化） */
+/** 内存 SQLite 隔离（每个测试文件独立 worker，DataSource 单例各自初始化）
+ * 测试环境关掉 migrations（dev/test 用 synchronize 直接建表；migration 仅生产路径）；
+ * opt-in synchronize 自动建表（schema 与 entity 对齐走 synchronize，测试不需要 migration）。
+ * 测试环境需要 synchronize=true 才能让 DataSource 初始化时自动建表（详见
+ * docs/standards/development.md §5.1.19 反模式禁止；helper 单点声明避免每个 test 重复 stub）。
+ */
 export const setupMemoryDatabase = (): void => {
     process.env.DATABASE_PATH = ':memory:'
+    process.env.DATABASE_MIGRATIONS_RUN = 'false'
+    process.env.DATABASE_SYNCHRONIZE = 'true'
 }
 
 export const teardownMemoryDatabase = (): void => {
     delete process.env.DATABASE_PATH
+    delete process.env.DATABASE_MIGRATIONS_RUN
+    delete process.env.DATABASE_SYNCHRONIZE
 }

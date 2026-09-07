@@ -19,7 +19,9 @@ export default defineConfig({
         globals: true,
         environment: 'node',
         // Nuxt server auto-import 模拟（API handler 测试用；setup 文件只注入全局 h3 工具，无副作用）
-        setupFiles: ['apps/platform/tests/setup-nuxt-server.ts'],
+        // 必须使用绝对路径：pnpm --filter <pkg> test 在包目录运行 vitest，root=cwd=包目录，
+        // 相对路径会解析到 <pkg>/apps/platform/tests/... 导致全部测试初始化失败
+        setupFiles: [resolve(import.meta.dirname, 'apps/platform/tests/setup-nuxt-server.ts')],
         // e2e 测试由 Playwright 运行（apps/platform/tests/e2e），vitest 不扫描
         exclude: [
             '**/node_modules/**',
@@ -44,7 +46,7 @@ export default defineConfig({
                 'packages/mcp/src/**/*.ts',
                 'apps/platform/app/**/*.ts',
                 'apps/platform/server/**/*.ts',
-                'scripts/*.mjs',
+                'scripts/**/*.mjs',
             ],
             exclude: [
                 '**/*.test.ts',
@@ -55,6 +57,9 @@ export default defineConfig({
             ],
             reporter: ['text', 'json-summary', 'lcov'],
             // 覆盖率目标：整体 80%（口径 = packages + apps + scripts 全部源码）
+            // 2026-08-20 branches 80% 冲刺完成：runs/[id].get.ts / batch.post.ts / naming-strategy.ts /
+            // distill-wisdom.mjs 分支补测后整体 branches 79.38% → 80.32%，临时下调的 79% 阈值恢复 80%。
+            // 详见 docs/plan/todo.md §M11 P2「branches 阈值恢复 80% 冲刺」收口记录。
             thresholds: {
                 statements: 80,
                 branches: 80,

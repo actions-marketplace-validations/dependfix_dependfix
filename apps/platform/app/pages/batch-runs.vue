@@ -1,6 +1,18 @@
 <script setup lang="ts">
 // 批量运行：列表 + 展开详情（跨仓库聚合统计 + 下属 ScanRun）——定时/手动批量触发的进度与结果
+//
+// 刷新策略：
+// - 轮询节拍 60s（替代原 2s），仅 status==='running' 时启用，无运行中批次自动停止
+// - 增量 reconcile：服务端返回 updatedAt，前端按 id 合并数组而非整表替换，
+//   避免 PrimeVue DataTable 整表 reconcile 引发屏闪
+// - 手动刷新按钮：点击立即拉取 + 重置下次轮询计时；in-flight 守卫防并发
+// - 60s 节拍为 2026-08-19 用户反馈决策（backlog 原推荐 5s 实际仍嫌频繁；
+//   running 批次平均 30s+ 进度变化有限，60s 已足够；保留 BATCH_POLL_INTERVAL_MS 常量便于后续微调）
+// - sortable 字段：sortable + removableSort 三态（asc/desc/none）；与 C54 增量 reconcile 并存（见 docs/plan/todo.md §C54 + §C60）——
+//   reconcile 只替换 updatedAt 变化行引用，不重排已排序数组；用户手动排序状态保留（C60 决策）
 import type { BatchRunRun, BatchRunSummary, BatchRunView } from '~/types/platform'
+import { reconcileBatchRuns } from '~/utils/reconcile-batch-runs'
+import { updateStatusRank, withStatusRank } from '~/utils/sort-helpers'
 
 definePageMeta({
     middleware: 'auth',
@@ -8,7 +20,15 @@ definePageMeta({
 
 const { t, d } = useI18n()
 
-const loading = ref(true)
+const BATCH_POLL_INTERVAL_MS = 60_000
+
+// 三态分离（RG-B1 修复：UI 态与并发守卫必须解耦）：
+// - firstLoad: 首屏骨架控制（true → 显示骨架；fetch 成功后 false → 显示 DataTable 且不再回滚）
+// - loading: 手动刷新按钮 loading 反馈（首屏骨架由 firstLoad 单独控制，不影响 DataTable 折叠）
+// - inflight: 实际请求是否 in-flight（并发守卫，与 UI 态解耦避免首屏请求被吞）
+const firstLoad = ref(true)
+const loading = ref(false)
+const inflight = ref(false)
 const error = ref('')
 const batchRuns = ref<BatchRunView[]>([])
 const expandedRows = ref<Record<string, boolean>>({})
@@ -69,16 +89,49 @@ const runStatusSeverity = (status: string) => {
     return 'warn' as const
 }
 
-/** 列表加载（存储值；详情展开时实时聚合） */
+/** 列表加载（增量 reconcile 而非整表替换；in-flight 守卫与 UI 态解耦） */
 const fetchBatchRuns = async () => {
+    if (inflight.value) {
+        return // 上一次尚未完成则跳过本轮（避免 setInterval 触发并发请求堆叠）
+    }
+    inflight.value = true
     loading.value = true
     error.value = ''
     try {
-        batchRuns.value = await $fetch<BatchRunView[]>('/api/batch-runs')
+        const fresh = await $fetch<BatchRunView[]>('/api/batch-runs')
+        // 排序键派生：status 走业务语义排序（running 优先）；reconcile 不重排已排序数组
+        const enriched = withStatusRank(fresh)
+        reconcileBatchRuns(batchRuns.value, enriched)
+        firstLoad.value = false // 首次 fetch 成功后关闭骨架；失败保留骨架允许重试
     } catch (e: any) {
         error.value = t('batchRuns.errors.loadFailed', { message: e?.data?.message ?? e?.message ?? t('common.errors.unknown') })
     } finally {
+        inflight.value = false
         loading.value = false
+    }
+}
+
+/** 已展开行详情刷新（轮询体与 manualRefresh 共用；收敛点见审计 RG-W1）
+ * 仅刷新 prevRunningIds ∪ currentRunningIds 命中的展开行——终态后的展开行不重复拉取 */
+const refreshOpenDetails = async (prevRunningIds: string[]) => {
+    for (const id of Object.keys(detailMap.value)) {
+        if (prevRunningIds.includes(id) || runningIds.value.includes(id)) {
+            await fetchDetail(id)
+        }
+    }
+}
+
+/** 手动刷新：in-flight 守卫防并发；startPolling 内部 clearInterval 旧 timer 自然重置节拍 */
+const manualRefresh = async () => {
+    if (inflight.value) {
+        return // 守卫：与 setInterval / 脚本触发重叠时跳过
+    }
+    const prevRunningIds = [...runningIds.value]
+    await fetchBatchRuns()
+    // 手动刷新后同步刷新展开详情，避免 reconcile 替换行引用导致聚合值退回存储值
+    await refreshOpenDetails(prevRunningIds)
+    if (runningIds.value.length > 0) {
+        startPolling()
     }
 }
 
@@ -96,10 +149,10 @@ const fetchDetail = async (id: string) => {
             runs: BatchRunRun[]
         }>(`/api/batch-runs/${id}`)
         detailMap.value[id] = detail
-        // 同步列表行状态（详情聚合值覆盖存储值）
+        // 同步列表行状态（详情聚合值覆盖存储值；RG-B07 同步派生 _statusRank）
         const row = batchRuns.value.find((b) => b.id === id)
         if (row) {
-            row.status = detail.status as BatchRunView['status']
+            updateStatusRank(row, detail.status)
             row.finishedCount = detail.finishedCount
             row.completedCount = detail.completedCount
             row.failedCount = detail.failedCount
@@ -116,7 +169,26 @@ const onRowExpand = (event: { data: BatchRunView }) => {
     void fetchDetail(event.data.id)
 }
 
-// 进行中批次轮询（2s 间隔；组件卸载清理）——前端轮询详情即触发后端聚合收敛
+/** 强制结束卡住的 BatchRun（应急逃生口）
+ * 仅 admin 角色可触发；后端幂等（已终态直接返回）；成功后刷新列表 */
+const forceFailing = ref<Record<string, boolean>>({})
+const forceFail = async (id: string): Promise<void> => {
+    if (forceFailing.value[id]) return
+    if (!confirm(t('batchRuns.forceFailConfirm'))) return
+    forceFailing.value[id] = true
+    try {
+        await $fetch(`/api/batch-runs/${id}/force-fail`, { method: 'POST' })
+        // 成功后立刻刷新列表 + 清掉展开详情缓存（终态后详情陈旧）
+        delete detailMap.value[id]
+        await fetchBatchRuns()
+    } catch (e: any) {
+        error.value = t('batchRuns.errors.forceFailFailed', { message: e?.data?.message ?? e?.message ?? t('common.errors.unknown') })
+    } finally {
+        forceFailing.value[id] = false
+    }
+}
+
+// 进行中批次轮询（60s 间隔；组件卸载清理）——前端轮询详情即触发后端聚合收敛
 let pollTimer: ReturnType<typeof setInterval> | null = null
 const runningIds = computed(() => batchRuns.value.filter((b) => b.status === 'running').map((b) => b.id))
 
@@ -128,17 +200,12 @@ const startPolling = () => {
         // 先记录本轮前仍运行中的批次（到达终态的那轮也要先刷新详情快照再停止）
         const prevRunningIds = [...runningIds.value]
         await fetchBatchRuns()
-        // 刷新已展开行的详情（保持聚合统计最新；含本轮刚到达终态的批次）
-        for (const id of Object.keys(detailMap.value)) {
-            if (prevRunningIds.includes(id) || runningIds.value.includes(id)) {
-                await fetchDetail(id)
-            }
-        }
+        await refreshOpenDetails(prevRunningIds)
         // 无进行中批次 → 停止轮询（终态后不再刷新）
         if (runningIds.value.length === 0) {
             stopPolling()
         }
-    }, 2000)
+    }, BATCH_POLL_INTERVAL_MS)
 }
 
 const stopPolling = () => {
@@ -172,7 +239,7 @@ onUnmounted(stopPolling)
                 :label="t('batchRuns.refresh')"
                 severity="secondary"
                 :loading="loading"
-                @click="fetchBatchRuns"
+                @click="manualRefresh"
             />
         </div>
 
@@ -184,7 +251,7 @@ onUnmounted(stopPolling)
             {{ error }}
         </Message>
 
-        <Card v-if="!loading">
+        <Card v-if="!firstLoad">
             <template #content>
                 <DataTable
                     v-model:expanded-rows="expandedRows"
@@ -192,11 +259,16 @@ onUnmounted(stopPolling)
                     data-key="id"
                     striped-rows
                     size="small"
+                    removable-sort
                     :empty-message="t('batchRuns.empty')"
                     @row-expand="onRowExpand"
                 >
                     <Column expander style="width: 3rem" />
-                    <Column :header="t('batchRuns.colSource')">
+                    <Column
+                        field="source"
+                        :header="t('batchRuns.colSource')"
+                        sortable
+                    >
                         <template #body="{data}">
                             <Tag
                                 :value="data.source === 'scheduled' ? t('batchRuns.sourceScheduled') : t('batchRuns.sourceManual')"
@@ -204,7 +276,11 @@ onUnmounted(stopPolling)
                             />
                         </template>
                     </Column>
-                    <Column :header="t('batchRuns.colCreatedAt')">
+                    <Column
+                        field="createdAt"
+                        :header="t('batchRuns.colCreatedAt')"
+                        sortable
+                    >
                         <template #body="{data}">
                             {{ d(new Date(data.createdAt), 'long') }}
                         </template>
@@ -214,7 +290,11 @@ onUnmounted(stopPolling)
                             {{ modeLabel(data.mode) }} · {{ severityLabel(data.severityThreshold) }}
                         </template>
                     </Column>
-                    <Column :header="t('batchRuns.colProgress')">
+                    <Column
+                        field="repositoryCount"
+                        :header="t('batchRuns.colProgress')"
+                        sortable
+                    >
                         <template #body="{data}">
                             <span v-if="data.pendingCount > 0" class="text-muted">
                                 {{ t('batchRuns.progressPending', {done: data.completedCount + data.failedCount, total: data.repositoryCount}) }}
@@ -225,12 +305,33 @@ onUnmounted(stopPolling)
                             </span>
                         </template>
                     </Column>
-                    <Column :header="t('batchRuns.colStatus')">
+                    <Column
+                        field="_statusRank"
+                        :header="t('batchRuns.colStatus')"
+                        sortable
+                        :default-sort-order="-1"
+                    >
                         <template #body="{data}">
-                            <Tag :value="statusTag(data.status).label" :severity="statusTag(data.status).severity" />
+                            <div class="batch-runs__status-cell">
+                                <Tag :value="statusTag(data.status).label" :severity="statusTag(data.status).severity" />
+                                <Button
+                                    v-if="data.status === 'running'"
+                                    icon="pi pi-stop-circle"
+                                    :label="t('batchRuns.forceFail')"
+                                    severity="danger"
+                                    size="small"
+                                    text
+                                    :loading="forceFailing[data.id]"
+                                    @click="forceFail(data.id)"
+                                />
+                            </div>
                         </template>
                     </Column>
-                    <Column :header="t('batchRuns.colFinishedAt')">
+                    <Column
+                        field="finishedAt"
+                        :header="t('batchRuns.colFinishedAt')"
+                        sortable
+                    >
                         <template #body="{data}">
                             {{ data.finishedAt ? d(new Date(data.finishedAt), 'long') : '—' }}
                         </template>
@@ -267,27 +368,27 @@ onUnmounted(stopPolling)
                                 size="small"
                                 :empty-message="t('batchRuns.subEmpty')"
                             >
-                                <Column :header="t('batchRuns.colRepo')">
+                                <Column :header="t('runs.colRepo')">
                                     <template #body="{data: run}">
                                         {{ run.owner }}/{{ run.name }}
                                     </template>
                                 </Column>
-                                <Column :header="t('batchRuns.colStatus')">
+                                <Column :header="t('runs.colStatus')">
                                     <template #body="{data: run}">
                                         <Tag :value="runStatusLabel(run.status)" :severity="runStatusSeverity(run.status)" />
                                     </template>
                                 </Column>
-                                <Column :header="t('batchRuns.colExecutor')">
+                                <Column :header="t('runs.colExecutor')">
                                     <template #body="{data: run}">
-                                        {{ run.executorKind === 'github-action' ? t('repos.githubAction') : t('repos.platformContainer') }}
+                                        {{ run.executorKind === 'github-action' ? t('repos.githubAction') : run.executorKind === 'sandbox' ? t('repos.sandboxContainer') : t('repos.platformContainer') }}
                                     </template>
                                 </Column>
-                                <Column :header="t('batchRuns.colAlerts')">
+                                <Column :header="t('runs.colAlerts')">
                                     <template #body="{data: run}">
                                         {{ (run.summary as {alertsFound?: number} | null)?.alertsFound ?? '—' }}
                                     </template>
                                 </Column>
-                                <Column :header="t('batchRuns.colResult')">
+                                <Column :header="t('runs.colResult')">
                                     <template #body="{data: run}">
                                         <span
                                             v-if="run.error"
@@ -306,6 +407,13 @@ onUnmounted(stopPolling)
                                             </a>
                                         </span>
                                         <span v-else>—</span>
+                                        <!-- C53-后-C：A 模式 PR 创建失败 → dispatched + branch URL 兜底，提示手动开 PR -->
+                                        <small
+                                            v-if="run.status === 'dispatched' && run.error?.code === 'pr_creation_failed'"
+                                            class="d-block mt-1 text-warning"
+                                        >
+                                            {{ t('batchRuns.openRunPrFailedHint') }}
+                                        </small>
                                     </template>
                                 </Column>
                             </DataTable>
@@ -349,6 +457,12 @@ onUnmounted(stopPolling)
         display: flex;
         flex-wrap: wrap;
         gap: $space-3;
+    }
+
+    &__status-cell {
+        display: flex;
+        align-items: center;
+        gap: $space-2;
     }
 
     &__stat {

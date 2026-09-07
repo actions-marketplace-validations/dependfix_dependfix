@@ -10,16 +10,19 @@ import {
     statusIcon,
 } from './types'
 import { collectCodeScanningSuggestions } from './suggestions'
+import { collectCodeQualityFindings } from './code-quality-suggestions'
 
 /**
  * 生成 Markdown 格式报告字符串。
  *
- * 模板固定 7 节：
+ * 模板固定节（3/3.5 为条件渲染）：
  * 1. Header（runId / 时间 / 模式）
  * 2. Summary 表
  * 3. AI Usage（仅 AI 实际调用时渲染）
+ * 3.5. Supply Chain Warnings（有警示时才渲染）
  * 4. Alerts by Severity 表
  * 5. Repositories 明细
+ * 5.5. Code Scanning Suggestions（有建议时才渲染）
  * 6. Fix Actions 表
  * 7. Errors 节（有错误时才渲染）
  */
@@ -72,6 +75,24 @@ export function generateMarkdownReport(result: RunResult): string {
             `> AI 研判调用 **${u.calls}** 次，消耗 **${u.inputTokens.toLocaleString('en-US')}** in / **${u.outputTokens.toLocaleString()}** out tokens（合计 ${u.totalTokens.toLocaleString('en-US')}）${costText}`,
             '',
         )
+    }
+
+    // ---- 3.5 Supply Chain Warnings（路径 A 投毒合入前人工确认依据）----
+    if (result.supplyChainWarnings && result.supplyChainWarnings.length > 0) {
+        sections.push(
+            '## ⚠️ Supply Chain Warnings',
+            '',
+            '> 以下本次新增/升级的包带 lifecycle scripts 且已被目标仓库 `allowBuilds` 批准——安装时脚本将真实执行，是投毒扩散面（event-stream 模式）。合入 PR 前请人工确认。',
+            '',
+            '| Package | Version | Scripts | Repository |',
+            '|---------|---------|---------|------------|',
+        )
+        for (const w of result.supplyChainWarnings) {
+            sections.push(
+                `| \`${escapeMd(w.packageName)}\` | \`${escapeMd(w.version)}\` | ${w.scriptTypes.map((t) => `\`${escapeMd(t)}\``).join(', ')} | ${escapeMd(w.repository)} |`,
+            )
+        }
+        sections.push('')
     }
 
     // ---- 4. Alerts by Severity ----
@@ -178,6 +199,27 @@ export function generateMarkdownReport(result: RunResult): string {
         sections.push('')
     }
 
+    // ---- 5.6 Code Quality Findings（静态分析类 findings 报告段）----
+    // 独立于 Code Scanning 段：cq 全部归 C 类，无修复动作、无 fixedKeys 关联；
+    // 报告仅展示 + 给人工审查建议（fetcher 注入的 rule.description）
+    const cqFindings = collectCodeQualityFindings(result)
+    if (cqFindings.length > 0) {
+        sections.push(
+            '## Code Quality Findings',
+            '',
+            '> Code Quality findings 由 GitHub CodeQL maintainability / reliability 规则生成；本工具首版仅做报告接入（不可自动修复）。',
+            '',
+            '| Repository | Rule | Location | Severity | Summary | Suggestion |',
+            '|------------|------|----------|----------|---------|------------|',
+        )
+        for (const f of cqFindings) {
+            sections.push(
+                `| ${escapeMd(f.repository)} | \`${escapeMd(f.ruleId)}\` | \`${escapeMd(f.location)}\` | ${f.severity.toUpperCase()} | ${escapeMd(f.summary)} | ${escapeMd(f.suggestion)} |`,
+            )
+        }
+        sections.push('')
+    }
+
     // ---- 6. Fix Actions ----
     sections.push('## Fix Actions', '')
     if (actions.length > 0) {
@@ -223,12 +265,22 @@ function severityRow(label: string, row: { found: number, fixable: number, fixed
     return `| ${label} | ${row.found} | ${row.fixable} | ${row.fixed} | ${row.failed} |`
 }
 
-/** 报告 Header 的 Alert Source 标签（code-scanning 开启时标注并行源）。 */
+/** 报告 Header 的 Alert Source 标签（多源并行时组合展示）。 */
 function alertSourceLabel(config: RunResult['config']): string {
     if (config.alertSource === 'pnpm-audit') {
         return 'pnpm-audit (local workspace)'
     }
-    return config.codeScanningEnabled ? 'GitHub Dependabot + Code Scanning API' : 'GitHub Dependabot API'
+    const extras: string[] = []
+    if (config.codeScanningEnabled) {
+        extras.push('Code Scanning API')
+    }
+    if (config.codeQualityEnabled) {
+        extras.push('Code Quality API')
+    }
+    if (extras.length === 0) {
+        return 'GitHub Dependabot API'
+    }
+    return `GitHub Dependabot + ${extras.join(' + ')}`
 }
 
 /** Code Scanning 规则分层标签（A/B/C）；非 Code Scanning 源显示 —。 */

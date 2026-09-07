@@ -20,6 +20,8 @@ export interface RunReportConfig {
     alertSource: AlertSourceKind
     /** 是否同时拉取 Code Scanning alerts（与 Dependabot 并行源） */
     codeScanningEnabled?: boolean
+    /** 是否同时拉取 Code Quality findings（与 Dependabot 并行源） */
+    codeQualityEnabled?: boolean
 }
 
 /**
@@ -99,6 +101,12 @@ export interface FixError {
     stage: 'fetch' | 'filter' | 'fix' | 'repair' | 'verify' | 'report'
     category?: string
     message: string
+    /**
+     * 告警源标识（仅 stage='fetch' + category='FETCH_FAILED' 时存在）：
+     * 标识本次失败的具体源（'dependabot' | 'code-scanning' | 'code-quality' | 'pnpm-audit'），
+     * 便于 CLI / 平台 UI 输出部分源失败的分组汇总（per-source 错误隔离）。
+     */
+    source?: string
 }
 
 /**
@@ -116,6 +124,22 @@ export interface AiUsageAggregate {
 }
 
 /**
+ * 供应链信号警示（路径 A"合法包被投毒"合入前人工确认的关键依据）：
+ * 本次新增/升级的包带 lifecycle scripts 且已被目标仓库 `allowBuilds` /
+ * `onlyBuiltDependencies` 批准——脚本会在目标仓库安装时真实执行。
+ */
+export interface SupplyChainWarning {
+    /** 目标仓库（owner/repo 或 local） */
+    repository: string
+    /** 包名 */
+    packageName: string
+    /** 升级后的版本（该版本在目标仓库将被安装并可能执行脚本） */
+    version: string
+    /** lifecycle 脚本类型（install / preinstall / postinstall 中的已存在项） */
+    scriptTypes: string[]
+}
+
+/**
  * 报告顶层容器。
  */
 export interface RunResult {
@@ -130,6 +154,8 @@ export interface RunResult {
     errors: FixError[]
     /** AI 研判用量聚合（仅 --ai 开启且实际调用时存在） */
     aiUsage?: AiUsageAggregate
+    /** 供应链信号警示区（本次升级包带脚本且被批准；空 = 不渲染） */
+    supplyChainWarnings?: SupplyChainWarning[]
 }
 
 /** 按严重级别聚合的统计。 */
@@ -218,6 +244,13 @@ export function isAlertFixedByActions(
             && a.type === 'code-scanning-fix'
             && `${a.repository}/${a.target}@${a.filePath ?? ''}` === csKey
         ))
+    }
+
+    // Code Quality：所有 findings 均 `fixable: false`、`recommendedVersion: ''`；
+    // 不可被 dependency-upgrade action 误标为 fixed（同名 packageName 与 Dependabot 重叠时
+    // 走包级匹配兜底会错误返回 true）。首版统一不可修复。
+    if (alert.source === 'code-quality') {
+        return false
     }
 
     // 依赖升级：版本满足判定

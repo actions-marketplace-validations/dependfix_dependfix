@@ -5,12 +5,10 @@ packages:
 minimumReleaseAge: 60
 confirmModulesPurge: false
 allowBuilds:
-  '@parcel/watcher': true
+  "@parcel/watcher": true
   better-sqlite3: true
   esbuild: true
   msgpackr-extract: true
-  # unrs-resolver��pnpm 11 ��ȫ����Ҫ��Ĺ����ű���������Ŀ���� eslint-config-cmyr ���������룩��
-  # ��ǰ��δ��ֵ��ռλ�ı����� pnpm install �� ERR_PNPM_IGNORED_BUILDS
   unrs-resolver: true
 overrides:
   compare-func: ^2.0.0
@@ -28,3 +26,6 @@ overrides:
   js-yaml@4: ^4.3.0
   vite@5: ^5.4.21
   js-yaml@3: ^3.15.1
+  "@octokit/auth-app": 8.3.0
+  fast-uri: 3.1.6
+  qs: ^6.16.0

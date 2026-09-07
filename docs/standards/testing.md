@@ -11,6 +11,7 @@
 - **失败路径优先**: 修复 Bug、补守卫或收紧契约时，优先补会在缺陷存在时失败的断言，再补成功路径回归，而不是只测当前实现已经能通过的分支。
 - **最小充分验证**: 优先运行与改动直接相关、最能区分风险的定向用例；只有当风险外溢到跨模块链路时，才升级为更大范围测试。
 - **单用例单风险**: 每个测试块应尽量围绕一个行为风险、边界条件或回退契约命名，避免把多个不相关断言堆在同一用例里导致失败归因模糊。
+- **运行时校验 vs 类型断言**: `JSON.parse(x) as RunResult` 是类型断言，**不**做运行时校验。任何对外边界（容器 stdout / 网络响应 / 跨进程数据）必须配套 `validate*()` 函数。typecheck 通过 ≠ 数据合法，契约漂移只能靠运行时校验兜底。
 
 ## 3. 测试组织
 
@@ -81,6 +82,10 @@
 - **Mock 原则**: mock 不掩盖真正的集成风险。优先真实调用，mock 仅在外部依赖不可控时使用。
 - **Mock 上限对执行速度敏感（跨平台 flaky）**: 循环/轮询类测试的固定次数 mock（如 nock `times(100)`）在更快环境（CI Linux vs 本地 Windows）可能被突破 → 第 N+1 次请求 No match。优先用 `persist()`（无上限）或放大 10 倍并注明原因；此类测试本地连跑多次验证后仍需 CI 实证（[经验归档 §二十七](../design/governance/experience-archive.md)）。
 - **失败处理**: 测试失败时先解释根因，再决定改代码还是改测试。严禁直接改断言让它绿掉。
+- **函数签名变更必须同步所有调用方验证**：utility 函数签名变更（如 `alertsFound(summary)` → `alertsFound(view)`）后必须 grep 全仓调用方同步更新；`pnpm typecheck` **不**捕捉 vitest `vi.mock` 下的类型错误（mock 路径可能跳过部分类型检查）——F 阶段本地验证 `typecheck 0 error` **不是** audit 替代。修复协议：F 阶段本地 typecheck 后必须补 A 阶段 Review Gate（`audit-depth: quick` 起步）独立核验调用方一致性；utility 抽取后单测一次性覆盖所有分支并包含"调用方误用"回归 case。M15.1 第 1 轮 Reject B1 实证：实现已通过单测 + typecheck，但调用方未对齐签名 → 审计快速 depth 仍能捕获。
+- **utility 单测一次性覆盖所有分支**：抽取后立即补单测覆盖所有分支（含 NaN / Infinity / 缺失字段 / 负时长 / 非法日期等边界）；不接受"先实现后补测"的两段式。`pnpm --filter @dependfix/platform test <utility>.test.ts` 在 D 阶段收尾时必须全过。
+- **测试隔离 afterEach 模式（describe 块 cleanup 兜底）**：describe 块 cleanup 应统一用 `afterEach` 兜底（vitest 钩子），而非 it case 末尾手动 cleanup 块——后者在 `expectError` 抛错 / 异常分支时易跳过导致污染后续测试。M17.4 commit 1 后 `repos/batch.post.test.ts` L165 实测：手动 cleanup（L183-187）不在 try/finally，L181 抛错后 cleanup 跳过，L190 后续测试读到外组织凭据导致 `RESOURCE_NOT_IN_ORG` 误抛（audit suggest #2 即源自此）。修复协议：① describe 块内首行添加 `afterEach(async () => { /* 还原被修改的全局状态 */ })`；② 手动 cleanup 块（如 L183-187）保留但仅作正向恢复兜底（afterEach 失败时仍可执行）；③ `expectError` 内部 catch 后 `return err`（不抛错）— 但若 statusCode 不匹配会抛 `Error('expected handler to throw 403')`，此时清理需 afterEach 兜底。
+- **test helper 强契约类型契约**：test helper 返回类型应反映测试断言模式：message 断言（如 `expect(err.message).toContain(...)`）可用 `Record<string, unknown>`；code/data 强契约断言（如 `expect(err.data?.code).toBe(...)`）需放宽为 `Record<string, any>` 或引入泛型（`expectError<T = Record<string, unknown>>`）。M17.4 commit 2 实测：`apps/platform/tests/api-helper.ts:32` `expectError` 返回 `Record<string, unknown>` 在 strict 模式下导致 6 处 `err.data?.code` 访问 TS2339。helper 选型决策：① message-only 测试用 `Record<string, unknown>`（vitest mock 路径特例，见上文 L85）；② code/data 强契约测试用 `Record<string, any>`（test helper 上下文 any 风险可控；JSDoc 注明 h3 1.15 createError 不透传顶层 code 需通过 data 读取）；③ 进阶用泛型 `expectError<T = Record<string, unknown>>`（调用处 `<{ code: string; field: string }>` 显式标注）。
 - **CI 最终裁决**: 修复的验收标准是 CI 全部通过，不是本地通过。
 - **测试输入用真实形态**: 测试 fixture 应使用真实格式的输入（如带固定前缀的 ID），合成数据会漏掉真实格式才触发的缺陷。
 - **lint 门禁**: `--max-warnings N` 让存量 warning 变成 CI 硬门禁倒逼清理；测试名应与真实断言一致（误导性测试名会掩盖缺口）。
@@ -94,6 +99,13 @@
 - **目录隔离**：`*.e2e.test.ts` 会被 vitest 默认扫描，vitest.config 必须 `exclude: ['**/tests/e2e/**']`。
 - **限流豁免**：better-auth 1.6.26 内置特殊规则（sign-in 10s/3 次）优先于 customRules，无代理 IP 头时回退共享桶（并行必 429）→ e2e 环境 `E2E_TEST=true` + `advanced.ipAddress.disableIpTracking: true` 完全跳过（[经验归档 §三十](../design/governance/experience-archive.md)）。
 - **浏览器 UI 验证必须使用视觉模型 agent**：V 阶段派发 `ui-validator` subagent（视觉模型 opencode-go/qwen3.7-plus）截图审查；无视觉能力的 agent 只能报告计算样式值、无法确认视觉回归（[经验归档 §三十一](../design/governance/experience-archive.md) 同源纪律）。
+- **Nuxt SSR+CSR 双层 fetch 的 mock 限制**：Playwright `page.route` 只在浏览器上下文生效，Nuxt SSR 阶段服务端 `fetchData`(onMounted SSR)直接走真实 API 不走 client mock。即使 client hydration 后 onMounted 跑 fetchData，`credentials.value` 已被 SSR 阶段服务端响应填充为 `[]`，后续 client 拉到的 mock 数据无法回写已显示的空 Select 状态。完整 mock 守卫需：(a) 关闭 SSR(spa mode)或 (b) 注入 service worker 拦截 server response 或 (c) 走 in-process 测试(Vitest + @vue/test-utils mount 组件 + mock `$fetch`)。**page.route mock 只能保证"client side 重新触发 fetch"才能命中**——SSR 已渲染的真实数据无法被覆盖。
+- **Playwright webServer 缓存必须 rebuild**（生产形态对齐 + CI step 顺序）：Playwright `webServer.command` 启动的 Nuxt server 用 `.output/` 产物（或 dev cache `.nuxt/`）。修改 `.vue`/`.ts` 后，直接跑 `pnpm exec playwright test` 不会自动 rebuild —— webServer 加载旧 build，新代码不生效（debug 现象：加 `console.log` 不触发、按钮 click 没反应、click handler 未绑定）。修复：**修改 `.vue`/`.ts` 后必须强制 rebuild**——`rm -rf apps/platform/.nuxt apps/platform/.output` + `pnpm --filter @dependfix/platform build` 后再跑 e2e。诊断信号：playwright 新建独立 `.auth` 状态文件（目录时间戳更新），但 webServer 日志仍引用旧 chunk hash。与 CI test.yml step 6 nuxt prepare + step 7 core/engine/build 顺序对齐，本地 e2e 前补 `pnpm --filter @dependfix/platform build` 即可（避免 CI 通过 ≠ 本地通过漂移）。
+- **`page.route` 注册顺序铁律**：Vue/Nuxt 应用 `onMounted` 在 hydration 后**立即**触发 fetch。`page.route` 必须在 `page.goto` **之前**注册（首选 `test.beforeEach` 模式），否则 onMounted 抢跑走真实 API（401/403）→ events 为空 → DataTable 不渲染 wrapper / rowGroup 不显示 subheader。判定理由与代码模板：见 [docs/archive/2026-08-20-standards-revisions.md §5](../archive/2026-08-20-standards-revisions.md)。
+- **CI 失败分析必看 `error-context.md`**：playwright CI 失败时 `test-results/<spec>/error-context.md` 含 accessibility tree（DOM 实际渲染态：row class / cell text / role attribute / button 标签），比堆栈更快定位 DOM-based 测试失败。诊断顺序：error-context.md → trace.zip → webServer 日志 → console.log。判定理由：见 [docs/archive/2026-08-20-standards-revisions.md §4](../archive/2026-08-20-standards-revisions.md)。
+- **PrimeVue 4 wrapper class 重命名**：`scrollable` 包裹层从 `.p-datatable-wrapper`（PrimeVue 3）改为 `.p-datatable-table-container`（PrimeVue 4）。e2e 断言必须看实际渲染产物（playwright error-context.md 或 `page.evaluate` 输出 classList）。判定理由：见 [docs/archive/2026-08-20-standards-revisions.md §10](../archive/2026-08-20-standards-revisions.md)。
+- **PrimeVue 4 + Nuxt SSR hydration 状态机分歧**（known-issue）：`onMounted` 异步赋值 `alerts.value` 后 PrimeVue 不重新计算 `processedData`，rowGroup subheader 永不渲染；`page.reload()` 后能渲染可佐证非业务逻辑问题。修复路径：迁移 alerts 加载到 `useAsyncData` 让 SSR 阶段就有数据，或升级 PrimeVue 到修复版本。当前 2 个 alerts-rowgroup.e2e.test.ts 测试以 `test.fixme()` 标记（命名空间 `known-issue/primevue-hydration-rowgroup`），等修复后取消 `.fixme`。详细背景：见 [docs/archive/2026-08-20-standards-revisions.md §7](../archive/2026-08-20-standards-revisions.md) + [`docs/plan/backlog.md` 已知边界与 known-issue](../plan/backlog.md)。
+- **Nuxt 4 payload 解析模式**：Nuxt 4 用 devalue 编码 SSR payload 到 `<script id="__NUXT_DATA__">`，结构是稀疏数组：`payload[0] = ["ShallowReactive",1]`、`payload[1] = {data:2, ...}`、`payload[15] = {role:21, id:12, ...}`。对象属性也是位置引用（`id: 12` 表示 `payload[12]` = 实际字符串），必须递归解引用才能拿到字面量。e2e 取 session userId 模式：遍历数组找含 role 的对象 → deref role → deref id → string。教训：编写 e2e 解析 Nuxt 4 SSR 注入数据时**不要假设标准 JSON 结构**，必须遍历稀疏数组 + 递归解引用。
 
 ### 6.2 真实基础设施集成测试（进程内，优先于后台服务冒烟）
 
@@ -104,6 +116,30 @@
 - **依赖注入可测性**：被测模块的处理器/回调支持注入（如 worker 的 `processor` 参数），测试传 mock 断言"收到正确数据"，不依赖真实业务执行。
 - **资源清理**：测试尾部显式 `close()` + `disconnect()`，避免连接泄漏与句柄堆积。
 - **职责边界**：进程内集成测试覆盖"基础设施层行为"（入队/消费/去重/终态重建）；HTTP 层状态流转（pending→running→completed + 轮询）才需要后台服务验证（staging 或 CI service container）。
+
+### 6.3 集成外部库测试模式（薄引用 — 完整规范见 development.md §5.1.15）
+
+集成 `@octokit/auth-app` / Vue 插件 / TypeORM / better-auth 等外部库时，**集成层测试不 mock 真实被集成库**（保留真实代码路径可执行）；mock 仅替换被测单元边界。完整规范 + 教训 + mock 边界示例见 [development.md §5.1.15](./development.md) + [经验归档 §四十三](../../docs/design/governance/experience-archive.md#四十三集成外部库必须读-readme-标准用法--e2e-真实路径冒烟测试2026-08-29m18.4-audit-round-1-reject-后补修)。
+
+### 6.4 E2E 网络抗性 + 未认证 API 调用标准模式
+
+> 教训来源：M22.7 hotfix commit `f617b56`（CI run 33525721103 E2E global-setup ECONNRESET）+ M22.8 hotfix commit `bdcd900`（CI run 33533376712 未认证 API 测试 cookie 注入）+ [经验归档 §五十一](../design/governance/experience-archive.md) + §五十二。
+
+#### e2e global-setup 串行场景网络抗性
+
+- **问题**：e2e global-setup 串行多次 setupPage.request / pageSignin（admin + viewer + storageState 序列化 6s+）后紧接 fixtures cleanup 首请求偶现 ECONNRESET（TCP RST，100ms 内）
+- **根因排查边界**：handler / 单测 / 本地复现穷举 → 通过即接受兜底修复 + 根因 backlog 分离
+- **修复模式**（test helper 层而非 handler 层）：复用 Playwright 1.62 `_sendRequestWithRetries` 内置 250ms 指数 backoff 重试（仅对 `e.code === 'ECONNRESET'` 触发）
+- **JSDoc 精度**：必须穷举"哪些错误重试"+"哪些错误不重试"（`ECONNREFUSED` / `ETIMEDOUT` 等不重试）
+- **根因排查**：按 ROI 排序登记 backlog.md §已知边界 M22.7 衍生段（M 阶段规划时优先排查 better-auth 1.7 transaction close 时序 / Nitro h3 async generator / SQLite WAL 模式）
+
+#### e2e 未认证 API 调用测试标准模式
+
+- **问题**：Playwright 1.62 `describe` 块内 `test.use({ storageState })` 配置可能通过 fixture pool 隐式传播到该 scope 内所有 `browser.newContext()` 调用（包括未指定 storageState 的手动创建）—— 未认证 API 调用测试（期望 401/403）莫名收到 200/201
+- **诊断信号**：网络追踪 `trace.zip` 中 `context-options` 携带上游 session token + `network` 子文件含完整 cookie / header / request 序列
+- **修复模式**：测试 `browser.newContext()` 调用必须显式传 `storageState: { cookies: [], origins: [] }`（Playwright 1.62 文档推荐的"unauthenticated API call"模式），与 `test.use({ storageState })` 完全脱钩强制清空 cookies/origins
+- **CI 失败时间模式诊断**：global-setup 失败 → 后续测试不运行 → 掩盖后续测试真实状态。CI 修复需走完整链路（global-setup → setup → tests → teardown），单一节点失败掩盖下游问题
+- **未来扩展**：建立 helper `tests/e2e/helpers/unauth-request.helper.ts` 抽取重复模式（audit suggest 候选）
 
 ## 7. 测试代码质量
 

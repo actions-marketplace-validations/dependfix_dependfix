@@ -184,12 +184,22 @@ if (value) { ... }  // 对 0, "", false 失效
 
 修改 `docs/` 站点内 md（含 experience-archive.md 等持续追加文档、归档转接）时，检查：
 
-- **裸 `<tag>` 占位符**：正文/表格中 `<tag>` / `<file>` / `<hash>` 等是否反引号包裹（`` `<hash>` ``）——markdown 裸 `<tag>` 被当 raw HTML 透传进 Vue 模板 → docs build 报 `Element is missing end tag`；报错行号是**转换产物行号**，不能按源文件行号找（lint:md 与 check:links 均不查 HTML 配对）
+- **裸 `<tag>` 占位符**：正文/表格中 `<tag>` / `<file>` / `<hash>` 等是否反引号包裹（`` `<hash>` ``）——markdown 裸 `<tag>` 被当 raw HTML 透传进 Vue 模板 → docs build 报 `Element is missing end tag`；报错行号是**转换产物行号**，不能按源文件行号找（lint:md 与 check:docs 均不查 HTML 配对）
 - **加粗内裸 `*`**：`**...*.test.ts...**` 中裸 `*` 破坏强调解析（转换产物出现 `<em>` 嵌套错乱），须反引号包裹
 - **本地 docs:build 证据**：`pnpm --filter dependfix-docs build` 是否已执行并提供通过证据？docs build 是唯一防线，缺失 → 退回补验证
 - **排查命令**：`rg '<[a-z][a-z0-9-]*>'` 后人工过滤反引号内命中
 
 规范见 [documentation.md §2 裸 HTML 标签禁令](../../../../docs/standards/documentation.md)，教训见 [经验归档 §三十九](../../../../docs/design/governance/experience-archive.md)（§三十三 `<path>` 后二次复现：登记 ≠ 防御，教训必须落成检查点）。
+
+### 本地 md 链接与锚点 check:docs 验证（必查项）
+
+修改 `docs/**/*.md` / `.github/skills/**/*.md` / `.github/agents/**/*.md` / `docs/plan/**/*.md` 等含本地链接的 md 文件时，检查：
+
+- **本地 check:docs 执行证据**：是否本地执行 `pnpm run check:docs`（`scripts/check-docs.mjs`，零依赖统一入口，覆盖 links + vue-interp 双规则）并提供通过证据？CI 是兜底，但提交前自检可避免 PR 失败往返
+- **CI check:docs 步骤**：CI Test job `Run pnpm run check:docs` 步骤是否通过？该步骤失败 → Test job 后续 `docs:build` / `typecheck` / `test` / `build` 共 5 步被 skipped（GitHub Actions 默认行为），盲区极大（run 32396605272 实证：Test job step 12 失败 → step 13-17 全部 skipped；其他类型如 `lint` / `lint:i18n` / `i18n:audit:missing` / `docs:check:i18n` / `lint:md:check` 在该 run 中均通过，唯 check:docs 卡住后续全部盲区）
+- **典型失败场景**：标题重命名 / 文档归档 / 跨文档锚点迁移 → 锚点漂移 → 跨文档锚点链接失效；GitHub 移除全角标点 `（）`、`、` 等生成锚点，VS Code / VitePress 保留 → 跨平台锚点漂移（check:docs 按宽松规范化兼容三平台差异）
+- **修复路径**：全局检索指向变更标题的锚点链接（`rg -n '\[[^]]*\]\([^)]*#.*'`）→ 同步改指新位置/新锚点；check:docs 输出 `path:line:col message` 格式可直接定位
+- **与 lint:md / docs:build 边界**：lint:md 不查链接存在性；check:docs 不查 HTML 标签配对；docs:build 不查链接锚点（VitePress 默认宽容）；三者是**互补**而非替代关系，缺一不可（教训见 run 32396605272 与 [documentation.md §链接检查](../../../../docs/standards/documentation.md)）。
 
 ### Node 脚本 main 入口守卫（必查项）
 
@@ -245,6 +255,180 @@ if (value) { ... }  // 对 0, "", false 失效
 
 规范见 [documentation.md §4 规范单点声明原则](../../../../docs/standards/documentation.md)。
 
+### todo.md / todo-archive.md 子任务详细度审计（必查项）
+
+P 阶段规划 / 阶段实施 / 阶段归档批次触及 `docs/plan/todo.md` / `docs/plan/todo-archive.md` 时，按 [planning.md §2.5 任务详细度要求](../../../../docs/standards/planning.md#25-任务详细度要求) 检查每条子任务（子阶段条目）的详细度：
+
+- **8 要素完整性**：每条子任务必须含以下 8 要素，缺一项即 warning（按严重性可升级为 blocker）：
+  1. **目标**：要达成什么（一句话可证伪）
+  2. **优先级**：P1 / P2 / P3
+  3. **范围**：包含什么（具体文件 / 模块）
+  4. **验收标准**：可证伪的具体条款（checklist 形式，≥ 3 条）
+  5. **不做什么**：边界（明确排除项）
+  6. **依赖**：前置任务 / 关联 backlog 条目
+  7. **交付物**：commits 数量 + files 清单 + 文档
+  8. **风险与缓解措施**：潜在风险点 + 缓解方案（≥ 1 条）
+
+- **禁止模糊口径**（按 [planning.md §1.1 L10 验收标准具体化](../../../../docs/standards/planning.md#11-硬性约束) 扩展）：
+  - "优化一下" / "清理一下" / "增强一下"
+  - "先做最小版本" / "做个基础版" / "做个简化版"
+  - "顺手做" / "一起处理" / "顺便改"
+  - "后续完善" / "持续优化" / "视情况"
+  - 仅 1-2 行描述的子任务清单（信息密度不足以指导实施）
+
+- **执行场景**：
+  - P 阶段规划 commit：每条 `M\d+\.\d+` 子任务清单必须满足 8 要素
+  - 阶段实施 commit：todo.md 子任务从 `[ ]` → `[x]` 时若任务描述变更需重新核验
+  - 阶段归档 commit：todo-archive.md 归档子任务需保留 8 要素（即使闭环后）
+
+- **验证手段**：
+  - 检索每条 `M\d+\.\d+` 条目，统计要素清单（标题 + 8 要素子条目 / 段落）
+  - 模糊口径关键词扫描：`grep -nE "(优化一下|清理一下|先做最小版本|做个基础版|顺手做|后续完善)" docs/plan/todo.md docs/plan/todo-archive.md`
+  - 缺失要素 ≥ 2 项或含模糊口径 → warning；缺失要素 ≥ 4 项或主条目整体过简 → blocker
+
+教训：M19 / M20 P 阶段规划 commit 实证：子任务描述简略（"M19.4 T701-e2e 管理端点集成测试补强" + 一行说明），缺乏验收标准 / 风险 / 范围详细度——后续 session 接手时需重新理解需求，违反 [planning.md §1.1 L10 验收标准具体化](../../../../docs/standards/planning.md) 与 §2.2 L41 任务描述要求。本必查项由 M21 P 阶段规划新增（2026-08-31）。
+
+### 分级审计协议（audit-depth）必查项
+
+审查调用方是否按改动风险等级声明 `audit-depth`（quick / standard / deep），审查输出是否在选档时间内收敛：
+
+- **必查场景**：A 阶段审计 prompt 是否携带 `audit-depth` 声明 + 理由（变更文件清单 / 已验证证据摘要 / 复审问题编号清单）？
+- **选档映射**：quick ≤ 5min（测试补强 / 文档措辞 / 简单配置 / 重命名）/ standard ≤ 10min（常规业务逻辑 / 模块内改动）/ deep ≤ 20min（发布流程 / 安全鉴权 / 外部调用 / 数据写入 / 配置与依赖变更 / agent 与 skill 定义）
+- **未声明按 deep 防御**：调用方未声明时按 deep 执行（防御方向），但**小改动必须主动声明 quick**避免拖长用时
+- **复审只审修复点**：第 2+ 轮只复查上轮问题编号对应的修复点 diff 与受影响断言，不得重读全量
+- **并发分区**：diff 文件数 > 8 或涉及 ≥ 2 个独立模块时按模块分区并行发起多个审查任务；小改动不得并发
+- **真实用时实测**：发起审计 task 前用宿主系统时钟记录启动时间戳，审计返回后实测 elapsed，超时仅作分级校准信号（agent 自报用时为 LLM 估算，不得作为时间盒核验依据）
+- **未声明防御**：缺失 audit-depth 声明 → 提示执行角色补声明；理由缺失 → 退回补理由
+
+规范见 [ai-collaboration.md §1.3 分级审计执行协议](../../../../docs/standards/ai-collaboration.md) + [code-reviewer SKILL.md §2.5](../SKILL.md)。
+
+### 单次提交审计阈值（10 文件 / 800 行）必查项
+
+审查 diff 规模是否触发拆分要求：
+
+- **必查场景**：A 阶段审计输入的 `git diff --stat` 新增文件数 > 10 或新增行数 > 800 → 必须要求调用方说明批次拆分依据；未拆分且无正当理由 → Reject
+- **阈值例外**：重构清理 / 单包小步迁移等场景可声明"既有阈值不适合"并提供新阈值（如 `5 files / 400 lines`），但需在 commit message 与 todo.md 阶段治理记录中固化
+- **C65-A batch 上限实证**：某次 C65-A1/A2/A3/A4 共 4 sub-batch × 4-6 commits ≈ 20+ commits 推送被 CI Coverage 验证分割至 4 维度阈值——分批已隐含执行，不强制按本阈值拆分（避免与"PDTFC+ 多 sub-batch 子阶段独立闭环"惯例冲突）
+- **反模式**：单次提交 50+ 文件 / 数千行 diff，审计耗时指数级上升、Review Gate Reject 概率增加、回滚粒度过粗
+
+规范见 [ai-collaboration.md §1.4 单次提交审计阈值](../../../../docs/standards/ai-collaboration.md) + [规划规范 §1.1 任务粒度约束](../../../../docs/standards/planning.md) + [code-reviewer SKILL.md §2.5](../SKILL.md)。
+
+### 验证分级矩阵（最低验证要求）必查项
+
+审查 F 阶段本地验证是否覆盖改动类型的最低验证矩阵：
+
+- **必查场景**：执行角色声明"F 阶段完整验证通过"时，是否覆盖 [ai-collaboration.md §2.2 验证分级矩阵](../../../../docs/standards/ai-collaboration.md) 列出的最低验证项？
+- **分级映射**：文档 / 规划 → lint:md + RG；纯逻辑 / 工具函数 / 服务层 → lint + typecheck + 定向测试 + RG；API / 鉴权 / 数据模型 → lint + typecheck + 定向测试 + RG（关键写路径升级到流程验证）；UI 组件 / 页面交互 → lint + typecheck + 测试 + 浏览器验证 + RG；修复型 Hotfix → lint + typecheck + 复现与修复后结果 + RG；配置 / 依赖 / CI / 技能与 agent 定义 → lint + typecheck + 定向验证 + RG
+- **执行验证 vs 声称验证**：执行角色可声明"已跑 lint / typecheck"但**未跑 build / test / coverage**，但 commit message / todo.md 验证证据段声称"完整验证全绿"——必查此类口径不一致
+- **测试覆盖增量**：含测试改动的批次是否含 `pnpm test` 全 workspace 而非仅 `pnpm --filter <pkg> test`（避免非改动包引起的回归漏掉）
+
+规范见 [ai-collaboration.md §2.2 验证分级矩阵](../../../../docs/standards/ai-collaboration.md) + §2.2 不同改动类型的最低验证要求子节。
+
+### F 阶段本地验证必须含 coverage 必查项（hard requirement）
+
+审查 F 阶段"完整验证"是否含 `pnpm run test:coverage`（全 workspace）+ 检查 4 维度（statements / branches / functions / lines）是否 ≥ 80% 阈值：
+
+- **必查场景**：跨多包 / 含新增文件 / 含数据库 / 含 IO 的批次，声称 F 阶段验证"全绿"但**未跑 `pnpm run test:coverage`** → 退回补验证
+- **二次复发警告**：M13.3 T1308 新增 code-quality-fetcher.ts 等 4 个新文件未被既有测试覆盖（防御分支 cursor 重复死循环 / URL parse catch / RATE_LIMITED 兜底 / 三源错误隔离），CI Coverage 79.98% < 80% 二次失败（run 32880889750）
+- **"基线已通过"陷阱**：当 4 维度整体 ≥ 80% 阈值但新增文件分支未被覆盖时，默认 80% 阈值即通过但漏了多包增量回归——必须**逐新增文件检查分支覆盖**
+- **CI 通过 = 最终裁决**：本地通过 ≠ 完成；本地全绿 + lint 0 error + typecheck 0 error 不等于 CI 全绿（CI 含 coverage / lint:md / check:docs / docs:build 多步骤，盲区极大）
+- **实证 commit**：`0c57211`（C65-D 12 commits 推送后 branches 79.88% < 80% 失败，补测 commit）+ `e63cdb9`（M13.3 T1308 补测 14 case，branches 79.98% → 80.17%）
+
+规范见 [ai-collaboration.md §4.4 F 阶段本地验证口径差异 + coverage 强制（hard requirement）](../../../../docs/standards/ai-collaboration.md)。
+
+### audit warning 修复决策协议（修复 vs 登记 backlog）必查项
+
+审查 audit warning 必须明确决策路径，不得"已记录但未行动"或"修复 vs 登记"含糊：
+
+- **必查场景**：Code Auditor 输出 warning（建议修复）或 suggest（优化建议）时，执行角色是否明确决策（修复 / 登记 backlog）+ 提供理由？
+- **修复判定标准**：低成本（通常 < 1 行 + 注释）+ 对齐验收 / 正确性 + 不扩大 scope → 修复（如 C65-D2 W1 清理 test.fixme 残留 + C65-D3 suggest-1 D3 缩写注释清理 + C65-D4 W1+S1 清理 MOCK_DASHBOARD_STATS + dead mock + stale doc + describe 标题）
+- **登记 backlog 判定标准**：实现成本过高（与已知问题耦合 / 依赖外部升级）/ 不在本次 PR 范围 → 登记（如 C65-D2 S1 PrimeVue 4 rowToggleButton 默认无 aria-expanded——Pass-through 不传 context，低成本 dynamic 实现不可行，登记待 PrimeVue 升级 / C65-D3 suggest-2 viewMode 快速切换请求竞态——低概率 UI 闪一下旧数据，可加 lastRequestId 守卫但本次 PR 范围外）
+- **决策三问**：是否影响用户行为？是否与 todo.md 验收条款一致？实现成本？三问中任一不满足"低成本可修复"→ 登记 backlog
+- **必查决策痕迹**：commit message / diff / follow-up 段是否含决策理由（避免后续 agent 重新判断）
+
+规范见 [ai-collaboration.md §4.6 audit warning 修复决策协议](../../../../docs/standards/ai-collaboration.md) + [code-reviewer SKILL.md §2.5 决策框架](../SKILL.md)。
+
+### 运行时校验 vs 类型断言（必查项）
+
+审查涉及数据解析、外部输入、跨进程通信的代码是否正确区分类型断言与运行时校验：
+
+- **类型断言 ≠ 运行时校验**：`JSON.parse(x) as RunResult` 是类型断言，不做运行时校验。typecheck 通过 ≠ 数据合法，契约漂移只能靠运行时校验兜底
+- **对外边界必须配套 validate 函数**：容器 stdout / 网络响应 / 跨进程数据等对外边界必须配套 `validate*()` 函数
+- **典型风险**：外部 API 返回格式变更、容器输出异常、跨版本兼容性问题——类型断言无法捕获
+
+规范见 [testing.md §2 测试设计原则](../../../../docs/standards/testing.md)。
+
+### 容器拼装类代码注释准确性（必查项）
+
+审查涉及 Docker 容器拼装、execFile / exec 调用的代码注释是否准确：
+
+- **禁止不准确表述**：`execFile` 不经过 shell，不会回显 argv（与 `exec` 不同）；注释禁止写"防 argv 回显"等不准确表述
+- **准确语义**：`spec.env` 隔离，避免 cmd/test 日志、git URL、daemon config 可见 token（凭据走 `http.extraheader` 等带外通道，与 argv 无关）
+- **注释必须真实反映防御机制**：错把"防 argv 回显"当成威胁模型会导致后续审计按错误方向找漏洞
+
+规范见 [development.md §5.1.7](../../../../docs/standards/development.md)。
+
+### JSDoc 注释与可见性声明一致性（必查项）
+
+审查新增/修改的 JSDoc 注释是否与可见性声明一致：
+
+- **禁止自相矛盾**：`private` 方法 + JSDoc 写"导出便于 snapshot 测试"自相矛盾；若实际不导出，改注释或改 `public` / `internal`
+- **拼装类函数应在测试中 snapshot 验证**：拼装 bug 在真起容器前难暴露，靠运行时回显只能发现一半问题
+- **注释与实现脱节会被 audit 作为 warning 处置**
+
+规范见 [development.md §5.1.8](../../../../docs/standards/development.md)。
+
+### 测试 Spy 与生产实现同模块时 @internal 标注（必查项）
+
+审查测试 Spy 模块是否正确标注 `@internal`：
+
+- **必须 @internal 标注**：`SpyAdapter` 与生产 `Adapter` 同模块导出时，必须在 Spy 类上加 `@internal` JSDoc + 文件级注释"生产代码禁止导入"
+- **避免业务模块误用 spy 路径**：会导致测试覆盖率虚高、运行时行为错位
+- **强约束**：eslint `no-restricted-imports` 规则限制生产代码 import spy 路径是最稳护栏
+
+规范见 [development.md §5.1.9](../../../../docs/standards/development.md)。
+
+### 删除"自动状态赋值"时被动接收路径审查（必查项）
+
+审查删除状态自动赋值逻辑时是否已审视所有被动接收路径：
+
+- **必须搜遍所有被动接收路径**：删除状态自动赋值逻辑（如 `selectedRepos.value = ...filter(...)`）前，必须审视所有调用路径是否依赖该自动行为收敛
+- **被动接收态风险**：成功提交后重新调用 `loadImportable()` 时，已删的自动赋值语句留下的旧状态会导致 UI 状态不一致
+- **修复范式**：在 `emit('success')` 后 `await reload()` 前主动重置状态，让"删除"与"主动重置"形成完整闭环
+
+规范见 [development.md §5.1.10](../../../../docs/standards/development.md)。
+
+### 调试临时代码清理（必查项）
+
+审查提交前是否已清理所有调试临时代码：
+
+- **必须清理**：任何调试临时代码（`// DEBUG` 注释、`console.log('[debug]', ...)`、`// TODO` 未跟踪项、`alert(...)` 弹窗、`debugger` 语句）必须在 `conventional-committer` 提交前手动清理
+- **不能依赖 lint**：`no-console` 等规则仅限服务端日志场景，无法拦截浏览器端调试输出
+- **调试完成后立即清理不留痕**：`git diff --staged` 容易遗漏单行 `console.log`，养成实时清理习惯
+- **范围扩展**：ui-validator agent 视觉验证时自建的截图脚本也属同类
+
+规范见 [development.md §5.1.11](../../../../docs/standards/development.md)。
+
+### TypeORM 实体时间列类型（必查项）
+
+审查 TypeORM 实体中时间列是否正确使用 `getDateType()`：
+
+- **必须通过 getDateType() 获取列类型**：实体中 `CreateDateColumn` / `UpdateDateColumn` / 日期字段统一 `{ type: getDateType() }`
+- **禁止硬编码**：禁止在实体中硬编码 `'datetime'` / `'timestamp'` 字面量（PostgreSQL 部署会静默出现时区偏移，且单测难以覆盖）
+- **跨库类型归一**：SQLite 下 `datetime` / MySQL 下 `datetime` / PG 下 `timestamp with time zone`——由 `getDateType()` 统一处理
+
+规范见 [platform.md §3.2 时区与列类型](../../../../docs/standards/platform.md)。
+
+### better-auth 四表字段对齐（必查项）
+
+审查 TypeORM 实体中 better-auth 四表字段是否与默认 schema 对齐：
+
+- **不得增删字段**：`user` / `session` / `account` / `verification` 四表字段对齐 better-auth 默认 schema，不得增删字段
+- **平台自有字段通过 additionalFields 配置**：如 `role` 字段通过 `user.additionalFields` 配置并同步实体
+- **违反后果**：字段不一致会导致 better-auth 插件功能异常或数据迁移问题
+
+规范见 [platform.md §3.4 实体规范](../../../../docs/standards/platform.md)。
+
 ### 应提出的问题
 
 - "diff 中新增的注释/测试名是否含孤立编号标记？"
@@ -254,6 +438,14 @@ if (value) { ... }  // 对 0, "", false 失效
 - "本次内部包依赖改动是否符合依赖方向（core ← engine ← {cli, mcp, platform}）？应用层（cli/mcp/platform）是否互相依赖？"
 - "本次新增/修改的条款是否与权威文档重复抄写？应改为一行链接引用（治理定义改动必查）？"
 - "新增的严格约束（必须/阈值/禁令）是否已声明并挂接 review 检查点？宽松指引是否留在执行层？"
+- "涉及数据解析/外部输入/跨进程通信的代码，是否区分了类型断言与运行时校验？"
+- "Docker 容器拼装代码的注释是否准确反映了防御机制（execFile vs exec）？"
+- "JSDoc 注释是否与可见性声明一致？private 方法是否误写为'导出便于测试'？"
+- "测试 Spy 模块是否已标注 @internal？生产代码是否可能误用 spy 路径？"
+- "删除自动状态赋值逻辑前，是否已审视所有被动接收该状态的路径？"
+- "提交前是否已清理所有调试临时代码（console.log / debugger / alert）？"
+- "TypeORM 实体中时间列是否通过 getDateType() 获取列类型？是否硬编码了 'datetime' / 'timestamp'？"
+- "better-auth 四表（user/session/account/verification）字段是否与默认 schema 对齐？是否误增删了字段？"
 
 ### 批量替换与行尾完整性（批量替换/行尾审查）
 
@@ -261,14 +453,16 @@ diff 包含大范围替换（脚本/正则批量改写、多文件机械变更�
 
 - **行尾噪音**：`git diff --ignore-space-at-eol` 与普通 diff 行数差异大 → 说明整文件行尾被翻转（混合行尾仓库常见），要求按行保留原行尾重做
 - **代码误伤**：替换正则是否误删代码 token（空调用 `()`、方法名 `trim`/`toUpperCase` 后丢失括号、URL `https:// /` 出现空格）——注意 `typecheck` 不总能覆盖字符串/注释误伤
-- **外链破坏**：涉及 URL 文本时检查是否出现 `https:// /`、`http://` 等畸形（check-links 只查本地链接）
+- **外链破坏**：涉及 URL 文本时检查是否出现 `https:// /`、`http://` 等畸形（check:docs 只查本地链接）
+- **PowerShell 转义残留（必查）**：diff 疑似经 PowerShell 批量替换（`-replace`/`Replace`/`Set-Content` 产物）时，检查：① 字面量转义残留——扫描变更文件中的字面量 `\r?\n`（反斜杠形态）与"反引号 + n"字符序列，命中即退回（PowerShell 替换文本不做转义解释、单引号完全字面）；② 既有内容误伤——`git diff` 中非预期行（如已知条目内容被拆行/截断）须逐条核验，`String.Replace` 短序列全局替换会拆坏"反引号 + n"（如代码块中的 `npm_config_registry` 变 "换行 + pm_config_registry"）；③ 修复路径必须是 `git checkout -- <file>` 恢复 + 精确 edit 重新应用，**不得**再用 PowerShell 批量替换"修复"替换造成的损坏。lint:md / check:docs / docs:build 均不检测文本语义，内容级验证（Node 字节抽查）由调用方补证（教训见 [经验归档 §四十](../../../../docs/design/governance/experience-archive.md)）
 
-规范见 [ai-collaboration.md §1.2 执行原则 6](../../../../docs/standards/ai-collaboration.md)，教训见 [经验归档 §十七](../../../../docs/design/governance/experience-archive.md)。
+规范见 [ai-collaboration.md §1.2 执行原则 6](../../../../docs/standards/ai-collaboration.md)，教训见 [经验归档 §十七 / §四十](../../../../docs/design/governance/experience-archive.md)。
 
 ### 应提出的问题
 
 - "该改动是否为批量替换？若是，行尾/URL/代码 token 是否被误伤？"
 - "是否存在全文件行尾翻转（--ignore-space-at-eol 前后行数差异）？"
+- "是否经 PowerShell 批量替换？字面量转义残留与既有内容误伤是否已排除？"
 
 ### 协议/枚举全集核对（防护正则/白名单审查）
 
@@ -319,6 +513,31 @@ diff 包含大范围替换（脚本/正则批量改写、多文件机械变更�
 - "引入的包/工具/MCP/技能，来源仓库与维护组织是否已核验？"
 - "AI 推荐的包是否确认在官方 registry 存在，而非拼写相近的 typosquatting 包？"
 - "新依赖是否钉版本并提交锁文件？依赖审计是否在 CI 门禁内？"
+
+---
+
+## 修复执行安全基线（必查项）
+
+改动涉及执行路径（Executor、验证 runner、安装参数、镜像配置、凭据传递、供应链披露）时，对照 [security.md §5.3 修复执行安全](../../../../docs/standards/security.md) 逐项核验（dependfix 自身不得成为漏洞扩散工具）：
+
+- **非 root 执行**: 执行不可信代码的进程/容器是否以非 root 用户运行？容器是否挂载 `docker.sock` / 授予额外特权？
+- **工作目录隔离**: 执行工作目录是否为独立临时目录（如 `runs/{runId}/`）且执行后清理？
+- **超时兜底**: 新增命令/子进程是否自带单命令超时（不得依赖外层总超时兜底）？
+- **保持 pnpm 默认脚本防护**: 是否扩大依赖 lifecycle scripts 执行面（保持仅 `allowBuilds`/`onlyBuiltDependencies` 批准包执行）？是否代目标仓库追加批准？
+- **凭据最小化**: 平台密钥（`ENCRYPTION_KEY`/`AUTH_SECRET`）是否永不传入执行进程？凭据是否仅注入本次执行最小集合、解密仅执行时内存用后即弃？凭据是否走带外通道（`http.extraheader`）不进 argv/URL？错误消息、命令输出、报告日志是否脱敏？
+- **权限面收敛**: 扫描不可信仓库（owner 模式、平台仓库管理）是否使用专用低权限 token？超权限 token（classic repo scope）是否启动即警告？
+- **升级前研判**: 自动升级前是否完成 changelog/diff 研判（研判不可省略）？
+- **供应链信号披露**: 本次新增/升级包带 lifecycle scripts 且被目标仓库批准时，是否进入报告/PR 警示区（含包名/脚本类型）？
+- **结果白名单回传**: 执行进程是否仅回传结构化结果，不赋予自由输出执行能力？
+- **资源与网络**: 执行环境是否具备资源上限（cgroup 配额）？执行期网络出站是否受限（出站白名单计划）或至少保留外联审计记录（当前防线）？新增执行路径/镜像配置是否绕过既有外联审计？
+- **新执行后端威胁建模评审**: 新增执行后端（ExecutorKind）或改变执行边界（网络、文件系统、权限、并发形态）时，是否对照 [executor-sandbox.md 风险表](../../../../docs/design/governance/executor-sandbox.md) 逐项评估并记录缓解措施（评审通过方可实现）？
+
+规范见 [security.md §5.3](../../../../docs/standards/security.md)，治理登记与验收见 [sandbox-security-governance.md](../../../../docs/design/governance/sandbox-security-governance.md)。
+
+### 应提出的问题
+
+- "本次改动是否触及执行路径？§5.3 十三条必须级条款是否逐项对照核验？"
+- "新增执行后端或改变执行边界，威胁建模评审结论是否登记？"
 
 ---
 

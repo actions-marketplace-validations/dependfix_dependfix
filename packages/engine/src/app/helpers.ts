@@ -1,5 +1,4 @@
-// helpers.ts（原 app-helpers.ts）
-// DependfixApp 的辅助方法集合。
+// helpers.ts（原 app-helpers.ts）：DependfixApp 的辅助方法集合。
 // 为控制 app/index.ts 文件规模（max-lines 800），将不直接参与模式编排的方法
 // 提取为模块级函数；通过 AppContext 传入所需状态，行为与原类方法一致。
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
@@ -13,12 +12,10 @@ import {
     type Logger,
     type NormalizedSecurityAlert,
     type RepositoryResult,
-    type RunResult,
-    type RunReportConfig,
     type RunSummary,
-    type AiUsageAggregate,
 } from '@dependfix/core'
 import { stageAndCommit } from '../github/pr-creator'
+import { logNetworkAudit, redactUrlForReport } from '../runners/network-audit'
 import {
     compareSemver,
     parseMajorVersion,
@@ -31,7 +28,6 @@ import { repairLockfile, type LockfileRepairResult } from '../fixers/pnpm'
 import { applyCodeScanningFix, restoreSourceFile, snapshotSourceFile } from '../fixers/code-scanning'
 import { inferRepoFromGitRemote, type RuntimeConfig } from '../config'
 
-import type { AiUsage } from '../ai/usage'
 import { formatVerificationError, runVerification, type VerificationResult } from '../runners/verification-runner'
 
 import { quickVerifyProject } from '../helpers'
@@ -73,7 +69,7 @@ export function resolveAlertRepositories(
 }
 
 /** 自动修复提交的兜底标题（无成功升级 / 包名超长无法生成动态标题时） */
-export const FIX_COMMIT_MESSAGE = 'fix(deps): automated dependfix security repair'
+export const FIX_COMMIT_MESSAGE = 'chore(deps): automated dependfix security repair'
 
 /** commitlint header-max-length 上限（commitlint-config-cmyr 覆盖为 140） */
 const COMMIT_HEADER_MAX_LENGTH = 140
@@ -106,12 +102,12 @@ function buildCommitTitle(upgrades: FixAction[]): string {
         const a = upgrades[0]
         const from = a.fromVersion && a.fromVersion !== 'unknown' ? ` from ${a.fromVersion}` : ''
         const to = a.toVersion ? ` to ${a.toVersion}` : ''
-        const title = `fix(deps): bump ${a.target}${from}${to}`
+        const title = `chore(deps): bump ${a.target}${from}${to}`
         return title.length <= COMMIT_HEADER_MAX_LENGTH ? title : FIX_COMMIT_MESSAGE
     }
 
     const names = upgrades.map((a) => a.target)
-    const full = `fix(deps): bump ${names.join(', ')}`
+    const full = `chore(deps): bump ${names.join(', ')}`
     if (full.length <= COMMIT_HEADER_MAX_LENGTH) {
         return full
     }
@@ -119,7 +115,7 @@ function buildCommitTitle(upgrades: FixAction[]): string {
     // 超长：逐步减少展示数量，直到 `bump a, b and N more` 不超过上限
     let count = names.length - 1
     while (count > 0) {
-        const candidate = `fix(deps): bump ${names.slice(0, count).join(', ')} and ${names.length - count} more`
+        const candidate = `chore(deps): bump ${names.slice(0, count).join(', ')} and ${names.length - count} more`
         if (candidate.length <= COMMIT_HEADER_MAX_LENGTH) {
             return candidate
         }
@@ -176,6 +172,28 @@ export function codeScanningAlertsTokenHint(error: unknown): string | null {
     }
     if (error.code === 'PERMISSION_DENIED') {
         return '请检查 token 是否具备 Code Scanning alerts 读取权限（security-events: read；Actions 默认 GITHUB_TOKEN 具备，本地 PAT 需勾选 Security events 或 fine-grained 的 Code scanning alerts: read）'
+    }
+    if (error.code === 'AUTHENTICATION_FAILED') {
+        return 'token 无效或已过期，请检查 GITHUB_TOKEN / alertsToken 配置'
+    }
+    return null
+}
+
+/**
+ * Code Quality findings fetch 错误用户指引（token 需 fine-grained `Code quality: read`
+ * 或 classic PAT `repo`/`public_repo` scope）。
+ * 仅用于 Code Quality fetch 错误路径；按精确 context 匹配（`fetch code quality findings for`），
+ * 不依赖裸关键字。
+ */
+export function codeQualityAlertsTokenHint(error: unknown): string | null {
+    if (!(error instanceof AppError)) {
+        return null
+    }
+    if (!error.message.includes('fetch code quality findings for')) {
+        return null
+    }
+    if (error.code === 'PERMISSION_DENIED') {
+        return '请检查 token 是否具备 Code Quality findings 读取权限（fine-grained PAT 需 Code quality: read；classic PAT 需 repo / public_repo scope；GitHub App 需对应仓库权限）'
     }
     if (error.code === 'AUTHENTICATION_FAILED') {
         return 'token 无效或已过期，请检查 GITHUB_TOKEN / alertsToken 配置'
@@ -589,6 +607,24 @@ export async function verifyProject(
             commands: valid,
         })
 
+        // 执行期网络外联审计（备查：恶意脚本外联事故溯源；总数 info、明细 debug）
+        logNetworkAudit(logger, repo, result.networkAudit ?? [])
+
+        // 非白名单外联违规 → 报告 error 区（verify 阶段，deny-by-default 拦截证据；逐条记录保证可审计）
+        // target 经 redactUrlForReport 最小化为 host[:port]——恶意 URL 的 path/query 可能携带
+        // 外带凭据，拦截后不得原样回显进报告/日志（防御纵深，最小暴露）
+        for (const violation of result.networkViolations ?? []) {
+            const redacted = redactUrlForReport(violation.target)
+            allErrors.push({
+                repository: repo,
+                target: redacted,
+                stage: 'verify',
+                category: 'network_violation',
+                message: `outbound blocked by allowlist: ${violation.method} ${redacted}`,
+            })
+            logger.error(`[network-audit] ${repo}: outbound blocked (network_violation): ${violation.method} ${redacted}`)
+        }
+
         return result.commandResults.map((cr) => {
             // 失败时附 stdout/stderr 摘要（已脱敏截断）供日志/报告定位失败原因（run 31552922137 教训：仅 "exit code 1" 无法定位）
             const error = cr.exitCode !== 0 ? formatVerificationError(cr) : undefined
@@ -720,167 +756,17 @@ export function buildPrTitle(summary: Pick<RunSummary, 'alertsFixed'>, actions: 
         parts.push(`${codeFixes} code fix${codeFixes > 1 ? 'es' : ''}`)
     }
     return parts.length > 0
-        ? `fix(deps): automated security fix — ${parts.join(', ')}`
-        : 'fix(deps): automated security fix'
+        ? `chore(deps): automated security fix — ${parts.join(', ')}`
+        : 'chore(deps): automated security fix'
 }
 
 // ---------------------------------------------------------------------------
-// Result assembly
+// Result assembly（迁移至 ./result-assembly，保持向后兼容 re-export）
 // ---------------------------------------------------------------------------
 
-/** 汇总所有动作到 summary（alertsSkipped 已在 repo-fix 修复管线中累加）。 */
-export function computeSummary(
-    ctx: Pick<AppContext, 'allActions' | 'allAlerts' | 'repoResults' | 'summary'>,
-): void {
-    const { allActions, allAlerts, repoResults, summary } = ctx
-
-    let fixed = 0
-    let failed = 0
-    let lockfileRepairs = 0
-    let verificationsPassed = 0
-    let verificationsFailed = 0
-
-    for (const action of allActions) {
-        // noOp（如 code-scanning 修复时文件已合规）不计入 fixed/failed（口径与 repoResults 一致）
-        if (action.noOp) {
-            continue
-        }
-        // AI 辅助动作（ai-patch 修复 / ai-suggestion 建议）是过程证据，不计入 fixed/failed——
-        // 告警结果由主动作（major-upgrade 等）代表，避免同告警重复计数
-        if (action.strategy === 'ai-patch' || action.strategy === 'ai-suggestion') {
-            continue
-        }
-        if (action.type === 'dependency-upgrade' || action.type === 'code-scanning-fix') {
-            if (action.success) {
-                fixed++
-            } else {
-                failed++
-            }
-        }
-        if (action.type === 'lockfile-repair' && action.success) {
-            lockfileRepairs++
-        }
-        if (action.type === 'verification') {
-            if (action.success) {
-                verificationsPassed++
-            } else {
-                verificationsFailed++
-            }
-        }
-    }
-
-    const fixable = allAlerts.filter((a) => a.fixable).length
-
-    // 用 repoResults 而非 config.repositories：pnpm-audit + 无 remote 时
-    // config.repositories 为空但实际处理了 1 个 local 仓库（报告可审计性）
-    summary.repositoriesScanned = repoResults.length
-    summary.alertsFound = allAlerts.length
-    summary.alertsFixable = fixable
-    summary.alertsFixed = fixed
-    summary.alertsFailed = failed
-    summary.lockfileRepairs = lockfileRepairs
-    summary.verificationsPassed = verificationsPassed
-    summary.verificationsFailed = verificationsFailed
-}
-
-/** 组装最终运行结果。 */
-export function buildRunResult(
-    ctx: Pick<AppContext, 'config' | 'runId' | 'startedAt' | 'finishedAt' | 'summary' | 'repoResults' | 'allAlerts' | 'allActions' | 'allErrors'>,
-    aiUsage?: AiUsageAggregate,
-): RunResult {
-    const reportConfig: RunReportConfig = {
-        mode: ctx.config.mode,
-        severityThreshold: ctx.config.severityThreshold,
-        repositories: ctx.config.repositories,
-        dryRun: ctx.config.dryRun,
-        createPullRequest: ctx.config.createPullRequest,
-        maxAlertsPerRepository: ctx.config.maxAlertsPerRepository,
-        alertSource: ctx.config.alertSource,
-        codeScanningEnabled: ctx.config.codeScanningEnabled,
-    }
-
-    return {
-        runId: ctx.runId,
-        startedAt: ctx.startedAt,
-        finishedAt: ctx.finishedAt,
-        config: reportConfig,
-        summary: ctx.summary,
-        repositories: ctx.repoResults,
-        alerts: ctx.allAlerts,
-        actions: ctx.allActions,
-        errors: ctx.allErrors,
-        aiUsage: aiUsage && aiUsage.calls > 0 ? aiUsage : undefined,
-    }
-}
-
-/**
- * 聚合一次 AI 研判消耗到 run 级累计。
- * - 单次未调用（usage 为 undefined）幂等返回原累计
- * - 成本合并：任一侧 undefined 时结果 undefined（模型无单价 → 不做误导性估算）
- */
-export function mergeAiUsage(
-    aggregate: AiUsageAggregate | undefined,
-    usage: AiUsage | undefined,
-): AiUsageAggregate | undefined {
-    if (!usage || usage.calls === 0) {
-        return aggregate
-    }
-    const next: AiUsageAggregate = {
-        calls: (aggregate?.calls ?? 0) + usage.calls,
-        inputTokens: (aggregate?.inputTokens ?? 0) + usage.inputTokens,
-        outputTokens: (aggregate?.outputTokens ?? 0) + usage.outputTokens,
-        totalTokens: (aggregate?.totalTokens ?? 0) + usage.totalTokens,
-    }
-    // 成本合并语义：
-    // - 首次聚合（aggregate 为空）→ 直接采用本次成本（含 undefined）
-    // - 两侧均有单价 → 相加
-    // - 已有累计成本而本次无单价（或反之）→ 整体 undefined（同模型单价一致，
-    //   混合只会由异常配置产生，保守不估算，避免误导）
-    if (aggregate === undefined) {
-        next.estimatedCostUsd = usage.estimatedCostUsd
-    } else if (aggregate.estimatedCostUsd === undefined || usage.estimatedCostUsd === undefined) {
-        next.estimatedCostUsd = undefined
-    } else {
-        next.estimatedCostUsd = aggregate.estimatedCostUsd + usage.estimatedCostUsd
-    }
-    return next
-}
-
-/**
- * 计算退出码：
- * - 0: 全部仓库处理成功（无 failed actions、无 errors）
- * - 1: 部分仓库失败
- * - 2: 全部仓库失败（或无仓库被成功处理）
- *
- * 语义注记：AI 辅助动作（ai-patch）失败计入 exit code（fail-safe——AI 修复失败
- * 说明 breaking change 未解决，应报红提醒人工），但不计入 summary.alertsFailed
- * （告警结果由主动作代表；见 computeSummary 的 ai 辅助动作排除规则）。
- */
-export function computeExitCode(
-    ctx: Pick<AppContext, 'config' | 'allErrors' | 'allActions' | 'repoResults'>,
-): number {
-    const { config, allErrors, allActions, repoResults } = ctx
-    const hasErrors = allErrors.length > 0
-    const hasFailures = allActions.some((a) => !a.success)
-    // 保守判定：dry-run 下成功仓库的 verificationPassed 为 undefined、alertsCount 可能为 0，
-    // 与失败仓库并存时会被判为"无成功"（返回 2 而非 1）——fail-safe 方向，可接受
-    // 验证失败（verificationPassed === false）的仓库不算成功交付（改动已回滚）
-    const hasRepoSuccess = repoResults.length > 0
-        && repoResults.some((r) => r.verificationPassed !== false
-            && (r.alertsCount > 0 || r.fixed > 0 || r.verificationPassed === true))
-    // cleanup-branches 模式不填充 repoResults，以成功的 branch-cleanup 动作判定
-    const hasCleanupSuccess = config.mode === 'cleanup-branches'
-        && allActions.some((a) => a.success && a.type === 'branch-cleanup')
-    const hasSuccess = hasRepoSuccess || hasCleanupSuccess
-
-    if (!hasErrors && !hasFailures) {
-        return 0
-    }
-
-    if (hasSuccess) {
-        return 1
-    }
-
-    return 2
-}
-
+export {
+    buildRunResult,
+    computeExitCode,
+    computeSummary,
+    mergeAiUsage,
+} from './result-assembly'

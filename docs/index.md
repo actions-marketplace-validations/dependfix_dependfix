@@ -4,9 +4,9 @@
 
 ## 当前状态
 
-**M6（最小平台 MVP）已完成（2026-08-08），M7.1（认证与用户体系）规划定稿 + 设计先行完成（2026-08-09，待实施）。** M0（基线收敛）/ M1（MVP 单仓库修复）/ M2（GitHub Action 接入）/ M3（Code Scanning 扩展）/ M4（多仓库治理）/ M4.5（跨线升级显式授权）/ M4.6（Monorepo 成员级修复）/ M5（AI Breaking Change 研判）/ M5.5（Skill 编排）/ M6（最小平台 MVP）已完成并归档。
+**M0-M22 已全部闭环归档（2026-09-01）；下一阶段规划待用户触发。** M22 涵盖：M22 沉淀（事故复盘 + 5 防御规范挂接）+ M22.1 启动期自动备份 + M22.2 db-restore 命令式恢复 + M22.3 db-doctor 自检工具 + M22.4 synchronize opt-in + M22.5 migrationsRun opt-in + M22.6 e2e/fixtures 双门控。详见 [todo-archive.md §M22](plan/todo-archive.md#m22-sqlite-数据保护防御加固m221m222m223m224m225m226-全部已闭环--2026-09-01-归档) + [roadmap.md §M22](plan/roadmap.md#m22-sqlite-数据保护防御加固已完成-2026-09-01-归档) + [经验归档 §五十](design/governance/experience-archive.md#五十sqlite-数据库业务数据被清空开发环境不可恢复事故2026-09-01)。
 
-`dependfix` CLI 支持四类命令（`report-only` / `fix` / `fix-and-pr` / `cleanup-branches`），可通过 GitHub Composite Action（`uses: dependfix/dependfix@v1`）提供零配置的自动化安全修复能力；独立管理平台（仓库/凭据管理、扫描触发、仪表板）与 MCP Server 已随 M6 落地。
+`dependfix` CLI 支持四类命令（`report-only` / `fix` / `fix-and-pr` / `cleanup-branches`），可通过 GitHub Composite Action（`uses: dependfix/dependfix@v1`）提供零配置的自动化安全修复能力；独立管理平台（仓库/凭据管理、扫描触发、仪表板、UX-R2 Sidebar、RunDetailDialog）与 MCP Server 已随 M6-M15 落地。
 
 ## 定位
 

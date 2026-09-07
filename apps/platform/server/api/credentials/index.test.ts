@@ -3,10 +3,14 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { expectError, makeEvent, setupMemoryDatabase, teardownMemoryDatabase } from '../../../tests/api-helper'
 import credentialsHandler from './index'
 
-// 鉴权由 guard.test.ts 单独覆盖：API handler 测试 mock guard 层
+// todo.md §M16.5 三角色鉴权：mock 改为可重写（默认 admin）
+const { mockRequireAuth, mockRequireRole } = vi.hoisted(() => ({
+    mockRequireAuth: vi.fn(async () => ({ user: { id: 'u1', email: 'admin@test.dev' } })),
+    mockRequireRole: vi.fn(async () => ({ user: { id: 'u1', email: 'admin@test.dev' } })),
+}))
 vi.mock('#server/utils/guard', () => ({
-    requireAuth: vi.fn(async () => ({ user: { id: 'u1', email: 'admin@test.dev' } })),
-    requireRole: vi.fn(async () => ({ user: { id: 'u1', email: 'admin@test.dev' } })),
+    requireAuth: mockRequireAuth,
+    requireRole: mockRequireRole,
 }))
 
 const call = (method: string, url: string, body?: unknown) => credentialsHandler(makeEvent(method, url, body))
@@ -21,12 +25,12 @@ const validBody = {
 describe('GET /api/credentials', () => {
     beforeAll(() => {
         setupMemoryDatabase()
-        process.env.ENCRYPTION_KEY = 'test-encryption-key-32-bytes!!'
+        // 注：M18.x 治理批次 S-5 — 删除 `process.env.ENCRYPTION_KEY` 死代码；
+        // stub 默认值由 `apps/platform/tests/setup-nuxt-server.ts:26` `useRuntimeConfig = () => ({ encryptionKey: 'test-encryption-key-32-bytes!!' })` 提供
     })
 
     afterAll(() => {
         teardownMemoryDatabase()
-        delete process.env.ENCRYPTION_KEY
     })
 
     beforeEach(() => {
@@ -44,7 +48,7 @@ describe('GET /api/credentials', () => {
         expect(JSON.stringify(created)).not.toContain('ghp_1234567890abcdef')
         expect(created.encryptedToken).toBeUndefined()
 
-        const list = await call('GET', '/api/credentials') as Array<Record<string, unknown>>
+        const list = await call('GET', '/api/credentials') as Record<string, unknown>[]
         expect(list).toHaveLength(1)
         expect(list[0]).toMatchObject({ name: 'github-pat', hasToken: true })
     })
@@ -55,5 +59,141 @@ describe('GET /api/credentials', () => {
 
     it('rejects unsupported method with 405', async () => {
         await expectError(call('PUT', '/api/credentials'), 405)
+    })
+})
+
+/**
+ * 三角色鉴权（todo.md §M16.5）：viewer 只读 / admin + org_admin 写
+ * 注：与 repos 不同，凭据敏感字段（token 加密）需确保 viewer 不能读写
+ */
+describe('/api/credentials 三角色鉴权（todo.md §M16.5）', () => {
+    beforeAll(() => {
+        // 注：M18.x 治理批次 S-5 — 删除 `process.env.ENCRYPTION_KEY` 死代码；
+        // stub 默认值由 `apps/platform/tests/setup-nuxt-server.ts:26` 全局 useRuntimeConfig 提供
+    })
+
+    beforeEach(() => {
+        vi.clearAllMocks()
+    })
+
+    it('viewer 调 POST /api/credentials → 403 (写操作拒绝)', async () => {
+        mockRequireRole.mockImplementationOnce(async () => {
+            const { createError } = await import('h3')
+            throw createError({ statusCode: 403, statusMessage: 'Forbidden', message: 'Forbidden' })
+        })
+        await expect(call('POST', '/api/credentials', validBody))
+            .rejects.toMatchObject({ statusCode: 403 })
+    })
+
+    it('org_admin 调 POST /api/credentials → 200 (写权限放行)', async () => {
+        mockRequireRole.mockResolvedValueOnce({ user: { id: 'orgadmin-1', email: 'orgadmin@test.dev' } })
+        const created = await call('POST', '/api/credentials', {
+            ...validBody,
+            name: 'orgadmin-cred',
+        }) as { id: string, name: string, hasToken: boolean }
+        expect(created.name).toBe('orgadmin-cred')
+        expect(created.hasToken).toBe(true)
+    })
+
+    it('viewer 调 GET /api/credentials → 200 (只读放行 + token 脱敏)', async () => {
+        mockRequireAuth.mockResolvedValueOnce({ user: { id: 'viewer-1', email: 'viewer@test.dev' } })
+        const list = await call('GET', '/api/credentials') as Record<string, unknown>[]
+        // 凭据列表不应含 token 字段；无论 viewer 还是 admin 一致脱敏
+        for (const item of list) {
+            expect(JSON.stringify(item)).not.toContain(validBody.token)
+        }
+    })
+
+    it('未登录调 GET /api/credentials → 401', async () => {
+        mockRequireAuth.mockImplementationOnce(async () => {
+            const { createError } = await import('h3')
+            throw createError({ statusCode: 401, statusMessage: 'Unauthorized', message: 'Unauthorized' })
+        })
+        await expect(call('GET', '/api/credentials')).rejects.toMatchObject({ statusCode: 401 })
+    })
+})
+
+/**
+ * GitHub App 路径（M18.3 commit 1 audit 反馈 W2）：覆盖 createCredential 的 github-app 分支。
+ *
+ * 验证：
+ * - 创建 github-app 凭据：appId/installationId/botLogin 明文 + encryptedPrivateKey 加密
+ * - 列表 / 详情 hasToken 检查 encryptedPrivateKey（不是 encryptedToken）
+ * - 跨路径字段保护（PAT 路径不应带 appId / 反之）
+ */
+describe('POST /api/credentials GitHub App 路径', () => {
+    const githubAppBody = {
+        name: 'dependfix-app',
+        type: 'github-app',
+        appId: '123456',
+        installationId: '7890123',
+        encryptedPrivateKey: `-----BEGIN RSA PRIVATE KEY-----
+MIIEpAIBAAKCAQEAxZxZ7BqHKJ9QsWbX8bFqHsK3p4QyjQJYxJ0gQjQJYxJ0gQjQJ
+YxJ0gQjQJYxJ0gQjQJYxJ0gQjQJYxJ0gQjQJYxJ0gQjQJYxJ0gQjQJYxJ0gQjQJ
+YxJ0gQjQJYxJ0gQjQJYxJ0gQjQJYxJ0gQjQJYxJ0gQjQJYxJ0gQjQJYxJ0gQjQJ
+-----END RSA PRIVATE KEY-----`,
+        botLogin: 'dependfix-bot[bot]',
+        note: 'GitHub App 凭据',
+    }
+
+    beforeAll(() => {
+        // 注：M18.x 治理批次 S-5 — 删除 `process.env.ENCRYPTION_KEY` 死代码；
+        // stub 默认值由 `apps/platform/tests/setup-nuxt-server.ts:26` 全局 useRuntimeConfig 提供
+    })
+
+    beforeEach(() => {
+        vi.clearAllMocks()
+    })
+
+    it('创建 GitHub App 凭据 → hasToken 来自 encryptedPrivateKey（非 encryptedToken）', async () => {
+        const created = await call('POST', '/api/credentials', githubAppBody) as Record<string, unknown>
+        expect(created).toMatchObject({
+            name: 'dependfix-app',
+            type: 'github-app',
+            hasToken: true,
+            appId: '123456',
+            installationId: '7890123',
+            botLogin: 'dependfix-bot[bot]',
+        })
+        // 明文 PEM 不应返回
+        expect(JSON.stringify(created)).not.toContain('BEGIN RSA PRIVATE KEY')
+        expect(created.encryptedPrivateKey).toBeUndefined()
+    })
+
+    it('GitHub App 凭据列表 → 附加 appId/installationId/botLogin 公开信息', async () => {
+        await call('POST', '/api/credentials', githubAppBody)
+        const list = await call('GET', '/api/credentials') as Record<string, unknown>[]
+        const found = list.find((c) => c.type === 'github-app')
+        expect(found).toBeDefined()
+        expect(found).toMatchObject({
+            appId: '123456',
+            installationId: '7890123',
+            botLogin: 'dependfix-bot[bot]',
+        })
+    })
+
+    it('strict mode 拒绝跨路径字段（PAT 路径不应带 appId）', async () => {
+        const invalidBody = {
+            name: 'invalid-pat',
+            type: 'classic-pat',
+            token: 'ghp_xxx',
+            appId: '123456', // 跨路径字段
+        }
+        await expectError(call('POST', '/api/credentials', invalidBody), 400)
+    })
+
+    it('strict mode 拒绝跨路径字段（App 路径不应带 token）', async () => {
+        const invalidBody = {
+            ...githubAppBody,
+            token: 'ghp_xxx', // 跨路径字段
+        }
+        await expectError(call('POST', '/api/credentials', invalidBody), 400)
+    })
+
+    it('GitHub App 路径必填字段缺失 → 400', async () => {
+        await expectError(
+            call('POST', '/api/credentials', { name: 'incomplete-app', type: 'github-app' }),
+            400,
+        )
     })
 })

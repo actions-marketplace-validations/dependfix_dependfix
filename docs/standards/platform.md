@@ -79,7 +79,7 @@ apps/platform/
 | `DATABASE_PATH` | `data/dependfix.sqlite` | SQLite 文件路径（必须可配，容器内指向数据卷） |
 | `DATABASE_SSL` | `false` | 多后端时启用 SSL |
 | `DATABASE_ENTITY_PREFIX` | `dependfix_` | 表前缀 |
-| `DATABASE_SYNCHRONIZE` | `false` | 生产环境显式开启才同步 schema |
+| `DATABASE_SYNCHRONIZE` | `false` | 全场景显式 opt-in 才同步 schema（详见 [development.md §5.1.19](./development.md)） |
 | `MACHINE_ID` | `process.pid % 1024` | 雪花 ID 机器位 |
 
 ### 3.2 时区与列类型（关键约束）
@@ -110,7 +110,8 @@ export const getDateType = (dbType?: string): string => {
 
 - 支持三后端，**显式传入 driver 实例**（`better-sqlite3` / `mysql2` / `pg`），绕过 TypeORM 1.x 动态 require（Docker/Vercel 已知坑）
 - 顶层 `import` 驱动模块，供 Nitro Rolldown 静态分析
-- `synchronize`：开发/测试自动同步；生产仅 `DATABASE_SYNCHRONIZE=true` 时开启
+- `synchronize` / `migrationsRun` 全场景显式 opt-in（dev/test 也不再自动开启 synchronize）；详见 [development.md §5.1.19 TypeORM 1.x synchronize 与 migrationsRun 反模式禁止](./development.md)
+- 启动期日志打印 `synchronize` + `migrationsRun` + 各自 env（development.md §5.1.19 hard requirement）
 - 初始化失败不抛致命错误：日志告警 + 功能降级（对齐 momei `reportDatabaseInitializationFailure` 语义）
 - 幂等单例 + 并发初始化锁（`ensureDatabaseInitialized`）
 
@@ -120,6 +121,95 @@ export const getDateType = (dbType?: string): string => {
 - 属性名 camelCase（与 better-auth schema 一致），列名由 `SnakeCaseNamingStrategy` 转 snake_case
 - better-auth 四表（`user` / `session` / `account` / `verification`）字段对齐 better-auth 默认 schema，**不得增删字段**；平台自有字段（如 `role`）通过 better-auth `user.additionalFields` 配置并同步实体
 - 跨库类型归一：SQLite 下 `bigint` → `integer`；PG 下 `bigint` → `integer`、长文本 → `text`（M6 以 SQLite 为默认目标，但实体写法必须保持三后端可编译）
+
+### 3.5 TypeORM 查询模式
+
+- **`find()` 不支持嵌套路径 order by**：TypeORM 1.x `find({ order: { 'scanRun.repository.owner': 'ASC' } })` **不支持嵌套路径 order by**（仅支持 entity 顶层字段），会抛 `EntityPropertyNotFoundError: Property "scanRun.repository.owner" was not found in "ScanResult". Make sure your query is correct.`（`node_modules/typeorm/query-builder/SelectQueryBuilder.js:2371` 等抛出位置）。任何"按关联实体字段排序"的需求必须用 QueryBuilder：`createQueryBuilder('result').leftJoinAndSelect('result.scanRun', 'scanRun').leftJoinAndSelect('scanRun.repository', 'repository').orderBy('repository.owner', 'ASC').addOrderBy('repository.name', 'ASC')`。统一代码路径优先（全部走 QueryBuilder 而非 find + QueryBuilder 两条路径），简化维护 + 行为等价。修复 commit `374a278`（alerts 视图切换按包 / 按项目）。
+
+### 3.6 e2e / fixtures 端点双门控规范
+
+`apps/platform/server/api/e2e/*` 下的所有端点（fixtures.post.ts / fixtures.delete.ts 等）**必须**叠加两道门控，防止生产环境误暴露。
+
+**强制门控**（两条件同时满足才放行；`useRuntimeConfig()` 来自 Nuxt auto-import，server/api/ 路由可直接调用，**无需显式 import**）：
+```typescript
+import { createError, defineEventHandler } from 'h3'
+
+const config = useRuntimeConfig() // Nuxt auto-import，无需 import；h3 不导出 useRuntimeConfig
+if (process.env.E2E_TEST !== 'true' || !config.e2eFixturesAllowed) {
+    throw createError({ statusCode: 404, statusMessage: 'Not Found' })
+}
+```
+
+**`e2eFixturesAllowed` 在 `nuxt.config.ts` 的 runtimeConfig 注册**：
+```typescript
+// nuxt.config.ts
+runtimeConfig: {
+    // 生产构建默认 false（NUXT_E2E_FIXTURES_ALLOWED 未设）；仅 e2e webServer 启动时显式开启
+    e2eFixturesAllowed: process.env.NUXT_E2E_FIXTURES_ALLOWED === 'true' || process.env.E2E_TEST === 'true',
+}
+```
+
+**为什么需要双门控**：
+- 单门控 `E2E_TEST === 'true'` 风险：生产环境误设 `E2E_TEST=true`（运维误操作、docker-compose 复制粘贴、CI 环境变量泄漏）即暴露端点
+- 叠加 `runtimeConfig.e2eFixturesAllowed` 兜底：仅当显式 `NUXT_E2E_FIXTURES_ALLOWED=true` 时才放行；prod build 默认 false
+
+**为什么不用 `process.env.NODE_ENV === 'production'` 作第二门控（陷阱）**：
+- ⚠️ **Nitro / esbuild 构建期会把 `process.env.NODE_ENV` 静态替换为构建时值**（prod build 时折叠为 `"production"`，dev build 时折叠为 `"development"`）
+- 表达式 `process.env.E2E_TEST !== 'true' || process.env.NODE_ENV === 'production'` 在产物中被折叠为 `... || true`，**永远 404**，e2e 套件必然破裂
+- **runtimeConfig 是 Nuxt 官方运行时覆盖通道**（`NUXT_` 前缀），运行时由 `NUXT_E2E_FIXTURES_ALLOWED` 注入，可绕开 esbuild define；prod build 时 `e2eFixturesAllowed` 默认 false，端点 404，e2e webServer 启动时设 `NUXT_E2E_FIXTURES_ALLOWED=true` 覆盖为 true
+- 教训：M22 阶段 fixtures 双门控首次落地时使用 `process.env.NODE_ENV === 'production'`（详见 todo.md §M22.6 风险与缓解），build 产物实测 `... || true` 折叠，code-auditor quick depth + 构建产物 grep 兜底发现并强制修订
+
+**应用范围**：
+- `apps/platform/server/api/e2e/fixtures.post.ts` — POST /api/e2e/fixtures
+- `apps/platform/server/api/e2e/fixtures.delete.ts` — DELETE /api/e2e/fixtures
+- 未来新增的 `apps/platform/server/api/e2e/*.ts` 文件全部适用
+
+**禁止**：
+- ❌ 单 `E2E_TEST` 门控（缺 `runtimeConfig.e2eFixturesAllowed` 兜底）
+- ❌ `process.env.NODE_ENV === 'production'` 门控（**esbuild define 折叠陷阱**，prod build 永远 404；M22 阶段实证）
+- ❌ `NODE_ENV !== 'development'` 门控（dev/test/staging 区分不清晰）
+- ❌ `import.meta.dev` 门控（仅 Nuxt 内置 dev/prod 区分，部署到 staging 仍误暴露）
+
+**D 阶段自检**：
+- Full Stack Master (全栈大师) agent 检查所有 `apps/platform/server/api/e2e/*.ts` 文件，确认含双门控代码（`useRuntimeConfig().e2eFixturesAllowed` 第二门控）
+- **构建产物 grep 兜底**：`pnpm --filter @dependfix/platform build` 后 `rg -n "E2E_TEST\|e2eFixturesAllowed" apps/platform/.output/server/chunks/routes/api/e2e/*.mjs`，确认产物未折叠表达式（不应出现 `|| true`）
+
+**A 阶段 Review Gate**：code-auditor 主责边界新增"e2e 端点双门控 + runtimeConfig 兜底 + 构建产物 grep"必查项
+
+**实证**（2026-09-01 dependfix.sqlite 数据清空事故关联风险 + M22.6 修订教训）：事故排查发现 `apps/platform/server/api/e2e/fixtures.delete.ts:39` 只有 `E2E_TEST !== 'true'` 单门控，与 fixtures.post.ts 同模式（post.ts:24-26 已记录 RG-S3 follow-up 未落地）。M22.6 commit 首次落地使用 `process.env.NODE_ENV === 'production'` 兜底，因 Nitro/esbuild 静态替换导致 prod build 折叠为 `... || true`，code-auditor quick depth + 构建产物实测发现并强制修订为 `runtimeConfig.e2eFixturesAllowed`（NUXT_E2E_FIXTURES_ALLOWED 运行时覆盖通道）。详见 [经验归档 §五十](../design/governance/experience-archive.md#五十sqlite-数据库业务数据被清空开发环境不可恢复事故2026-09-01) + todo.md §M22.6。
+
+### 3.7 SQLite 启动期备份 + 自检工具（引用 security.md §2.1 + 平台角度差异化信息）
+
+> 权威完整声明（备份路径 / fsync / 保留策略 / 命令式恢复 / 自检工具判断逻辑等）见 [security.md §2.1](./security.md)。本节仅保留平台角度差异化信息（调用时机 / 协同关系 / D 阶段自检 + A 阶段 Review Gate）。
+
+**调用时机**：backup.ts 在 `ensureDatabaseInitialized()` 之前同步调用（详见 [security.md §2.1.1](./security.md)）
+
+**协同关系**：与 e2e / fixtures 端点双门控（[platform.md §3.6](#36-e2e--fixtures-端点双门控规范)）协同——防止生产环境误暴露清空端点（详见 [security.md §2.1.4](./security.md)）
+
+**D 阶段自检**：必须验证 backup.ts / db-restore.ts / db-doctor.ts 3 个文件存在且含核心实现（fsync / retention / `--yes` 门控 / 报告格式；文件路径见 [security.md §2.1](./security.md)）
+
+**A 阶段 Review Gate**：backup.ts 必须含 fsync + retention 清理逻辑；db-restore.ts 必须含 `--yes` 二次确认；db-doctor.ts 必须打印 schema_version + freelist_count
+
+### 3.7.1 fixtures API 无节流默认 + 经验性节流方案
+
+fixtures handler（`apps/platform/server/api/e2e/fixtures.{post,delete}.ts`）**当前无任何节流 / debounce / rate-limit 代码**，依赖调用方（`tests/e2e/global-setup.ts` + 各 test suite）按顺序串行调用。**M24.2 阶段源码追溯判定**（`rg -n "rate.?limit|throttle|debounce" apps/platform/server/api/e2e/` 0 命中）：调用频次低（global-setup 阶段 ≤ 2 次），不存在并发资源竞态。
+
+**经验性节流方案**（M24.2 follow-up，未来 e2e 复现 fixture 并发问题时实施）：
+
+```typescript
+// apps/platform/server/utils/fixtures-throttle.ts
+let lastFixtureCall = 0
+export const fixturesRateLimit = (): boolean => {
+    const now = Date.now()
+    if (now - lastFixtureCall < 100) return false  // 100ms 节流
+    lastFixtureCall = now
+    return true
+}
+```
+
+fixtures.delete / fixtures.post 在双门控通过后调用 `fixturesRateLimit()`；返回 false → `429 Too Many Requests`。
+
+**未来触发条件**：CI 偶现 fixtures DELETE 502/503 + 资源释放竞态时优先复现 → 启用节流而非加复杂锁。详见 [经验归档 §五十七 M24.2 候选 ④（experience-archive.md §五十七段）](../design/governance/experience-archive.md)。
 
 ## 4. 认证规范（better-auth）
 
@@ -140,13 +230,14 @@ export const getDateType = (dbType?: string): string => {
 - 事务：`dataSource.transaction(async (manager) => callback(createAdapter(manager)))`
 - 字段映射：实体属性名 = better-auth schema 字段名（camelCase）；列名由命名策略转换，**adapter 不感知列名**
 - 禁止在 adapter 中 import 业务实体（保持通用）
+- **better-auth adapter 必须显式实现 `transaction`（隐性技术债陷阱）**（M24.2 阶段教训）：better-auth 1.7.2 `getBaseAdapter`（`node_modules/.pnpm/better-auth@*/dist/db/adapter-base.mjs:18`）在 adapter 不实现 `transaction` 时**自动 patch fallback** `cb => cb(adapter)`（**非真事务**，仅同步回调）+ logger warn 但**不阻断**业务运行。**根因**：业务代码可能误以为有真事务保护（实际仅同步回调；并发场景下 better-auth 多步写入的隔离性丢失）。**M24.2 源码追溯结论**：项目 `typeorm-adapter.ts:209` 已实现 `dataSource.transaction(...)` 真事务，better-auth 走真事务路径（fallback 不适用）。**防御**（防 future 重构引入回退）：在 `server/utils/__tests__/better-auth-adapter-transaction.test.ts` 写单测验证项目 typeorm-adapter.transaction 是真事务（mock adapter + 验证 callback commit 时序），不依赖 better-auth 上游 fallback。详见 [经验归档 §五十七 M24.2 教训 1 + 教训 3（experience-archive.md §五十七段）](../design/governance/experience-archive.md)。
 
 ## 5. 凭据安全规范（T602 起生效）
 
-- 平台级密钥：环境变量 `ENCRYPTION_KEY`（AES-256-GCM 密钥，32 字节 base64 或 hex）；未配置时**禁用凭据功能并明确报错**（不静默降级为明文）
-- Credential 实体：`type`（classic-pat / fine-grained-pat / github-app）、`encryptedToken`、`name`、`repoId` 关联
-- 加解密工具（`server/utils/credential-crypto.ts`）：AES-256-GCM + 随机 IV，密文格式 `iv:tag:ciphertext`（base64）；解密仅在执行时 worker 内存中，用完即弃
-- **禁止**：token 明文落库、token 进日志、token 进前端响应（API 返回 `hasToken` 布尔即可）
+- 平台级密钥：环境变量 `NUXT_ENCRYPTION_KEY`（AES-256-GCM 密钥，32 字节 base64 或 hex；Nuxt `NUXT_` 前缀约定）；未配置时**禁用凭据功能并明确报错**（不静默降级为明文）—— M17.1 标准化（C38 治理：service 直读 env → `useRuntimeConfig().encryptionKey` + 移除 inline fallback；详见 M17 闭环记录 [todo-archive.md §M17.1](../plan/todo-archive.md)）
+- Credential 实体：`type`（classic-pat / fine-grained-pat / github-app）、`encryptedToken` / `encryptedPrivateKey`（GitHub App 路径）、`appId` / `installationId` / `botLogin`（GitHub App 路径公开信息）、`name`、`repoId` 关联——M18.3 接入 GitHub App 路径扩展
+- 加解密工具（`server/services/credential.service.ts`）：AES-256-GCM + 随机 IV（12 字节），密文格式 `{iv}.{authTag}.{ciphertext}`（三段 base64 点号拼接，GCM 自带完整性校验）；PAT 路径加密 `token`，GitHub App 路径加密 `privateKey`（PEM）；解密仅在执行时 worker 内存中，用完即弃。算法细节与审计必查项见 [security.md §5.5](./security.md#55-凭据加密存储c28-已闭环2026-08-20)
+- **禁止**：token / privateKey 明文落库、token 进日志、token 进前端响应（API 返回 `hasToken` 布尔即可）
 - Dependabot alerts 读取必须显式凭据（`GITHUB_TOKEN` 不可用，见 [G2 处置记录](../plan/todo-archive.md)）
 - 测试用独立随机密钥（不读生产 env）
 
@@ -158,16 +249,55 @@ export const getDateType = (dbType?: string): string => {
 - 认证守卫：除 `auth/**` 与登录相关外，API 默认要求会话（`requireSession` 工具），未登录 401
 - 凭据类 API 永不返回明文 token
 - API 层只做参数校验与响应组装，业务逻辑下沉 `server/services/`
+- **h3 `defineEventHandler` 行为：handler 是 `async function` 而非 `async function*` generator**（M24.2 阶段教训）：h3 `_callHandler`（`node_modules/.pnpm/h3@1.15.11/h3/dist/index.mjs:1886-1890`）`await handler(event)` —— handler 返回 `Promise<value>`（普通 async function）或 `AsyncGenerator<T>`（`async function*` generator，不可 await 自动迭代）。`async function*` 在 h3 默认 handler 路径下不会自动迭代（需显式 `sendIterable` 走 `coerceIterable` 工具函数，定义于 `index.mjs:716-725`）；如误用 `async function*` 写 API handler，Nitro 默认路径下行为异常（不会自动 yield）。**M24.2 源码追溯判定**：`apps/platform/server/api/e2e/fixtures.{post,delete}.ts` 与 `pr-checks/index.get.ts` 等均明确为 `async (event) => { ... }` 普通 async function（grep `async function\*` 全仓仅 `packages/engine/src/runners/cgroup.ts:282` 1 处，为 cgroup OOM observer 非 API handler），**与 M22.7 ECONNRESET 无因果关系**。**防御**：写 Nuxt server route 时 handler 一律 `defineEventHandler(async (event) => { ... })`；如确需流式响应（SSE / 长轮询），显式 `defineEventHandler(async (event) => { ... return sendIterable(event, generator) })`。详见 [经验归档 §五十七 M24.2 候选 ②（experience-archive.md §五十七段）](../design/governance/experience-archive.md)。
 
 ## 7. 前端规范（app/）
 
 - Vue 3 Composition API + `<script setup lang="ts">`
 - PrimeVue 组件按需使用（`@primevue/nuxt-module` 自动导入，无需手动注册）；模板中 PascalCase
 - 样式：SCSS + BEM；全局变量/ mixin 通过 `vite.css.preprocessorOptions.scss.additionalData` 注入，**组件内直接使用 `$space-4` / `$color-primary` 等变量**
-- 暗色模式：`use-color-mode.ts` 切换 `<html>.dark` + localStorage 持久化；PrimeVue 主题 `darkModeSelector: '.dark'`
+- 暗色模式：`use-color-mode.ts` 切换 `<html>.dark` + localStorage 持久化；PrimeVue 主题 `darkModeSelector: '.dark'`。**全局 SCSS mixin 适配**：`main.scss` 是全局 CSS 无 scope，原 `@mixin dark-mode { :global(.dark) & { @content; } }` 编译失败（`:global()` 是 CSS Modules 语法只在 `<style scoped>` 有效）；正确写法是 `.dark &`（mixin 改动 1 行，4 处 `@include dark-mode` 自动 work）—— 这是 2026-08-20 C59 mixin 修复的根因。
 - composables / utils 文件 **kebab-case**；Vue 组件 **kebab-case.vue**；样式类 BEM
 - 页面组件默认导出为空（布局/路由由 Nuxt 管理），业务状态放 composables 或组件内
 - 禁止 `any`；模板中不写复杂逻辑（抽到 computed / 函数）
+
+### 7.1 PrimeVue 4 集成实践
+
+- **sortable 用 `data-p-sortable-column` 属性**（PrimeVue 4 把 sortable class 改成 data attribute，CSS-in-JS 模式；CSS class `.p-sortable-column` 已废弃）：e2e selector 必须用 `th[data-p-sortable-column="true"]`。写 PrimeVue 4 e2e 前 grep 实际渲染产物确认 attribute vs class。
+- **业务语义排序需 `:default-sort-order="-1"`**：PrimeVue 默认 asc 排序与 critical-first 业务顺序相反；column sortable 必须加 `:default-sort-order="-1"`，否则用户首次点击得到反语义结果。`sort-helpers` 的 `_xxxRank` 是升序的 asc 顺序（0 在前），要 desc 显示业务优先级必须显式 -1。
+- **派生字段运行时修改路径必须同步**：派生字段（`_severityRank` / `_statusRank` / `_roleRank`）的首次注入（fetch 时 `withXxxRank`）不能覆盖后续运行时修改路径——必须每次同步（如 `updateStatusRank` / `updateRoleRank`）。否则 fetchDetail 修改 row.status 后没更新 _statusRank，DataTable 排序引用陈旧 rank → 业务语义错位。
+- **`<Chart>` 引入体积警告**：PrimeVue `<Chart>` 内部 `import('chart.js/auto')` 引入 ~200KB 全量依赖，与 tree-shakable 原则冲突。引入 PrimeVue wrapper 组件前先 grep 内部是否引入了全量依赖；如确实需要 Chart.js，**自实现 `ChartCanvas.vue` 包装**（仅注册用到的 controllers/elements/scales/plugins 子集，如 `LinearScale` + `CategoryScale` + `BarController` + `BarElement` + `DoughnutController` + `ArcElement` + `Tooltip` + `Legend`），实测 bundle < 50KB gzip（vs PrimeVue wrapper 200KB，节省 75%）。`<ClientOnly>`  包裹避免 SSR `window is not defined` 报错。
+- **类型 vs 运行时契约核验**：编写 PrimeVue v-model 绑定、ref 形态、callback 契约时**必须直接看 `node_modules/primevue/<comp>/index.mjs` 内部实现**（如 `this.expandedRowGroups.indexOf(...)` 调用），不能信 TypeScript 类型声明（已知 type bug 案例：`DataTableExpandedRows = Record<string, boolean>` 类型允许，但 PrimeVue 4 `v-model:expanded-row-groups` 内部要求 `string[]`，传 Record 触发 `TypeError: ...indexOf is not a function`）。本项目已积累 2 条同类 latent bug：`alerts.vue expandedPackages Record → string[]` 修复（C64，commit `de28ae4`）+ `alerts.vue multiSortMeta` 修复（commit `5c39fe5`）。核验流程：grep `node_modules/primevue/<comp>/index.mjs` 找 `this.<ref>.indexOf` / `this.<ref>[0].field` 等内部契约调用点。
+- **`sort-mode="multiple"` 必须用 `v-model:multi-sort-meta` 传初始排序**：PrimeVue 4 `sort-field` + `sort-order` 仅在 `sort-mode="single"` 下生效；切到 `multiple` 后 `d_multiSortMeta` 不会被自动填充（保持空数组 `[]`），但 `d_sortField` 被赋值后 `sorted` 仍为 `true`（`node_modules/primevue/datatable/index.mjs:6091-6093` `sorted = d_sortField || ...`），进入 `processedData` 走 `sortMultiple(data)` → `multisortField(d, d, 0)` → `d_multiSortMeta[0].field` → 空数组 `TypeError: Cannot read properties of undefined (reading 'field')`。正确写法：`v-model:multi-sort-meta="ref<DataTableSortMeta[]>([{field: 'packageName', order: 1}])"`（PrimeVue Volt UI 官方文档明确："In multiple sort mode, `multiSortMeta` should be used"）。触发条件：必须有真实数据加载（e2e 因 mock 数据未真正进入 DataTable 计算路径，被 hydration fixme 掩盖，调试时易误判）。修复 commit `5c39fe5`。
+- **PrimeVue 4 DataTable 不支持 `:sort-meta` prop（silent ignore 陷阱）**（M24.1 阶段教训）：PrimeVue 4 DataTable 的 sort 状态 prop **仅**有 `v-model:multi-sort-meta`（v-model 形式），**没有** `:sort-meta` / `sortMeta` 等命名（实测 `node_modules/primevue/datatable/DataTable.vue` + `BaseDataTable.vue` 0 命中 `sortMeta`/`sort-meta`，仅 `multiSortMeta` 在 L371/L418/L463）。Vue 模板解析时未知 prop 被静默忽略（无运行时错误但也无功能效果——默认排序失效 + 用户点击列头排序无法持久）。**根因**：Vue 模板解析 + v-model 双向绑定的 prop 名必须与组件定义的 `props.multiSortMeta` 严格匹配（v-model:multi-sort-meta → props.multiSortMeta 短横线转驼峰）。**M24.1 Phase 4 B2 实证**：pr-checks.vue `:sort-meta="sortMeta"` 写错导致默认排序 + 用户排序均失效。**防御**：写 PrimeVue 4 DataTable 多列排序前 grep `node_modules/primevue/datatable/index.mjs` 确认 prop 名；TypeScript 类型声明也仅暴露 `multiSortMeta: DataTableSortMeta[]`，未暴露 `sortMeta`。详见 [经验归档 §五十六 M24.1 教训 3（experience-archive.md §五十六段）](../design/governance/experience-archive.md)。
+- **`<Select>` disabled 不渲染 root `.p-disabled` class**：PrimeVue 4 `<Select>`（非 editable 形态，default）的 `disabled` 状态**不渲染 root `.p-disabled` class**，而是写到内部 `<span role="combobox">` 的 `aria-disabled="true"` + `tabindex="-1"`（`node_modules/primevue/select/index.mjs:1134-1167` span 渲染分支）。editable 形态才走 `<input>` 的 `disabled` 属性。e2e 断言必须用 selector `.p-select span[role="combobox"]` 而非 root `.p-select` class（`.p-disabled` class 来自 `style/index.mjs:10` 的 CSS-in-JS 模板，PrimeVue 4 默认未注入到 DOM）。
+- **bugfix 烟雾脚本**：一次性 smoke 验证脚本（`tests/e2e/_smoke-xxx.mjs`，跑完即删）能精准捕获 PrimeVue 类型/运行时契约类 bug 的修复有效性：监听 `pageerror` + `console.error`，过滤已知 noise（preload warnings），断言关键 TypeError 文本（如 `multisortField` / `Cannot read properties of undefined.*reading 'field'`）。比单纯 typecheck 更具说服力，特别是 e2e 被 known-issue fixme 掩盖的场景。验证后清理脚本不留痕（开发规范 §5.1.11 调试临时代码清理规则）。
+
+### 7.2 i18n 配置单点声明
+
+- **配置中心位置**：`apps/platform/i18n/` 目录下两个文件协作承载全部 i18n 配置：
+  - `apps/platform/nuxt-i18n-config.ts` —— @nuxtjs/i18n 模块层配置（locales / strategy / langDir / defaultLocale / detectBrowserLanguage / detector 路径），被 `nuxt.config.ts` 顶层 import 后 spread 到 `i18n` 字段；**jiti 安全**（无 `defineI18nConfig` 顶层调用）。
+  - `apps/platform/i18n/i18n.config.ts` —— vue-i18n 构建期配置（datetime/number formats 本地化），通过 `nuxt.config.ts` 的 `i18n.vueI18n` 字段按文件路径加载，**仅可由 Nuxt transform pipeline 加载**（注入了 `defineI18nConfig` 全局）。
+  - `apps/platform/i18n/localeDetector.ts` —— 浏览器语言检测器（`resolveLocale` 纯函数，便于单测）；`nuxt-i18n-config.ts` 仅以路径常量引用。
+  - `apps/platform/nuxt.config.ts` 的 `i18n` 块仅做引用（spread `nuxtI18n` + `vueI18n` 路径 + `experimental.localeDetector`），不再重复 locales / strategy / langDir / detectBrowserLanguage 等字段；当前 i18n 块 6 行（含括号）。
+- **jiti 加载边界（关键约束）**：`nuxt.config.ts` 顶层 import 走 jiti（轻量 TS 转换器，无 Nuxt transform pipeline），而 `defineI18nConfig` 是 @nuxtjs/i18n 模块加载时通过 addImports 注入的运行时全局。因此 `nuxt.config.ts` 顶层 **只能 import 拆出的 `nuxt-i18n-config.ts`**（仅 named export const 定义，无模块顶层副作用），**不能 import `i18n.config.ts`**（其 default export 会触发 jiti 顶层 evaluate `defineI18nConfig(...)` → `is not defined` 报错）。这是双文件拆分的唯一根因，不接受合并尝试（合并会在 typecheck 时暴露）。
+- **`as const` 锁定字面量类型**：`nuxtI18n = { ... } as const` 是必需的，避免 spread 后被 Nuxt 模块类型推断为宽化（`string` 而非字面量），引发 `@nuxtjs/i18n` 字段契约检查报错。
+- **nuxt.config.ts i18n 块行数上限**：≤ 10 行（仅引用 + 必要 override）。超出即视为散落配置点回归，应回收到 `nuxt-i18n-config.ts`。
+- **新增语言流程**：仅改 `nuxt-i18n-config.ts` 一处（`nuxtI18n.locales` 追加 1 项 `{ code, name, file, language }`）+ 在 `apps/platform/i18n/locales/` 下复制对应 `.json` 并补翻译。`nuxt.config.ts` 与 `i18n.config.ts` 不需任何 i18n 字段调整。
+- **职责边界**：本节聚焦 i18n **配置实现层**（字段归属与单点声明）；语言标识规范 / fallback 链 / 文案归属层级 / 翻译流程见 [i18n.md §3](./i18n.md#3-平台-ui-国际化)。
+- **禁止反模式**：
+  - 在 `nuxt.config.ts` i18n 块内重复声明 `locales` / `strategy` / `langDir`（散落点回归）
+  - 把 `vueI18n` 字段写成内联对象而非文件路径（无法承载 `locales` 等模块层字段，也丢失 i18n.config.ts 作为运行时配置中心的边界）
+  - 把 `i18n.config.ts` 的 named export（含 vue-i18n 配置以外的代码）放到会被 jiti 顶层 import 的位置（必须物理拆分）
+  - 在 detector 文件里直接 hard-code `defaultLocale` 或 locale 列表（应通过 `nuxtI18n` 配置中心维护）
+
+### 7.3 Utility 抽取与跨组件共享
+
+- **抽取时机**：D 阶段实现收尾时若发现同一格式化函数在 ≥ 2 个 SFC 中重复出现（如 `modeLabel` / `executorLabel` / `formatDuration`），立即抽到 `apps/platform/app/utils/<feature>.ts` 单文件集中维护；同时接受 Review Gate `suggest` 触发的反向抽取（先实现后抽取）。
+- **utility 签名**：仅接受纯函数（无副作用、依赖参数化）；i18n 相关函数应接收 `t: (key, params?) => string` 翻译函数作为参数，而非在 utility 内部 `useI18n()`——避免 utility 与 Vue 实例耦合，提高单测覆盖度（无需 mock i18n）。
+- **utility 单测一次性覆盖所有分支**：抽取后立即补单测覆盖所有分支（含 NaN / Infinity / 缺失字段 / 负时长 / 非法日期等边界）；不接受"先实现后补测"的两段式——utility 函数纯度高，单测零成本，理应一次到位（M15.1 run-view.test.ts 16 case 单批覆盖 6 函数所有分支）。
+- **函数签名变更必须同步所有调用方**：utility 函数签名变更后必须 grep 全仓所有调用方同步更新；`pnpm typecheck` 不捕捉 vitest mock 下的类型错误（mock 路径可能跳过部分类型检查），Review Gate `audit-depth: quick` 仍能命中此类 blocker（M15.1 第 1 轮 Reject B1 `alertsFound` 误用——调用方传整个 run 对象，签名已变）。
+- **跨组件复用边界**：utility 一旦抽到 `utils/<feature>.ts`，所有 SFC（含 dialog 组件）通过 import 复用；禁止在第二个 SFC 中复制定义（即使仅微调）。
 
 ## 8. 测试规范
 
@@ -195,8 +325,8 @@ export const getDateType = (dbType?: string): string => {
 | `DATABASE_TYPE` / `DATABASE_URL` | 否 | `sqlite` | 多后端切换 |
 | `DATABASE_SSL` | 否 | `false` | MySQL/PG 启用 SSL（多后端时生效） |
 | `DATABASE_ENTITY_PREFIX` | 否 | `dependfix_` | 表前缀 |
-| `DATABASE_SYNCHRONIZE` | 否 | `false` | 生产环境显式开启才同步 schema |
-| `ENCRYPTION_KEY` | 凭据功能必需 | 空 | AES-256-GCM 平台密钥 |
+| `DATABASE_SYNCHRONIZE` | 否 | `false` | 全场景显式 opt-in 才同步 schema（详见 [development.md §5.1.19](./development.md)） |
+| `NUXT_ENCRYPTION_KEY` | 凭据功能必需 | 空 | AES-256-GCM 平台密钥（PAT token + GitHub App PEM 私钥共用同一密钥派生） |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` | 否 | 空 | 配置后启用邮件验证 |
 | `NUXT_PUBLIC_BETTER_AUTH_URL` | 反向代理时 | 自动推断 | 认证基础 URL |
 | `MACHINE_ID` | 否 | `pid % 1024` | 雪花机器位 |
@@ -205,7 +335,7 @@ export const getDateType = (dbType?: string): string => {
 
 1. **多后端时机**：M6 默认 SQLite 交付，`getDateType()` + driver 注入 + `DATABASE_URL` 推断一次性做对（避免 T601 后返工）；MySQL/PG 真实部署验证延后到 M7 —— ✅ 确认
 2. **表前缀**：默认 `dependfix_`（`DATABASE_ENTITY_PREFIX` 可配）—— ✅ 确认（需要前缀）
-3. **synchronize 策略**：M6 开发/测试自动同步 + 生产显式开启（`DATABASE_SYNCHRONIZE=true`）；正式迁移链排期 M7 —— ✅ 确认
+3. **synchronize 策略**：M6 开发/测试自动同步 + 生产显式开启（`DATABASE_SYNCHRONIZE=true`）；正式迁移链排期 M7 —— ✅ 确认（2026-09-01 演进：synchronize / migrationsRun 均显式 opt-in，详见 [development.md §5.1.19](./development.md)）
 4. **雪花 ID**：沿用 momei 方案（48 位时间戳 + 10 位机器 + 12 位序列，hex 输出）；与 better-auth 默认 UUID 不同，全局统一 —— ✅ 确认
 5. **首用户 admin**：首个注册用户自动 `role=admin`（`databaseHooks.user.create.before`）—— ✅ 确认
 6. **文件命名**：文件与 Vue 组件统一 **kebab-case**（Nuxt 自动导入 `use-session.ts` → `useSession`）—— ✅ 确认；全局 [开发规范 §2](./development.md) 已同步修订（Vue 组件由 PascalCase 改为 kebab-case）

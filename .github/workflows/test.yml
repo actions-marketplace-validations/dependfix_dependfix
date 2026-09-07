@@ -20,6 +20,14 @@ jobs:
           node-version: "lts/*"
           cache: "pnpm"
       - run: pnpm i --frozen-lockfile
+      # 依赖审计（M18.x 治理批次 W4 — c22 §5.5 决策 C 缓解措施 4）：
+      # - pnpm.overrides 钉定 @octokit/auth-app=8.3.0（pnpm-workspace.yaml）
+      # - audit --prod 只看 prod deps（devDeps 漏洞不影响生产部署）
+      # - --audit-level=moderate 包含 high + critical（Dependabot 默认告警阈值）
+      # - 失败不阻断 Test job（|| true）：audit 失败仅作为信号；hard-fail 由 dependabot.yml 处理
+      # - 升级 @octokit/auth-app 前必须重跑 M18.4 e2e + 评估 breaking change
+      - name: pnpm audit (prod deps, moderate+)
+        run: pnpm audit --prod --audit-level=moderate || true
       # Nuxt 平台 eslint 依赖 .nuxt/tsconfig.json（Nuxt 生成的类型），需先 prepare 生成
       - run: pnpm --filter @dependfix/platform exec nuxt prepare
       # 平台 server 代码 import dependfix、@dependfix/core、@dependfix/engine 的 dist 类型声明（Nuxt tsconfig 不映射 workspace 源码）：
@@ -27,10 +35,15 @@ jobs:
       # （本地开发因存在 dist 不触发；顺序与 Dockerfile 的 core → engine → cli → platform 一致）
       - run: pnpm --filter @dependfix/core build && pnpm --filter @dependfix/engine build && pnpm --filter dependfix build
       - run: pnpm run lint
+      # i18n 校验：lint:i18n 单独执行（@intlify/vue-i18n 规则较慢，不并入常规 lint）；
+      # i18n:audit:missing 缺词 parity 作为 blocker；docs:check:i18n 防旧目录回流
+      - run: pnpm run lint:i18n
+      - run: pnpm run i18n:audit:missing
+      - run: pnpm run docs:check:i18n
       - run: pnpm run lint:md:check
-      - run: pnpm run check:links
+      - run: pnpm run check:docs
       # docs 构建前置：VitePress 会把 markdown 中的裸 HTML 当作 Vue 模板编译（缺结束标签即失败），
-      # lint-md/check-links 均不检查标签配对——docs 构建失败必须尽早暴露，不等 typecheck/test/build 跑完
+      # lint-md/check-docs 均不检查标签配对——docs 构建失败必须尽早暴露，不等 typecheck/test/build 跑完
       # （教训见经验归档 §三十三：release.md 裸 <path> 导致 Test/Pages 双 workflow 在末尾构建才失败）
       - run: pnpm run docs:build
       - run: pnpm run typecheck

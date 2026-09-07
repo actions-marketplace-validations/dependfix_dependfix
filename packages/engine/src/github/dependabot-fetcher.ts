@@ -1,5 +1,5 @@
 import type { Octokit, RestEndpointMethodTypes } from '@octokit/rest'
-import type { NormalizedSecurityAlert, DependencyType } from '@dependfix/core'
+import { normalizeUpstreamId, type NormalizedSecurityAlert, type DependencyType } from '@dependfix/core'
 import { mapGitHubError } from './errors'
 
 // ---------------------------------------------------------------------------
@@ -45,8 +45,13 @@ type DependabotAlertItem =
  *
  * @example
  * ```typescript
- * const octokit = createGitHubClient({ token: 'ghp_xxxx' })
+ * // 推荐：使用 auth 抽象层（M18.1 实施后）
+ * import { fromPat } from '@dependfix/engine/auth'
+ * const octokit = createGitHubClient({ auth: fromPat('ghp_xxxx') })
  * const alerts = await fetchDependabotAlerts(octokit, { owner: 'foo', repo: 'bar' })
+ *
+ * // 向后兼容：使用 token 字段（deprecated）
+ * const octokit = createGitHubClient({ token: 'ghp_xxxx' })
  * ```
  */
 export async function fetchDependabotAlerts(
@@ -106,7 +111,26 @@ function normalizeAlert(
         fixStrategy: fixable ? 'upgrade' : null,
         recommendedVersion: firstPatched?.identifier ?? '',
         dependencyType: normalizeDependencyRelationship(alert.dependency.relationship),
+        upstreamId: normalizeUpstreamId('dependabot', { alertNumber: alert.number }),
+        // M23.3 C66-A2：透传 GHSA + CVE ID 列表
+        ghsaId: alert.security_advisory.ghsa_id,
+        cveIds: extractCveIds(alert.security_advisory.identifiers),
     }
+}
+
+/**
+** 从 dependabot alert.security_advisory.identifiers[] 提取 CVE 列表（type === 'CVE'）。
+** 兼容 identifiers 缺省为 undefined / 空数组场景。
+*/
+function extractCveIds(identifiers: ReadonlyArray<{ type?: string, value?: string }> | undefined): string[] | undefined {
+    if (!Array.isArray(identifiers) || identifiers.length === 0) {
+        return undefined
+    }
+    const cves = identifiers
+        .filter((id: { type?: string, value?: string } | undefined): id is { type: 'CVE', value: string } =>
+            id?.type === 'CVE' && typeof id.value === 'string' && Boolean(id.value))
+        .map((id) => id.value)
+    return cves.length > 0 ? cves : undefined
 }
 
 // ---------------------------------------------------------------------------

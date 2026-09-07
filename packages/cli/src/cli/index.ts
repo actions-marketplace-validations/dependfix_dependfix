@@ -110,6 +110,11 @@ export const argsDef = {
         description: '同时拉取 Code Scanning alerts（与 Dependabot 并行，默认关闭；需要 token 具备 security-events: read，GITHUB_TOKEN 默认具备）',
         negativeDescription: '不拉取 Code Scanning alerts（默认）',
     },
+    'code-quality': {
+        type: 'boolean' as const,
+        description: '同时拉取 Code Quality findings（与 Dependabot 并行，默认关闭；需要 fine-grained PAT 具备 Code quality: read，或 classic PAT 具备 repo/public_repo scope）',
+        negativeDescription: '不拉取 Code Quality findings（默认）',
+    },
     'allow-major-upgrade': {
         type: 'boolean' as const,
         description: '跨线告警（推荐版本跨大版本，当前线内无修复版本）显式授权自动升级：仅根 package.json 直接依赖（workspace 成员独占声明维持人工）且 lockfile 单版本的告警自动跨线升级，升级后复核脆弱实例、强制完整验证（install+lint+build），失败自动回滚；间接依赖 / 多版本共存跨线告警维持人工处理。仅 CLI 可用，Action 不支持',
@@ -134,6 +139,11 @@ export const argsDef = {
         type: 'string' as const,
         description: '限流退避单次等待上限毫秒（100-120000，默认 30000；Retry-After / reset / 指数退避均受此约束）',
         default: '30000' as const,
+    },
+    'max-repos': {
+        type: 'string' as const,
+        description: '发现规模上限：最多保留的仓库数（默认 100；0 或负数表示不限制；大 org 场景下防止一次性全量发现）',
+        default: '100' as const,
     },
     history: {
         type: 'string' as const,
@@ -190,19 +200,19 @@ export const argsDef = {
 // Conversion helpers
 // ---------------------------------------------------------------------------
 
-function isRuntimeMode(value: string): value is RuntimeMode {
+export function isRuntimeMode(value: string): value is RuntimeMode {
     return RUNTIME_MODES.includes(value as RuntimeMode)
 }
 
-function isSeverityThreshold(value: string): value is SeverityThreshold {
+export function isSeverityThreshold(value: string): value is SeverityThreshold {
     return SEVERITY_THRESHOLDS.includes(value as SeverityThreshold)
 }
 
-function isAlertSource(value: string): value is AlertSourceKind {
+export function isAlertSource(value: string): value is AlertSourceKind {
     return ALERT_SOURCES.includes(value as AlertSourceKind)
 }
 
-function appendRepositories(target: string[], value: string): void {
+export function appendRepositories(target: string[], value: string): void {
     for (const repository of value.split(',')) {
         const trimmed = repository.trim()
 
@@ -221,7 +231,7 @@ function appendRepositories(target: string[], value: string): void {
     }
 }
 
-function parseCommandsFlag(value: string): string[] {
+export function parseCommandsFlag(value: string): string[] {
     return value
         .split(',')
         .map((cmd) => cmd.trim())
@@ -232,7 +242,7 @@ function parseCommandsFlag(value: string): string[] {
  * 严格整数字面量解析（修复：拒绝 `2.5` 被 parseInt 静默截断为 2）。
  * 仅接受 `^\d+$`；范围语义由调用方在 expected 描述中声明（config 校验兜底）。
  */
-function parseIntegerFlag(value: string, flagName: string, expected: string): number {
+export function parseIntegerFlag(value: string, flagName: string, expected: string): number {
     const trimmed = value.trim()
     if (!/^\d+$/.test(trimmed)) {
         throw new AppError(
@@ -247,7 +257,7 @@ function parseIntegerFlag(value: string, flagName: string, expected: string): nu
  * 归一化可重复 flag 值（citty/mri 对重复传入返回数组，单次传入返回字符串）：
  * 按逗号拆分 + 去空白 + 去空项。`--owner a,b --owner c` → ['a', 'b', 'c']。
  */
-function normalizeFlagList(value: string | string[] | undefined): string[] {
+export function normalizeFlagList(value: string | string[] | undefined): string[] {
     if (value === undefined) {
         return []
     }
@@ -369,6 +379,11 @@ function parsedArgsToCliOverrides(parsed: ParsedArgs<typeof argsDef>): CliConfig
         overrides.codeScanningEnabled = parsed['code-scanning']
     }
 
+    // code-quality (three-state: true / false / undefined)
+    if (parsed['code-quality'] !== undefined) {
+        overrides.codeQualityEnabled = parsed['code-quality']
+    }
+
     // allow-major-upgrade (three-state: true / false / undefined; 无 env 通道，仅 CLI)
     if (parsed['allow-major-upgrade'] !== undefined) {
         overrides.allowMajorUpgrade = parsed['allow-major-upgrade']
@@ -396,6 +411,12 @@ function parsedArgsToCliOverrides(parsed: ParsedArgs<typeof argsDef>): CliConfig
     const maxBackoffMs = parsed['max-backoff-ms']
     if (maxBackoffMs) {
         overrides.maxBackoffMs = parseIntegerFlag(maxBackoffMs, '--max-backoff-ms', 'Expected an integer between 100 and 120000.')
+    }
+
+    // max-repos（发现规模上限，config 校验兜底）
+    const maxRepos = parsed['max-repos']
+    if (maxRepos) {
+        overrides.maxRepos = parseIntegerFlag(maxRepos, '--max-repos', 'Expected a non-negative integer (0 = unlimited).')
     }
 
     // history（独立查询命令，不进入运行配置）
@@ -477,7 +498,7 @@ function parsedArgsToCliOverrides(parsed: ParsedArgs<typeof argsDef>): CliConfig
  * 空 entry 忽略；非空但缺冒号/组名或包列表为空 → 抛 ARGUMENT_PARSE_ERROR；
  * 原型链风险键名（__proto__ / constructor / prototype）忽略。
  */
-function parseUpgradeGroupsFlag(value: string): Record<string, string[]> {
+export function parseUpgradeGroupsFlag(value: string): Record<string, string[]> {
     const result: Record<string, string[]> = {}
     for (const entry of value.split(';')) {
         if (!entry.trim()) {

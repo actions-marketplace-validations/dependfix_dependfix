@@ -1,0 +1,583 @@
+<script setup lang="ts">
+// 扫描历史 Dialog（应用层修复：替代 unrouting 0.2.x 子路由 /repos/[id]/runs，
+// 用 query 传仓库 id，绕开 `:id()` dynamic segment 与 path-to-regexp 8.x 不兼容的根因）。
+//
+// 当前由两种调用方消费（todo.md §M16.1）：
+// - repos.vue 老路径 `/repos?history={id}`：保留 queryKey='history' 默认值兼容
+// - scans.vue 新路径 `/scans?run={id}`：通过 :query-key="'run'" 注入
+//
+// 分页（todo.md §M14.2 UX-R1）：服务端分页（lazy DataTable + Paginator）。
+// 默认 pageSize=10，rows-per-page-options=[10, 25, 50]，最大 200 由 server 钳制。
+const props = withDefaults(defineProps<{
+    /**
+     * 触发 Dialog 的 query 键：
+     * - 'history'：兼容老路径 /repos?history={id}（按仓库过滤）
+     * - 'run'：新路径 /scans?run={id}（直接打开单 run 详情）
+     *
+     * 注意：queryKey 决定触发方式与关闭时清理行为，但不影响内部 list/detail 视图；
+     * list 视图仍按 repositoryId 过滤（从 /api/runs/{id} 详情推断），detail 视图无需仓库上下文。
+     */
+    queryKey?: 'history' | 'run'
+}>(), { queryKey: 'history' })
+
+const { t, d } = useI18n()
+const route = useRoute()
+const router = useRouter()
+
+interface HistoryRunView {
+    id: string
+    repositoryId: string
+    owner: string | null
+    name: string | null
+    mode: string
+    severityThreshold: string
+    status: string
+    startedAt: string | null
+    finishedAt: string | null
+    runUrl: string | null
+    summary: Record<string, unknown> | null
+    error: { code: string, message: string } | null
+}
+
+const dialogVisible = ref(false)
+// run mode 时直接打开 detail，不进入 list
+const detailMode = ref(props.queryKey === 'run')
+const repoId = ref<string | null>(null)
+const runs = ref<HistoryRunView[]>([])
+const total = ref(0)
+const pageSize = ref(10)
+const first = ref(0)
+const loading = ref(false)
+const error = ref('')
+// detail 含 status + error（用于 Error Banner 展示失败原因）+ results + logs + runUrl
+// 实测反馈：详情面板需展示执行级错误，否则失败 run 详情仅能看到空 alerts 表
+interface DetailView {
+    id?: string
+    owner?: string | null
+    name?: string | null
+    mode?: string
+    severityThreshold?: string
+    executorKind?: string
+    status: string
+    startedAt?: string | null
+    finishedAt?: string | null
+    runUrl?: string | null
+    summary?: Record<string, unknown> | null
+    error: { code: string, message: string } | null
+    results: unknown[]
+    logs?: Array<{ timestamp: string, level: string, message: string }>
+    logsText?: string | null
+}
+const detail = ref<DetailView | null>(null)
+const detailLoading = ref(false)
+const detailError = ref('')
+
+const PAGE_SIZE_OPTIONS = [10, 25, 50] as const
+
+const resetDetail = () => {
+    detail.value = null
+    detailError.value = ''
+    detailLoading.value = false
+}
+
+const statusSeverity = (status: string) => {
+    switch (status) {
+        case 'completed': return 'success'
+        case 'failed': return 'danger'
+        case 'dispatched': return 'info'
+        default: return 'warn'
+    }
+}
+
+const statusLabel = (status: string) => ({
+    completed: t('runs.statusCompleted'),
+    failed: t('runs.statusFailed'),
+    dispatched: t('runs.statusDispatched'),
+    running: t('runs.statusRunning'),
+})[status] ?? status
+
+const formatLogTime = (timestamp: string) => {
+    try {
+        const date = new Date(timestamp)
+        return date.toLocaleTimeString('zh-CN', { hour12: false })
+    } catch {
+        return timestamp
+    }
+}
+
+const copyLogs = async () => {
+    if (!detail.value?.logsText) {
+        return
+    }
+    try {
+        await navigator.clipboard.writeText(detail.value.logsText)
+    } catch {
+        // 降级方案
+        const textarea = document.createElement('textarea')
+        textarea.value = detail.value.logsText
+        document.body.appendChild(textarea)
+        textarea.select()
+        document.execCommand('copy')
+        document.body.removeChild(textarea)
+    }
+}
+
+const fetchRuns = async (id: string, page = 1, rows = pageSize.value) => {
+    loading.value = true
+    error.value = ''
+    try {
+        const res = await $fetch('/api/runs', {
+            query: { repositoryId: id, page, pageSize: rows },
+        })
+        const data = res as { items: HistoryRunView[], total: number }
+        runs.value = data.items
+        total.value = data.total
+    } catch (e: any) {
+        error.value = t('runs.errors.loadFailed', { message: e?.data?.message ?? e?.message ?? t('common.errors.unknown') })
+    } finally {
+        loading.value = false
+    }
+}
+
+// PrimeVue DataTable @page 事件：page 0-indexed，first 是首行索引（rows × page）
+const onPage = async (event: { page: number, first: number, rows: number }) => {
+    pageSize.value = event.rows
+    first.value = event.first
+    if (repoId.value) {
+        await fetchRuns(repoId.value, event.page + 1, event.rows)
+    }
+}
+
+const openDetail = async (run: HistoryRunView) => {
+    resetDetail()
+    detailLoading.value = true
+    try {
+        const res = await $fetch(`/api/runs/${run.id}`)
+        // 实测反馈：detail 类型扩展为含 status + error 以支持失败 Error Banner
+        detail.value = res as { status: string, error: { code: string, message: string } | null, results: unknown[] }
+    } catch (e: any) {
+        detailError.value = t('runs.errors.detailLoadFailed', { message: e?.data?.message ?? e?.message ?? t('common.errors.unknown') })
+    } finally {
+        detailLoading.value = false
+    }
+}
+
+/**
+ * 直接打开单 run 详情（queryKey='run' 模式）：
+ * - 跳过 list 视图，直接展示 detail
+ * - 无需 repositoryId 过滤
+ * - 关闭时由 closeDialog 一并清理 query
+ */
+const openRunDetail = async (runId: string) => {
+    resetDetail()
+    detailLoading.value = true
+    detailMode.value = true
+    try {
+        const res = await $fetch(`/api/runs/${runId}`)
+        detail.value = res as { status: string, error: { code: string, message: string } | null, results: unknown[] }
+    } catch (e: any) {
+        detailError.value = t('runs.errors.detailLoadFailed', { message: e?.data?.message ?? e?.message ?? t('common.errors.unknown') })
+    } finally {
+        detailLoading.value = false
+    }
+}
+
+const openRunUrl = (url: string) => {
+    window.open(url, '_blank')
+}
+
+const closeDialog = async () => {
+    dialogVisible.value = false
+    repoId.value = null
+    runs.value = []
+    total.value = 0
+    pageSize.value = 10
+    first.value = 0
+    error.value = ''
+    detailMode.value = props.queryKey === 'run'
+    resetDetail()
+    if (route.query[props.queryKey] !== undefined) {
+        const { [props.queryKey]: _drop, ...rest } = route.query
+        await router.replace({ query: rest })
+    }
+}
+
+// 监听 URL ?<queryKey>={id} → 自动打开 Dialog
+// - queryKey='history'：按仓库过滤列表（向后兼容）
+// - queryKey='run'：直接打开单 run 详情（todo.md §M16.1）
+watch(() => route.query[props.queryKey], async (newVal) => {
+    const id = typeof newVal === 'string'
+        ? newVal
+        : Array.isArray(newVal) ? newVal[0] : null
+    if (id) {
+        if (props.queryKey === 'run') {
+            // run 模式：直接打开 detail，不进入 list
+            dialogVisible.value = true
+            await openRunDetail(id)
+        } else {
+            // history 模式：按仓库过滤 list（向后兼容）
+            if (repoId.value !== id) {
+                repoId.value = id
+                // 切换仓库：重置 first 与 pageSize（保留首次进入默认；避免切换后 UI 高亮页与 server 数据不一致）
+                first.value = 0
+                pageSize.value = 10
+                detailMode.value = false
+                resetDetail()
+                await fetchRuns(id, 1, pageSize.value)
+            }
+            dialogVisible.value = true
+        }
+    } else if (dialogVisible.value) {
+        // query 被外部清空（如浏览器后退），同步关闭
+        await closeDialog()
+    }
+}, { immediate: true })
+</script>
+
+<template>
+    <Dialog
+        v-model:visible="dialogVisible"
+        :header="t('runs.title')"
+        modal
+        :draggable="false"
+        :closable="!detail || queryKey === 'run'"
+        :close-on-escape="!detail || queryKey === 'run'"
+        :style="{width: '720px'}"
+        @hide="closeDialog"
+    >
+        <div v-if="loading && runs.length === 0 && !detailMode" class="text-muted">
+            {{ t('common.empty.loading') }}
+        </div>
+        <Message
+            v-else-if="error && !detailMode"
+            severity="error"
+            :closable="false"
+        >
+            {{ error }}
+        </Message>
+        <div v-else-if="detailLoading" class="text-muted">
+            {{ t('common.empty.loading') }}
+        </div>
+        <Message
+            v-else-if="detailError"
+            severity="error"
+            :closable="false"
+        >
+            {{ detailError }}
+        </Message>
+        <!-- 实测反馈：detail.status === 'failed' 时在 results 表格 header 内展示执行级 Error Banner，
+             即使 detail.error 为空（数据损坏 / 旧数据迁移 / 后端 errorJson 缺失）也显示降级提示（RG-W02）。
+             放在 DataTable #header slot 内避免与外面 v-else-if="detail" 链冲突 -->
+        <DataTable
+            v-else-if="detail"
+            :value="(detail as {results: Array<{id: string; packageName: string; severity: string; source: string; fixable: boolean; fixStrategy: string | null; recommendedVersion: string | null; htmlUrl: string | null}>}).results"
+            striped-rows
+            size="small"
+            :empty-message="t('runs.detailEmpty')"
+        >
+            <template #header>
+                <div class="repo-history__detail-header">
+                    <!-- list mode：返回列表按钮 -->
+                    <Button
+                        v-if="!detailMode"
+                        icon="pi pi-arrow-left"
+                        :label="t('runs.backToList')"
+                        text
+                        size="small"
+                        @click="resetDetail"
+                    />
+                    <!-- run mode（queryKey='run'）：列表不可用，提供关闭按钮；history mode 但已无列表上下文时也降级到关闭 -->
+                    <Button
+                        v-else-if="queryKey === 'run'"
+                        icon="pi pi-times"
+                        :label="t('common.actions.close')"
+                        text
+                        size="small"
+                        @click="closeDialog"
+                    />
+                    <Message
+                        v-if="detail.status === 'failed'"
+                        severity="error"
+                        :closable="false"
+                        class="repo-history__error-banner"
+                    >
+                        <strong>{{ t('runs.errorTitle', {code: detail.error?.code ?? 'UNKNOWN'}) }}</strong>
+                        <p v-if="detail.error" class="repo-history__error-message">
+                            {{ detail.error.message }}
+                        </p>
+                        <p v-else class="repo-history__error-message text-muted">
+                            {{ t('runs.errorNoDetail') }}
+                        </p>
+                    </Message>
+                    <!-- PR 链接（右手边） -->
+                    <a
+                        v-if="detail.runUrl"
+                        :href="detail.runUrl"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="repo-history__run-url"
+                    >
+                        {{ t('alerts.detailRunOpen') }}
+                    </a>
+                </div>
+            </template>
+            <!-- 日志区域 -->
+            <div v-if="detail.logs && detail.logs.length > 0" class="repo-history__logs">
+                <div class="repo-history__logs-header">
+                    <span class="repo-history__logs-title">{{ t('runs.logsTitle') }}</span>
+                    <Button
+                        icon="pi pi-copy"
+                        text
+                        rounded
+                        size="small"
+                        :aria-label="t('runs.logsCopy')"
+                        :title="t('runs.logsCopy')"
+                        @click="copyLogs"
+                    />
+                </div>
+                <ScrollPanel style="height: 200px">
+                    <div class="repo-history__logs-content">
+                        <div
+                            v-for="(entry, index) in detail.logs"
+                            :key="index"
+                            class="repo-history__log-entry"
+                            :class="`repo-history__log-entry--${entry.level}`"
+                        >
+                            <span class="repo-history__log-time">{{ formatLogTime(entry.timestamp) }}</span>
+                            <span class="repo-history__log-level">{{ entry.level.toUpperCase() }}</span>
+                            <span class="repo-history__log-message">{{ entry.message }}</span>
+                        </div>
+                    </div>
+                </ScrollPanel>
+            </div>
+            <Column :header="t('runs.colPackage')" field="packageName" />
+            <Column :header="t('runs.colSeverity')">
+                <template #body="{data}">
+                    <Tag
+                        :value="data.severity"
+                        :severity="data.severity === 'critical' ? 'danger' : data.severity === 'high' ? 'warn' : 'info'"
+                    />
+                </template>
+            </Column>
+            <Column :header="t('runs.colSource')" field="source" />
+            <Column :header="t('runs.colFixable')">
+                <template #body="{data}">
+                    <Tag
+                        :value="data.fixable ? t('common.yes') : t('common.no')"
+                        :severity="data.fixable ? 'success' : 'secondary'"
+                    />
+                </template>
+            </Column>
+            <Column :header="t('runs.colRecommended')" field="recommendedVersion" />
+            <Column :header="t('runs.colLink')">
+                <template #body="{data}">
+                    <a
+                        v-if="data.htmlUrl"
+                        :href="data.htmlUrl"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                    >
+                        {{ t('runs.view') }}
+                    </a>
+                </template>
+            </Column>
+        </DataTable>
+        <template v-else-if="!detailMode">
+            <!-- todo.md §M14.2 UX-R1：服务端分页（lazy DataTable + 内置 paginator）
+                 —— pageSize 由 pageSize.value 驱动，total 由后端返回的 total 驱动，
+                 翻页触发 onPage → 重新请求 /api/runs 带 page + pageSize -->
+            <DataTable
+                :value="runs"
+                lazy
+                paginator
+                paginator-template="PrevPageLink CurrentPageReport NextPageLink RowsPerPageDropdown"
+                :current-page-report-template="t('runs.paginatorInfo', {first: '{first}', last: '{last}', total: '{totalRecords}'})"
+                :rows="pageSize"
+                :total-records="total"
+                :first="first"
+                :rows-per-page-options="[...PAGE_SIZE_OPTIONS]"
+                :loading="loading"
+                striped-rows
+                size="small"
+                :empty-message="t('runs.empty')"
+                @page="onPage"
+            >
+                <Column :header="t('runs.colStatus')">
+                    <template #body="{data}">
+                        <!-- 实测反馈：failed 状态 Tag 包一层 span :title 显示 error.message
+                             （PrimeVue Tag inheritAttrs:false，:title 不会自动 fallthrough 到 root） -->
+                        <span
+                            v-if="data.error"
+                            class="repo-history__status-wrap"
+                            :title="data.error.message"
+                        >
+                            <Tag
+                                :value="statusLabel(data.status)"
+                                :severity="statusSeverity(data.status)"
+                            />
+                        </span>
+                        <Tag
+                            v-else
+                            :value="statusLabel(data.status)"
+                            :severity="statusSeverity(data.status)"
+                        />
+                    </template>
+                </Column>
+                <Column :header="t('runs.colMode')" field="mode" />
+                <Column :header="t('runs.colThreshold')" field="severityThreshold" />
+                <Column :header="t('runs.colStartedAt')">
+                    <template #body="{data}">
+                        {{ data.startedAt ? d(new Date(data.startedAt), 'long') : '—' }}
+                    </template>
+                </Column>
+                <Column :header="t('runs.colAlerts')">
+                    <template #body="{data}">
+                        {{ (data.summary as Record<string, number> | null)?.alertsFound ?? 0 }}
+                    </template>
+                </Column>
+                <Column :header="t('runs.colFixed')">
+                    <template #body="{data}">
+                        {{ (data.summary as Record<string, number> | null)?.alertsFixed ?? 0 }}
+                    </template>
+                </Column>
+                <Column :header="t('runs.colActions')" :style="{width: '200px'}">
+                    <template #body="{data}">
+                        <Button
+                            v-if="data.runUrl"
+                            icon="pi pi-external-link"
+                            text
+                            rounded
+                            size="small"
+                            :aria-label="t('runs.actionViewActionRun')"
+                            :title="t('runs.actionViewActionRun')"
+                            @click="openRunUrl(data.runUrl)"
+                        />
+                        <Button
+                            icon="pi pi-eye"
+                            text
+                            rounded
+                            size="small"
+                            :aria-label="t('runs.actionViewDetail')"
+                            :title="t('runs.actionViewDetail')"
+                            @click="openDetail(data)"
+                        />
+                    </template>
+                </Column>
+            </DataTable>
+        </template>
+    </Dialog>
+</template>
+
+<style lang="scss" scoped>
+// 实测反馈：失败执行级错误展示样式（detail Error Banner + 列表 status Tag 包裹）
+.repo-history {
+    &__error-banner {
+        margin-bottom: $space-3;
+    }
+
+    &__error-message {
+        margin: $space-2 0 0;
+        word-break: break-word;
+    }
+
+    &__status-wrap {
+        // inline-flex 让 span 紧贴 Tag 内部尺寸，title 命中区域 = Tag 渲染范围
+        display: inline-flex;
+        cursor: help;
+    }
+
+    &__detail-header {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: $space-2;
+    }
+
+    &__run-url {
+        display: inline-flex;
+        align-items: center;
+        margin-left: auto;
+        padding: $space-1 $space-2;
+        background: rgba($color-primary, 0.1);
+        border-radius: $radius-sm;
+        color: $color-primary;
+        text-decoration: none;
+        font-size: $font-size-sm;
+        transition: background 0.2s;
+
+        &:hover {
+            background: rgba($color-primary, 0.2);
+        }
+    }
+
+    &__logs {
+        margin-bottom: $space-3;
+        border: 1px solid $color-border;
+        border-radius: $radius-md;
+        overflow: hidden;
+    }
+
+    &__logs-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: $space-2 $space-3;
+        background: $color-surface;
+        border-bottom: 1px solid $color-border;
+    }
+
+    &__logs-title {
+        font-weight: 600;
+        font-size: $font-size-sm;
+    }
+
+    &__logs-content {
+        padding: $space-2;
+        font-family: monospace;
+        font-size: $font-size-sm;
+        line-height: 1.5;
+    }
+
+    &__log-entry {
+        display: flex;
+        gap: $space-2;
+        padding: $space-1 0;
+        border-bottom: 1px solid $color-border;
+
+        &:last-child {
+            border-bottom: none;
+        }
+
+        &--error {
+            color: $color-danger;
+        }
+
+        &--warn {
+            color: $color-warning;
+        }
+
+        &--info {
+            color: $color-text;
+        }
+
+        &--debug {
+            color: $color-text-muted;
+        }
+    }
+
+    &__log-time {
+        color: $color-text-muted;
+        white-space: nowrap;
+    }
+
+    &__log-level {
+        font-weight: 600;
+        white-space: nowrap;
+        min-width: 40px;
+    }
+
+    &__log-message {
+        word-break: break-word;
+    }
+}
+</style>

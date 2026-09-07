@@ -4,13 +4,16 @@
         "nav": {
             "dashboard": "Dashboard",
             "repos": "Repositories",
+            "scans": "Scans",
             "alerts": "Alerts",
+            "envEvents": "Env Events",
+            "prChecks": "PR Checks",
             "schedules": "Schedules",
             "batchRuns": "Batch Runs",
             "credentials": "Credentials",
             "users": "Users",
             "settings": "Settings",
-            "logout": "Sign out",
+            "logout": "Log out",
             "toggleDarkMode": "Toggle dark mode",
             "userAvatar": "Avatar",
             "userSettings": "Settings"
@@ -26,7 +29,9 @@
             "refresh": "Refresh",
             "back": "Back",
             "submit": "Submit",
-            "search": "Search"
+            "search": "Search",
+            "details": "Details",
+            "actions": "Actions"
         },
         "dialog": {
             "confirmTitle": "Confirm",
@@ -49,6 +54,7 @@
             "converged": "Converged",
             "pending": "Pending"
         },
+        "superseded": "Closed",
         "status": {
             "enabled": "Enabled",
             "disabled": "Disabled",
@@ -75,6 +81,11 @@
         },
         "severity": {
             "all": "All"
+        },
+        "role": {
+            "admin": "Admin",
+            "orgAdmin": "Org Admin",
+            "viewer": "Viewer"
         }
     },
     "repos": {
@@ -96,6 +107,7 @@
         "colActions": "Actions",
         "notLinked": "Not linked",
         "platformContainer": "Platform container",
+        "sandboxContainer": "Isolated Sandbox Container",
         "githubAction": "GitHub Action",
         "privateRepo": "Private",
         "publicRepo": "Public",
@@ -123,15 +135,36 @@
         "batchMode": "Scan mode",
         "batchSeverity": "Severity threshold",
         "batchStart": "Start scan",
+        "scanConfigHeader": "Scan config ({owner}/{name})",
+        "scanConfigHeaderEmpty": "Scan config",
+        "scanConfigTarget": "Target repository",
         "importTitle": "Import repositories",
         "importCredential": "GitHub credential",
         "importCredentialPlaceholder": "Select a credential",
+        "importDefaultCredential": "Default credential",
+        "importDefaultCredentialPlaceholder": "Select a credential (leave empty to skip)",
+        "importDefaultCredentialHint": "Imported repositories will be auto-linked to the selected credential; leave empty to skip and edit later",
         "importRefresh": "Refresh repository list",
         "importSelectAll": "Select all ({count})",
         "importSelectedCount": "{count} selected",
         "importSelect": "Import selected",
         "importNoRepos": "No repositories found (credential has no access or no matching repositories)",
         "importSelectCredential": "Select a GitHub credential first",
+        "importFilterFork": "Repository type",
+        "importFilterForkSource": "Source only",
+        "importFilterForkAll": "All (including forks)",
+        "importFilterVisibility": "Visibility",
+        "importFilterVisibilityAll": "All visibilities",
+        "importFilterVisibilityPublic": "Public only",
+        "importFilterVisibilityPrivate": "Private only",
+        "importFilterSearch": "Search",
+        "importFilterSearchPlaceholder": "Search repository name or description",
+        "importPaginationPageInfo": "Page {current} of {page}",
+        "importPaginationPageSize": "{size} per page",
+        "importPaginationTotalCount": "{total} repositories in total",
+        "importCachedAt": "Cached {minutes} min ago",
+        "importFromCache": "Loaded from cache",
+        "importFreshRefreshed": "Forced refresh",
         "scanStatusQueryFailed": "Failed to query scan status, check the scan history",
         "scanCompleted": "Scan completed, see results in the scan history",
         "scanDuplicate": "This repository already has a scan in progress",
@@ -185,8 +218,16 @@
         "fieldNamePlaceholder": "e.g. Weekly Monday scan",
         "fieldCron": "cron expression *",
         "fieldCronHint": "5 fields (min hour day month weekday) or 6 fields (with seconds), e.g. 0 2 * * 1 = every Monday 02:00; keep interval at least 1 hour",
+        "cronPreviewTitle": "Next triggers (current timezone, next 3)",
+        "cronInvalid": {
+            "empty": "Please enter a cron expression",
+            "invalidFieldCount": "cron expression must have 5 or 6 fields (min hour day month weekday / sec min hour day month weekday)",
+            "parseError": "Invalid cron expression syntax"
+        },
         "fieldTimezone": "Timezone (optional)",
-        "fieldTimezonePlaceholder": "Asia/Shanghai, empty uses server local timezone",
+        "fieldTimezonePlaceholder": "Search IANA timezone (e.g. Asia/Shanghai)",
+        "timezoneHint": "Default follows browser ({default}); empty uses server local timezone",
+        "timezoneEmpty": "No matches found",
         "fieldSelector": "Repository selection",
         "fieldTag": "Tag",
         "fieldTagPlaceholder": "e.g. frontend (matches repositories whose tags include it)",
@@ -275,6 +316,15 @@
         "fixedCount": "Fixed",
         "latestRun": "Latest scan",
         "severityTitle": "Alerts by severity",
+        "chartTitle": "Charts",
+        "severityChartTitle": "Alert distribution",
+        "fixRateChartTitle": "Fix rate",
+        "topPackagesChartTitle": "Top-10 alerted packages",
+        "chartEmpty": "No data yet",
+        "fixRateLabel": "Fixed",
+        "fixRateRemaining": "Not fixed",
+        "fixRateValue": "{percent}%",
+        "packageTruncated": "Full name in tooltip",
         "errors": {
             "loadFailed": "Failed to load: {message}"
         }
@@ -347,6 +397,7 @@
         "errors": {
             "loadFailed": "Failed to load: {message}",
             "roleUpdateFailed": "Failed to update role: {message}",
+            "cannotSelfModify": "Cannot change your own role; contact another administrator",
             "enableFailed": "Failed to enable: {message}",
             "disableFailed": "Failed to disable: {message}",
             "statusUpdateFailed": "Failed to update status: {message}",
@@ -371,17 +422,117 @@
         "filterSeverity": "Severity",
         "filterSource": "Source",
         "filterApply": "Filter",
+        "filter": {
+            "includeSuperseded": "Show resolved"
+        },
         "severityAll": "All levels",
         "sourceAll": "All sources",
+        "sourceCodeQuality": "Code Quality",
         "colRepository": "Repository",
         "colSeverity": "Severity",
         "colPackage": "Package / rule",
         "colSource": "Source",
+        "colIdentifiers": "Identifiers",
+        "colRuleId": "Rule ID",
         "colFixable": "Fixable",
         "colRecommended": "Recommended",
         "colStatus": "Status",
         "colLink": "Link",
         "view": "View",
+        "groupHeaderCount": "({count} alerts)",
+        "viewMode": "View",
+        "viewModePackage": "By Package",
+        "viewModeRepository": "By Repository",
+        "viewModeNone": "Flat List",
+        "repositoryUnknown": "Unknown repository",
+        "colOccurrenceCount": "Occurrences",
+        "colLastSeenAt": "Last seen",
+        "colFirstSeenAt": "First seen",
+        "detailRunsTitle": "Scan runs for this alert ({total} total)",
+        "detailRunId": "Run ID",
+        "detailRunStatus": "Status",
+        "detailRunStartedAt": "Started at",
+        "detailRunDuration": "Duration",
+        "runDurationSeconds": "{seconds}s",
+        "detailRunMode": "Mode",
+        "detailRunThreshold": "Severity threshold",
+        "detailRunExecutor": "Executor",
+        "detailRunAlertsFound": "Alerts found",
+        "detailRunOpen": "View PR",
+        "detailRunEmpty": "No related scan runs",
+        "fixNow": {
+            "action": "Fix this repository now",
+            "success": "Triggered fix on run {runId}; redirecting to scan history",
+            "failed": "Failed to trigger fix: {message}"
+        },
+        "errors": {
+            "loadFailed": "Failed to load: {message}"
+        }
+    },
+    "prChecks": {
+        "title": "PR Check Monitoring",
+        "subtitle": "Monitor dependfix / dependabot PR Test check status",
+        "empty": "No PR Check data yet (create a pr-check schedule first and enable it)",
+        "allRepositories": "All repositories",
+        "filterRepository": "Repository",
+        "filterAlertFiring": "Alert status",
+        "alertFiringAll": "All",
+        "alertFiringTrue": "Firing only",
+        "alertFiringFalse": "Acked only",
+        "colRepository": "Repository",
+        "colPrNumber": "PR",
+        "colAuthor": "Author",
+        "colConclusion": "Conclusion",
+        "colLastPolledAt": "Last polled",
+        "colStatus": "Alert",
+        "colLink": "Link",
+        "colActions": "Actions",
+        "repositoryUnknown": "Unknown repository",
+        "ack": {
+            "action": "Ack and close alert",
+            "success": "PR #{prNumber} acknowledged",
+            "failed": "Ack failed: {message}",
+            "confirm": "Acknowledge PR #{prNumber} alert?"
+        },
+        "summary": {
+            "total": "Total",
+            "firing": "Firing",
+            "acked": "Acked"
+        },
+        "errors": {
+            "loadFailed": "Failed to load: {message}"
+        }
+    },
+    "envEvents": {
+        "title": "Env Events",
+        "subtitle": "Sandbox / docker / runtime environment alerts (with notification status)",
+        "empty": "No env events (auto-recorded on sandbox startup degradation or runtime failure)",
+        "filterType": "Event Type",
+        "filterSeverity": "Severity",
+        "filterNotified": "Notification",
+        "filterFrom": "From",
+        "filterTo": "To",
+        "filterApply": "Filter",
+        "typeAll": "All types",
+        "severityAll": "All levels",
+        "notifiedAll": "All",
+        "notifiedYes": "Notified",
+        "notifiedNo": "Not notified",
+        "colType": "Type",
+        "colSeverity": "Severity",
+        "colRepository": "Repository",
+        "colMessage": "Details",
+        "colNotified": "Notification",
+        "colTime": "Occurred At",
+        "severityInfo": "Info",
+        "severityWarn": "Warning",
+        "severityError": "Error",
+        "severityCritical": "Critical",
+        "typeSandboxUnavailable": "Sandbox unavailable",
+        "typeSandboxDegraded": "Sandbox degraded",
+        "typeDockerDaemonDown": "Docker daemon down",
+        "expand": "Expand",
+        "collapse": "Collapse",
         "errors": {
             "loadFailed": "Failed to load: {message}"
         }
@@ -412,6 +563,21 @@
         "fieldTokenPlaceholderNew": "ghp_... / github_pat_...",
         "howToGet": "How to get one?",
         "githubDocs": "GitHub docs: managing personal access tokens",
+        "fieldAppId": "App ID *",
+        "fieldAppIdPlaceholder": "e.g. 123456",
+        "fieldInstallationId": "Installation ID *",
+        "fieldInstallationIdPlaceholder": "e.g. 7890123",
+        "fieldPrivateKey": "Private Key (PEM) *",
+        "fieldPrivateKeyEdit": "Private Key (leave empty to keep)",
+        "fieldPrivateKeyPlaceholder": "Paste PEM content or upload .pem file",
+        "fieldBotLogin": "Bot Login (optional)",
+        "fieldBotLoginPlaceholder": "e.g. dependfix-bot[bot]",
+        "pemFingerprint": "Fingerprint",
+        "pemFingerprintHint": "To verify against GitHub App settings page fingerprint, run: openssl rsa -in {pem} -pubout -outform DER \\| openssl sha256 -binary \\| openssl base64",
+        "pemUpload": "Upload .pem file",
+        "pemValid": "Valid PEM",
+        "pemInvalid": "Invalid PEM",
+        "githubAppDocs": "How to create a GitHub App",
         "fieldNote": "Note",
         "success": {
             "updated": "Credential updated",
@@ -451,24 +617,25 @@
             "running": "Running",
             "completed": "Succeeded",
             "failed": "Failed",
-            "dispatched": "Dispatched"
+            "dispatched": "Dispatched",
+            "dispatchedPrFailed": "PR creation failed (branch pushed)"
         },
-        "colRepo": "Repository",
-        "colStatus": "Status",
-        "colExecutor": "Executor",
-        "colAlerts": "Alerts",
-        "colResult": "Result",
+        "openRunPrFailedHint": "PR creation failed; branch pushed. Click the link above to open PR manually.",
         "openRun": "Open run",
         "subEmpty": "No scan runs",
+        "forceFail": "Force Fail",
+        "forceFailConfirm": "Force fail this batch? All in-flight sub-runs will be marked as failed (cannot be undone).",
         "errors": {
             "loadFailed": "Failed to load: {message}",
-            "detailLoadFailed": "Failed to load details: {message}"
+            "detailLoadFailed": "Failed to load details: {message}",
+            "forceFailFailed": "Force fail failed: {message}"
         }
     },
     "runs": {
         "title": "Scan history",
         "back": "Back",
         "empty": "No scan runs",
+        "colRepo": "Repository",
         "colStatus": "Status",
         "colMode": "Mode",
         "colThreshold": "Threshold",
@@ -476,13 +643,16 @@
         "colStartedAt": "Started",
         "colAlerts": "Alerts",
         "colFixed": "Fixed",
+        "colResult": "Result",
         "colActions": "Actions",
         "statusCompleted": "Completed",
         "statusFailed": "Failed",
         "statusDispatched": "Dispatched",
         "statusRunning": "Running",
+        "statusDegraded": "Degraded",
         "actionViewActionRun": "View Action run",
         "actionViewDetail": "View details",
+        "backToList": "Back to list",
         "dialogTitle": "Scan details",
         "detailEmpty": "No alert details in this scan",
         "colPackage": "Package",
@@ -492,9 +662,189 @@
         "colRecommended": "Recommended",
         "colLink": "Link",
         "view": "View",
+        "errorTitle": "Scan execution failed ({code})",
+        "errorNoDetail": "The scan failed but no error details were recorded. Check the system logs.",
+        "paginatorInfo": "Showing {first} to {last} of {total}",
+        "logsTitle": "Execution Logs",
+        "logsCopy": "Copy Logs",
+        "logsEmpty": "No execution logs",
         "errors": {
             "loadFailed": "Failed to load: {message}",
             "detailLoadFailed": "Failed to load details: {message}"
+        }
+    },
+    "scans": {
+        "title": "Scans",
+        "subtitle": "Cross-repository scan history with summary cards, per-repository breakdown, and full run list",
+        "repoFilterActive": "Filtered by repository: {owner}/{name}",
+        "clearFilter": "Clear filter",
+        "summary": {
+            "totalRuns": "Total runs",
+            "totalAlerts": "Total alerts",
+            "totalFixed": "Total fixed",
+            "lastRunAt": "Last scan"
+        },
+        "byRepo": {
+            "title": "By repository",
+            "empty": "No repository activity yet",
+            "colOwner": "Owner",
+            "colName": "Name",
+            "colRuns": "Runs",
+            "colAlerts": "Alerts",
+            "colFixed": "Fixed",
+            "colLastRun": "Last run",
+            "colLastStatus": "Last status",
+            "colActions": "Actions",
+            "actionFilterThis": "Filter this repository"
+        },
+        "runList": {
+            "title": "All runs",
+            "empty": "No scan runs in this scope",
+            "errors": {
+                "loadFailed": "Failed to load: {message}",
+                "summaryFailed": "Failed to load summary: {message}"
+            }
+        },
+        "errors": {
+            "loadFailed": "Failed to load: {message}"
+        }
+    },
+    "serverErrors": {
+        "UNAUTHORIZED": {
+            "zh-CN": "未登录或会话已过期",
+            "en": "Not signed in or session expired"
+        },
+        "FORBIDDEN": {
+            "zh-CN": "没有权限执行该操作",
+            "en": "You do not have permission to perform this action"
+        },
+        "RESOURCE_NOT_IN_ORG": {
+            "zh-CN": "资源不属于当前组织",
+            "en": "Resource does not belong to current organization"
+        },
+        "REPO_NOT_FOUND": {
+            "zh-CN": "仓库不存在",
+            "en": "Repository not found"
+        },
+        "REPO_DUPLICATE": {
+            "zh-CN": "该仓库已存在",
+            "en": "Repository already exists"
+        },
+        "REPO_ID_MISSING": {
+            "zh-CN": "缺少仓库 id",
+            "en": "Repository id is required"
+        },
+        "REPO_VALIDATION_FAILED": {
+            "zh-CN": "参数校验失败",
+            "en": "Request validation failed"
+        },
+        "SCAN_RUN_NOT_FOUND": {
+            "zh-CN": "扫描记录不存在",
+            "en": "Scan run not found"
+        },
+        "RUN_ID_MISSING": {
+            "zh-CN": "缺少运行 id",
+            "en": "Run id is required"
+        },
+        "RUNS_VALIDATION_FAILED": {
+            "zh-CN": "查询参数校验失败",
+            "en": "Invalid query parameters"
+        },
+        "REUSE_RUN_NOT_IN_REPO": {
+            "zh-CN": "复用的扫描记录不属于当前仓库",
+            "en": "Reused scan run does not belong to this repository"
+        },
+        "REUSE_RUN_RUNNING": {
+            "zh-CN": "该扫描正在执行中，请等待完成后复用",
+            "en": "Scan is currently running, please wait for completion before reusing"
+        },
+        "SCAN_PENDING_MERGED": {
+            "zh-CN": "该仓库已有进行中的扫描任务，本次触发已合并",
+            "en": "A scan is already in progress for this repository; this trigger has been merged"
+        },
+        "SCAN_ALREADY_COMPLETED": {
+            "zh-CN": "扫描已完成，请在扫描历史中查看",
+            "en": "Scan already completed, please check scan history"
+        },
+        "CREDENTIAL_NOT_FOUND": {
+            "zh-CN": "凭据不存在",
+            "en": "Credential not found"
+        },
+        "CREDENTIAL_ID_MISSING": {
+            "zh-CN": "缺少凭据 id",
+            "en": "Credential id is required"
+        },
+        "CREDENTIAL_VALIDATION_FAILED": {
+            "zh-CN": "参数校验失败",
+            "en": "Request validation failed"
+        },
+        "SCHEDULE_NOT_FOUND": {
+            "zh-CN": "定时计划不存在",
+            "en": "Schedule not found"
+        },
+        "SCHEDULE_ID_MISSING": {
+            "zh-CN": "缺少计划 id",
+            "en": "Schedule id is required"
+        },
+        "SCHEDULE_VALIDATION_FAILED": {
+            "zh-CN": "参数校验失败",
+            "en": "Request validation failed"
+        },
+        "PR_CHECK_NOT_FOUND": {
+            "zh-CN": "PR check 记录不存在",
+            "en": "PR check record not found"
+        },
+        "PR_CHECK_ID_MISSING": {
+            "zh-CN": "缺少 PR check id",
+            "en": "PR check id is required"
+        },
+        "PR_CHECK_ACK_VALIDATION_FAILED": {
+            "zh-CN": "参数校验失败",
+            "en": "Request validation failed"
+        },
+        "BATCH_RUN_ID_MISSING": {
+            "zh-CN": "缺少批量运行 id",
+            "en": "Batch run id is required"
+        },
+        "BATCH_RUN_NOT_FOUND": {
+            "zh-CN": "批量运行不存在",
+            "en": "Batch run not found"
+        },
+        "REPOS_BATCH_VALIDATION_FAILED": {
+            "zh-CN": "参数校验失败",
+            "en": "Request validation failed"
+        },
+        "REPOS_BATCH_SCAN_VALIDATION_FAILED": {
+            "zh-CN": "参数校验失败",
+            "en": "Request validation failed"
+        },
+        "REPOS_BATCH_SCAN_NO_REPO": {
+            "zh-CN": "所选仓库不存在或不属于当前组织",
+            "en": "Selected repositories do not exist or do not belong to current organization"
+        },
+        "IMPORTABLE_CREDENTIAL_ID_MISSING": {
+            "zh-CN": "缺少 credentialId",
+            "en": "credentialId is required"
+        },
+        "IMPORTABLE_AFFILIATION_INVALID": {
+            "zh-CN": "affiliation 仅支持 owner / collaborator / organization_member",
+            "en": "affiliation must be one of owner, collaborator, organization_member"
+        },
+        "GITHUB_API_AUTH_FAILED": {
+            "zh-CN": "GitHub Token 无权访问仓库列表（请检查凭据权限）",
+            "en": "GitHub token does not have permission to access repository list"
+        },
+        "GITHUB_API_FETCH_FAILED": {
+            "zh-CN": "拉取 GitHub 仓库失败：{message}",
+            "en": "Failed to fetch GitHub repositories: {message}"
+        },
+        "METHOD_NOT_ALLOWED": {
+            "zh-CN": "请求方法不被允许",
+            "en": "Method not allowed"
+        },
+        "UNKNOWN": {
+            "zh-CN": "未知错误",
+            "en": "Unknown error"
         }
     }
 }

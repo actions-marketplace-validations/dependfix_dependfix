@@ -1,11 +1,11 @@
 {
   "name": "@dependfix/platform",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "dependfix 管理平台（控制面）：仓库/凭据管理、扫描触发与结果展示",
+  "description": "dependfix 管理平台（控制面）：仓库/凭据管理、扫描触发与结果展示。version 字段用于 release 链路的独立版本号与 CHANGELOG 锚定，不发布到 npm（private+npmPublishable=false），发布通道为 docker 镜像",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "scripts": {
     "dev": "nuxt dev -o",
@@ -15,42 +15,53 @@
     "lint": "cross-env NODE_ENV=production eslint . --fix --max-warnings 10",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "test:e2e:install": "playwright install chromium"
+    "test:e2e:install": "playwright install chromium",
+    "db:backfill:dry-run": "tsx server/database/scripts/backfill-scan-result.ts --dry-run",
+    "db:backfill": "tsx server/database/scripts/backfill-scan-result.ts --apply",
+    "db:restore": "tsx server/database/scripts/db-restore.ts",
+    "db:doctor": "tsx server/database/scripts/db-doctor.ts"
   },
   "dependencies": {
     "@dependfix/core": "workspace:*",
     "@dependfix/engine": "workspace:*",
     "@nuxtjs/i18n": "^10.6.0",
-    "@octokit/rest": "^21.1.1",
-    "@primeuix/themes": "^2.0.3",
+    "@octokit/rest": "^22.0.1",
+    "@primeuix/themes": "^3.0.0",
     "@primevue/nuxt-module": "^4.5.5",
-    "better-auth": "^1.6.25",
-    "better-sqlite3": "^12.11.1",
-    "bullmq": "^6.0.9",
-    "cron-parser": "^5.8.1",
+    "better-auth": "^1.7.2",
+    "better-sqlite3": "^13.0.3",
+    "bullmq": "^6.3.4",
+    "chart.js": "^4.5.1",
+    "cron-parser": "^5.10.0",
     "h3": "^1.15.11",
     "ioredis": "^6.0.0",
     "lodash-es": "^4.18.1",
-    "mysql2": "^3.23.2",
+    "lru-cache": "^11.5.2",
+    "mysql2": "^3.24.3",
     "node-cron": "^4.6.0",
+    "nodemailer": "^9.1.1",
     "nuxt": "^4.5.1",
-    "pg": "^8.22.0",
+    "pg": "^8.23.0",
     "primeicons": "^8.0.0",
     "primelocale": "^2.4.0",
     "primevue": "^4.5.5",
     "reflect-metadata": "^0.2.2",
-    "sass": "^1.102.0",
-    "typeorm": "^1.1.0",
-    "vue": "^3.5.40",
-    "vue-router": "^5.2.0",
-    "zod": "^4.4.3"
+    "sass": "^1.103.1",
+    "typeorm": "^1.1.1",
+    "vue": "^3.5.42",
+    "vue-router": "^5.3.1",
+    "winston": "^3.19.0",
+    "winston-daily-rotate-file": "^5.0.0",
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",
-    "@types/better-sqlite3": "^7.6.13",
-    "@types/pg": "^8.20.4",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/nodemailer": "^8.0.1",
+    "@types/pg": "^8.23.1",
     "cross-env": "^10.0.0",
     "nock": "^14.0.17",
-    "vue-tsc": "^3.3.9"
+    "tsx": "^4.23.13",
+    "vue-tsc": "^3.3.11"
   }
 }

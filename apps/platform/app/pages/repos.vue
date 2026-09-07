@@ -6,7 +6,7 @@ definePageMeta({
     middleware: 'auth',
 })
 
-const { t } = useI18n()
+const { t, d } = useI18n()
 
 interface RepoForm {
     owner: string
@@ -15,7 +15,7 @@ interface RepoForm {
     packageManager: 'pnpm' | 'npm' | 'yarn'
     credentialId: string | null
     actionWorkflowFile: string
-    executorKind: 'container' | 'github-action'
+    executorKind: 'container' | 'github-action' | 'sandbox'
     note: string
     tags: string[]
 }
@@ -168,8 +168,8 @@ const pollRun = async (runId: string, executorKind: string) => {
             return
         }
         if (run.status === 'failed') {
-            // duplicate_scan（去重合并）：非执行失败，提示合并语义而非"扫描失败"
-            scanError.value = run.error?.code === 'duplicate_scan'
+            // SCAN_PENDING_MERGED（去重合并，M18.x 治理批次 S1 与 ServerErrorCode 对齐）：非执行失败，提示合并语义而非"扫描失败"
+            scanError.value = run.error?.code === 'SCAN_PENDING_MERGED'
                 ? (run.error.message ?? t('repos.scanDuplicate'))
                 : t('repos.scanFailed', { message: run.error?.message ?? t('common.errors.unknown') })
             return
@@ -190,7 +190,7 @@ onUnmounted(() => {
     pollCancelled = true
 })
 
-const triggerScan = async (repo: RepoView) => {
+const triggerScan = async (repo: RepoView, mode: string, severity: string) => {
     pollCancelled = false
     scanError.value = ''
     scanSuccess.value = ''
@@ -204,8 +204,8 @@ const triggerScan = async (repo: RepoView) => {
         const run = await $fetch(`/api/repos/${repo.id}/scan`, {
             method: 'POST',
             body: {
-                mode: 'report-only',
-                severityThreshold: 'high',
+                mode,
+                severityThreshold: severity,
                 executorKind: repo.executorKind === 'github-action' ? 'github-action' : undefined,
             },
         })
@@ -239,7 +239,41 @@ watch(toastMessage, (v) => {
     }
 })
 
-// ===== 批量扫描（勾选多仓库 → 一次触发 → 跳转批量运行页）=====
+// 扫描模式/严重级别选项（批量 + 单仓库 Dialog 共享，见 docs/plan/todo.md §PR2 C52）
+const modeOptions = computed(() => [
+    { label: t('common.scanMode.reportOnly'), value: 'report-only' },
+    { label: t('common.scanMode.fix'), value: 'fix' },
+    { label: t('common.scanMode.fixAndPr'), value: 'fix-and-pr' },
+])
+
+const severityOptions = computed(() => [
+    { label: 'Critical', value: 'critical' },
+    { label: 'High', value: 'high' },
+    { label: 'Medium', value: 'medium' },
+    { label: t('common.severity.all'), value: 'all' },
+])
+
+// 单仓库扫描配置 Dialog state（见 docs/plan/todo.md §PR2 C52）
+const scanConfigDialogVisible = ref(false)
+const scanConfigRepo = ref<RepoView | null>(null)
+const scanConfigMode = ref('report-only')
+const scanConfigSeverity = ref('high')
+
+const openScanConfig = (repo: RepoView) => {
+    scanConfigRepo.value = repo
+    scanConfigMode.value = 'report-only'
+    scanConfigSeverity.value = 'high'
+    scanConfigDialogVisible.value = true
+}
+
+const submitScanConfig = () => {
+    const repo = scanConfigRepo.value
+    if (!repo) return
+    scanConfigDialogVisible.value = false
+    void triggerScan(repo, scanConfigMode.value, scanConfigSeverity.value)
+}
+
+// 批量扫描（勾选多仓库 → 跳转批量运行页）
 const selectedRows = ref<RepoView[]>([])
 const batchDialogVisible = ref(false)
 const batchSubmitting = ref(false)
@@ -247,33 +281,22 @@ const batchError = ref('')
 const batchMode = ref('report-only')
 const batchSeverityThreshold = ref('high')
 
-const batchModeOptions = computed(() => [
-    { label: t('common.scanMode.reportOnly'), value: 'report-only' },
-    { label: t('common.scanMode.fix'), value: 'fix' },
-    { label: t('common.scanMode.fixAndPr'), value: 'fix-and-pr' },
-])
-
-const batchSeverityOptions = computed(() => [
-    { label: 'Critical', value: 'critical' },
-    { label: 'High', value: 'high' },
-    { label: 'Medium', value: 'medium' },
-    { label: t('common.severity.all'), value: 'all' },
-])
-
 const openBatchScan = () => {
-    if (!selectedRows.value.length) {
-        return
-    }
+    if (!selectedRows.value.length) return
     batchError.value = ''
     batchMode.value = 'report-only'
     batchSeverityThreshold.value = 'high'
     batchDialogVisible.value = true
 }
 
-/** 批量触发：POST /api/repos/batch-scan → 跳转批量运行页查看进度与聚合结果 */
+/** 批量触发：POST /api/repos/batch-scan → 跳转批量运行页查看进度与聚合结果
+ * 乐观关闭：提交前立即关闭 dialog，避免用户感知"点了不关"——同步模式下几百毫秒用户不易察觉，
+ * 异步模式下 /api/repos/batch-scan 返回前用户看到的是 dialog 持续 spinning + 滞留期间；
+ * 失败时回滚 dialog + 显示错误 */
 const submitBatchScan = async () => {
     batchSubmitting.value = true
     batchError.value = ''
+    batchDialogVisible.value = false
     try {
         const result = await $fetch<{ batchRunId: string, repositoryCount: number }>('/api/repos/batch-scan', {
             method: 'POST',
@@ -283,17 +306,18 @@ const submitBatchScan = async () => {
                 severityThreshold: batchSeverityThreshold.value,
             },
         })
-        batchDialogVisible.value = false
         success.value = t('repos.success.batchTriggered', { count: result.repositoryCount })
         await navigateTo('/batch-runs')
     } catch (e: any) {
+        // 失败时回滚 dialog + 显示错误（用户可重试或修改后再次提交）
+        batchDialogVisible.value = true
         batchError.value = t('repos.errors.batchFailed', { message: e?.data?.message ?? e?.message ?? t('common.errors.unknown') })
     } finally {
         batchSubmitting.value = false
     }
 }
 
-// ===== 批量导入（子组件 ImportReposDialog 承载；visible 由本页控制）=====
+// ===== 批量导入（子组件 `import-repos-dialog` 承载；visible 由本页控制）=====
 const importDialogVisible = ref(false)
 
 </script>
@@ -377,11 +401,20 @@ const importDialogVisible = ref(false)
                     data-key="id"
                     striped-rows
                     size="small"
+                    removable-sort
                     :empty-message="t('repos.empty')"
                 >
                     <Column selection-mode="multiple" header-style="{width: '3rem'}" />
-                    <Column field="owner" :header="t('repos.colOwner')" />
-                    <Column field="name" :header="t('repos.colRepo')" />
+                    <Column
+                        field="owner"
+                        :header="t('repos.colOwner')"
+                        sortable
+                    />
+                    <Column
+                        field="name"
+                        :header="t('repos.colRepo')"
+                        sortable
+                    />
                     <Column :header="t('repos.colTags')">
                         <template #body="{data}">
                             <div v-if="data.tags?.length" class="repos__tags">
@@ -401,7 +434,11 @@ const importDialogVisible = ref(false)
                             {{ data.defaultBranch }}
                         </template>
                     </Column>
-                    <Column :header="t('repos.colPackageManager')">
+                    <Column
+                        field="packageManager"
+                        :header="t('repos.colPackageManager')"
+                        sortable
+                    >
                         <template #body="{data}">
                             <Tag :value="data.packageManager" severity="secondary" />
                         </template>
@@ -412,9 +449,13 @@ const importDialogVisible = ref(false)
                             <span v-else class="text-muted">{{ t('repos.notLinked') }}</span>
                         </template>
                     </Column>
-                    <Column :header="t('repos.colExecutor')">
+                    <Column
+                        field="executorKind"
+                        :header="t('repos.colExecutor')"
+                        sortable
+                    >
                         <template #body="{data}">
-                            <Tag :value="data.executorKind === 'github-action' ? t('repos.githubAction') : t('repos.platformContainer')" />
+                            <Tag :value="data.executorKind === 'github-action' ? t('repos.githubAction') : data.executorKind === 'sandbox' ? t('repos.sandboxContainer') : t('repos.platformContainer')" />
                         </template>
                     </Column>
                     <Column :header="t('repos.colActions')" :style="{width: '230px'}">
@@ -425,10 +466,9 @@ const importDialogVisible = ref(false)
                                 rounded
                                 size="small"
                                 :loading="scanningId === data.id"
-                                :disabled="scanningId !== null && scanningId !== data.id"
                                 :aria-label="t('repos.actionTriggerScan')"
                                 :title="t('repos.actionTriggerScan')"
-                                @click="triggerScan(data)"
+                                @click="openScanConfig(data)"
                             />
                             <Button
                                 icon="pi pi-history"
@@ -437,7 +477,7 @@ const importDialogVisible = ref(false)
                                 size="small"
                                 :aria-label="t('repos.actionScanHistory')"
                                 :title="t('repos.actionScanHistory')"
-                                @click="navigateTo(`/repos/${data.id}/runs`)"
+                                @click="navigateTo(`/scans?repository=${data.id}`)"
                             />
                             <Button
                                 icon="pi pi-pencil"
@@ -469,6 +509,7 @@ const importDialogVisible = ref(false)
             v-model:visible="dialogVisible"
             :header="editingId ? t('repos.dialogEditTitle') : t('repos.dialogAddTitle')"
             modal
+            :draggable="false"
             :style="{width: '520px'}"
         >
             <form class="repo-form" @submit.prevent="submit">
@@ -534,7 +575,8 @@ const importDialogVisible = ref(false)
                             v-model="form.executorKind"
                             :options="[
                                 {label: t('repos.platformContainer'), value: 'container'},
-                                {label: t('repos.githubAction'), value: 'github-action'}
+                                {label: t('repos.githubAction'), value: 'github-action'},
+                                {label: t('repos.sandboxContainer'), value: 'sandbox'}
                             ]"
                             option-label="label"
                             option-value="value"
@@ -592,7 +634,7 @@ const importDialogVisible = ref(false)
             </form>
         </Dialog>
 
-        <ImportReposDialog
+        <import-repos-dialog
             v-model:visible="importDialogVisible"
             :credentials="credentials"
             @imported="fetchData"
@@ -602,6 +644,7 @@ const importDialogVisible = ref(false)
             v-model:visible="batchDialogVisible"
             :header="t('repos.batchHeader', {count: selectedRows.length})"
             modal
+            :draggable="false"
             :style="{width: '480px'}"
         >
             <div class="batch-form">
@@ -627,7 +670,7 @@ const importDialogVisible = ref(false)
                         <Select
                             id="batchMode"
                             v-model="batchMode"
-                            :options="batchModeOptions"
+                            :options="modeOptions"
                             option-label="label"
                             option-value="value"
                             fluid
@@ -638,7 +681,7 @@ const importDialogVisible = ref(false)
                         <Select
                             id="batchSeverity"
                             v-model="batchSeverityThreshold"
-                            :options="batchSeverityOptions"
+                            :options="severityOptions"
                             option-label="label"
                             option-value="value"
                             fluid
@@ -661,6 +704,18 @@ const importDialogVisible = ref(false)
                 </div>
             </div>
         </Dialog>
+
+        <scan-config-dialog
+            v-model:visible="scanConfigDialogVisible"
+            v-model:mode="scanConfigMode"
+            v-model:severity="scanConfigSeverity"
+            :repo="scanConfigRepo"
+            :mode-options="modeOptions"
+            :severity-options="severityOptions"
+            @submit="submitScanConfig"
+        />
+        <!-- `repo-history-dialog` 不再在此挂载：pi-history 跳转改到 /scans?repository=xxx（todo.md §M16.1），
+             详情 dialog 由 scans.vue 内 mount 的 `<repo-history-dialog query-key="run" />` 兜底 -->
     </div>
 </template>
 
@@ -671,102 +726,35 @@ const importDialogVisible = ref(false)
         align-items: center;
         justify-content: space-between;
         margin-bottom: $space-5;
+        h2 { margin: 0 0 $space-1; }
+        p { margin: 0; font-size: $font-size-sm; }
     }
-
-    &__header h2 {
-        margin: 0 0 $space-1;
-    }
-
-    &__header p {
-        margin: 0;
-        font-size: $font-size-sm;
-    }
-
-    &__header-actions {
-        display: flex;
-        align-items: center;
-        gap: $space-2;
-    }
+    &__header-actions { display: flex; align-items: center; gap: $space-2; }
 }
 
 .repo-form {
     display: flex;
     flex-direction: column;
     gap: $space-4;
-
-    &__row {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: $space-3;
+    &__row { display: grid; grid-template-columns: 1fr 1fr; gap: $space-3; }
+    &__field { display: flex; flex-direction: column; gap: $space-1;
+        label { font-size: $font-size-sm; font-weight: 500; }
     }
-
-    &__field {
-        display: flex;
-        flex-direction: column;
-        gap: $space-1;
-    }
-
-    &__field label {
-        font-size: $font-size-sm;
-        font-weight: 500;
-    }
-
-    &__actions {
-        display: flex;
-        justify-content: flex-end;
-        gap: $space-2;
-        margin-top: $space-2;
-    }
+    &__actions { display: flex; justify-content: flex-end; gap: $space-2; margin-top: $space-2; }
 }
 
-.repos__tags {
-    display: flex;
-    flex-wrap: wrap;
-    gap: $space-1;
-}
+.repos__tags { display: flex; flex-wrap: wrap; gap: $space-1; }
 
 .batch-form {
     display: flex;
     flex-direction: column;
     gap: $space-4;
-
-    &__repos {
-        display: flex;
-        flex-wrap: wrap;
-        gap: $space-1;
-        max-height: 120px;
-        overflow-y: auto;
+    &__repos { display: flex; flex-wrap: wrap; gap: $space-1; max-height: 120px; overflow-y: auto; }
+    &__repo { font-size: $font-size-sm; background-color: rgba($color-primary, 0.08); border-radius: $radius-sm; padding: $space-1 $space-2; }
+    &__row { display: grid; grid-template-columns: 1fr 1fr; gap: $space-3; }
+    &__field { display: flex; flex-direction: column; gap: $space-1;
+        label { font-size: $font-size-sm; font-weight: 500; }
     }
-
-    &__repo {
-        font-size: $font-size-sm;
-        background-color: rgba($color-primary, 0.08);
-        border-radius: $radius-sm;
-        padding: $space-1 $space-2;
-    }
-
-    &__row {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: $space-3;
-    }
-
-    &__field {
-        display: flex;
-        flex-direction: column;
-        gap: $space-1;
-    }
-
-    &__field label {
-        font-size: $font-size-sm;
-        font-weight: 500;
-    }
-
-    &__actions {
-        display: flex;
-        justify-content: flex-end;
-        gap: $space-2;
-        margin-top: $space-2;
-    }
+    &__actions { display: flex; justify-content: flex-end; gap: $space-2; margin-top: $space-2; }
 }
 </style>

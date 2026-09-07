@@ -1,5 +1,9 @@
 <script setup lang="ts">
 // 扫描历史：按仓库查看运行列表与详情
+// 注意：本页面已被 C51 应用层修复迁入 `repo-history-dialog`（见 docs/plan/todo.md §C51），但保留兼容——
+// 用户直接访问 /repos/{id}/runs 仍可使用（C58 候选删除，见 docs/plan/backlog.md §C58）。
+import { withRunStatusRank } from '~/utils/sort-helpers'
+
 definePageMeta({
     middleware: 'auth',
 })
@@ -20,6 +24,7 @@ interface RunView {
     runUrl: string | null
     summary: Record<string, unknown> | null
     error: { code: string, message: string } | null
+    _statusRank?: number
 }
 
 const route = useRoute()
@@ -50,13 +55,20 @@ const statusLabel = (status: string) => ({
     running: t('runs.statusRunning'),
 })[status] ?? status
 
+/** C53-后-C：A 模式 PR 创建失败时 dispatched 状态 Tag 用专门文案（区别于 B 模式「已触发等待结果」） */
+const isPrFailedDispatched = (run: RunView) => run.status === 'dispatched' && run.error?.code === 'pr_creation_failed'
+
 const fetchRuns = async () => {
     loading.value = true
     error.value = ''
     try {
         const repoId = route.params.id as string
         const res = await $fetch('/api/runs', { query: { repositoryId: repoId } })
-        runs.value = res as RunView[]
+        // 排序键派生：status 走业务语义排序（RG-W03 修复——runs 状态全集与 batch-runs 不同）
+        // todo.md §M14.2 适配：/api/runs 返回结构变更为 {items, total, page, pageSize}（向后兼容：pageSize 缺省 100）
+        // 本页面无分页控件（保留 backlog.md §C58 候选删除兼容路径），仍取全部 items
+        const data = res as { items: RunView[] }
+        runs.value = withRunStatusRank(data.items)
     } catch (e: any) {
         error.value = t('runs.errors.loadFailed', { message: e?.data?.message ?? e?.message ?? t('common.errors.unknown') })
     } finally {
@@ -115,21 +127,54 @@ const openRunUrl = (url: string) => {
                     :value="runs"
                     striped-rows
                     size="small"
+                    removable-sort
                     :empty-message="t('runs.empty')"
                 >
-                    <Column :header="t('runs.colStatus')">
+                    <Column
+                        field="_statusRank"
+                        :header="t('runs.colStatus')"
+                        sortable
+                        :default-sort-order="-1"
+                    >
                         <template #body="{data}">
-                            <Tag :value="statusLabel(data.status)" :severity="statusSeverity(data.status)" />
+                            <Tag
+                                :value="isPrFailedDispatched(data as RunView)
+                                    ? t('batchRuns.runStatus.dispatchedPrFailed')
+                                    : statusLabel(data.status)"
+                                :severity="statusSeverity(data.status)"
+                            />
+                            <small
+                                v-if="isPrFailedDispatched(data as RunView)"
+                                class="d-block mt-1 text-warning"
+                            >
+                                {{ t('batchRuns.openRunPrFailedHint') }}
+                            </small>
                         </template>
                     </Column>
-                    <Column field="mode" :header="t('runs.colMode')" />
-                    <Column field="severityThreshold" :header="t('runs.colThreshold')" />
-                    <Column :header="t('runs.colExecutor')">
+                    <Column
+                        field="mode"
+                        :header="t('runs.colMode')"
+                        sortable
+                    />
+                    <Column
+                        field="severityThreshold"
+                        :header="t('runs.colThreshold')"
+                        sortable
+                    />
+                    <Column
+                        field="executorKind"
+                        :header="t('runs.colExecutor')"
+                        sortable
+                    >
                         <template #body="{data}">
-                            <Tag :value="data.executorKind === 'github-action' ? t('repos.githubAction') : t('repos.platformContainer')" severity="secondary" />
+                            <Tag :value="data.executorKind === 'github-action' ? t('repos.githubAction') : data.executorKind === 'sandbox' ? t('repos.sandboxContainer') : t('repos.platformContainer')" severity="secondary" />
                         </template>
                     </Column>
-                    <Column :header="t('runs.colStartedAt')">
+                    <Column
+                        field="startedAt"
+                        :header="t('runs.colStartedAt')"
+                        sortable
+                    >
                         <template #body="{data}">
                             {{ data.startedAt ? d(new Date(data.startedAt), 'long') : '—' }}
                         </template>
@@ -178,6 +223,7 @@ const openRunUrl = (url: string) => {
             v-model:visible="detailVisible"
             :header="t('runs.dialogTitle')"
             modal
+            :draggable="false"
             :style="{width: '720px'}"
         >
             <div v-if="detailLoading" class="text-muted">

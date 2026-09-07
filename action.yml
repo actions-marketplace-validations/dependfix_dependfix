@@ -58,6 +58,10 @@ inputs:
     description: "每仓库最多处理的告警数"
     required: false
     default: "20"
+  max-repos:
+    description: "发现规模上限：最多保留的仓库数（默认 100；0 表示不限制；大 org 场景下防止一次性全量发现）"
+    required: false
+    default: "100"
   cleanup-branches:
     description: "（fix-and-pr 模式）结束后将已合并的 dependfix 分支列入报告待清理清单（不自动删除）"
     required: false
@@ -67,7 +71,7 @@ inputs:
     required: false
     default: "false"
   github-token:
-    description: "GitHub Token（需 security-events 权限；fix-and-pr 模式需 contents + pull-requests 写权限）"
+    description: "GitHub Token（需 security-events 权限；fix-and-pr 模式需 contents + pull-requests 写权限；M19.3 起重复 PR 自动评论 + duplicate label 额外需 issues: write）"
     required: true
   dependabot-alerts-token:
     description: "Dependabot alerts 专用 token（可选，最小权限 fine-grained PAT，仅需 Dependabot alerts: read；缺省回退 github-token。GITHUB_TOKEN 无法读取 Dependabot alerts API，仅给 GITHUB_TOKEN 会拉取失败）"
@@ -141,6 +145,9 @@ runs:
         # 构建链 core → engine → cli（cli 运行时 imports @dependfix/engine/dist，漏构建会
         # ERR_MODULE_NOT_FOUND——engine 加入后 action 构建链未同步，Security Auto Fix 首跑暴露）
         pnpm --filter @dependfix/core --filter @dependfix/engine --filter dependfix build
+        # Nuxt 平台 lint 依赖 .nuxt/tsconfig.json（nuxt prepare 生成物）；
+        # quickVerifyProject 仅跑 pnpm lint，无 prepare 步骤会导致 eslint OOM（教训：run 33946113272）
+        pnpm --filter @dependfix/platform exec nuxt prepare
         # Smoke check：确认 CLI bin 可执行、外部依赖可解析（pnpm isolated 布局）
         node "${{ github.action_path }}/packages/cli/dist/bin.mjs" --help > /dev/null
       shell: bash
@@ -156,6 +163,7 @@ runs:
         MAX_ALERTS="${{ inputs.max-alerts-per-repository }}"
         MAX_CONCURRENCY="${{ inputs.max-concurrency }}"
         MAX_RETRIES="${{ inputs.max-retries }}"
+        MAX_REPOS="${{ inputs.max-repos }}"
         REPOS="${{ inputs.repos }}"
         OWNER="${{ inputs.owner }}"
         REPO_TOPICS="${{ inputs.repo-topics }}"
@@ -180,6 +188,7 @@ runs:
         args+=("--max-alerts-per-repository" "$MAX_ALERTS")
         args+=("--max-concurrency" "$MAX_CONCURRENCY")
         args+=("--max-retries" "$MAX_RETRIES")
+        args+=("--max-repos" "$MAX_REPOS")
         if [ -n "$REPO_TOPICS" ]; then args+=("--repo-topics" "$REPO_TOPICS"); fi
         if [ -n "$REPO_INCLUDE" ]; then args+=("--repo-include" "$REPO_INCLUDE"); fi
         if [ -n "$REPO_EXCLUDE" ]; then args+=("--repo-exclude" "$REPO_EXCLUDE"); fi

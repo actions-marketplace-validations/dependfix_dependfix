@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { AppError, normalizeAuditSeverity, type NormalizedSecurityAlert } from '@dependfix/core'
+import { AppError, normalizeAuditSeverity, normalizeUpstreamId, type NormalizedSecurityAlert } from '@dependfix/core'
 
 /**
  * pnpm audit 本地回退数据源（无 GitHub token 场景）。
@@ -48,10 +48,16 @@ export async function fetchPnpmAuditAlerts(
  * ⚠️ 发现漏洞时 pnpm audit 返回非零退出码（exit 1）是**正常行为**——JSON 输出仍然有效，
  * 不能以 exit code 判断失败（参考 security-alert-remediator 的 loadAuditReport 同款语义）。
  * 仅在空输出或 JSON 解析失败时视为硬失败。
+ *
+ * ⚠️ 显式 `--registry=https://registry.npmjs.org/`：
+ * pnpm audit 默认继承用户 `.npmrc` / `npm_config_registry` 的镜像源（如 npmmirror），
+ * 部分镜像站 advisory metadata 缺失或不同步会导致漏报安全漏洞——与 dependfix 的核心目标
+ * （修复安全告警）直接冲突。对齐 `changelog-fetcher.ts` 默认口径（`registryBaseUrl ??
+ * 'https://registry.npmjs.org'`）。追溯见 [backlog B 类登记「C35 pnpm audit 拉取应显式指定官方 registry」](../plan/backlog.md)。
  */
 function runPnpmAudit(workDir: string): Promise<unknown> {
     return new Promise((resolve, reject) => {
-        const cp = spawn('pnpm audit --json', {
+        const cp = spawn('pnpm audit --json --registry=https://registry.npmjs.org/', {
             cwd: workDir,
             shell: true,
             stdio: ['ignore', 'pipe', 'pipe'],
@@ -103,6 +109,10 @@ interface RiskRecord {
     title: string
     htmlUrl: string
     patchedVersion: string | null
+    /** GitHub Advisory ID（pnpm audit `advisory.github_advisory_id`，GitHub Advisory Database 收录时） */
+    ghsaId?: string
+    /** CVE ID 列表（pnpm audit `advisory.cves[]` 字符串数组） */
+    cveIds?: string[]
 }
 
 /** pnpm audit 修复版本的空值哨兵（无可用修复） */
@@ -110,6 +120,21 @@ function normalizePatchedVersionValue(value: unknown): string | null {
     const normalized = String(value ?? '').trim().toLowerCase()
     if (!normalized || ['<0.0.0', 'manual review required', 'none', 'unavailable'].includes(normalized)) {
         return null
+    }
+    // legacy 格式 patched_versions 为 range（如 ">=0.2.4" / ">=1.2.3 <2"）：剥离前缀取首个裸版本，
+    // 否则 compareSemver 对 ">=x.y.z" 解析退化为 [0,0,0]，当前版本被误判"已达标"而假跳过
+    // （T801 容器实证暴露：minimist 0.0.8 被日志判定 "0.0.8 >= >=0.2.4" 而跳过修复）。
+    // 已知边界（与旧行为等价，未变差）：两段版本（"1.2.x"→"1.2"）、">=0.0.0"（剥离为 0.0.0 后任何
+    // 版本判已达标）、pre-release range（compareSemver 忽略 pre-release 段）仍可能假跳过——
+    // 真实 npm advisory patched_versions 以 ">=x.y.z" / ">=x.y.z <x.y.z" 为主，残余面罕见，暂登记不处理
+    // ReDoS（CodeQL js/polynomial-redos）：原 /(\d+\.\d+(?:\.\d+)?(?:-[0-9a-z.]+)?)/i 的 \d+ 与可选组
+    // 在长数字串（如 "000...0."）上呈二次方回溯（10 万字符实测 ~8.5s）；改为 ^ 锚定 + 有界量词 {1,2}
+    // （语义等价：major.minor 必选、patch 至多一次）后线性（实测 ~0.2ms），17 组边界用例行为一致
+    // 残余差异（审计建议登记）：畸形输入 "数字前缀 + 空格 + 合法版本"（如 "123 1.2.3"）不再
+    // 跳过前缀提取到后面的版本，而是整体回退原值——非合法 semver range 形态，保守回退不误提取
+    const versionMatch = /^[^\d]*(\d+(?:\.\d+){1,2}(?:-[0-9a-z.]+)?)/i.exec(normalized)
+    if (versionMatch) {
+        return versionMatch[1]
     }
     return String(value).trim()
 }
@@ -146,6 +171,18 @@ function parseLegacyAuditReport(report: Record<string, unknown>): RiskRecord[] {
 
     // actions 提供修复版本（action.target）
     const actionMap = new Map<string, string | undefined>()
+    // M23.3 C66-A2：提取 GHSA + CVE 列表（按 advisory id 索引）
+    const advisoryExtrasMap = new Map<string, { ghsaId?: string, cveIds?: string[] }>()
+    for (const [id, rawAdvisory] of Object.entries(advisories as Record<string, unknown>)) {
+        if (!rawAdvisory || typeof rawAdvisory !== 'object') {
+            continue
+        }
+        const advisory = rawAdvisory as Record<string, unknown>
+        const extras = extractIdentifiers(advisory)
+        if (extras.ghsaId || (extras.cveIds && extras.cveIds.length > 0)) {
+            advisoryExtrasMap.set(id, extras)
+        }
+    }
     for (const action of toArray(report.actions)) {
         if (!action || typeof action !== 'object') {
             continue
@@ -168,6 +205,7 @@ function parseLegacyAuditReport(report: Record<string, unknown>): RiskRecord[] {
         const patched = normalizePatchedVersionValue(
             actionMap.get(id) ?? (typeof advisory.patched_versions === 'string' ? advisory.patched_versions : undefined),
         )
+        const extras = advisoryExtrasMap.get(id)
         risks.push({
             advisoryId: resolveAdvisoryId(advisory),
             packageName: typeof advisory.module_name === 'string' ? advisory.module_name : 'unknown-package',
@@ -175,6 +213,7 @@ function parseLegacyAuditReport(report: Record<string, unknown>): RiskRecord[] {
             title: typeof advisory.title === 'string' ? advisory.title : 'Untitled advisory',
             htmlUrl: typeof advisory.url === 'string' ? advisory.url : '',
             patchedVersion: patched,
+            ...(extras ?? {}),
         })
     }
     return risks
@@ -211,6 +250,7 @@ function parseModernAuditReport(report: Record<string, unknown>): RiskRecord[] {
         const viaItems = toArray(vulnerability.via).filter((item): item is Record<string, unknown> => item !== null && typeof item === 'object')
 
         if (viaItems.length === 0) {
+            const extras = extractIdentifiers(vulnerability)
             risks.push({
                 advisoryId: resolveAdvisoryId(vulnerability),
                 packageName,
@@ -218,6 +258,7 @@ function parseModernAuditReport(report: Record<string, unknown>): RiskRecord[] {
                 title: typeof vulnerability.title === 'string' ? vulnerability.title : `${packageName} vulnerability`,
                 htmlUrl: typeof vulnerability.url === 'string' ? vulnerability.url : '',
                 patchedVersion: patchedFromFixAvailable,
+                ...(extras ?? {}),
             })
             continue
         }
@@ -227,6 +268,7 @@ function parseModernAuditReport(report: Record<string, unknown>): RiskRecord[] {
             if (typeof advisory.severity === 'string' && advisory.severity) {
                 severity = advisory.severity
             }
+            const extras = extractIdentifiers(advisory)
             risks.push({
                 advisoryId: resolveAdvisoryId(advisory),
                 packageName: typeof advisory.name === 'string' && advisory.name ? advisory.name : packageName,
@@ -234,6 +276,7 @@ function parseModernAuditReport(report: Record<string, unknown>): RiskRecord[] {
                 title: typeof advisory.title === 'string' ? advisory.title : `${packageName} vulnerability`,
                 htmlUrl: typeof advisory.url === 'string' ? advisory.url : '',
                 patchedVersion: patchedFromFixAvailable,
+                ...(extras ?? {}),
             })
         }
     }
@@ -279,13 +322,43 @@ export function parseAuditReport(report: unknown): RiskRecord[] {
 // ---------------------------------------------------------------------------
 
 /**
- * advisoryId 的稳定数字哈希（`NormalizedSecurityAlert.id` 为 number）。
+ * advisoryId 的稳定数字哈希（M20 之前使用，M20 后保留以维持向后兼容 `NormalizedSecurityAlert.id: number`）。
+ *
  * 取 sha256 前 4 字节完整 uint32（非设计稿的 `% 2^31`：uint32 语义更自然，
  * 碰撞概率 ~2^-32/对，12 条告警场景生日界 ~1.6e-8，可忽略）。
+ *
+ * M20 弃用：唯一去重键改为 `upstreamId`，详见 [`normalizeUpstreamId`](../../../core/src/alerts/upstream-id.ts)。
+ * 本函数保留仅为兼容现有 `NormalizedSecurityAlert.id: number` 字段，**不是**平台去重键。
  */
 export function hashAdvisoryId(packageName: string, advisoryId: string): number {
     const digest = createHash('sha256').update(`${packageName}:${advisoryId}`).digest()
     return digest.readUInt32BE(0)
+}
+
+/**
+** M23.3 C66-A2：从 pnpm audit advisory 提取 GHSA ID + CVE 列表。
+** 兼容 legacy `github_advisory_id` + modern `advisory.github_advisory_id` 与 `cves[]`。
+*/
+function extractIdentifiers(candidate: Record<string, unknown>): { ghsaId?: string, cveIds?: string[] } {
+    const ghsaId = typeof candidate.github_advisory_id === 'string' && candidate.github_advisory_id
+        ? candidate.github_advisory_id
+        : undefined
+    const cves = candidate.cves
+    let cveIds: string[] | undefined
+    if (Array.isArray(cves)) {
+        const valid = cves.filter((c): c is string => typeof c === 'string' && Boolean(c))
+        if (valid.length > 0) {
+            cveIds = valid
+        }
+    }
+    const result: { ghsaId?: string, cveIds?: string[] } = {}
+    if (ghsaId) {
+        result.ghsaId = ghsaId
+    }
+    if (cveIds) {
+        result.cveIds = cveIds
+    }
+    return result
 }
 
 /** audit 风险 → 标准化告警（source='pnpm-audit'，repository 由调用方注入） */
@@ -308,5 +381,12 @@ function mapAuditRiskToAlert(risk: RiskRecord, repository: string): NormalizedSe
         recommendedVersion: risk.patchedVersion ?? '',
         // audit 输出的依赖链路径无法可靠区分 direct/transitive，留空
         dependencyType: undefined,
+        upstreamId: normalizeUpstreamId('pnpm-audit', {
+            packageName: risk.packageName,
+            advisoryId: risk.advisoryId,
+        }),
+        // M23.3 C66-A2：透传 GitHub Advisory ID + CVE 列表
+        ghsaId: risk.ghsaId,
+        cveIds: risk.cveIds,
     }
 }

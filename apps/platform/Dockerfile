@@ -41,20 +41,51 @@ FROM nodejs AS docker-minifier
 WORKDIR /app
 # .output 自带完整 node_modules（含已编译 better-sqlite3），无需复制 node_modules
 COPY --from=builder /app/apps/platform/.output ./.output
-# 容器内执行器：在容器内运行 DependfixApp 需要 cli/core/engine 构建产物（含 package.json 供依赖解析）
+# 容器内执行器：在容器内运行 DependfixApp 需要 cli/core/engine/skills 构建产物（含 package.json 供依赖解析）
 COPY --from=builder /app/packages/core/dist packages/core/dist
 COPY --from=builder /app/packages/core/package.json packages/core/package.json
 COPY --from=builder /app/packages/engine/dist packages/engine/dist
 COPY --from=builder /app/packages/engine/package.json packages/engine/package.json
 COPY --from=builder /app/packages/cli/dist packages/cli/dist
 COPY --from=builder /app/packages/cli/package.json packages/cli/package.json
+COPY --from=builder /app/packages/skills packages/skills
+# ── T801 容器内执行依赖：workspace node_modules（符号链接 + 根 .pnpm store）──
+# pnpm 布局：各包 node_modules 内依赖链接指向根 node_modules/.pnpm/<pkg>@<ver>/node_modules/...；
+# Docker COPY 保留符号链接，根 store 一并拷贝后链接在镜像内依然有效。
+# 注意：.dockerignore 仅约束 build context（COPY . .），不影响多阶段 COPY --from
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/packages/core/node_modules packages/core/node_modules
+COPY --from=builder /app/packages/engine/node_modules packages/engine/node_modules
+COPY --from=builder /app/packages/cli/node_modules packages/cli/node_modules
+# skills 零依赖，pnpm 不创建其 node_modules（链接直接指向包目录），无需拷贝
 
 # 阶段四：生产
 FROM runtime
 ENV NODE_ENV=production
+# ── T801 容器工具链（ContainerExecutor 依赖）：git（clone）+ pnpm（install/audit）──
 # unzip: B mode result fetch (ActionResultFetcher unzip artifact) needs it
-RUN apk add --no-cache unzip && rm -rf /var/cache/apk/*
+# git 随 alpine 滚动 index（与 unzip/su-exec 同惯例，实证版本 2.54.0）；可复现性以基础镜像 digest 为基线
+RUN apk add --no-cache unzip git && rm -rf /var/cache/apk/*
+# pnpm：从构建链镜像（docker-minifier，完整 nodejs 镜像）拷贝，版本 11.18.0 与构建链一致、
+# 零网络下载保证可复现构建；与 package.json packageManager 声明（pnpm@11.17.0）的 minor 差异
+# 由 toolchainPnpmVersion 验证链处理（backlog C2 已闭环）。pnpm 为自包含 npm 全局包结构。
+COPY --from=docker-minifier /usr/local/lib/node_modules/pnpm /usr/local/lib/node_modules/pnpm
+RUN ln -sf ../lib/node_modules/pnpm/bin/pnpm.mjs /usr/local/bin/pnpm
 WORKDIR /app
 COPY --from=docker-minifier /app /app
+# ── C38 非 root 降权（安全基线 §5.3 执行环境）：执行不可信代码的进程不得以 root 运行 ──
+# 运行用户创建（幂等，避免与基础镜像内置用户冲突）；su-exec 供 entrypoint 降权
+RUN set -eux; \
+    if ! getent passwd dependfix > /dev/null 2>&1; then \
+        addgroup -S dependfix && adduser -S -G dependfix -h /home/dependfix dependfix; \
+    fi; \
+    apk add --no-cache su-exec && rm -rf /var/cache/apk/*
+# 数据目录预建 + 授权：命名卷首次挂载继承目录所有权（entrypoint 再幂等 chown，兼容既有 root 卷）
+RUN mkdir -p /app/data && chown -R dependfix:dependfix /app/data
+# entrypoint：root 启动 → chown 数据目录 → su-exec 降权执行（恶意脚本仅能在非 root 权限下运行）
+COPY apps/platform/docker/entrypoint.sh /usr/local/bin/dependfix-entrypoint.sh
+RUN chmod +x /usr/local/bin/dependfix-entrypoint.sh
+ENV HOME=/home/dependfix
+ENTRYPOINT ["/usr/local/bin/dependfix-entrypoint.sh"]
 EXPOSE 3000
 CMD ["node", ".output/server/index.mjs"]

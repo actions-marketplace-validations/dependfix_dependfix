@@ -26,11 +26,13 @@ describe('resolveRuntimeConfig', () => {
             githubToken: 'token-from-env',
             alertSource: 'github-dependabot',
             codeScanningEnabled: false,
+            codeQualityEnabled: false,
             allowMajorUpgrade: false,
             maxAlertsPerRepository: 20,
             maxConcurrency: 1,
             maxRetries: 3,
             maxBackoffMs: 30000,
+            maxRepos: 100,
             ai: {
                 enabled: false,
                 provider: 'openai-compatible',

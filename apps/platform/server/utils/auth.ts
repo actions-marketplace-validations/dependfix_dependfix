@@ -6,6 +6,7 @@ import { ensureDatabaseInitialized } from '#server/database'
 import { ensureDefaultOrganization, migrateLegacyRoles } from '#server/utils/organization'
 import { parseDomainList, type AuthMode } from '#server/utils/email-domain'
 import { buildCreateUserBefore } from '#server/utils/registration-access'
+import { sendTemplateMail, MailerError } from '#server/services/mailer'
 
 /**
  * better-auth 实例（邮箱密码登录 + admin 用户管理插件）。
@@ -78,6 +79,49 @@ const buildRateLimit = () => {
     }
 }
 
+/**
+ * 构造 trustedOrigins 列表：better-auth 1.7 origin-check 中间件（PR #9973）强制
+ * sign-up/sign-in/social 等端点的 Origin/Referer 头命中 trustedOrigins，否则 403。
+ * 默认从 baseURL 派生，但项目未配置静态 baseURL（依赖运行时请求 host 推断），
+ * 因此显式声明：
+ * - E2E_TEST: 固定 `http://127.0.0.1:3101`（与 playwright.config 一致）
+ * - 生产: 从 NUXT_PUBLIC_BASE_URL 或 BETTER_AUTH_TRUSTED_ORIGINS 读取 origin 列表
+ * - 兜底: 当上述均未配置时，加 `http://*` 与 `https://*` 通配符覆盖所有 http(s) origin
+ *   （匹配模式 `wildcardMatch`，见 better-auth trusted-origins.mjs）
+ *
+ * 注意：通配兜底放宽了 origin 校验，但项目此前依赖运行时请求 host 推断（无 baseURL 配置），
+ * better-auth 1.7 默认 trustedOrigins 为空 → 升级后所有 sign-up/sign-in 立即 403。
+ * 兜底模式保持与 1.6 的"默认放行 Origin"行为对齐，避免升级阻塞；生产部署应
+ * 显式设置 BETTER_AUTH_TRUSTED_ORIGINS 或 NUXT_PUBLIC_BASE_URL 以收紧。
+ */
+const buildTrustedOrigins = (_options: { authSecret: string }): string[] => {
+    const origins = new Set<string>()
+    if (process.env.E2E_TEST === 'true') {
+        origins.add('http://127.0.0.1:3101')
+        return [...origins]
+    }
+    const base = process.env.NUXT_PUBLIC_BASE_URL
+    if (base) {
+        try {
+            origins.add(new URL(base).origin)
+        } catch {
+            // 非法 URL 忽略
+        }
+    }
+    const extra = process.env.BETTER_AUTH_TRUSTED_ORIGINS
+    if (extra) {
+        for (const o of extra.split(',').map((s) => s.trim()).filter(Boolean)) {
+            origins.add(o)
+        }
+    }
+    // 兜底：未配置 env 时，覆盖所有 http(s) origin（与 1.6 默认行为对齐）
+    if (origins.size === 0) {
+        origins.add('http://*')
+        origins.add('https://*')
+    }
+    return [...origins]
+}
+
 /** better-auth 实例类型（由实际配置推断，含 role 等附加字段） */
 const buildAuth = (ds: Awaited<ReturnType<typeof ensureDatabaseInitialized>>, options: {
     authSecret: string
@@ -111,6 +155,12 @@ const buildAuth = (ds: Awaited<ReturnType<typeof ensureDatabaseInitialized>>, op
         appName: 'dependfix',
         secret: options.authSecret,
         database: typeormAdapter(ds),
+        // better-auth 1.7 origin-check：sign-up/sign-in 等端点会校验请求 Origin 头
+        // 是否在 trustedOrigins 中；默认 trustedOrigins 为空（从 baseURL 派生），
+        // 未配置时所有 Origin 请求被拒，导致 e2e（http://127.0.0.1:3101）+ 生产同源
+        // 登录全部失效。显式声明 trustedOrigins 列表：e2e 固定 127.0.0.1，生产从
+        // NUXT_PUBLIC_BASE_URL（或同源 origin）兜底
+        trustedOrigins: buildTrustedOrigins(options),
         rateLimit: buildRateLimit(),
         plugins: [
             admin({
@@ -122,17 +172,20 @@ const buildAuth = (ds: Awaited<ReturnType<typeof ensureDatabaseInitialized>>, op
             }),
             // OIDC SSO（enterprise 模式）：oidcEnabled 时才启用（clientId 等在条件内保证非空）；
             // 未配置自动禁用不阻塞启动。
-            // requireIssuerValidation: true 防 issuer 混淆（platform-auth-users.md §11 安全注意）
+            // better-auth 1.7：issuer validation 自动通过 OIDC discovery 完成（1.6 中的
+            // `issuer` / `requireIssuerValidation` 字段已删除；无 discovery 的 IdP 可用
+            // `accountIssuer` 覆盖；see release notes "Rewrite the generic OAuth plugin"）。
             ...(oidcEnabled
                 ? [genericOAuth({
                     config: [{
                         providerId: 'oidc',
                         discoveryUrl: options.oidcDiscoveryUrl || undefined,
-                        issuer: options.oidcIssuer || undefined,
+                        // 无 discovery 时手动声明 issuer（accountIssuer 替代旧 issuer 字段）；
+                        // 有 discovery 时 issuer 自动从 discovery 文档获取，accountIssuer 不传
+                        ...(options.oidcIssuer ? { accountIssuer: options.oidcIssuer } : {}),
                         clientId: options.oidcClientId!,
                         clientSecret: options.oidcClientSecret!,
                         scopes: (options.oidcScopes || 'openid,profile,email').split(',').map((s) => s.trim()).filter(Boolean),
-                        requireIssuerValidation: true,
                         // 无 discovery 的 IdP 手动声明端点（OIDC_AUTHORIZATION_URL 等覆盖）
                         ...(options.oidcAuthorizationUrl ? { authorizationUrl: options.oidcAuthorizationUrl } : {}),
                         ...(options.oidcTokenUrl ? { tokenUrl: options.oidcTokenUrl } : {}),
@@ -155,10 +208,22 @@ const buildAuth = (ds: Awaited<ReturnType<typeof ensureDatabaseInitialized>>, op
             // SMTP 未配置时：不支持发送密码重置邮件（用户 MVP 仅注册 + 会话）
                 if (!options.smtpEnabled) {
                     console.warn('[auth] SMTP 未配置，密码重置邮件未发送')
+                    return
                 }
-                void user
-                void url
-                await Promise.resolve()
+                try {
+                    await sendTemplateMail('en-US', 'reset-password', {
+                        email: user.email,
+                        url,
+                        appName: 'dependfix',
+                    })
+                } catch (error) {
+                    if (error instanceof MailerError) {
+                        // fail-quiet：better-auth 捕获异常不阻塞流程；日志详细便于排障
+                        console.error(`[auth] 密码重置邮件发送失败：${error.code}`, error)
+                        return
+                    }
+                    throw error
+                }
             },
         },
         // OAuth 登录（public 模式）：clientId/clientSecret 均配置才启用，未配置自动禁用不阻塞启动
@@ -187,10 +252,21 @@ const buildAuth = (ds: Awaited<ReturnType<typeof ensureDatabaseInitialized>>, op
             // SMTP 未配置时：不发验证邮件（注册自动通过）
                 if (!options.smtpEnabled) {
                     console.warn('[auth] SMTP 未配置，验证邮件未发送')
+                    return
                 }
-                void user
-                void url
-                await Promise.resolve()
+                try {
+                    await sendTemplateMail('en-US', 'verification', {
+                        email: user.email,
+                        url,
+                        appName: 'dependfix',
+                    })
+                } catch (error) {
+                    if (error instanceof MailerError) {
+                        console.error(`[auth] 验证邮件发送失败：${error.code}`, error)
+                        return
+                    }
+                    throw error
+                }
             },
         },
         session: {
@@ -226,19 +302,26 @@ const buildAuth = (ds: Awaited<ReturnType<typeof ensureDatabaseInitialized>>, op
                 // SMTP 未配置时直接改邮箱（对齐"未配置自动跳过验证"模式）；已配置时发确认邮件
                 updateEmailWithoutVerification: !options.smtpEnabled,
                 sendChangeEmailConfirmation: async ({ user, newEmail, url }) => {
-                // SMTP 未配置时：不发确认邮件（changeEmail 直接生效）
-                // SMTP 已配置但邮件发送器未实现：确认邮件不发出（既有降级模式，
-                // 与 sendVerificationEmail/sendResetPassword 一致；统一实现已登记
-                // docs/plan/backlog.md「邮件发送器统一实现」条目）
+                // SMTP 未配置时：不发确认邮件（changeEmail 直接生效，updateEmailWithoutVerification 已为 true）
+                // SMTP 已配置：经 mailer service 发送（fail-quiet：异常被 better-auth 捕获不阻塞流程）
                     if (!options.smtpEnabled) {
                         console.warn('[auth] SMTP 未配置，邮箱变更确认邮件未发送')
-                    } else {
-                        console.warn('[auth] 邮件发送器未实现，邮箱变更确认邮件未发送（变更需在 verify-email 链接确认）')
+                        return
                     }
-                    void user
-                    void newEmail
-                    void url
-                    await Promise.resolve()
+                    try {
+                        await sendTemplateMail('en-US', 'change-email', {
+                            email: user.email,
+                            newEmail,
+                            url,
+                            appName: 'dependfix',
+                        })
+                    } catch (error) {
+                        if (error instanceof MailerError) {
+                            console.error(`[auth] 邮箱变更确认邮件发送失败：${error.code}`, error)
+                            return
+                        }
+                        throw error
+                    }
                 },
             },
         },

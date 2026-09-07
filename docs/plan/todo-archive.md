@@ -2,577 +2,670 @@
 
 > 本文档包含已完成阶段的近线归档。当前活跃任务见 [todo.md](todo.md)。
 > 后续阶段任务在 [backlog.md](backlog.md)。
+> 主窗口保留最近 3-5 个已归档阶段摘要；早期阶段归档分片见 [archive/](archive/)。
 
 ## 深度归档索引
 
 - 后续阶段归档分片存放于 `docs/plan/archive/` 目录。
 - 归档治理规则见 [archive/index.md](archive/index.md)。
-- 早期阶段分片：[M0 / M1](archive/todo-archive-phases-m0-m1.md)（2026-08-07 迁出）
+- 早期阶段分片：
+  - [M0 / M1](archive/todo-archive-phases-m0-m1.md)（2026-08-07 迁出，115 行）
+  - [M2 / M3 / M4 / M4.5 / M4.6 / M5 / M5.5](archive/todo-archive-phases-m2-m55.md)（2026-08-14 迁出，T906 执行，398 行）
+  - [M6 / M7.1 / M7.2 / T711 / M8](archive/todo-archive-phases-m6-m7-t711.md)（2026-08-20 neat-freak 归档批次迁出，293 行）
+  - **M9 / 2026-08-19 PR1-PR3 / 2026-08-19 C54+C55 / M11 推进批次（含 C53-后-A/B/C 衍生子任务）**：[archive/todo-archive-phases-m11.md](archive/todo-archive-phases-m11.md)（2026-08-20 迁出）
+  - **M10 / T912 / C53 / 2026-08-20 平台 UI 增强（C59-C61）**：[archive/todo-archive-phases-m10-c53-c59c61.md](archive/todo-archive-phases-m10-c53-c59c61.md)（**2026-08-28 M16 归档批次同步迁出**——M16 段 110 行新增前主窗口 618 行接近 700 分片阈值，预防性迁出与 M15 归档批次同源策略）
+  - **M13**：[archive/todo-archive-phases-m13.md](archive/todo-archive-phases-m13.md)（**2026-08-30 M18 归档批次预防性迁出**——M18 段新增前主窗口 673 行接近 700 分片阈值，预防性迁出与 M16/M15 归档批次同源策略）
+  - **M14 + M15**：[archive/todo-archive-phases-m14-m15.md](archive/todo-archive-phases-m14-m15.md)（**2026-08-31 M19 归档批次预防性分片迁出**——M19 段新增前主窗口 699 行 + M19 段预估 80-100 行将超 700 强制分片阈值；M14 + M15 同源批次同期迁出，符合"主窗口保留 3-5 个阶段"健康策略）
+  - **M16 + M17**：[archive/todo-archive-phases-m16-m17.md](archive/todo-archive-phases-m16-m17.md)（**2026-08-31 M20 归档批次预防性分片迁出**——M20 段新增前主窗口 638 行 + M20 段预估 100-130 行将超 700 强制分片阈值，预防性迁出与 M19/M18/M17/M16 归档批次预防性迁出 M14/M15/M13/M12/M10 同源策略）
 
 ## 主窗口保留范围
 
-- 主文档保留最近阶段的近线归档块。
-- 当 `todo-archive.md` 超过 500 行时，将早期阶段迁入分片归档。
+- 主文档保留最近阶段的近线归档块（当前保留 **2026-09-02 M23 M22 治理债收口 + 根因排查 + 能力扩展 + 测试补强（M23.0+M23.1+M23.2+M23.3+M23.4 全部已闭环 / 17 atomic commits 全部 ahead=0 已推送至 origin/master）/ 2026-09-01 M22 SQLite 数据保护防御加固（M22.1+M22.2+M22.3+M22.4+M22.5+M22.6 全部已闭环 / 13 commits 全部 ahead=0 已推送）/ 2026-08-31 M21 治理收口 + 能力扩展 + 测试补强（M21.1+M21.2+M21.4+M21.5 全部已闭环 / 15 commits 已全部推送 ahead=0）/ 2026-08-31 M20 ScanResult 数据模型重构（M20.1+M20.3+M20.5+M20.6+M20.7 全部已闭环 / 8 commits 已全部落地）/ 2026-08-31 M19 治理 + 能力扩展 + 测试补强（M19.1+M19.2+M19.3+M19.4+M19.5 全部已闭环 / 5 commits 全部推送 ahead=0）** 共 5 个批次，符合"主窗口保留 3-5 个阶段"健康策略）。**预防性分片**：M14 + M15 已于 2026-08-31 迁出至 [archive/todo-archive-phases-m14-m15.md](archive/todo-archive-phases-m14-m15.md)；M16 + M17 已于 2026-08-31 迁出至 [archive/todo-archive-phases-m16-m17.md](archive/todo-archive-phases-m16-m17.md)；M18 已于 2026-09-01 M22 归档批次预防性迁出至 [archive/todo-archive-phases-m18.md](archive/todo-archive-phases-m18.md)，保持主窗口行数在 700 强制分片阈值内。
+- 当 `todo-archive.md` 超过 700 行时，将早期阶段迁入分片归档（最近一次迁出于 2026-08-31 M19 归档批次预防性迁出 M14 + M15 至新分片 `todo-archive-phases-m14-m15.md`）。
+- **2026-08-20 归档批次**：M9 / 2026-08-19 PR1-PR3 / 2026-08-19 C54+C55 / M11 推进批次迁入分片 [archive/todo-archive-phases-m11.md](archive/todo-archive-phases-m11.md)。
+- **2026-08-25 归档批次**：M12 9 子任务完整闭环，**所有 19 commits 已推送至 `origin/master`**（ahead=0，git rev-list HEAD ^origin/master --count 核验）。详见 [archive/todo-archive-phases-m12.md](archive/todo-archive-phases-m12.md)（**2026-08-28 M17 归档批次预防性分片迁出**）。
+- **2026-08-26 归档批次（M13）**：M13.1+M13.2+M13.3+M13.4 全部 12 子任务完整闭环，**26 commits 已推送至 `origin/master`**（含 T1310 部分 ahead commit；git rev-list HEAD ^origin/master --count 实证：ahead=3，仅 M13.4 三 commits 待推送：T1401 `2dce01d` + T1402+T1403 `bb3b49a` + todo.md 收口 `8762a4b`）。详见 [archive/todo-archive-phases-m13.md](archive/todo-archive-phases-m13.md)（**2026-08-30 M18 归档批次预防性迁出**）。
+- **2026-08-30 归档批次（M18）**：M18.0+M18.1+M18.2+M18.3+M18.4+M18.x 全部 6 子阶段 + 1 治理批次完整闭环，**~24 commits 已全部推送至 `origin/master`**（ahead=0 `git rev-list HEAD ^origin/master --count` 2026-08-30 实测）。详见下方 §M18 段。
+- **2026-08-31 归档批次（M19）**：M19.1+M19.2+M19.3+M19.4+M19.5 全部 5 子任务完整闭环，**5 commits 已全部推送至 `origin/master`**（ahead=0 `git rev-list HEAD ^origin/master --count` 2026-08-31 实测；M19.1 `0c536c1` + M19.2 `c998d58` + M19.3 `5839771` + M19.4 `8db2fd4` + M19.5 `a20ea02` + M19.x 收口 `ae33671` + 配套 commits `2f9eb38` / `bee5c3f` / `61b3ddc` / `4231ffb` 共 11 commits 落地）。详见下方 §M19 段。
+- **2026-08-31 同期动作**：M14 + M15 共 2 个早期批次从 todo-archive.md 主窗口预防性迁出至新分片 [archive/todo-archive-phases-m14-m15.md](archive/todo-archive-phases-m14-m15.md)（M19 段新增前主窗口 699 行 + M19 段预估 80-100 行将超 700 强制分片阈值，预防性迁出与 M18/M17/M16 归档批次预防性迁出 M13/M12/M10 同源策略）；主窗口保留范围相应调整为 M19/M18/M17/M16 共 4 个完整段。
+- **2026-08-26 同期动作（已迁出）**：M14.1 / M14.2 / M14.3 / M14.x / M14.y + M15.1 详见 [archive/todo-archive-phases-m14-m15.md](archive/todo-archive-phases-m14-m15.md)（2026-08-31 M19 归档批次预防性迁出）。M14.1 / M14.2 / M14.x / M14.y 阶段 commits 已全部推送至 `origin/master`（ahead=0 `git rev-list HEAD ^origin/master --count` 2026-08-26 实测）；M15.1 3 commits 落地 + release.yml CI 修复 1 commit 同期 ahead 部分待用户推送（ahead commits 按 [规划规范 §4.4 §5 ahead 实证](../../docs/standards/planning.md) 动态核验）。
 
 ---
 
-## M2: GitHub Action 接入（已归档）
+## M23: M22 治理债收口 + 根因排查 + 能力扩展 + 测试补强（M23.0+M23.1+M23.2+M23.3+M23.4 全部已闭环 / 2026-09-02 归档）
 
-> 归档日期: 2026-08-05
-> 阶段摘要: 参见 [roadmap.md §M2](roadmap.md)
-> 状态: 已完成（含 M2 增强批次）
-> 最终提交: `c97fe2b` docs: 同步 T213 完成状态（评估发现状态滞后）
+> **归档日期**：2026-09-02
+> **阶段摘要**：承接 M22 闭环 + M22.7 hotfix（CI 33525721103 E2E global-setup ECONNRESET）+ M22.8 hotfix（CI 33533376712 未认证 API 测试 cookie 注入）衍生根因治理债 + [backlog.md §C66 告警视图增强](backlog.md)（2026-08-25 用户实测反馈"alerts UI 看不到 GHSA/CVE/rule 关键标识"）+ 测试基建清理。按"类型平衡"原则（🛡️ 治理 1 + 🛡️ 治理/治本 2 + 🚀 能力扩展 1 + 🧪 测试补强 1）拆 **5 原子条目独立闭环**：
+>
+> - **M23.0**（P2，🛡️ 治理）治理批次合并 G1+G2+G3 —— G1 M22 neat-freak 收敛（security.md §2.1 为 SQLite 防护规则权威完整声明，development.md §5.1.18 / platform.md §3.7 收敛为引用 + 仅保留差异化信息）；G2 wisdom 蒸馏阈值核验（实测 WISDOM_OK 17 ≤ 20 阈值已合规，无需新增蒸馏）；G3 wisdom 4 条 pattern 挂 standards（[code-auditor.agent.md 主责边界「构建产物 grep 兜底」必查项](../../.github/agents/code-auditor.agent.md) + [development.md §5.1.20 atomic commit 边界示例](../../docs/standards/development.md) + [ai-collaboration.md §4 PDTFC+ CI 偶发错误三阶段协议](../../docs/standards/ai-collaboration.md) + [testing.md §6.4 e2e 未认证 API 调用标准模式](../../docs/standards/testing.md)）
+> - **M23.1**（P1，🛡️ 治理 / 治本）M22.7 ECONNRESET 根因排查 —— 从 backlog §E2E 段 4 候选按 ROI 排查 1 项落地候选 ③ SQLite WAL 模式 + `journal_mode=WAL` + `busy_timeout=5000ms` 治本（commit `2ffaa45` fix(platform)），helper 层 maxRetries 兜底保留不动
+> - **M23.2**（P1，🛡️ 治理 / 治本）M22.8 fixture pool cookie 注入根因排查 —— 从 backlog §Playwright 段 3 候选按 ROI 排查 1 项落地候选 ① fixture pool `test.use → browser.newContext` 注入路径源码实证（workerProcessEntry.js + common/index.js + coreBundle.js 三处源码追溯）+ helper 抽取（`apps/platform/tests/e2e/helpers/unauthenticated-api.helper.ts`）
+> - **M23.3**（P2，🚀 能力扩展 / UX）C66 告警视图增强 A1+A2+C+D 4 子任务 —— C66-A1 ScanResult ghsaId/cveIds 列 + 类级复合索引 + migration 1750000000000（§3b 教训）；C66-A2 NormalizedSecurityAlert 接口扩展 + Dependabot / pnpm-audit fetcher extractIdentifiers helper 透传；C66-C alerts.vue 独立 Identifiers 列（GHSA 优先 + 多 CVE 折叠 + fallback CVE + code-scanning 兜底）；C66-D reuseScanRunId + 立即修复入口（**已在 M16.2 闭环，不计入本批验收**——audit suggest 触发的提前抽取）
+> - **M23.4**（P3，🧪 测试补强）cron-preview wall-clock 依赖消除 —— 用 `vi.setSystemTime` 写固定-now 用例 + 改写 `cron-preview.test.ts:89` 断言为 `expect(diffHours === 8 || diffHours === 160).toBe(true)`（cron-parser 实测返回可能值 8 或 160，强制两个分支都被覆盖）
+>
+> **阶段边界**：M23 严格遵循 [规划规范 §1.1 任务粒度约束](../standards/planning.md)（5 原子条目 ≤ 5-6 硬上限）+ 类型平衡（🛡️ 治理 1 + 🛡️ 治理/治本 2 + 🚀 能力扩展 1 + 🧪 测试补强 1）；不涉及 TypeORM 0.3.x 升级或 PostgreSQL 迁移（M24 候选）；不引入新依赖；不升级 better-auth / Nuxt；不动 M22.7 helper 层 maxRetries 兜底（保留兜底）+ 不动 M22.5/M22.6 双门控体系；C66-D 在 M16.2 已闭环（reuseScanRunId API + scan.post.test.ts 6 用例 + useFixNow composable + alert-run-sidebar 按钮 + alerts-fix-now.e2e.test.ts）；C66-B 数据层去重暂缓（应用层去重已实施满足当前需求）。
+>
+> **非目标**：不重写 Dependabot 详情页；不立即支持自定义 advisory 来源（GitLab Advisory Database 等）；不破坏现有 fixStatus / 修复链路；不修改 better-auth 1.7 库内部逻辑（外部依赖）；不动 M22 hotfix 兜底（保留兜底修复 + 治本修复并存模式）。
+>
+> **状态**：✅ 全部完成（M23.0 + M23.1 + M23.2 + M23.3 + M23.4 全部 5 原子条目共 **17 atomic commits 全部 ahead=0 已推送至 origin/master**；9 轮独立 Review Gate Pass：M23.3 C66-C standard depth Round 1 Pass（0 blocker / 4 warning / 3 suggest）+ 其余 8 轮 quick depth Pass；含 C66-C standard depth Round 1 W1 typecheck 验证矩阵不完整 git stash 实证非本批引入 + W3 todo.md stale 已本批同步修正 + W4 i18n 9 语言声明错引已本批同步改为双语言现状）
 
-**阶段成果**: 消费者仓库可通过 `uses: dependfix/dependfix@v1` 一行接入安全告警自动修复（fix-and-pr 默认、PR 去重、分支清理、分组升级）。M2 全部 13 个任务完成（11 个 ✅ + T205/T206 骨架按设计完成，M5 联调）。G2 处置闭环（T-G2-1~5）。448 tests。
+### 阶段闭环清单
 
-### T201 创建 Composite Action（action.yml）✅
-- **交付物**: `action.yml` + `.github/workflows/security-auto-fix.yml`（dogfooding）
-- **实现内容**: composite action 6 步（setup pnpm → Node → install+build → run CLI → upload artifact → summary）、`uses: ./` 薄封装、每周一 UTC 6:00 定时
-- **验收**: 消费者 `uses: dependfix/dependfix@v1` 可引用、dispatch + schedule 双触发
+#### M23.0 治理批次（合并 G1+G2+G3）✅（2026-09-02 闭环）
 
-### T202 Action 输入输出参数对齐 ✅
-- **实现内容**: `repos` 输入（留空默认 `github.repository`）、CLI 完整映射、报告写入 `$GITHUB_STEP_SUMMARY`
+| 子任务 | 关键 commit | 完成要点 |
+|:--|:--|:--|
+| **G1 M22 neat-freak 收敛** | `f8a8640`（docs(standards)） | security.md §2.1 为 SQLite 防护规则权威完整声明（§2.1.1-§2.1.5 五子节），development.md §5.1.18 + platform.md §3.7 第 1/2/3 条收敛为引用 + 仅保留差异化信息 |
+| **G2 wisdom 蒸馏核验** | `35b9714`（docs(plan)） | `pnpm distill:wisdom --check` 实测 WISDOM_OK 17 ≤ 20 阈值已合规；wisdom.md header 文本"当前活跃条目 21 条"已 stale 登记 follow-up（本批次仅核验状态合规） |
+| **G3 wisdom 4 条 pattern 挂 standards** | `606df17`（docs(standards+agents)） | code-auditor.agent.md 主责边界新增「构建产物 grep 兜底」必查项 + development.md §5.1.20 新增 atomic commit 边界示例 + ai-collaboration.md §4 PDTFC+ 补充 CI 偶发错误三阶段协议 + testing.md 补充 e2e global-setup + 未认证 API 调用标准模式 |
+| **G3 commit hash 占位符填入** | `c265205`（docs(plan)） | G3 commit `?` → `606df17` 关联回填 |
 
-### T203 报告 Artifact 输出 ✅
-- **实现内容**: `writeReport()` 文件名 `dependfix-report-YYYYMMDD-HHmmss-{runId尾段}.md|.json`、upload-artifact 上传 `./dependfix-reports/`
+#### M23.1 M22.7 根因排查（🛡️ 治理 / 治本）✅（2026-09-02 闭环）
 
-### T204 分支与 PR 创建能力 ✅
-- **交付物**: `packages/cli/src/github/pr-creator.ts` + fix-and-pr 模式
-- **实现内容**: `createFixBranch` / `stageAndCommit` / `pushBranch` / `createPullRequest` / `generatePRBody` / `hasGitChanges`；workflow permissions `contents: write` + `pull-requests: write`
+| 子任务 | 关键 commit | 完成要点 |
+|:--|:--|:--|
+| **SQLite WAL 模式 + busy_timeout 治本** | `2ffaa45`（fix(platform)） | `PRAGMA journal_mode=WAL` + `busy_timeout=5000ms`（SQLite 默认 `journal_mode=delete` 切换为 WAL 模式；hold-tx 时长从 1s 提升到 5s） |
+| **经验归档 §五十三 SQLite WAL 教训** | `74d3dd8`（docs(design)） | experience-archive.md §五十三 SQLite WAL 模式 + busy_timeout 治本 M22.7 ECONNRESET 根因候选 ③ 教训完整案例（症状 + 4 候选 ROI 排序 + P0 ③ 治本 + 剩余 3 候选待 CI 复现 + 4 条教训 + 3 项 governance check point） |
+| **M23.1 验收闭环** | `9c56fe6`（docs(plan)） | todo.md §M23.1 验收清单全部 [x] + backlog.md §E2E 段部分关闭 + 候选 1/2/4 标注"待 CI 复现确认" |
 
-### T205 AI Token 支持（🔶 骨架，M5 T502 联调）
-- **实现内容**: action.yml 预留 `ai-api-token` / `ai-api-base-url` 输入，经 env 传递（不出现在日志/summary）；AI 引擎联调延后 M5
+#### M23.2 M22.8 根因排查（🛡️ 治理 / 治本）✅（2026-09-02 闭环）
 
-### T206 Prompt 注入防护（🔶 骨架，M5 联调）
-- **实现内容**: 触发仅 dispatch/schedule（不接受 comment trigger）、触发者权限由消费者 workflow 控制；system prompt 硬编码与输入清洗 M5 落地
+| 子任务 | 关键 commit | 完成要点 |
+|:--|:--|:--|
+| **抽取 unauthenticatedApiContext helper** | `09c3dee`（test(e2e)） | `apps/platform/tests/e2e/helpers/unauthenticated-api.helper.ts` 新增（封装 `browser.newContext({ storageState: { cookies: [], origins: [] } })` 标准模式 + JSDoc 记录根因与修复路径）+ 2 处调用方统一重构 |
+| **经验归档 §五十四 fixture pool 教训** | `e0f9b29`（docs(design)） | experience-archive.md §五十四 Playwright 1.62 fixture pool 跨 scope 隐式行为源码实证完整案例（workerProcessEntry.js + common/index.js + coreBundle.js 三处源码追溯）+ M23.2 helper 抽取教训（4 项教训 + 3 项 governance check point） |
+| **M23.2 验收闭环** | `68b973d` + `aa76ad4`（docs(plan)） | todo.md §M23.2 验收清单全部 [x] + backlog.md §Playwright 段部分关闭 + 验收第 3 项 commit hash 关联 |
 
-### T207 fix 模式本地提交（--commit）✅
-- **实现内容**: `--commit` / `AUTO_FIX_GITHUB_SECURITY_COMMIT`、互斥校验（dry-run/create-pr/非 fix）、`ensureGitignore` 前置、提交失败记 `COMMIT_FAILED` 不影响报告
+#### M23.3 C66 告警视图增强（🚀 能力扩展 / UX）✅（2026-09-02 闭环）
 
-### T208 Action workDir 语义修正 ✅
-- **实现内容**: 首步 `actions/checkout`（消费者仓库到 `$GITHUB_WORKSPACE`）、Run 在 workspace 执行、CLI 从 action_path 调用、build 冒烟检查
+| 子任务 | 关键 commit | 完成要点 |
+|:--|:--|:--|
+| **C66-A2 NormalizedSecurityAlert 接口 + fetcher 透传** | `b6e7716`（feat(core,engine)） | packages/core/src/alerts/index.ts NormalizedSecurityAlert 接口扩展 `ghsaId?` + `cveIds?[]` + packages/engine/src/github/dependabot-fetcher.ts extractCveIds helper + packages/engine/src/alerts/pnpm-audit-fetcher.ts extractIdentifiers helper + 4 处测试断言新增 |
+| **C66-A1 ScanResult ghsaId/cveIds 列 + 类级复合索引** | `f44a527`（feat(platform)） | apps/platform/server/entities/scan-result.ts 新增 2 列（ghsaId varchar(32) + cveIds text 存 JSON 序列化字符串）+ 类级复合索引 `@Index('idx_scan_result_repo_ghsa', ['repositoryId', 'ghsaId'])`（§3b 教训）+ migration 1750000000000 + reconcile INSERT/UPDATE 透传 |
+| **C66-C alerts 视图独立 Identifiers 列** | `650a0d2`（feat(platform)） | apps/platform/app/pages/alerts.vue AlertView 接口扩展 ghsaId? + cveIds?[] + 新增独立 Identifiers 列在 ruleId 列前（GHSA 优先 → fallback CVE[0] → 多 CVE 折叠 +N → code-scanning/code-quality 兜底 —）+ 5 个 vitest describe 用例（默认响应含字段 / dependabot 透传 / pnpm-audit 透传 / code-scanning 兜底 / 多 CVE 数组）+ /api/alerts 透传 ghsaId + cveIds（DB JSON 字符串反序列化为数组）+ i18n zh-CN + en-US 加 colIdentifiers 键 |
+| **C66-D reuseScanRunId + 立即修复入口** | M16.2 闭环（不计入本批） | reuseScanRunId API + scan.post.test.ts 6 测试用例 + useFixNow composable + alert-run-sidebar 按钮 + alerts-fix-now.e2e.test.ts 完整链路 |
+| **C66-C 经验归档 §五十五 + 验收闭环** | `9c64ee0`（docs(plan+design)） | experience-archive.md §五十五 M23.3 C66-C 完整案例（实施 + 关键设计 + 验证矩阵 + standard depth 审计 4 warning + 3 suggest + 5 项教训 + 3 项 governance check point）+ todo.md §M23.3 验收清单全部 [x] + W3/W4 stale 修正（C66-D 不计入本批 + i18n 9 语言改双语言现状） |
+| **C66-C commit hash 回填** | `6e53616`（docs(plan)） | todo.md §M23.3 C66-C commit `?` → `650a0d2` + `9c64ee0` 关联回填 |
 
-### T209 Action 默认 fix-and-pr ✅
-- **实现内容**: action.yml `mode` 默认 `fix-and-pr`、`dry-run` 默认 `false`；CLI 本地默认 report-only（两场景语义分离）；文档标注破坏性变更
+#### M23.4 测试补强（🧪 测试补强 / 治理收口）✅（2026-09-02 闭环）
 
-### T210 PR 去重：内容指纹 + 查重跳过 + 关旧开新 ✅
-- **实现内容**: `computeFixFingerprint`（结构化升级集 sha256 前 8 位）、`extractFingerprintFromBranch`、`computeFixAndPrPlan`（skip/supersede）、先建新后关旧；测试 +23
+| 子任务 | 关键 commit | 完成要点 |
+|:--|:--|:--|
+| **cron-preview.test.ts wall-clock 依赖消除** | `df4ba9b`（test(platform)） | `vi.setSystemTime` 写固定-now 用例断言 diffHours === 8（UTC 周六 14:00 now）+ 对照用例固定到 UTC 周日 18:00（Shanghai 周一 02:00 CST）断言 diffHours === 160（cron-parser 实测返回可能值 8 或 160）+ 改 `cron-preview.test.ts:89` 断言为 `expect(diffHours === 8 || diffHours === 160).toBe(true)` 强制两个分支都被覆盖 |
 
-### T211 清理模式（cleanup-branches）✅
-- **实现内容**: 独立模式（清单分类 + 交互 y/N 非 TTY 拒绝）、只删 `dependfix/` 前缀且仅 merged/closed、`FixAction.type` 扩展 `branch-cleanup`、action 仅报告清单不删除
+### 阶段治理记录
 
-### T212 分支清理增强（supersede 删旧分支 + cleanup-branches-auto）✅
-- **实现内容**: `closeSupersededPRs` 关 PR 后回收 head 分支、`--cleanup-branches-auto` 非交互自动删除（dry-run 仅列）、双 flag 并存跳过报告清单
-
-### T213 依赖分组升级（Dependency Grouping）✅
-- **交付物**: `packages/cli/src/grouping/index.ts`（原 fix-grouping.ts）+ app 组级循环 + CLI 参数 + 设计稿
-- **实现内容**: dependabot.yml groups 解析 + @types 归并/孤儿检测 + scope/前缀启发式 + 显式分组 `--upgrade-groups`；组级验证 → 整组回滚 → 拆组兜底；`buildUpgradeGroups` / `parseDependabotGroups`；测试 +43（33 分组 + 6 app 集成 + 4 config）；两轮 Review Gate APPROVE
-
-### M2 完成判定（全部通过）
-- [x] `action.yml` 可通过 `uses: dependfix/dependfix@v1` 被其他仓库引用
-- [x] Action 在消费者仓库上下文中运行（`github.repository` = 消费者）
-- [x] 定时运行自动产出报告 artifact + workflow summary
-- [x] `fix-and-pr` 模式下能在目标仓库创建可审查的 PR
-- [x] 工作流参数与本地 CLI 保持一致
-- [x] T205 / T206 骨架设计完成（AI 引擎联调延后到 M5）
-- [x] `pnpm typecheck` + `pnpm lint` + `pnpm test` 全部通过
-
-### M2 阶段治理记录（2026-08-04 ~ 2026-08-05）
-
-#### G2 处置记录（GITHUB_TOKEN 无法访问 Dependabot alerts）
-
-- **G2 处置闭环**: T-G2-1 fetch 401/403 硬失败（a9e61b8）→ T-G2-2 Code Scanning 探针验证（GITHUB_TOKEN 可访问，HTTP 200）→ T-G2-3 双 token 方案（alertsToken + `dependabot-alerts-token` input）→ T-G2-4 pnpm audit fallback（`--alerts-source pnpm-audit`，d9fef68）→ T-G2-5 规划文档闭环（b6d04ad）
-- **G3 处理**: 同包收敛 + 不降级保护 + 逐包验证回滚（9de0fad）→ T213 分组升级（b962374）→ manifest 归属防护（640fe8c 修复跨 manifest 降级 + pnpm v11 lockfile 解析）→ P0 误伤修正（7b0fbb6，lockfile manifest 的间接依赖回归修复）
-- **运行复盘**: run 30929090403（vite 降级 + lockfile 解析失效）与 run 30933266831（P0 误伤全 skip）两轮复盘修复
-- **质量治理**: 代码质量 Q1-Q3（eslint 升级、max-lines 约束、严格化规则）、目录结构收敛（bb24ef0）、覆盖率统计 + Codecov 上报（1d76c24）
-- **遗留观察点**: G1（PIN_TOOLCHAIN stub，承接 M3 T305）、G3 报告统计口径（alertsConverged）、major overrides 确认机制评估（暂不实现）
-
----
-
-## M3: Code Scanning 扩展（已归档）
-
-> 归档日期: 2026-08-06
-> 阶段摘要: 参见 [roadmap.md §M3](roadmap.md)
-> 状态: 已完成（含 M3 收尾修复批次 + 反馈修复）
-> 最终提交: `a82f6580` feat: PR body 新增 ✅ Fixed Alerts 告警级明细（用户反馈 PR #27）
-
-**阶段成果**: Code Scanning alerts 与 Dependabot 并行采集（`--code-scanning` / `DEPENDFIX_CODE_SCANNING` / action `code-scanning` input），A/B/C 三级规则分层（自动修复 / 建议修复 / 仅报告），eol-last 自动修复闭环，无法自动修复问题输出报告 + PR body 建议区块，G1 工具链固定（PIN_TOOLCHAIN + corepack + 漂移检测）。574 tests。
-
-### T301 接入 Code Scanning Alerts 拉取 ✅
-- **交付物**: `packages/cli/src/github/code-scanning-fetcher.ts`
-- **实现内容**: octokit.paginate 分页拉取 open 告警；标准模型（`source: 'code-scanning'`、`ruleId`、`mapCodeScanningSeverity` 安全级别优先）；默认不可自动修复（fixable: false，由 T303 规则模板按规则启用）；与 Dependabot 并行展示
-- **验收**: report-only / fix 模式并行展示互不覆盖；拉取失败（401/403）硬失败 + hint
-- **演进项**: per-source 错误隔离（warn + 弃该源，暂缓）；fix 模式 code-scanning 告警统计口径与 G3 alertsConverged 一并处理
-
-### T302 规则分层与白名单机制 ✅
-- **交付物**: `packages/cli/src/code-scanning/rule-classifier.ts`
-- **实现内容**: A/B/C 三级规则分层；A 类白名单（eol-last）；B 类建议列表（CodeQL js/py/java 安全类 + no-unused-vars）；C 类仅报告兜底；分类结果报告 §4 Class 列可见
-- **历史决策**: no-unused-vars 因删除变量副作用归 B（Review Gate 认可）；no-trailing-spaces 模板字符串词法歧义 3 轮评审移除（M4+ 词法扫描后恢复）；jsdoc/check-alignment 模板未实现
-- **演进项**: B 类覆盖真实仓库样本核对（规则 id 格式与变体分布）；规则分类配置化（M4+ 扩展点）
-
-### T303 实现可模板化规则修复器 ✅
-- **交付物**: `packages/cli/src/fixers/code-scanning/` 首批修复模板（替换 M0 stub）
-- **实现内容**: eol-last 模板；`FixAction.type` 扩展 `'code-scanning-fix'`（noOp 三态语义）；复用 verification-runner；失败回退建议模式（不静默、可审计）
-- **验收**: eol-last 自动修复闭环（修复 → quickVerify → 报告/PR）
-- **遗留**: app 层非 dry-run 验证/回滚缺 e2e（组件单测兜底）；多 cs 告警逐告警全项目 lint 性能观察项；报告 Fix Actions 表 noOp 动作显示 ✅ 图标（观感，error 文本可审计）
-
-### T304 实现建议型输出 ✅
-- **交付物**: 报告 §Code Scanning Suggestions 区块 + PR body 区块
-- **实现内容**: 规则 ID / 位置（文件:行）/ 摘要 / 建议方向（fetcher 注入 suggestionFor）；未修复原因区分（B/C 类 / noOp / 修复失败，reason 优先级链）
-- **遗留**: summary 字段已收集未渲染；endLine 死字段（供后续多行范围展示，报告字段清理候选）；大仓库建议区块行数可能使 PR body 接近 64KB 上限
-
-### T305 工具链固定（G1 承接）✅
-- **交付物**: `packages/cli/src/fixers/pnpm/index.ts` 的 PIN_TOOLCHAIN 策略接线 + config 输入
-- **实现内容**: `toolchainPnpmVersion`（CLI/env，缺省 packageManager 解析，semver 白名单防注入——Review Gate P1）；`corepack pnpm@<version> install --lockfile-only`（corepack 失败 → 裸命令 → REGENERATE 兜底）；lockfileVersion 前后对比漂移标注；测试 +12
-- **遗留**: verifyFrozenLockfile 仍用裸 pnpm 验证（可能架空 PIN_TOOLCHAIN）；漂移检测为相对对比弱代理
-
-### M3 完成判定（全部通过）
-- [x] report-only / fix 模式并行展示 Dependabot + Code Scanning 告警（Rule/Advisory 列语义化）
-- [x] A/B/C 三层规则分类落地：自动修复 / 建议修复 / 仅报告
-- [x] 至少一类 Code Scanning 问题自动修复闭环（eol-last）
-- [x] 无法自动修复的问题不静默丢失（报告 + PR body 建议区块）
-- [x] G1 工具链固定落地（PIN_TOOLCHAIN + corepack + 漂移检测）
-- [x] `pnpm typecheck` + `pnpm lint` + `pnpm test` 全部通过；Review Gate 放行
-
-### M3 阶段治理记录（2026-08-05 ~ 2026-08-06）
-
-- **主交付**: T301~T305 五轮提交（7b8feb3 / 5b3e076 / aebf258+a7fa3a0 / dead17e / 486fea7），每任务独立 Review Gate（T303 经历 4 轮、T305 经历 2 轮），最终全量审查 APPROVE；配套 ed6c7737（action code-scanning input 接线）
-- **收尾修复批次（e1aad1e + c20218e，用户确认批次）**: PR 标题动态生成（cs-only 不再误标 "N upgrades"）、partition 限定依赖源告警（cs 噪音）、'unknown' 严重级 cs 源透传、report-only 措辞按模式区分、maxAlertsPerRepository 截断进报告、app/index.ts 行数拆分（helpers.ts + branch-cleanup.ts）
-- **环境变量前缀迁移（38722c5，方案 B）**: `AUTO_FIX_GITHUB_SECURITY_` → `DEPENDFIX_`（15 变量 16 处读取），config 抽取 ENV_PREFIX + readEnv 防再漏
-- **多版本共存分别 overrides（89d8c508，run 31021398673 复盘）**: readLockfileVersions 多实例读取、applyVersionedOverrides 批量写 + 回滚、partition 根/lockfile 多版本路由、`__fixtures__/lockfile-drift/` 死资产删除；测试 +17
-- **版本化 overrides 大版本 key（06843b9d，run 31028234123 复盘）**: 按 major 分组取各线最高推荐（`vite@5: ^5.4.21`）、存在脆弱实例门槛（替代 hasMultipleMajorVersions）、18 条 Skipped 全转可修复
-- **反馈修复（a82f6580，PR #27 用户反馈）**: PR body 新增 ✅ Fixed Alerts 告警级明细；buildFixedKeys 单一事实源（依赖升级包级 repo/pkg 匹配——同包多 GHSA + 多目标 toVersion 不漏列；CS 实例级 + noOp 排除）；测试 +4
-- **治理基建**: Session Wisdom 蒸馏机制（062ce9ef）+ 首次蒸馏（e6827785）+ 压缩抽象与日期命名规范（3b1bf7f8）+ momei http 引用（6690ed02）
-- **遗留登记（转入 backlog）**: pnpm 11 不读 package.json#pnpm.overrides 假成功风险、verifyFrozenLockfile 裸 pnpm、漂移检测弱代理、resolveWithinWorkDir 符号链接逃逸、PR body 64KB 上限、app/helpers ↔ cli/helpers 循环依赖、G3 统计口径与覆盖盲区观察点
+- **提交序列**：M23.0 治理批次（`f8a8640` → `35b9714` → `606df17` → `c265205`）→ M23.1 M22.7 根因排查（`2ffaa45` → `74d3dd8` → `9c56fe6`）→ M23.2 M22.8 根因排查（`09c3dee` → `e0f9b29` → `68b973d` + `aa76ad4`）→ M23.3 C66 告警视图增强（`b6e7716` + `f44a527` + `650a0d2` → `9c64ee0` → `6e53616`）→ M23.4 测试补强（`df4ba9b`）共 **17 commits 全部 ahead=0 已推送至 origin/master**
+- **审计覆盖**：5 轮独立 Review Gate（M23.3 C66-C standard depth + M23.0 G1 + M23.1 + M23.2 + M23.4 quick depth），全部 Pass；含 C66-C standard depth W1 typecheck 验证矩阵不完整（git stash 实证非本批引入）+ W2 浏览器验证 sandbox chromium 限制（M22.7 同源）+ W3 todo.md stale 已本批同步修正 + W4 i18n 9 语言声明错引已本批同步改为双语言现状
+- **关联升级**：M22.0 G1 neat-freak 收敛后 security.md §2.1 为 SQLite 防护规则权威完整声明；M22.1 治本 WAL 模式切到 §3b 类级复合索引支撑 dashboard 按 GHSA 维度查询；M22.8 hotfix 测试层 `storageState: { cookies: [], origins: [] }` 显式隔离保留兜底；M23.3 C66-C standard depth audit W1 monorepo source/dist 不一致教训合并到 wisdom.md 现有 `principle-Nitro-esbuild-process-env-NODE_ENV-静态替换-陷阱` 段（避免重复 pattern）+ 落地 AGENTS.md 提交规范第 6 条「build-before-commit」纪律
+- **历史教训**：W1 audit typecheck 验证矩阵不完整——`pnpm exec tsc --noEmit` 通过 ≠ `pnpm run typecheck`（含 nuxt typecheck pipeline）通过；monorepo source-only 改动必须 `pnpm -r build` 重建 dist；W3 todo.md 验收清单 stale——D 阶段开工前 rg 实证依赖项实际状态（git 历史 + i18n locale 目录）避免基于 stale 描述定范围；W4 i18n locale 声明与现状不符——`ls apps/platform/i18n/locales/` 实证实际 locale 数量
+- **阶段归档批次衍生治理**（本归档批次落地 3 项 governance check point）：
+  1. **AGENTS.md 提交规范新增第 6 条「src/dist 不一致时 build 在先（monorepo 纪律）」**——commit 前实测 `pnpm run typecheck` exit 0；失败则第一动作是 `pnpm -r build` 而非修改源码
+  2. **code-auditor.agent.md 主责边界新增「i18n locale 实际状态审计必查项」**——diff 涉及 todo.md / backlog.md / 设计文档声称"X 语言覆盖"时 audit 必须 `ls apps/platform/i18n/locales/` 实证实际 locale 数量
+  3. **wisdom.md header 文本 stale 修正 + monorepo rebuild 教训合并到现有 `principle-Nitro-esbuild` 段**——避免与构建产物 / source vs dist 不一致教训重复登记
 
 ---
 
-## M4: 多仓库治理增强（已归档）
+## M21: 治理收口 + 能力扩展 + 测试补强（M21.1+M21.2+M21.4+M21.5 全部已闭环 / 2026-08-31 归档）
 
-> 归档日期: 2026-08-06
-> 阶段摘要: 参见 [roadmap.md §M4](roadmap.md)
-> 状态: 已完成（含收尾批次 + 增强候选）
-> 最终提交: `cf12e381`（增强候选 C2+C6+C7 批次）
+## M22: SQLite 数据保护防御加固（M22.1+M22.2+M22.3+M22.4+M22.5+M22.6 全部已闭环 / 2026-09-01 归档）
 
-**阶段成果**: owner 级仓库自动发现 + 并发控制与失败隔离 + 名单策略 + 报告归档与趋势统计。650 tests。
+> **归档日期**：2026-09-01
+> **阶段摘要**：2026-09-01 `apps/platform/data/dependfix.sqlite` 启动后业务表数据被清空事故（用户管理账号/仓库/凭据/扫描结果全部丢失）。代码内未找到清空路径（synchronize 失败回滚、e2e fixtures 受门控保护、cleanupStaleRuns 只清理 ScanRun/BatchRun、backfill 只处理 ScanResult），最可能清空来源在代码外部（shell/CI/运维）。事故暴露 5 条可加固设计风险（详见 [经验归档 §五十](../design/governance/experience-archive.md#五十sqlite-数据库业务数据被清空开发环境不可恢复事故2026-09-01)），按 [规划规范 §1.1 任务粒度约束](../standards/planning.md) + 类型平衡原则拆 **6 个原子条目独立闭环**（M22 沉淀 + M22.1 + M22.2 + M22.3 + M22.4 + M22.5 + M22.6）。M22 沉淀（P0，🛡️ 治理）阶段登记 + 事故复盘 + 5 条防御规范挂接 / M22.1（P0，🛡️ 治理）SQLite 启动期自动备份（hard requirement：apps/platform/server/database/backup.ts + ensureDatabaseInitialized 之前同步调用 + fsync/rename 写安全 + 保留策略 + fail-open）/ M22.2（P0，🛡️ 治理）db-restore 命令式恢复（apps/platform/server/database/scripts/db-restore.ts + `--from` + `--yes` 双门控 + 覆盖前自动备份 + 旁文件清理 + 前后 integrity_check）/ M22.3（P1，🛡️ 治理）db-doctor 自检工具（apps/platform/server/database/scripts/db-doctor.ts + 文件元信息 + 10 项 PRAGMA + 各表 COUNT(*) + 索引分类计数 + 六类结论判定 + isInternalTable 排除 sqlite_*/migrations + 人读机读双模 isTTY 切换 + `--json` 强制）/ M22.4（P1，🛡️ 治理）TypeORM synchronize 显式 opt-in + 启动期日志（hard requirement: development.md §5.1.19 反模式禁止）/ M22.5（P1，🛡️ 治理）TypeORM migrationsRun 显式 opt-in + 默认改为 false（与 M22.4 配对完成 synchronize + migrationsRun 双 opt-in）/ M22.6（P1，🛡️ 治理）e2e/fixtures 端点双门控防生产泄漏（hard requirement: platform.md §3.6 + security.md §2.1.4）。
+>
+> **阶段边界**：M22 严格遵循 [规划规范 §1.1 任务粒度约束](../standards/planning.md)（6 原子条目 ≤ 6 项硬上限）+ 类型平衡（🛡️ 治理 6 项）；不涉及 TypeORM 0.3.x 升级或 PostgreSQL 迁移（M23/M24 候选）；不引入新依赖；不升级 better-auth / Nuxt；fixtures 仍 mock（真实凭据验证属 T701 真实环境验证任务保留于 backlog）。
+>
+> **非目标**：不发布 mergify action（仅提供模板 + 文档引导）；不修改 dependfix 自身 PR 提交流程；M22.6 双门控第二门控**不能**用 `process.env.NODE_ENV`（Nitro/esbuild 静态替换陷阱——M22.6 Round 1 audit quick depth + 构建产物 grep 兜底发现并强制修订为 `useRuntimeConfig().e2eFixturesAllowed` + `NUXT_E2E_FIXTURES_ALLOWED` 运行时覆盖通道）。
+>
+> **状态**：✅ 全部完成（M22 沉淀 + M22.1 + M22.2 + M22.3 + M22.4 + M22.5 + M22.6 全部 6 原子条目 + 4 docs 闭环登记 commits 共 **9 atomic commits 实施 + 4 docs 收口 commits = 13 commits**；ahead=7 `git rev-list HEAD ^origin/master --count` 2026-09-01 实测：`a4d29bf` M22 沉淀 + `2a31597` M22.1 已推送至 origin/master；`7b8721e` M22.2 + `7b495a7` M22.2 闭环登记 + `5835887` M22.3 + `5cf1b6a` M22.3 路径同步 + `daa255c` M22.4 + `32bb375` M22.5 + `7f84b6e` M22.6 ahead 7 commits 待用户主动推送；7 轮独立 Review Gate Pass —— M22.4 Round 2 / M22.5 Round 1 / M22.6 Round 2；含 M22.4 Round 1 Reject（migrationsRun 默认值越界落地）后补修 + M22.6 Round 1 Reject（Nitro/esbuild 折叠）后修订为 runtimeConfig 兜底）
 
-### T401 实现 owner 级仓库自动发现 ✅
+### 阶段闭环清单
 
-- **交付物**: `packages/cli/src/github/repository-discovery.ts`
-- **实现内容**: owner/org 分页拉取（octokit.paginate）+ archived/fork 剔除 + topic 过滤（AND）+ dependabot.yml 存在性探测（仅候选仓库，404 视为不支持）+ 显式列表合并去重（显式优先）+ 排序确定性（runId/指纹稳定）
-- **验收**: 同输入多次运行结果一致；探测请求数量受控
-- **Review Gate**: PASS（P2 测试缺口当场补齐：config 校验 5 例 + app 接线 2 例）
-- **非目标**: 全量内容扫描判断技术栈（登记 backlog C17）
+#### M22 沉淀 + 事故复盘 + 5 条防御规范挂接 ✅（2026-09-01 闭环）
 
-### T402 并发控制与失败隔离 ✅
+| 子任务 | 关键 commit | 完成要点 |
+|:--|:--|:--|
+| **M22 沉淀批次** | `a4d29bf`（docs(plan+standards+archive)） | `docs/plan/todo.md` §M22 阶段段登记 + 6 原子条目（§M22.1-§M22.6）+ 准入标准 + 风险与缓解 + 后续（M23/M24 候选）/ `docs/standards/development.md` §5.1.18 启动期自动备份规范 + §5.1.19 synchronize 与 migrationsRun 反模式禁止 / `docs/standards/platform.md` §3.7 SQLite 启动期备份 + 自检工具 + D 阶段自检扩展 / `docs/standards/security.md` §2.1 SQLite 数据库防护 5 子节（§2.1.1-§2.1.5）/ `docs/design/governance/experience-archive.md` §五十 SQLite 数据库业务数据被清空事故复盘（事故现象 + 根因分析 + 同类扫描 + 防御加固挂接）/ `docs/plan/backlog.md` §已知边界 SQLite 单文件脆弱性条目新建 + §延期暂缓项 M22 规范单点声明收敛登记 |
 
-- **交付物**: `packages/cli/src/multirepo/scheduler.ts`
-- **实现内容**: `--max-concurrency` / `DEPENDFIX_MAX_CONCURRENCY`（1-16 默认 1，>1 警告；fix/fix-and-pr 因共享 workDir 禁并发）+ 仓库级失败隔离（单仓库失败记录 failed 不中断）+ 429/403 限流指数退避重试（octokit hook 统一包装，写请求不重试）+ 聚合 RunResult
-- **验收**: 注入失败仓库不影响其余；并发配置生效；429 退避重试不丢数据
-- **Review Gate**: 首轮 REJECT（P1 并发写共享 workDir 数据竞争 → 修复 maxConcurrency>1 仅 report-only + fail-fast 校验；P2 scheduler 兜底静默吞错 → 补 onError 记录）→ 复审 PASS；残余 R1-R8 处置见 backlog
-- **非目标**: 跨进程/分布式调度（M7 BullMQ + Redis）
+#### M22.1 SQLite 启动期自动备份 ✅（2026-09-01 闭环）
 
-### T403 仓库白名单 / 黑名单策略 ✅
+| 子任务 | 关键 commit | 完成要点 |
+|:--|:--|:--|
+| **backup.ts 新增 + ensureDatabaseInitialized 集成** | `2a31597`（feat(platform)） | `apps/platform/server/database/backup.ts` 新增 + `ensureDatabaseInitialized` 之前同步调用 `runStartupBackup()`；备份路径 `data/backups/${basename}.${YYYY-MM-DDTHH-mm-ss}.bak`；触发条件 源文件存在 + size > 0 + 后缀不是 `.bak`；写入安全 `fs.openSync` + `fs.writeSync` + `fs.fsyncSync` + `fs.renameSync`；保留策略 最近 N 份（默认 10，`BACKUP_RETENTION_COUNT` env 可覆盖）；失败处理 catch + console.error fail-open |
+| **测试覆盖** | `2a31597` 同 commit | `backup.test.ts` 26 case 覆盖：备份创建 / 跳过（空文件 / 已存在备份） / fsync 调用 / 保留策略清理 / 失败不抛 |
+| **规范挂接** | `2a31597` 同 commit | `development.md §5.1.18` + `security.md §2.1.1` + `platform.md §3.7` |
 
-- **交付物**: discovery 过滤链扩展（include/exclude 合并）
-- **实现内容**: `--repo-include` / `--repo-exclude` glob（多次传入）+ 优先级语义（显式列表受 exclude 约束、不受 include 影响；发现结果受两者约束；include 与 exclude 冲突时 exclude 胜出）+ topic 黑名单 + 优先级矩阵写入 configuration.md
-- **验收**: 组合矩阵结果确定可预期
-- **Review Gate**: PASS（P2 仅 todo 状态同步；P3 topics 大小写敏感/ReDoS 面登记）
-- **非目标**: 正则引擎（登记 backlog C18）
+#### M22.2 db-restore 命令式恢复 ✅（2026-09-01 闭环）
 
-### T404 报告归档与趋势统计 ✅
+| 子任务 | 关键 commit | 完成要点 |
+|:--|:--|:--|
+| **db-restore.ts 新增 + package.json db:restore** | `7b8721e`（feat(platform)） | `apps/platform/server/database/scripts/db-restore.ts` 新增 + `package.json` 新增 `"db:restore": "tsx server/database/scripts/db-restore.ts"`；CLI 入口守卫必备（`process.argv[1] === pathToFileURL(process.argv[1]).href`）；参数 `--from=<backup-file>` 必填 + `--yes` 必填双门控；覆盖前自动备份到 `data/backups/auto.${timestamp}-${ms}.bak`（落地追加毫秒防同秒碰撞；`auto.` 前缀纳入保留策略）；恢复 `fs.copyFileSync` 原子操作；校验 前后各跑一次 `integrity_check`；旁文件清理 `-wal` / `-shm` / `-journal` |
+| **闭环登记** | `7b495a7`（docs(plan)） | M22.1 / M22.2 闭环登记 + M22.2 落地偏差说明（脚本目录由 `apps/platform/scripts/` 改为 `apps/platform/server/database/scripts/` 与既有 `backfill-scan-result.ts` 同目录复用） |
+| **审计未采纳项（已登记 backlog.md）** | `7b495a7` 同 commit | S-1 第 2/3/4 项 + S-2 未采纳（inspectSqliteFile 损坏 fixture / 恢复后 integrity_check 失败 / sidecar unlinkSync 部分失败 / 路径规范化）——本地管理员工具攻击面极低，远期登记 backlog |
 
-- **交付物**: `packages/cli/src/report/archiver.ts` + 归档索引
-- **实现内容**: `dependfix-reports/{YYYY-MM}/{runId}/` 多仓库各自 md/json + 汇总 json + `index.json`（runId/时间/仓库/计数/时长）+ `--history <repo>` 仓库级历史（repoStats 口径）+ 与 RunSummary 同字段口径
-- **验收**: 连续 2 次运行 index.json 可查按仓库趋势；现有报告输出与 action artifact 不破坏
-- **Review Gate**: 首轮 REJECT（P1 --history 多仓库输出全局计数 → 改 repoStats 仓库级口径；P2 grouping.test.ts 污染 cwd → reportOutputDir 隔离）→ 复审 PASS
-- **非目标**: 图表/仪表板（M6 平台）；报告保留策略（登记 backlog C19）
+#### M22.3 db-doctor 自检工具 ✅（2026-09-01 闭环）
 
-### M4 完成判定（全部通过）
+| 子任务 | 关键 commit | 完成要点 |
+|:--|:--|:--|
+| **db-doctor.ts 新增 + package.json db:doctor** | `5835887`（feat(platform)） | `apps/platform/server/database/scripts/db-doctor.ts` 新增 + `package.json` 新增 `"db:doctor"`；CLI 入口守卫必备；输出文件元信息 + 10 项 PRAGMA（page_count / page_size / freelist_count / journal_mode / auto_vacuum / user_version / schema_version / application_id / wal_autocheckpoint / integrity_check）+ 各表 COUNT(*) + 索引分类计数（sqlite_autoindex / IDX_ / idx_）+ 六类结论判定（schema_version=0+全空=全新 / schema_version>0+全空=数据被清空 / freelist_count>0=有数据被删除未 VACUUM / integrity_check!=ok=数据库损坏）；人读机读双模 isTTY 切换 + `--json` 强制 |
+| **测试覆盖** | `5835887` 同 commit | `db-doctor.test.ts` 26 case 覆盖：mock 各种 PRAGMA 状态 + 集成测试 创建数据库跑 db-doctor |
+| **路径同步 + 闭环登记** | `5cf1b6a`（docs(standards+plan)） | M22.2 / M22.3 脚本目录由原 `apps/platform/scripts/` 改为 `apps/platform/server/database/scripts/` 后，security.md §2.1.2 / §2.1.3 + platform.md §3.7 中的路径同步为实际落地位置；M22.3 闭环登记 |
 
-- [x] `--owner` 一次拉取多仓库处理清单
-- [x] 显式 + 发现 + 名单组合结果可预期
-- [x] 多仓库失败隔离 + 并发可控
-- [x] 历史归档可查趋势
-- [x] typecheck + lint + 650 tests 全部通过；Review Gate 放行
+#### M22.4 synchronize 显式 opt-in + 启动日志 ✅（2026-09-01 闭环）
 
-### M4 阶段治理记录（2026-08-05 ~ 2026-08-06）
+| 子任务 | 关键 commit | 完成要点 |
+|:--|:--|:--|
+| **synchronize 显式 opt-in + 启动日志** | `daa255c`（feat(platform)） | `apps/platform/server/database/index.ts:43` `synchronize = process.env.DATABASE_SYNCHRONIZE === 'true'`（删 `isDev` 变量；dev 模式不再自动开）+ 提取 `migrationsRun` 为 const 支撑启动日志（保持原 `!== 'false'` 默认值，留给 M22.5 单独 commit 反转）+ 启动期 `console.log(\`[database] synchronize=... (DATABASE_SYNCHRONIZE=..., NODE_ENV=...), migrationsRun=... (DATABASE_MIGRATIONS_RUN=...)\`)`（与 development.md §5.1.19 line 317 范例格式对齐） |
+| **测试覆盖** | `daa255c` 同 commit | `index.test.ts`：默认断言反转 synchronize=true → false；新增显式 `DATABASE_SYNCHRONIZE=true` 用例 + `NODE_ENV=development` 回归用例（防御未来误加回 `\|\| isDev`） |
+| **tests/api-helper.ts setupMemoryDatabase 适配** | `daa255c` 同 commit | M22.4 后 synchronize 默认 false，25+ 调用 `setupMemoryDatabase` 的测试（fixtures.post/delete + scan-reconcile + scan-orchestrator + batch/stale-cleanup + notification + run/audit-events 等）需 opt-in 才能建表；helper 单点声明 `process.env.DATABASE_SYNCHRONIZE = 'true'` 避免每个 test 重复 stub |
+| **.env.example 注释 + platform.md §3.3 + §11 决策记录同步** | `daa255c` 同 commit | `.env.example` 新增 `DATABASE_SYNCHRONIZE` 注释块；`docs/standards/platform.md` §3.3 `synchronize / migrationsRun 全场景显式 opt-in（详见 development.md §5.1.19）` + §3.3 新增启动期日志条目 + env 变量表 2 处 + §11 决策记录 M6 synchronize 策略追加 2026-09-01 演进注记 |
+| **A 阶段 Review Gate 关键教训** | `daa255c` audit 记录 | **Round 1 Reject**（1 blocker + 4 warning）：M22.4 commit 越界落地 M22.5 核心改动（migrationsRun 默认值反转）；Round 2 Pass（0 blocker / 0 warning / 0 suggest）—— 教训见 wisdom.md "atomic commit 边界——提取 const 支撑日志 vs 改 const 计算语义要分清" |
 
-- **主交付**: T401-T404 四轮提交（cb801b60 / fedb7200 / 5860fb4d / 2a7fed00），T402/T404 首轮 REJECT 后修复复审 PASS，每任务独立 Review Gate
-- **Action 接入（7c39db00）**: owner / repo-* / max-concurrency / max-retries 输入接线；建议每仓库单独配置 action 控制权限范围
-- **backlog 修复批次（3d19d499 / ac8ce5c7）**: R1 写请求 429 不重试、R2 `--max-backoff-ms` 可配、R3 Retry-After 解析、R5 topics 大小写归一、R6 glob ReDoS 加固（>200 字符拒绝）、R7 损坏 index 备份重建；P3 五项（小数截断拒绝、merge 大小写去重、repoSlug 碰撞后缀、cleanup-branches 空归档跳过、cleanup-branches maxConcurrency fail-fast）
-- **全 ESM（965e68f3）**: 两包单格式 esm（R4 消除），Node 22.12+ 原生 require(ESM) 兜底未来 CJS 消费者
-- **增强候选批次**: C5+C1（12af197d，resolveWithinWorkDir 符号链接防护 + pnpm 11 overrides 假成功警告）、C10+C11（10927851，lockfile 告警版本关系细化 + workspace 成员直接依赖识别）、C8（67157985，per-source 错误隔离保留待评估）、C2+C6+C7（cf12e381，toolchainPnpmVersion 验证链 + PR body 64KB 截断 + alertsConverged 口径拆分）
-- **编号标记清理（3c714cc1）**: 60 处编号标记清理 + development.md §3 立规（教训 §十六/§十七）
-- **遗留登记（转入 backlog）**: C3/C4/C9/C13-C19 等增强候选
+#### M22.5 migrationsRun 默认改为 false ✅（2026-09-01 闭环）
 
----
+| 子任务 | 关键 commit | 完成要点 |
+|:--|:--|:--|
+| **migrationsRun 默认 false** | `32bb375`（fix(platform)） | `apps/platform/server/database/index.ts:46` `migrationsRun = process.env.DATABASE_MIGRATIONS_RUN === 'true'`（默认 false；不再自动执行 pending migration；修复 development.md §5.1.19 反模式）；与 M22.4 commit `daa255c` synchronize opt-in 配对完成 "synchronize + migrationsRun 双 opt-in" hard requirement |
+| **测试覆盖** | `32bb375` 同 commit | `index.test.ts` 新增 2 个用例（默认 false + 显式 true）双向断言 |
+| **.env.example 注释更新** | `32bb375` 同 commit | `DATABASE_MIGRATIONS_RUN` 注释从 "默认 true" 改为 "默认 false"；显式开启命令拆分为 "启动时自动执行（DATABASE_MIGRATIONS_RUN=true）" + "手动单次执行（pnpm ... typeorm migration:run）" 两条路径（audit suggest 采纳） |
+| **A 阶段 Review Gate** | `32bb375` audit 记录 | Round 1 Pass（0 blocker / 0 warning / 1 suggest 已采纳清理） |
 
-## M4.5: 跨线升级显式授权（已归档）
+#### M22.6 e2e/fixtures 端点双门控 ✅（2026-09-01 闭环）
 
-> 归档日期: 2026-08-07
-> 阶段摘要: 参见 [roadmap.md §M4.5](roadmap.md)
-> 状态: 已完成（含编号标记治理闭环）
-> 最终提交: `528d1aae`（编号标记残留清理 + Review Gate 必查项）
+| 子任务 | 关键 commit | 完成要点 |
+|:--|:--|:--|
+| **fixtures.post.ts + fixtures.delete.ts 改双门控 + runtimeConfig 兜底** | `7f84b6e`（fix(platform)） | 第二门控从 `process.env.NODE_ENV === 'production'` 改为 `useRuntimeConfig().e2eFixturesAllowed`（Nuxt runtimeConfig 运行时覆盖通道，绕开 Nitro/esbuild `process.env.NODE_ENV` 静态替换陷阱）；`apps/platform/nuxt.config.ts` runtimeConfig 注册 `e2eFixturesAllowed: process.env.NUXT_E2E_FIXTURES_ALLOWED === 'true' \|\| process.env.E2E_TEST === 'true'`（prod build 默认 false）；`apps/platform/playwright.config.ts` e2e webServer 注入 `NUXT_E2E_FIXTURES_ALLOWED=true`（R3 缓解：原方案 NODE_ENV=test 无效，构建期常量；修订为 runtimeConfig 运行时覆盖） |
+| **新建 2 个 vitest 单元测试** | `7f84b6e` 同 commit | `apps/platform/server/api/e2e/fixtures.post.test.ts` + `fixtures.delete.test.ts`（3 case × 2 文件 = 6 测试）：默认 404 / `E2E_TEST=true`+`e2eFixturesAllowed=false` → 404 / `E2E_TEST=true`+`e2eFixturesAllowed=true` → 200；每个 case 显式 `vi.stubGlobal('useRuntimeConfig', ...)` 隔离 runtimeConfig + afterEach `vi.unstubAllGlobals()` 清理 |
+| **tests/setup-nuxt-server.ts 默认 stub 加 e2eFixturesAllowed 字段** | `7f84b6e` 同 commit | 默认 `useRuntimeConfig` stub 加 `e2eFixturesAllowed: false` 字段，防止其他 server 测试误启用 fixtures 端点 |
+| **platform.md §3.6 + security.md §2.1.4 同步** | `7f84b6e` 同 commit | `docs/standards/platform.md` §3.6 强制门控写法 + 新增 "为什么不用 `process.env.NODE_ENV`" 陷阱段（esbuild define 折叠）+ D 阶段自检扩展（构建产物 grep 兜底）+ 实证段追加 M22.6 修订教训；`docs/standards/security.md` §2.1.4 同步 |
+| **A 阶段 Review Gate 关键教训** | `7f84b6e` audit 记录 | **Round 1 Reject**（2 blocker + 3 warning）：① B1 Nitro/esbuild `process.env.NODE_ENV` 静态替换陷阱——`if (process.env.X !== 'true' \|\| process.env.NODE_ENV === 'production')` 在产物中被折叠为 `... \|\| true`，端点永远 404；② B2 R3 缓解无效 + 注释陈述错误；③ W1 测试 ambient env 不密闭；④ W2 200 路径覆盖强度有限；⑤ W3 todo.md 状态漂移 + R3 落地偏差未登记。Round 2 Pass（0 blocker / 2 W 不阻塞已采纳清理 W4 fixtures JSDoc 同步 + W5 platform.md §3.6 import 错误示例）—— 教训见 wisdom.md "Nitro/esbuild `process.env.NODE_ENV` 静态替换陷阱" |
 
-**阶段成果**: `--allow-major-upgrade` 跨线告警显式授权自动升级（仅 CLI，无 env 通道、Action 结构性禁用）。720 tests。
+### 阶段验收标准（M22 全部 6 原子条目闭环 ✅）
 
-### T405 实现 --allow-major-upgrade 跨线显式授权 ✅
+- [x] **M22 沉淀** —— 5 条防御规范挂接（development.md §5.1.18 + §5.1.19 + platform.md §3.7 + security.md §2.1.1-§2.1.5）+ experience-archive.md §五十事故复盘 + todo.md §M22 6 原子条目
+- [x] **M22.1 启动期备份** —— backup.ts 含 fsync + rename + 保留策略 + fail-open 兜底；backup.test.ts 26 case 全过；ensureDatabaseInitialized 之前同步调用
+- [x] **M22.2 db-restore** —— `--from` + `--yes` 双门控；覆盖前自动备份；前后 integrity_check；旁文件清理
+- [x] **M22.3 db-doctor** —— 文件元信息 + 10 项 PRAGMA + 各表 COUNT(*) + 索引分类计数 + 六类结论判定 + 人读机读双模
+- [x] **M22.4 synchronize opt-in** —— synchronize 必须 `DATABASE_SYNCHRONIZE=true` 才开；dev 模式不再自动；启动日志完整打印
+- [x] **M22.5 migrationsRun opt-in** —— migrationsRun 必须 `DATABASE_MIGRATIONS_RUN=true` 才开；默认 false；与 M22.4 配对双 opt-in
+- [x] **M22.6 e2e/fixtures 双门控** —— `E2E_TEST=true` + `runtimeConfig.e2eFixturesAllowed` 兜底；构建产物 grep 实证未折叠；playwright NODE_ENV=test + NUXT_E2E_FIXTURES_ALLOWED=true 调通
+- [x] `pnpm lint` / `pnpm typecheck` 全绿 —— 0 error
+- [x] vitest 单测覆盖 + playwright e2e 覆盖 —— apps/platform vitest server/ 70 test files / 828 tests passed
+- [x] `pnpm check:docs` 全过 —— 103 md + 58 vue-interp OK
+- [x] 编号标记扫描 0 命中（无孤立 `T\d+` / `M\d+` / `C\d+` 等编号——按 [开发规范 §3 注释规范](../standards/development.md) 与 [code-auditor.agent.md 主责边界必查项](../../.github/agents/code-auditor.agent.md) 防御）
+- [x] CI 端到端裁决待推送后核验 —— ahead=7 commits 待用户主动推送（按 AGENTS.md §5 推送禁令）；M22 沉淀 + M22.1 已推送至 origin/master（`git rev-list HEAD ^origin/master --count` 2026-09-01 实测 ahead=7）
+- [x] 实施过程中新发现 2 条 wisdom 沉淀——Nitro/esbuild `process.env.NODE_ENV` 静态替换陷阱 + atomic commit 边界（提取 const 支撑日志 vs 改 const 计算语义要分清）
 
-- **交付物**: `packages/cli/src/app/index.ts` 2.0.2 跨线链路 + CLI 参数
-- **实现内容**: 三态布尔 CLI 参数（无 env 通道；action.yml 不暴露 input → Action 结构性禁用）+ config 直通；跨线分流（仅根直接依赖 + lockfile 单版本进入自动跨线）；2.0.2 链路（快照 → upgradeDependency → **升级后实例复核** → **强制完整验证 install+lint+build** → 失败 restoreTrackedFiles 回滚）；同包多跨线告警按包聚合取最高目标；报告 `strategy='major-upgrade'` + `isMajor=true`
-- **验收**: 默认行为与 PR #28 完全一致（跨线 skipped 不误标）；开启后仅根直接依赖单版本跨线自动升级；间接依赖/成员独占/多版本共存维持人工；dry-run 不写盘；验证动作入报告
-- **Review Gate**: 首轮 REJECT（P1-1 实例残留误标 + P2-1 同包多告警目标选择 + P2-2 成员独占必然失败 + P2-3 验证证据缺失）→ 全部修复复审 PASS
-- **残余风险登记（转入 backlog 跟踪）**: 理论降级边（跨线升级后仍可能被未来推荐版本降级？）/ 合并告警计数（同包多告警合并后 skipped/fixed 计数口径）/ node_modules 不回滚（回滚仅 manifest + lockfile，node_modules 残留旧包）/ 自定义 commands 时验证链为用户链（verifyCommands 自定义时完整验证语义由用户命令决定）
-- **后续治理**: 用户指出编号标记问题（与 3c714cc1 同类）→ 528d1aae 清理 10 处残留 + code-auditor 必查项 + code-reviewer checklist（教训 §十五/§十六）
+### 阶段治理记录
 
-### M4.5 完成判定（全部通过）
+- **总投入**：**9 atomic commits 实施 + 4 docs 收口 commits = 13 commits**（M22 沉淀 `a4d29bf` docs(plan+standards+archive) + M22.1 `2a31597` feat(platform) + M22.2 `7b8721e` feat(platform) + M22.2 闭环 `7b495a7` docs(plan) + M22.3 `5835887` feat(platform) + M22.3 路径同步 `5cf1b6a` docs(standards+plan) + M22.4 `daa255c` feat(platform) + M22.5 `32bb375` fix(platform) + M22.6 `7f84b6e` fix(platform)）
+- **测试覆盖**：apps/platform vitest server/ 70 test files passed (2 skipped) / 828 tests passed (7 skipped)；M22.1 backup.test.ts 26 case + M22.3 db-doctor.test.ts 26 case + M22.6 fixtures.post/delete.test.ts 6 case + M22.4/5 index.test.ts 12 case
+- **审计覆盖**：3 轮独立 Review Gate Pass —— M22.4 Round 2（Round 1 Reject 后补修：migrationsRun 越界落地 + 补 NODE_ENV=development 回归用例 + 同步 platform.md §3.3）/ M22.5 Round 1 / M22.6 Round 2（Round 1 Reject 后修订 runtimeConfig 兜底 + 构建产物 grep 兜底审计模式）
+- **ahead commits 实证**：`git rev-list HEAD ^origin/master --count` 2026-09-01 实测 ahead=7（`7f84b6e` + `32bb375` + `daa255c` + `5cf1b6a` + `5835887` + `7b495a7` + `7b8721e` 7 commits 待用户主动推送）；M22 沉淀 + M22.1 已推送至 origin/master
+- **文档落盘**：
+  - `docs/plan/todo-archive.md` §M22 段（本段；2026-09-01 M22 归档批次新增）
+  - `docs/plan/todo.md` M22 段 → 顶部 banner 更新（M22 → 待确定 active）
+  - `docs/plan/roadmap.md` Milestone 概述表 M22 行状态更新（计划中 → 已完成 2026-09-01 归档）+ §M22 详细实施状态段新增（在 §M21 段之后、`## 详细任务` 之前）
+  - `docs/plan/archive/index.md` 当前基线更新（2026-08-31 → 2026-09-01 M22 归档后）+ 主窗口保留范围（M21/M20/M19/M18 → M22/M21/M20/M19 4 段）+ 近期归档批次登记新增 M22 行
+  - `docs/plan/archive/todo-archive-phases-m18.md` 新建（M18 段从主窗口预防性迁出，与 M19/M20 归档批次迁出 M14-M15/M16-M17 同源策略——主窗口从 5 段回到 4 段符合 "3-5 个阶段" 健康策略中位）
+  - `docs/plan/backlog.md` §已知边界 SQLite 单文件脆弱性条目状态更新（"等待落地" → "已闭环 M22 全部 6 原子条目 + 2026-09-01 archive batch"）
+  - `docs/index.md` 当前状态更新（"M22 待启动" → "M22 已闭环 2026-09-01 归档"）
+- **关键决策**：
+  - **M22.4 atomic commit 边界** — 提取 `migrationsRun` 为 const 支撑启动日志 vs 改 const 计算语义（默认值反转）是两件事，必须分 commit；M22.4 仅做提取 const 保持原 `!== 'false'` 默认值，M22.5 单独反转
+  - **M22.6 runtime gate 设计** — `process.env.NODE_ENV` 在 Nitro/esbuild 构建期被静态替换为构建时值，prod build 表达式折叠为 `... || true` 永远 404；改用 Nuxt `runtimeConfig.e2eFixturesAllowed`（`NUXT_` 前缀运行时覆盖通道）绕开 esbuild define
+  - **M22.6 资产授权路径** — e2eFixturesAllowed 在 `nuxt.config.ts` 注册（prod build 默认 false），playwright e2e webServer 通过 `NUXT_E2E_FIXTURES_ALLOWED=true` 显式开启；prod 部署误设 `E2E_TEST=true` 但缺 `NUXT_E2E_FIXTURES_ALLOWED` 仍 404（双门控兜底真正生效）
+- **关键经验（已挂 standards）**：
+  - `docs/standards/development.md §5.1.19` TypeORM 1.x synchronize 与 migrationsRun 反模式禁止（hard requirement）—— M22.4 / M22.5 同步 opt-in；NOT NULL 列无 default 时启动期日志 + 恢复路径
+  - `docs/standards/platform.md §3.6` e2e / fixtures 端点双门控规范 —— hard requirement + 为什么不用 `process.env.NODE_ENV`（esbuild define 折叠陷阱）+ D 阶段自检扩展构建产物 grep 兜底 + A 阶段 Review Gate 必查项
+  - `docs/standards/security.md §2.1` SQLite 数据库防护 5 子节 —— §2.1.1 启动期自动备份 / §2.1.2 命令式恢复 / §2.1.3 数据库自检工具 / §2.1.4 与 e2e/fixtures 端点关系 / §2.1.5 实证（M22 事故复盘）
+  - `docs/standards/platform.md §3.7` SQLite 启动期备份 + 自检工具 —— 3 文件（backup.ts / db-restore.ts / db-doctor.ts）+ D 阶段自检验证
+- **M22 沉淀后 backlog 候选更新**：
+  - §延期/暂缓项 M22 规范单点声明收敛（neat-freak 批次）—— security.md §2.1 + development.md §5.1.18 + platform.md §3.7 三处 SQLite 防护规则重复声明收敛延后
+  - §延期/暂缓项 db-restore 审计未采纳项（M22.2 S-1 第 2/3/4 项 + S-2）—— 本地管理员工具攻击面极低，远期登记
+  - §已知边界 SQLite 单文件脆弱性 + TypeORM synchronize 风险（持续观察）—— M22 闭环后更新为 "已闭环 M22 全部 6 原子条目 + M23 候选 PostgreSQL 多写者迁移 + TypeORM 0.3.x 升级保留"
 
-- [x] `--allow-major-upgrade` 仅 CLI 可用（Action 结构性禁用）
-- [x] 开启后仅「根 package.json 直接依赖 + lockfile 单版本」跨线自动升级
-- [x] 升级后实例复核 + 强制完整验证，失败/残留回滚计 failed 不误标
-- [x] 间接依赖 / 成员独占 / 多版本共存跨线维持人工
-- [x] typecheck + lint + 720 tests + build 通过；Review Gate 复审 PASS
+#### M22.7 e2e/fixtures helper 网络兜底（hotfix / CI run 33525721103）✅（2026-09-01 闭环）
 
----
+> **触发**：M22 归档批次 `2e590f0` 推送后 CI run 33525721103 触发，Test / Coverage success，**E2E job 失败**于 global-setup 末尾 `cleanAlertsRowgroupFixtures` → `DELETE /api/e2e/fixtures` → `ECONNRESET`（TCP RST，100ms 内）。时序实测：server up 15:28:01 → setupPage.goto → admin sign-in 3s → viewer sign-in 3s → DELETE fail 15:28:10.98 → ahead=1 commit。
 
-## M4.6: Monorepo 成员级修复增强（已归档）
+> **根因排查穷举**：
+> 1. handler 逻辑 bug → 排除（vitest 单测 6/6 + 本地复现脚本 + .output grep 实证 `useRuntimeConfig().e2eFixturesAllowed` 正确读取 `NUXT_` altPrefix，未被 esbuild define 折叠）
+> 2. 服务侧 OOM → 低概率（5+ 请求成功且 ECONNRESET 距上次请求仅 100ms）
+> 3. Chromium headless DELETE + body 行为差异 → 可能但无法本地复现（容器沙箱 chromium 限制）
+> 4. **better-auth session 写入后 SQLite 连接释放时序 → 最可能根因**（admin / viewer sign-in 走 `dataSource.transaction(...)` 写 session，紧接 fixtures DELETE 经 `ensureDatabaseInitialized()` 走同一 singleton，better-auth 异步清理未完全收敛前过早释放 socket；better-auth 1.7 内部 transaction 关闭路径不在本仓库，无法加日志实证）
 
-> 归档日期: 2026-08-07
-> 阶段摘要: 参见 [roadmap.md §M4.6](roadmap.md)
-> 状态: 已完成
-> 最终提交: `7fb264e3` feat(cli): 支持 workspace 成员级直接依赖自动升级
+> **修复方案（最小变动 + 兜底 + 根因追踪分离）**：
+> - 已落地：e2e/fixtures helper 加 `maxRetries: 2`（commit `f617b56` test(platform)）。实证 Playwright 1.62.1 `_sendRequestWithRetries` 源码（`playwright-core@1.62.1/lib/coreBundle.js:25870-25895`）仅对 `e.code === 'ECONNRESET'` 触发 250ms 指数 backoff 重试（其他网络错误码如 ECONNREFUSED / ETIMEDOUT 不重试）；maxRetries=2 走 250ms → 500ms → 1000ms，正好覆盖"首请求 ECONNRESET + 异步资源清理收敛后第二次成功"窗口
+> - 不触动 server handler：本地 / CI 行为等价；handler 单元测试 + 真实路由测试均通过
+> - **未落地（根因排查）**：登记 M23 阶段规划 backlog 候选（按 ROI 排序）：① better-auth 1.7 transaction 关闭时序 → `getAuth()` 加 trace 日志 + `ds.transaction` 包装打印 begin/commit 时间戳；② Nitro h3 `defineEventHandler` async generator 行为；③ SQLite WAL 模式 + `journalMode=delete` 切 WAL + `busy_timeout` 消解并发事务持锁；④ fixtures API 请求间 100ms 节流（经验性方案，不作为唯一修复）
 
-**阶段成果**: workspace 成员包直接依赖告警自动升级（成员级修复器 + 三桶化分流 + app 2.0.3 链路 + 报告/指纹 manifest 维度）。755 tests。
+> **验证**：
+> - lint / typecheck exit 0
+> - vitest 6/6 fixtures 单测 + 全量 1001/1008 passed
+> - A 阶段 review quick depth Round 1 Pass（0 blocker，1 warning JSDoc 精度 + 1 suggest 经验沉淀，已 Round 2 修订 JSDoc 描述"仅对 ECONNRESET 重试"，suggest 跨轮次追溯由经验归档 §五十一承接）
+> - 本地复现脚本 `repro-e2e-fixtures.mjs`：auth + DELETE + POST fixtures 串行通过；server 进程稳定存活
 
-### 方案细化（2026-08-07 落盘，三项用户决策）
+> **关键决策**：
+> - **helper 层而非 handler 层**：maxRetries 是客户端行为，server 不感知；保持 handler 单元测试 0 改动；本地 / CI 行为等价
+> - **兜底修复 + 根因 backlog 分离**：避免"无限本地复现"陷阱（CI 独有环境组合无法本地稳定复现），接受兜底修复 + 根因登记 M23 候选
 
-- **D1 修复器扩展**: `UpgradeDependencyParams.manifestDir?`（缺省 = 根 manifest 现状回归）；install 仍在根 workDir 执行（workspace 解析语义）；非 semver 声明 failResult
-- **D2 快照扩展**: `snapshotTrackedFiles(workDir, extraPaths?)` 支持成员 manifest 相对路径
-- **D3 partition 三桶化**: `{ root, member, sub }`——member 准入 = 成员白名单 + 成员直接声明 + fixable + lockfile 单版本 + 推荐>=锁定 + 非跨线
-- **D4 app 2.0.3 链路**: 按「包名 + manifestDir」聚合取最高推荐 → 快照 → 升级 → 实例复核（残留回滚）→ **lint-only 验证**（用户决策 1）→ 失败回滚
-- **D5 报告**: FixAction 复用 `filePath` + `strategy='member-upgrade'`（用户决策 3）；多版本共存成员告警维持 sub（用户决策 2）
+> **关键经验（已挂 wisdom.md）**：新增 `pattern-playwright-maxRetries-econnreset` —— Playwright 1.62 `_sendRequestWithRetries` 仅对 `e.code === 'ECONNRESET'` 触发 250ms 指数 backoff 重试（其他网络错误码不重试）+ test helper 兜底模式。详见 [经验归档 §五十一](../design/governance/experience-archive.md#五十一e2e-global-setup-串行多次-setuppage-后首请求-econnreset2026-09-01ci-run-33525721103)（含完整 4 假设穷举 + 修复方案 + 4 项治理检查点登记）
 
-### T406 成员级直接依赖升级修复器 ✅
+#### M22.8 未认证 API 测试显式空 storageState 隔离 cookie 注入（hotfix / CI run 33533376712）✅（2026-09-02 闭环）
 
-- **交付物**: `packages/cli/src/fixers/dependency/index.ts` 扩展
-- **实现内容**: `manifestDir` 参数（成员 manifest 解析 / 备份 / install 失败回滚成员 manifest + lockfile）；`isNonSemverDeclaration` 协议防护（workspace/catalog/link/file/npm/github/gitlab/bitbucket/gist/git+ssh/git+https/git+http/git+file/git/http/ssh/portal/patch 等，全集见源码正则）；`fromVersion/toVersion` 保留成员声明前缀
-- **验收**: 根直接依赖行为零变化；成员升级成功 / install 失败回滚 / 非 semver failResult（不写盘、不触发 install）
+> **触发**：M22.7 hotfix commit `51e8c13` 推送后 CI run 33533376712 触发，Test / Coverage success，**E2E job 失败**于 2 个用例（retry #1 / retry #2 均复现）：
+> - `tests/e2e/credentials-api.e2e.test.ts:283 › 凭据管理 API 鉴权边界 › 未认证 GET /api/credentials → 401` —— `Expected: 401, Received: 200`
+> - `tests/e2e/repos-api.e2e.test.ts:447 › 仓库管理 API 鉴权边界 › 未认证 GET /api/repos → 401` —— `Expected: 401, Received: 200`
+>
+> CI 时序实测：global-setup 成功（M22.7 兜底生效）+ fixtures seeded + 171 tests 运行到 #89（credentials-api 未认证）首次失败 #140（repos-api 未认证）二次失败 + 全局 E2E 失败。
 
-### T407 成员告警分流与 app 接线 ✅
+> **根因排查**：
+> 1. handler 逻辑 bug → 排除（本地 curl + Playwright fresh context 空 cookies → 401 ✓；vitest 单测全过）
+> 2. 服务侧 OOM / 进程崩溃 → 排除（其他 80+ 测试正常 200/403；E2E 跑满 6 分钟到失败）
+> 3. `test.use({ storageState })` 配置传播到 `browser.newContext()` → **最可能根因**（Playwright 1.62 fixture pool 行为：describe 块内 test.use 选项通过 fixture pool 注入到所有 browser.newContext() 调用，包括未指定 storageState 的手动创建；trace 实证 context-options 中 baseURL + storageState 都被注入）
+> 4. 上游 test session refresh 残留到新 context → 可能（token 值 `LhAh2mxu...` ≠ admin.json `aKoIPeL...` / viewer.json `Uev1leUL...`，且 token 在 describe 块之间共享，可能 better-auth 中间件对某些请求刷新 session 后通过 fixture pool 传递）
+>
+> 网络追踪关键证据：两个失败用例的 context-options 携带**完全相同**的 cookie 值：
+> ```
+> cookies: [
+>   { name: 'i18n_locale', value: 'zh-CN', domain: '127.0.0.1' },
+>   { name: 'better-auth.session_token', value: 'LhAh2mxu4rTjo27Wc8wLyeDpspBq4MnE...', domain: '127.0.0.1', expires: 1790873050.509821 }
+> ]
+> ```
+> session token expires 1790873050 ≈ 2026-09-30（CI run 2026-09-01 + 29 天 = better-auth session 配置 expiresIn 30 天一致）
 
-- **交付物**: partition 三桶化 + 快照扩展 + app 2.0.3 链路 + 报告渲染
-- **实现内容**: `snapshotTrackedFiles(extraPaths)`；`partitionSubmanifestAlerts` 返回 `{ root, member, sub }`（member 桶准入见 D3）；app 2.0.3（聚合 / dry-run / 快照 / 实例复核 / lint-only / 回滚，残留回滚日志含"其他成员 pin / 根 override"归因）；markdown actionDetails filePath 展示 + PR body `member upgrade` 策略与成员路径列 + `computeFixFingerprint` 纳入 manifest 维度（防根/成员升级指纹碰撞）
-- **验收**: 成员直接依赖安全场景自动升级且报告可见成员路径；降级风险 / 无版本信息 / 多版本共存 / 跨线维持人工；失败 / 残留回滚计 failed 不误标 fixed/converged
+> **修复方案**（最小变动 + 标准化兜底）：
+> - 已落地：2 个测试在 `browser.newContext()` 调用中**显式传** `storageState: { cookies: [], origins: [] }`（commit `bdcd900` test(e2e)）—— Playwright 1.62 文档推荐的"unauthenticated API call"模式，与 `test.use({ storageState })` 完全脱钩，强制清空 cookies/origins
+> - 不触动 handler：测试期望值不变（仍期望 401）
+> - **未落地（根因排查）**：登记 M23 阶段规划排查（按 ROI 排序）：① Playwright 1.62 fixture pool `test.use → browser.newContext` 注入路径源码实证；② better-auth 中间件对非 /api/auth/* 端点返回 Set-Cookie 路径扫描
 
-### M4.6 完成判定（全部通过）
+> **验证**：
+> - `pnpm exec eslint tests/e2e/{credentials-api,repos-api}.e2e.test.ts` exit 0
+> - `pnpm exec tsc --noEmit` exit 0
+> - `pnpm test` exit 0（1001 passed / 7 skipped）
+> - A 阶段 quick depth Round 1 Pass（0 blocker / 1 warning hotfix 任务编号登记 / 2 suggest 注释长度 + helper 抽取）
+> - 本地复现脚本：fresh context + 空 cookies → 401 ✓
+> - CI run 33533376712 修复待用户推送后下次 CI 验证
 
-- [x] T406/T407 交付并通过 Review Gate（三审 PASS）
-- [x] typecheck + lint + 755 tests + build 通过
-- [x] 根直接依赖行为回归无损
-- [x] 方案细化三项决策已确认落盘
-
-### M4.6 阶段治理记录（2026-08-07）
-
-- **提交**: 立项（2607b665）+ 方案细化（c19bf091）+ 实现（7fb264e3）
-- **Review Gate 三审**: 首轮 REJECT（P1-1 协议正则漏 git+ssh 等 / P2-1 PR 聚合丢成员路径 / P2-2 同包多成员 pin 复核互斥 / P2-3 todo 状态未同步）→ 修复复审 PASS（新增 P2-1 指纹未含 filePath / P2-2 正则漏 gitlab 变体）→ 修复终审 PASS
-- **经验沉淀**: 归档 §十八（防护正则按全集核对 + 同类扫描）/ §十九（维度字段传播检查）/ §二十（断言精确到链路身份）/ §二十一（脚本化编辑验证文件内容）+ code-reviewer checklist 新增「协议/枚举全集核对」「维度字段传播检查」两小节
-- **残余风险**: 成员验证 lint-only（演进项：成员独立 lint 脚本）；明细表 action 查找粒度；同包多成员精确 pin 场景需人工介入；`latest`/`*` 等 range 的 `^` 归约行为未纳入防护
-- **遗留登记**: 无阻塞项，M5 可启动
-
-
-## M5: AI Breaking Change 研判（已归档）
-
-> 归档日期: 2026-08-07
-> 阶段摘要: 参见 [roadmap.md §M5](roadmap.md)
-> 状态: 已完成
-> 最终提交: `61929613` fix(action): ai-api-key description 去除 secrets 表达式示例（CI 链式修复收口）
-
-**阶段成果**: AI 对依赖升级 breaking change 的自动研判闭环——Changelog 双源采集 → 多 provider 研判 → 结构化 patch 应用 → 安全门 + 完整验证 → app 触发接线 + 报告 aiUsage 聚合。903 tests（38 files）。
-
-### 规划决策（2026-08-07 已确认，用户确认内容）
-
-- **D1 AI 提供商**: OpenAI 兼容端点优先 + Anthropic 双 provider（fetch 封装无 SDK；DeepSeek 等走 `--ai-base-url`；anthropic 模式支持 `--ai-api-url` 自定义兼容端点）
-- **D2 触发时机**: 验证失败 + major 升级触发，`--ai-trigger` 可配（both / failure / major）
-- **D3 Token 来源与凭据安全**: CLI `DEPENDFIX_AI_API_KEY` env（优先）/ `--ai-api-key`（泄露面文档警示）；action `ai-api-key` input（composite 不支持 `secret` 属性 → 经 env 传递自动打码）；apiKey 不落盘 + maskSecrets 脱敏 + action input 声明；M6 T602 统一凭据管理
-- **D4 成本默认关闭 + token 消耗展示**: `--ai` opt-in；每次调用记录 usage（input/output tokens），聚合展示（日志每次调用 + 报告 aiUsage 段 + console run 总计 + 内置单价表标注"估算仅供参考"）
-
-### T501 实现 Changelog / Release Notes 采集 ✅
-
-- **交付物**: `packages/cli/src/ai/changelog-fetcher.ts`（npm registry packument → GitHub Releases 双源）
-- **实现内容**: packument 解析 repository 字段 → octokit `repos.listReleases` 取 release body；breaking 段落启发式提取（Breaking changes / ⚠️ / Migration / BREAKING CHANGE）；run 内 Map 缓存（单测断言请求次数）；双源失败降级 null + 原因（不静默）
-- **验收**: 双源失败降级路径可测试；缓存命中不重复请求
-
-### T502 实现 AI 研判引擎 ✅
-
-- **交付物**: `packages/cli/src/ai/`（provider / prompt / schema / usage / secrets）
-- **实现内容**: `AiProvider` 接口 + `OpenAICompatibleProvider`（/chat/completions）+ `AnthropicProvider`（/v1/messages，x-api-key + anthropic-version header）+ factory；system prompt 硬编码（用户内容仅 data 注入，prompt 注入防护）；Zod 输出 schema（classification / summary / changes / confidence / rationale），校验失败重试 1 次 → 降级建议模式；usage 聚合 + 单价表成本估算；`maskSecrets` 脱敏（provider 层 + 编排层防御纵深）
-- **验收**: 非法输出可检测不静默；apiKey 不进报告/日志（含响应体回显 key 场景）
-
-### T503 实现修复方案生成器 ✅
-
-- **交付物**: `packages/cli/src/ai/patch-applier.ts`
-- **实现内容**: 结构化 changes 应用（search 精确匹配 + 唯一性校验 → 失败回退建议模式）；快照/回滚（snapshotTrackedFiles + 新文件登记）；version-lock → override 生成；wait-upstream → 说明文档
-- **验收**: patch 应用成功/失败/冲突（search 不唯一）矩阵可测；失败可审计回退；默认不自动合并
-- **承接登记**: PR 提交由 app 集成（T506）承接
-
-### T504 AI 输出安全校验与质量门 ✅
-
-- **交付物**: `packages/cli/src/ai/safety-gate.ts`
-- **实现内容**: patch 范围限制（≤5 文件，超限拒绝可审计）；路径穿越（resolveWithinWorkDir）/ 命令注入（结构化数据不执行 shell，检查危险模式）/ 敏感信息泄露（sk- / ghp_ / private key 模式）检查；完整验证链（install+lint+build，对齐 T405 跨线语义）
-- **验收**: 恶意/异常 patch 样本拒绝矩阵（安全单测）；失败回滚 + 记录原因回退建议模式
-- **承接登记**: 质量门动态验证接线由 app 集成（T506）承接
-
-### T505 CLI 解耦重构（平台化前置）✅
-
-- **交付物**: `packages/cli/src/app/pipeline.ts`（`createPipeline(deps)` 抽象）
-- **实现内容**: runCli() 中 process.env / console.log 紧耦合抽离为可注入依赖（logger / config resolver / io）；local 与 platform 模式共用同一编排核心；C13 循环依赖（app/helpers ↔ cli/helpers）解环
-- **验收**: 本地 CLI 行为不变（全量回归）；platform 模式可注入不同 logger / config resolver 复用编排逻辑
-
-### T506 AI 链路 app 接线（收口 M5）✅
-
-- **交付物**: config 接线 + app 触发接入 + 报告展示 + action 输入
-- **实现内容**: config（--ai / --ai-provider / --ai-model 默认 deepseek-v4-flash / --ai-base-url 默认 https://api.deepseek.com / --ai-api-key / --ai-trigger / --ai-api-url；开启时 apiKey 缺失 → CONFIG_VALIDATION_ERROR 清晰报错）；app 2.0.2 触发接入（验证失败带 failureLog / major 预防性；ai-patch 成功 → majorOk 升级保留；dry-run 不触发不产生费用）；`runAiIntegration` 分流闭环（code-change → safety-gate → applyChanges → 完整验证 → 回滚；version-lock / wait-upstream / 降级 → 建议 noOp）；计数语义（ai 辅助动作不计 fixed/failed，主动作代表；指纹排除 noOp 防漂移）；报告 aiUsage 聚合段（RunResult.aiUsage / Markdown AI Usage 节 / JSON / console run 总计）；action.yml ai 系列 inputs + DEPENDFIX_AI_* env（api-key 经 env 传递自动打码）
-- **验收**: --ai 开启 + apiKey 配置后自动触发研判并产出可审计结果；code-change 通过质量门才提交；未开启 --ai 行为与现状完全一致（回归）；dry-run 不触发
-
-### M5 完成判定（全部通过）
-
-- [x] T501-T506 交付并通过 Review Gate（每任务独立审计，T503 三审 / 其余 PASS + 复审）
-- [x] 4 项规划决策已确认落盘（2026-08-07）
-- [x] `pnpm typecheck` + `pnpm lint` + 全量测试（903/903）+ `pnpm build` 通过
-- [x] 本地 CLI 模式行为回归无损（T505 全量回归 + T506 回归断言）
-
-### M5 阶段治理记录（2026-08-07）
-
-- **提交序列**: T501（21c07b67）→ T502（3475e6e5）→ T503（f9affe5f）→ T504（31997adc）→ T505（e30f2a3e）→ flaky 修复（451cdcc5）→ T506 主实现（7509e3e2）+ 测试补充（9f62a34f）+ 状态回链（1db75efc）→ aiUsage 聚合段（a7530299）→ roadmap 锚点修复（ae93bd2a）→ action.yml manifest 修复（61929613）→ 经验沉淀 docs(governance)（a4dfd884）
-- **Review Gate**: T501-T506 每任务独立审计 PASS；T503 三审（首轮 REJECT 写盘回滚/schema 契约/todo 状态 → 二轮 REJECT 编号标记 → 终审 PASS）；T506 复审 PASS（F1 指纹口径 / F2 场景 C exit 语义 / F3 todo 标注）；aiUsage 聚合段独立审查 PASS
-- **CI 链式修复（剥洋葱）**: ① lint:md:check 穿透 node_modules（.lintmdrc 显式空排除覆盖工具默认）→ 修复；② check:links roadmap 锚点指向已归档标题 → 修复（改指 todo-archive）；③ Security Scan dogfood workflow 暴露 action.yml description 内嵌 <span v-pre>`${{ secrets.DEEPSEEK_API_KEY }}`</span> manifest 模板校验失败 → 修复。教训沉淀归档 §二十二 / §二十三
-- **经验沉淀**: 归档 §二十二（CI 链式暴露 + 本地不可测陷阱）/ §二十三（行尾方向检测 + 特殊字符脚本写临时文件）；规范 ai-collaboration 4.2（剥洋葱）/ 4.3（本地不可测配置纪律）/ 1.2-6（行尾 + 脚本纪律）、documentation 链接检查（归档锚点联动）
-- **残余风险**: AI 调用失败路径的 token 计费盲区（provider 响应无 usage）；本地无法完全模拟 CI 环境（依赖 CI 端到端裁决，推送后复跑）；10 个 lint warning 存量临界（max-warnings 顶格）
-- **遗留登记**: 报告 aiUsage 聚合段已交付；PR body 展示 AI 消耗登记 M6 增强候选；无阻塞项，M5.5 可启动
+> **关键经验（已挂 wisdom.md）**：新增 `pattern-playwright-browser-newContext-cookie-injection` —— Playwright 1.62 `test.use({ storageState })` 在 describe 块内可能通过 fixture pool 传播到所有 `browser.newContext()` 调用（即使新 context 未指定 storageState）；"未认证 API 调用"测试必须显式传 `storageState: { cookies: [], origins: [] }` 强制隔离。详见 [经验归档 §五十二](../design/governance/experience-archive.md#五十二playwrighttestuse存储状态传染导致未认证api测试收到20020260902cirun33533376712)。
 
 ---
 
-## M5.5: Skill 编排（CLI 先行）（已归档）
+## M21: 治理收口 + 能力扩展 + 测试补强（M21.1+M21.2+M21.4+M21.5 全部已闭环 / 2026-08-31 归档）
 
-> 归档日期: 2026-08-07
-> 阶段摘要: 参见 [roadmap.md §M5.5](roadmap.md)
-> 状态: 已完成
-> 最终提交: `ba5be12b` refactor(skills): @dependfix/skills 包精简与同步脚本仓库化
+> **归档日期**：2026-08-31
+> **阶段摘要**：M20 闭环后承接 backlog 候选池 + M18.x 治理剩余风险；按"类型平衡"原则（🛡️ 治理 2 项 + 🚀 能力扩展 1 项 + 🧪 测试覆盖 1 项）选取 **4 项任务**独立闭环（M21.3 段为重复登记——S-5 已由 M18.x commit `878ae1a` 闭环，本批次 P 阶段规划删除并迁 backlog 历史归档指针段）。M21.1（P3，🛡️ 治理）Code Scanning RG-W01 + RG-W02 `execFileSync` 替换 `execSync` 2 处命令注入修复 / M21.2（P3，🛡️ 治理）M18.x 剩余风险 W1 + W2 + audit suggest 1+2 集中清理 / M21.4（P3，🚀 能力扩展）B3 PR 自动合并闭环（mergify 模板 + auto-merge guide + audit W1 vitepress sidebar 修复）/ M21.5（P3，🧪 测试覆盖）T704 async 定时触发 + Schedule CRUD e2e 补强（playwright e2e 6 case + BullMQ upsertJobScheduler 短间隔集成测试）。
+>
+> **阶段边界**：M21 严格遵循 [规划规范 §1.1 任务粒度约束](../../docs/standards/planning.md)（≤5-6 项硬上限）+ 类型平衡；不涉及架构变更；不引入新依赖；不升级 better-auth / PrimeVue；fixtures 仍 mock（真实凭据验证属 T701 真实环境验证任务保留于 backlog）。
+>
+> **非目标**：不发布 mergify action（仅提供模板 + 文档引导）；不修改 dependfix 自身 PR 提交流程；不立即引入 GitHub Actions API `issues: write` 之外的其他权限面扩展（保留与 M19.3 一致的边界）。
+>
+> **状态**：✅ 全部完成（M21.1 + M21.2 + M21.4 + M21.5 全部 4 子阶段闭环 / **11 atomic commits 实施 + 4 docs 收口 commits = 15 commits 已全部推送至 origin/master ahead=0**；`git rev-list HEAD ^origin/master --count` 2026-08-31 实测；含 M21.4 audit round 1 W1 vitepress sidebar 注册修复闭环）
 
-**阶段成果**: 产品 skill（`dependfix-remediator`）权威源与 CLI 编排（T506）、npx skills 生态主通道 + 自研兜底安装器（T507）、MCP 双后端扩展点（T508）；`@dependfix/skills` 纳入发布与 CHANGELOG 体系。929 tests（38 files）。
+### 阶段闭环清单
 
-> 编号说明：M5.5 T506-T508 与已归档 M5 的 T506 编号重叠，归档后仍以"阶段 + 编号"全称（如 M5.5 T506）区分。
+#### M21.1 Code Scanning RG-W01 + RG-W02（execFileSync 替换 execSync 2 处）✅（2026-08-31 闭环）
 
-### 规划决策（2026-08-07 用户确认）
+| 子任务 | 关键 commit | 完成要点 |
+|:--|:--|:--|
+| **RG-W01** `packages/engine/src/github/pr-creator.ts:214` execSync 替换 | `0a83c74`（fix(engine)） | `git add .` 替换为 `execFileSync('git', ['add', '.'])`；参数化数组避免 shell 解释；既有 `pr-creator.test.ts` 覆盖 PR 创建全链路 |
+| **RG-W02** `packages/engine/src/fixers/pnpm/index.ts:144` execSync 替换 | `a77e557`（fix(engine)） | `execSync(command)` 含模板拼接 → `execFileSync('pnpm', [...args])` 参数化；既有 `fixers-pnpm.test.ts` 覆盖 |
 
-- **D1 CLI 先行、MCP 为增强后端**: CLI 能力面（report/fix/fix-and-pr/cleanup-branches + 多仓库 + 双源 + PR 链路）已覆盖 MCP 规划的 4 个 tool（fetch_alerts / run_scan / fix_dependency / get_last_report）；skill 编排不依赖 MCP，MCP Server 本体随 M6 T605/T606 交付
-- **D2 生态主通道**: `npx skills`（vercel-labs/skills）为主安装通道（发布 = git push 仓库根 `skills/` 目录）；自研 `dependfix skills install` 仅离线兜底
-- **D3 内部 skill 防发现**: 10 个内部开发 skill 以 `metadata.internal: true` 标记（.github/skills 权威源），不进入生态正常发现（实测矩阵：正常 1 个产品 skill / `INSTALL_INTERNAL_SKILLS=1` 11 个）
+#### M21.2 M18.x 剩余风险 W1 + W2 + audit suggest 1+2（4 项集中清理）✅（2026-08-31 闭环）
 
-### T506 产品 Skill 权威源与 CLI 编排 ✅
+| 子任务 | 关键 commit | 完成要点 |
+|:--|:--|:--|
+| **W1** stageAndCommit `--local` flag 路径回归测试 | `fe7cc0f`（test(engine)） | `packages/engine/src/git/stage-and-commit.test.ts` 新增 case 用 `process.env.GIT_CONFIG_GLOBAL=/tmp/synthetic-global-with-user.name` 模拟 host global + 不预设 local config；vi.stubEnv 隔离 + vi.unstubAllEnvs |
+| **W2** detectServerLocale 大小写兼容 | `ad376c8`（fix(platform)） | `apps/platform/server/utils/localized-error.ts:tryQueryLocale` 加 `.toLowerCase()` 让 `?locale=EN` / `?locale=en-US` 都接受；与 `@nuxtjs/i18n` BCP 47 lowercasing 对齐 |
+| **audit suggest 1** test.describe 嵌套 test.use 冗余清理 | `0903f06`（refactor(platform)） | `apps/platform/tests/e2e/admin-roles.e2e.test.ts` 嵌套 test.use 删除（父级已声明）；0 行为变更 |
+| **audit suggest 2** 空 beforeAll 钩子清理 | `b6d8539`（refactor(platform)） | `apps/platform/tests/e2e/credentials/[id].test.ts` 空 beforeAll 直接删除；0 行为变更 |
 
-- **交付物**: `packages/skills/dependfix-remediator/`（SKILL.md + REFERENCES.md）+ 仓库根 `skills/` 分发目录（npx skills 生态发现）
-- **实现内容**: SKILL.md（frontmatter `name`/`description` + 编排步骤 + 决策树）；执行后端 = CLI 命令映射表（report → `dependfix report-only`；fix → `dependfix fix` / `fix-and-pr`；告警查询 → `--history` / 归档）；能力契约解耦预留 MCP tool 映射位；skill 放置规范落盘（[skill-distribution.md](../design/governance/skill-distribution.md)：packages/skills 权威源 / 根 skills/ 生态分发 / .github/skills 内部开发，职责分离）
-- **验收**: 本机冒烟通过（npx skills 生态发现 + 安装到 opencode 全局目录）；SKILL.md 无 MCP 依赖
-- **Review Gate**: 两轮闭环 PASS
+#### M21.4 B3 PR 自动合并闭环（mergify 模板 + auto-merge guide）✅（2026-08-31 闭环）
 
-### T507 npx skills 生态接入 + 自研兜底安装器 ✅
+| 子任务 | 关键 commit | 完成要点 |
+|:--|:--|:--|
+| **mergify 模板扩展** | `f1dd5df`（docs(guide)） | `.github/mergify.yml` 模板按 dependabot / dependfix PR 规则配置 auto-merge 条件 + author 限制（仅 `dependabot[bot]` / `dependfix[bot]` / `123+dependfix[bot]` 命中；`CaoMeiYouRen` 不命中） |
+| **auto-merge.md + README** | `beea5b9`（docs(guide)） | `docs/guide/auto-merge.md` 指南（启用步骤 + mergify 配置说明 + 安全注意事项 + 危险场景示例：依赖大版本升级 / breaking change / CI 覆盖不足 / 重复 PR / author 劫持） |
+| **audit W1 vitepress sidebar 注册修复** | `c9939cb`（fix(docs)） | audit round 1 Reject 后修复：`docs/.vitepress/config.ts` sidebar 注册 `docs/guide/auto-merge.md`（之前漏注册） |
 
-- **交付物**: npx skills 主通道 + `dependfix skills install`（兜底）/ doctor + README 安装指引
-- **实现内容**: 主通道本地源实证（`npx skills add <source> -s dependfix-remediator -g` 发现 + copied 安装，发布 = git push）；内部 skill 防发现（10 个 metadata.internal: true，可见性矩阵 1/11 实测）；兜底安装器（agent 目录约定检测 → 复制产品 skill → 安装清单；非 TTY 默认拒绝覆盖，--force 强制；幂等可重跑）；doctor（目录约定漂移 + 安装状态/内容一致性 + internal 标记完整性检查）
-- **验收**: 兜底本机 3 agent 实测 installed/up-to-date + doctor 0 error；主通道与兜底均幂等可重跑
-- **Review Gate**: 首轮 PASS + 复审
-- **已知边界**: GitHub 源端到端（`npx skills add dependfix/dependfix`）待推送后 CI 复验（本机 clone github.com 网络受限）
+#### M21.5 T704 async 定时触发 + Schedule CRUD e2e 补强 ✅（2026-08-31 闭环）
 
-### T508 MCP 双后端扩展点（衔接 T606/T706）✅
+| 子任务 | 关键 commit | 完成要点 |
+|:--|:--|:--|
+| **schedules CRUD e2e 6 case** | `9850e24`（test(platform)） | `apps/platform/tests/e2e/schedules.e2e.test.ts` 新建（创建 / 列表 / 详情 / 更新 / 删除 / 触发 / 重复创建同名 / 并发触发 / 失败 schedule 状态流转）；e2e 强制 sync 降级（playwright.config.ts:36 NUXT_QUEUE_ENABLED=false）走 sync 路径 |
+| **BullMQ upsertJobScheduler 短间隔集成测试** | `b9e35f7`（test(platform)） | `apps/platform/server/services/scheduler/scheduler.integration.test.ts` 新增（describe.skipIf(!enabled) 门控 + TEMP_REDIS_INTEGRATION=true 启用 + 进程内集成模式 + 随机 id 幂等） |
 
-- **交付物**: SKILL.md MCP 探测与双后端指引 + REFERENCES.md 一致性断言清单
-- **实现内容**: 执行后端探测步骤（Claude Code `claude mcp list` / `.mcp.json`，OpenCode mcp 字段 → MCP tool 优先 / CLI 回退 / MCP 调用失败降级 CLI）；能力契约映射表补齐 MCP tool 列（fetch_alerts / run_scan / fix_dependency / get_last_report 入参要点 + CLI 对应）；双后端一致性断言清单（以 @dependfix/core RunResult / ArchiveRunEntry 契约为基准，4 条能力逐项断言）
-- **验收**: 探测/决策/降级规则落 SKILL.md；一致性断言清单已定义（MCP Server 交付后按清单验证，当前无法实测属已知边界）
-- **Review Gate**: PASS
+### 阶段验收标准（M21 全部 4 子阶段闭环 ✅）
 
-### M5.5 完成判定（全部通过）
+- [x] **M21.1 RG-W01 + RG-W02** —— 2 处 execSync 替换为 execFileSync + 参数数组；既有测试不回归；本地 grep 实证 0 处 execSync 模板拼接
+- [x] **M21.2 W1 + W2 + S1 + S2** —— W1 stageAndCommit `--local` flag 路径回归；W2 `?locale=EN` 大小写兼容；S1 test.describe 嵌套 test.use 冗余清理；S2 空 beforeAll 钩子清理；engine vitest 1061 passed + platform vitest 919 passed + playwright admin-roles 15 passed
+- [x] **M21.4 mergify + guide + audit W1** —— mergify 模板通过 yaml.safe_load 语法 OK + author 正则覆盖实测；auto-merge.md 涵盖 mergify 安装 / 配置 / 启用条件 / 危险情况 6 项；vitepress sidebar 注册修复
+- [x] **M21.5 schedules e2e + BullMQ** —— playwright e2e 6 case × 2 次连跑无 flaky；BullMQ 集成测试 describe.skipIf 门控 + 进程内模式
+- [x] `pnpm lint` / `pnpm typecheck` 全绿 —— 0 error
+- [x] vitest 单测覆盖 + playwright e2e 覆盖 —— engine 1061 passed + platform 919 passed + playwright 6 passed × 2 连跑
+- [x] `pnpm check:docs` 全过 —— 103 md + 58 vue-interp OK
+- [x] 编号标记扫描 0 命中（无孤立 `T\d+` / `M\d+` / `C\d+` 等编号——按 [开发规范 §3 注释规范](../../docs/standards/development.md) 与 [code-auditor.agent.md 主责边界必查项](../../.github/agents/code-auditor.agent.md) 防御）
+- [x] CI 端到端裁决通过 —— 15 commits 已全部推送至 origin/master，ahead=0
 
-- [x] T506-T508 交付并通过 Review Gate（每任务独立审计：T506 两轮闭环、T507 首轮 PASS+复审、T508 PASS）
-- [x] npx skills 主通道 + 兜底安装器双路径验证通过（主通道本地源实证 + 兜底本机 3 agent 实测；GitHub 源端到端待推送后复验）
-- [x] 内部开发 skill 生态不可见（可见性矩阵实测：正常 1 个 / INSTALL_INTERNAL_SKILLS=1 11 个）
-- [x] `pnpm typecheck` + `pnpm lint` + 全量测试 + `pnpm build` 通过（串行 929/929；并行 2 个已知 Windows flaky 与本次改动无关）
-- [x] CLI 现状行为回归无损（主命令 positional 命令面 + --help 实测正常）
+### 阶段治理记录
 
-### M5.5 阶段治理记录（2026-08-07）
+- **总投入**：**15 commits**（M21.1 2 + M21.2 4 + M21.4 3 + M21.5 2 = **11 atomic commits 实施** + M21 文档收口 4：`a8604c6` M21.1+M21.2 标记 / `d66b11d` M21.3 重复登记清理 + backlog §S-5 闭环迁移 / `6516e34` M21.4 标记 / `cbcb15d` M21.5 标记）
+- **测试覆盖**：engine vitest 1061 passed + 1 skipped（M21.1 + M21.2 W1 回归）+ platform vitest 919 passed + 4 skipped（M21.2 W2 大小写兼容 + S2）+ playwright admin-roles 15 passed（M21.2 S1）+ playwright schedules 6 case（M21.5）+ BullMQ 集成测试（M21.5）
+- **审计覆盖**：M21.1 + M21.2 standard depth Pass / M21.4 standard depth 1 轮（含 1 个 W1 vitepress sidebar 注册修复）/ M21.5 standard depth Pass（2 warning 已修：W1 todo 同步勾选 + W2 removeJobScheduler finally 化 + 2 suggest 登记 backlog：S1 trigger happy path / S2 pattern 覆盖断言）
+- **ahead commits 实证**：`git rev-list HEAD ^origin/master --count` 2026-08-31 实测 ahead=0（15 commits 已全部推送至 origin/master）
+- **文档落盘**：
+  - `docs/plan/todo-archive.md` §M21 段（本段；2026-08-31 M21 归档批次新增）
+  - `docs/plan/todo.md` M21 任务清单 → 顶部 banner 更新（M21 → 待确定 active）
+  - `docs/plan/roadmap.md` Milestone 概述表 M21 行状态更新（计划中 → 已完成 2026-08-31 归档）+ §M21 详细实施状态段新增
+  - `docs/plan/backlog.md` 清理 B3 主条目（已上收 M21.4 闭环）+ §已闭环特定批次 段新增 B3 条目 + T704 待人工验收更新（实施部分已 M21.5 闭环）+ §已闭环阶段 段新增 M21 行
+  - `docs/plan/archive/index.md` §4 当前基线更新（M21 归档后）+ §5 近期归档批次登记新增 M21 行
+  - `.github/mergify.yml` mergify 模板（M21.4 实施）
+  - `docs/guide/auto-merge.md` PR 自动合并启用指南（M21.4 实施）
 
-- **提交序列**: 规划决策（56a91446 + d177e3b3）→ T506（21fae4d4 + da7d4c95）→ T507（6f9e5eea + 480497b9 + ba5be12b）→ T508（1837f21e）→ 完成判定勾选（84809da4）→ 发布体系（24e5c097 + 1c5bc3c1）
-- **Review Gate**: T506 两轮闭环 / T507 首轮 PASS + 复审 / T508 PASS
-- **发布体系**: `@dependfix/skills` 纳入发布包清单与 CHANGELOG 体系（24e5c097，release.md 同步）；changeset 自动生成脚本（1c5bc3c1，semantic-release 规则从 git log 推导 bump 级别）
-- **已知边界（归档时点）**: GitHub 源端到端复验（主通道 + 全链质量门）依赖 CI 端到端裁决（本地网络受限），推送后复跑确认
-- **遗留登记**: MCP Server 本体（M6 T605/T606）；org 增强候选（C22-C24）；无阻塞项
+### 关键决策
 
----
+- **M21.3 重复登记删除**：M21.3 段原计划抽取 `setTestEncryptionKey(key)` helper 部分**无真实用例需求**（grep `vi.stubGlobal.*encryptionKey` / `useRuntimeConfig.*encryptionKey` 自定义调用 = 0 命中），属 over-engineering；S-5 已由 M18.x commit `878ae1a` 闭环；M21 P 阶段规划批次删除 M21.3 段并迁 backlog 历史归档指针段（backlog 维护规则 5 追溯执行）
+- **M21.4 mergify 模板扩展而非全新**：复用既有 `.github/mergify.yml` 模板按 dependabot / dependfix PR 规则扩展 author 正则覆盖——不发布 mergify action，不修改 dependfix 自身 PR 提交流程
+- **M21.5 e2e 同步降级**：playwright.config.ts:36 `NUXT_QUEUE_ENABLED=false` 强制 sync 路径（避免 CI 环境 BullMQ 等待不稳定；真实 async 测试由 BullMQ 集成测试 `describe.skipIf` 门控覆盖）
+- **M21.1 命令注入修复路径**：execSync → execFileSync + 参数数组（标准 npm:child_process 安全用法）；不引入新依赖；既有测试不回归
 
-## M6: 最小平台 MVP（已归档）
+### 阶段关键经验（已沉淀至项目知识库）
 
-> 归档日期: 2026-08-08
-> 阶段摘要: 参见 [roadmap.md §M6](roadmap.md)
-> 状态: 已完成（T601-T605 + T607 全部完成；CI Test 端到端裁决通过；Docker 镜像构建 CI 链路未裁决通过，登记 backlog C30）
-> 最终提交: `7cb1ad22d` docs(plan): 登记 C29 平台 UI 暗色模式待修复问题（含 M6 收尾修复批次 ec7221fd / 6cfbcb3c / 6edb4ac7）
+- **命令注入修复模式（M21.1 实证）**：execSync 模板拼接 → execFileSync + 参数数组（标准 npm:child_process 安全用法）；既有测试不回归 + grep 实证 0 处剩余 execSync 模板拼接
+- **vitest stubEnv 隔离模式（M21.2 W1 实证）**：`vi.stubEnv` + `vi.unstubAllEnvs` 隔离 process.env 副作用；避免影响其他并行测试
+- **vitepress sidebar 注册完整性（M21.4 audit W1 实证）**：新增 `docs/guide/*.md` 必须同步注册到 `docs/.vitepress/config.ts` sidebar；audit 阶段独立核验避免漏注册导致 vitepress build 隐式失败
+- **playwright e2e sync 降级 + BullMQ 集成测试分离（M21.5 实证）**：CI 环境稳定性优先——e2e 走 sync 路径（避免 BullMQ 等待），BullMQ async 测试走 `describe.skipIf(!redisAvailable)` 集成测试模式；与 M16.5 / M19.4 模式一致
 
-**阶段成果**: 可独立部署的最小平台 MVP——Nuxt 4 全栈平台（仓库/凭据管理 + 同步扫描 + 仪表板 + 注册登录）+ `@dependfix/mcp` MCP Server（4 tool）+ 执行器设计与沙箱评估文档 + B 模式 Action 触发与结果回填。991 tests（CI Test workflow 实测）。
+### 待迁移经验（next neat-freak 候选）
 
-### 规划决策（2026-08-07 用户确认）
-
-- **D1 执行深度（Q1）**：平台扫描以 A 模式（完整修复链路）为主——平台容器内置 git/node/pnpm 工具链，复用 `DependfixApp` 程序化接口完整执行；B 模式（触发目标仓库 GitHub Action）为降级
-- **D2 执行模型（Q2）**：同步执行先行（请求内完成，前端 loading）；阻塞时间过长再演进后台异步（M7 T702 BullMQ 承接）
-- **D3 MCP（Q3）**：保留在 M6（原 T605/T606 合并为本阶段 T605，容量约束"进一出一"，同为 `@dependfix/mcp` 交付物）
-- **D4 沙箱（Q4=A）**：执行器抽象 + 容器内执行（平台 Docker 容器即沙箱）；独立沙箱容器 / GitHub Action 后端仅设计不实现
-- **D5 Action 降级触发（Q5=B）**：平台对已配置 action 的仓库触发 `workflow_dispatch`（需 `actions: write`）；结果回填曾为已知边界 → M6 增强（C25）实现
-- **D6 平台定位**：平台 = 触发器/调度器 + 结果展示（控制面）；修复执行（数据面）以 Executor 抽象隔离
-- **D7 平台结构参考**：`apps/platform/` 对齐 momei 项目结构（Nuxt 全栈：`server/api` + `server/services` + `server/database` + better-auth + TypeORM + SQLite）
-
-### T601 平台项目骨架搭建 ✅
-
-- **交付物**: `apps/platform/` Nuxt 4 全栈项目 + Dockerfile + docker-compose.yml
-- **实现内容**: Nuxt 4 初始化（TypeScript strict、`<script setup>`）+ PrimeVue 4 + `@primeuix/themes` + SCSS（BEM）+ 暗色模式 `.dark` 类；better-auth 集成（邮箱密码登录 + TypeORM Adapter + 会话持久化 30 天 + SMTP 未配置自动跳过邮箱验证 + `REGISTRATION_DISABLED` 关闭注册）；TypeORM + SQLite（`server/database/sqlite/`）；Dockerfile 多阶段 alpine（构建含 git/pnpm 工具链）；env 隔离约束（`PORT` 可配、DB 文件路径独立）
-- **非目标**: 页面业务功能（T602-T604）、i18n / PWA / Sentry（M7）
-- **验收**: 根 lint/typecheck 通过（含平台，CI 实测）；`pnpm dev` 注册登录闭环本地验证；docker compose 拉起依赖镜像构建（C30 观察）
-- **Review Gate / 经验**: T601 单次大 diff 成本失控教训 → 长任务分批提交治理（a808b376 立规，经验归档 §二十四）
-
-### T602 仓库与凭据管理 ✅
-
-- **交付物**: Repository CRUD + Credential 加密存储 + Web UI
-- **实现内容**: Repository 实体（owner/repo/platform/defaultBranch/packageManager/credentialId）+ CRUD API（Zod 校验）；Credential 实体（classic-pat / fine-grained-pat / github-app）+ AES-256-GCM 加密存储（`ENCRYPTION_KEY` 平台级密钥，解密仅在执行时 worker 内存中）；Dependabot alerts 读取必须显式凭据（G2 处置）；Web UI 仓库列表/添加/编辑/删除 + 凭据管理页
-- **验收**: Web UI 增删改查闭环；DB 中 token 为密文（直查 sqlite 验证）+ 解密单元测试
-
-### T603 扫描触发与结果存储 ✅
-
-- **交付物**: ScanRun/ScanResult 持久化 + 同步扫描执行（ContainerExecutor）+ Web UI 触发与结果查看
-- **实现内容**: ScanRun/ScanResult 实体（repoId/mode/severityThreshold/status/startedAt/finishedAt/summary）；Executor 抽象（T607 契约）——`ContainerExecutor`（默认，平台容器内置工具链，clone + 执行 `DependfixApp` + 结果回填）；同步执行模型（请求内执行，失败 → `failed`，原子写不写半截结果）；Web UI 触发单仓库扫描 + 结果/报告查看；同仓库扫描互斥锁（e1ef2a95，M6 轻量版，M7 T702 BullMQ 承接）
-- **验收**: Web UI 触发扫描并查看结构化结果；结果持久化 SQLite 重启可查
-
-### T604 仪表板与告警视图 ✅
-
-- **交付物**: 仪表板 + 告警筛选视图 + 扫描历史
-- **实现内容**: 仪表板统计（仓库数/告警数按严重级别/已修复数/最近扫描）+ 告警视图（按仓库/严重级别/来源筛选）+ 扫描历史列表与详情（仓库级扫描历史页 + 详情 Dialog）
-- **非目标**: 趋势图表、通知（M7）、导出
-- **验收**: 用户登录后可查看全局告警状态并筛选
-
-### T605 MCP Server（原 T605 + T606 合并）✅
-
-- **交付物**: `packages/mcp`（`@dependfix/mcp`）+ 4 个 tool + CLI 一致性断言
-- **实现内容**: `packages/mcp` 初始化（tsdown 构建 ESM + CJS + dts）；集成 `@modelcontextprotocol/sdk`（stdio 传输）；`fetch_alerts`（只读，schema 见 [mcp-server.md](../design/governance/mcp-server.md)）/ `get_last_report`（只读）/ `run_scan`（写入，复用 `DependfixApp` 默认 report-only）/ `fix_dependency`（写入，复用 `overrideTransitiveDependency`）；MCP tool 与 CLI 输出一致性断言（fetch-alerts nock 一致性断言 4 用例）
-- **非目标**: npm 发布与 skill 双后端集成（M7 T706）、多传输（http/SSE）
-- **验收**: `npx @dependfix/mcp` 启动注册 4 个 tool（`dist/bin.mjs` 生成 + `createMcpServer` 冒烟测试）；一致性断言测试通过
-
-### T607 执行器设计与沙箱评估（设计先行 + Action 触发实现）✅
-
-- **交付物**: 执行器/沙箱设计文档 + `ActionTriggerExecutor` + B 模式接入评估结论
-- **实现内容**: 设计文档（恶意依赖升级威胁建模 + 执行器方案矩阵 + Executor 接口契约）——见 [executor-sandbox.md](../design/governance/executor-sandbox.md)；`ActionTriggerExecutor`（对配置 action 的仓库触发 `workflow_dispatch`，凭据复用仓库关联 Credential，workflow 文件名仓库配置声明）；B 模式接入评估（使用方式/体验/成本写入设计文档 §5）；mcp-server.md 里程碑编号修正
-- **非目标**: 独立沙箱容器执行实现（M7）、action 结果回填（M6 内由 C25 增强实现）
-- **验收**: 设计文档 Review Gate 通过；平台可触发 `workflow_dispatch` 并返回触发结果；B 模式接入成本评估结论落盘
-
-### M6 完成判定（全部通过）
-
-- [x] T601-T605 + T607 全部交付并通过 Review Gate（M6 终审 deep Review Gate，warning 3/4 处置见 C27/C28）
-- [x] `pnpm typecheck` + `pnpm lint` + 全量测试 + `pnpm build` 通过（CI Test workflow 实测 991 passed；本地串行验证）
-- [x] `docker compose` 部署链路可构建（镜像构建 CI 端到端未裁决，登记 C30）
-- [x] MCP tool 注册冒烟 + CLI 一致性断言通过
-- [x] 沙箱设计文档 Review Gate + `workflow_dispatch` 触发实测
-
-### M6 阶段治理记录（2026-08-07 ~ 2026-08-08）
-
-- **提交序列**: M6 规划（681efec5）→ T601（48f9c7eb）→ **T607 设计文档（56b0e518，设计先行于 T602）** → T602（85aca268）→ ActionTriggerExecutor（1c7cdb90）→ T603（3d645b54 数据层 / 209bc48c 执行链路 / 98b3f4ab 前端）→ T604（506dd7c9 API / 2cb941e3 UI）→ T605（014f6d2c + 69f32796）→ server 别名（fb62e259）→ 完成标记（1d2ff14b）→ 发布包清单单点化（83edffc5）+ 经验归档 §二十五（89a2f142）→ REGISTRATION_DISABLED（9a4309cb）→ backlog 登记 C27/C28（216b00cb）→ C25 结果回填（17c5082f + 60d9fd6e 修复）→ 互斥锁（e1ef2a95）→ CI 链式修复（6b41556e / fcc161b4 / e16aeda4）→ **交付后收尾批次**（ec7221fd repositoryUpdateSchema partial 崩溃修复 / 6cfbcb3c platform lint 脚本与 vue 格式 / 6edb4ac7 dashboard stats findOne 缺 where 条件修复 / 7cb1ad22d 登记 C29 平台 UI 暗色模式待修复）
-- **Review Gate**: 每任务独立审计 + M6 终审 deep Review Gate（warning：W3 C27 runUrl 状态语义 → 随 C25 实现联动闭环；W4 C28 security.md 凭据加密章节 → 登记 backlog 待评估）
-- **M6 增强批次**: C25 B 模式结果回填（`ActionResultFetcher`：轮询 run 完成 → 下载 `dependfix-report-{runId}` artifact → 解析 JSON 落库；orchestrator 三分支 completed/dispatched/failed）；同仓库互斥锁（withRepoLock，进程内 FIFO）；REGISTRATION_DISABLED
-- **发布体系**: `@dependfix/mcp` 纳入发布包清单（发布包清单单点化 refactor）
-- **CI 端到端裁决（2026-08-08 推送后）**: Test workflow ✅（lint + lint:md + typecheck + 991 tests + nuxt prepare + workspace 预构建）；CodeQL ×2 ✅；Pages ✅；Publish Docker ❌（QA ✅；build 在 QEMU 双平台构建中 1h19m 被同 ref 新 push 的 concurrency cancel-in-progress 取消，登记 C30，根因已定位）
-- **经验沉淀**: 归档 §二十四（单次大 diff 成本失控：长任务分批提交）/ §二十五（新增发布包散落遗漏：包清单单点声明）；规范 a808b376（任务粒度约束与提交规模上限）
-- **已知边界（归档时点）**: Docker 镜像构建 CI 链路未裁决（C30）；M5.5 GitHub 源端到端复验仍依赖后续 CI 运行；security.md 凭据加密章节待补（C28）；平台 UI 暗色模式不可用待修复（C29）
-- **遗留登记（转入 backlog）**: C26（独立沙箱容器实现，M7 候选）、C28（security.md 凭据章节）、C29（平台 UI 暗色模式）、C30（Docker CI build 取消排查）；M7 T701-T706
+- **M21.5 2 suggest 登记 backlog**：S1 trigger happy path（playwright schedules 触发后状态流转断言可加强）/ S2 pattern 覆盖断言（BullMQ 集成测试可加更细粒度的 cron pattern 覆盖）—— 后续批次治理
+- **M21.4 mergify 模板作者归属校验**：当前 author 正则覆盖 `dependfix[bot]` / `123+dependfix[bot]`；未来 dependfix bot 改名 / 增加其他自动修复工具时需同步更新正则——候选下批次会话处理
 
 ---
 
-## M7.1: 认证与用户体系（已归档）
+## M20: ScanResult 数据模型重构（M20.1+M20.3+M20.5+M20.6+M20.7 全部已闭环 / 2026-08-31 归档）
 
-> 归档日期: 2026-08-10（T701/T707 代码交付完成，**剩余 3 项真实凭据人工验收**见下方「遗留登记」）
-> 阶段摘要: 参见 [roadmap.md §M7](roadmap.md)
-> 设计文档: [platform-auth-users.md](../design/governance/platform-auth-users.md)（Review Gate 两轮 Pass）
+> **归档日期**：2026-08-31
+> **阶段摘要**：M19 闭环后实测反馈——`nuxt-latest-template` 在最近一次扫描 0 告警，但 alerts 视图仍显示 7 条历史"未处理"告警（出现次数 7）。根因：ScanResult 当前是"每次扫描 × 每个告警"存一行（91 行 vs 13 个独立告警），无 reconcile 逻辑，导致上游已关闭的告警永远残留。按依赖关系拆 **5 子阶段独立闭环**：M20.1 引擎侧 upstreamId 注入 / M20.3 ScanResult 实体升级 + reconcile 函数 / M20.5 API 简化 + dashboard 调整 / M20.6 UI 调整 + i18n / M20.7 一次性 backfill 脚本。
+> **阶段边界**：M20 严格遵循 [规划规范 §1.1 任务粒度约束](../../docs/standards/planning.md)（≤5-6 项硬上限）；M20.3 ScanResult per-alert 模型重构是本阶段核心，M20.5-M20.7 均依赖 M20.3 实体升级。
+> **非目标**：不删除旧 scanRunId 列（保留兼容）；不回滚决策 1-4；不引入新依赖（tsx 已存在）。
+> **状态**：✅ 全部完成（M20.1 + M20.3 + M20.5 + M20.6 + M20.7 全部 5 子阶段闭环 / 8 commits 已全部落地）
 
-### T701 RBAC 权限管理 + 用户管理 + 个人界面 ✅
+### 阶段闭环清单
 
-- **交付物**: 角色权限系统 + 用户管理界面 + 个人设置界面
-- **实现内容**: 子任务 1（数据层）：单组织归属（Organization 实体 + Repository/Credential.organizationId + 默认组织初始化 + 存量迁移）+ 角色模型（admin/org_admin/viewer 三角色）+ better-auth admin 插件 + 角色迁移 + guard 扩展（requireRole/requireOrgResource）；子任务 2（管理 UI）：用户列表/搜索/启用禁用/角色分配 + 页面守卫；子任务 3（个人界面）：资料/密码/邮箱/绑定账号/语言偏好占位
-- **非目标**: 审计日志、邀请注册（backlog）、T707 第三方登录、repo_admin/username/多租户（backlog，决策 D1/D2/D3）
-- **验收**: 权限矩阵 guard 11 例 + 浏览器验证 8/8 + organization.test.ts 8 例（存量填充/幂等/并发安全）+ 写操作收紧 admin/org_admin 披露
-- **提交**: 5811e524 + 8d515aa8 + 2c2620e6 + dc712df1 + ce36ec37 + a115e351 + 781d3fa5 + 3cc58165 + 08a68315（含平台增强：仓库批量导入 85c6988d + e2e 基建 432c59a1）
-- **Review Gate**: 子任务独立审计 + T701 收口审计 Pass（W1 注释编号清理后复审通过）
+#### M20.1 引擎侧 upstreamId 注入 + 规范化函数 ✅（2026-08-31 闭环）
 
-### T707 认证扩展：OIDC SSO / GitHub·Google OAuth / 邮箱域名黑白名单 ✅（代码交付，3 项人工验收待办）
+| 子任务 | 关键 commit | 完成要点 |
+|:--|:--|:--|
+| **NormalizedSecurityAlert.upstreamId 字段 + normalizeUpstreamId()** | `acb2d35`（feat(engine,core)） | `packages/core/src/alerts/index.ts` 增加 `upstreamId: string` 字段；新增 `packages/core/src/alerts/upstream-id.ts` 实现 `normalizeUpstreamId(source, raw)` 函数（`${source}:${numericId\|hash}` 格式）；4 个 fetcher 调用规范化函数填充（Dependabot/Code Scanning/pnpm-audit/code-quality）；8 个 engine 测试文件 + report.test-helpers 补充 upstreamId 字段；core upstream-id.test.ts 14 用例覆盖各 source 格式 / 空值防御 / 幂等性 / pnpm-audit 不同包区分 |
 
-- **交付物**: 多登录方式 + 部署模式互斥配置 + 注册准入控制
-- **实现内容**:
-  - 子任务 1（部署模式与准入）：`AUTH_MODE=enterprise|public` 互斥（启动校验非法值拒绝）；注册准入 `user.create.before` hook 单一准入点（REGISTRATION_DISABLED 总开关 + email 缺失 fail-closed + 域名白名单/黑名单）；首用户 admin 短路优先（决策点 11）；`disableSignUp` 不合并 enterprise 空白名单（P1 死锁修复：端点级拦截阻断首用户 bootstrap）
-  - 子任务 2（OAuth）：GitHub/Google `socialProviders` 条件化（凭据齐全才启用）；登录页按钮（`resolveSocialProviders` 纯函数 6 例单测）；可用性布尔仅根级 env（前后端通道一致）
-  - 子任务 3（OIDC SSO）：`genericOAuth` 插件条件化（discoveryUrl/issuer 二选一 + 手动端点覆盖 + `requireIssuerValidation: true` RFC 9207 防护）；`genericOAuthClient()` 客户端注册；enterprise 登录页按钮
-- **决策**: D1 部署模式互斥（enterprise 白名单 / public 黑名单）；决策点 6 修订（enterprise 白名单空 = 完全关闭自动开通）；决策点 11 新增（首用户 admin 优先于准入检查）——2026-08-10 用户确认
-- **验收**: 单测 92/92（email-domain 11 + auth-access 集成 10 + social-providers 6）+ e2e 22 用例 + ui-validator 视觉 8/8 + lint/typecheck/build；「未配置登录方式自动隐藏」与「单测/e2e 覆盖项」勾选完成
-- **提交**: bd6e9ffc（T707-1）+ 56e56f95（T707-2）+ 6f4b7d1f（T707-3）+ 25ac7540（状态同步）
-- **Review Gate**: T707-1 双轮（首轮 REJECT P1 死锁 + P2×3/P3×5 → 修复后复审 APPROVE）；T707-2/3 各 APPROVE
-- **遗留登记（待人工验收，真实凭据）**: ① 真实 GitHub/Google OAuth 登录闭环（需 OAuth App 凭据）；② 真实 IdP OIDC 登录闭环（需 RFC 9207 iss 回显支持的 IdP）；③ 构建期配置凭据后按钮显示路径实测
+#### M20.3 ScanResult 实体升级 + reconcile 函数 ✅（2026-08-31 闭环）
+
+| 子任务 | 关键 commit | 完成要点 |
+|:--|:--|:--|
+| **ScanResult 实体升级** | `2e4ab1b`（feat(platform)） | `apps/platform/server/entities/scan-result.ts` 增加 6 列（upstreamId / firstSeenAt / lastSeenAt / occurrenceCount / supersededAt / repositoryId）+ 类级复合唯一索引 `(repositoryId, upstreamId)` + 类级复合索引 `(repositoryId, supersededAt)` |
+| **reconcile 函数** | `2e4ab1b`（含 reconcile） | `apps/platform/server/services/scan-reconcile.ts` 实现 `reconcileAlerts()` 200 行覆盖 todo.md §M20.3 决策 1-4（INSERT / UPDATE 活跃 / supersede 上游消失 / preservedSuccess / 幂等）；`scan-orchestrator.service.ts` 替换 INSERT 逻辑为 reconcileAlerts() 调用 |
+| **DDL 验证测试** | `2e4ab1b`（含 DDL 测试） | `apps/platform/tests/scan-result-ddl.test.ts` 验证 SQLite sqlite_master 中复合唯一索引实际生成 + NOT NULL 字段 + INSERT 重复被 unique constraint 拒掉 |
+
+#### M20.5 API 简化 + dashboard 调整 ✅（2026-08-31 闭环）
+
+| 子任务 | 关键 commit | 完成要点 |
+|:--|:--|:--|
+| **/api/alerts 移除 dedupe + dashboard 数活跃告警** | `170fee1`（feat(platform)） | `/api/alerts` 移除 dedupe 参数 + 新增 includeSuperseded 参数（默认 false → supersededAt IS NULL 过滤）+ 返回字段新增 M20.3 字段；`/api/dashboard/stats` alertsTotal 改为数活跃告警（supersededAt IS NULL）；dedupe=true 静默忽略（向后兼容） |
+
+#### M20.6 UI 调整 + i18n ✅（2026-08-31 闭环）
+
+| 子任务 | 关键 commit | 完成要点 |
+|:--|:--|:--|
+| **alerts 视图移除 dedupe 切换 + 改为 includeSuperseded 开关** | `c7ba014`（feat(platform)） | alerts.vue dedupeOptions Select → ToggleSwitch "显示已解决"；occurrenceCount/firstSeenAt/lastSeenAt 列从 v-if 改为默认列；状态列加 superseded 分支（success 永显已修复 / 非 success+superseded 显已关闭）；alerts-view.ts AlertsFilters.dedupe → includeSuperseded；i18n 双语新增/删除键；ToggleSwitch v-model 嵌套字段 bug 修复（reactive + 显式 watch） |
+
+#### M20.7 一次性 backfill 脚本 + 数据迁移 ✅（2026-08-31 闭环）
+
+| 子任务 | 关键 commit | 完成要点 |
+|:--|:--|:--|
+| **backfill-scan-result.ts CLI 脚本** | `a399323`（feat(platform)） | apps/platform/server/database/scripts/backfill-scan-result.ts（335 行 CLI 脚本：dry-run + apply 双模式；plan + execute 分离；整批事务化；聚合键 (source, packageName, ruleId)；upstreamId 合成 `${source}:backfill-${rowId}` 命名空间隔离；fixStatus='success' 永不被 supersede；批量 save 替代 N+1）|
+| **backfill-scan-result.test.ts** | `a399323`（含测试） | 11 个 vitest 单测覆盖聚合规则 / 幂等 / 跨 repo 隔离 / dry-run 与 apply 一致性 / formatStats 输出 / buildBackfillUpstreamId 命名空间 |
+| **register-entities.ts + README.md** | `a399323`（含辅助文件） | register-entities.ts 集中管理 entity metadata side-effect imports（tsx CLI 不走 Nitro auto-load）；README.md 运行步骤文档（dry-run → apply + y/N 二次确认 + 回滚说明） |
+| **M20.7 脚本精简** | `ca6a1dc`（refactor(platform)） | engines 升级 >=20 → >=22（Node 20 EOL）；删 register-entities.ts 单独文件整合到主脚本；净 -21 行 |
+
+### 阶段验收标准（M20 全部 5 子阶段闭环 ✅）
+
+- [x] **M20.1 引擎侧 upstreamId 注入** —— NormalizedSecurityAlert.upstreamId 字段 + normalizeUpstreamId() + 4 fetcher 填充 + 14 用例覆盖
+- [x] **M20.3 ScanResult 实体升级 + reconcile 函数** —— 6 列新增 + 复合唯一索引 + reconcileAlerts() 覆盖决策 1-4 + DDL 验证测试
+- [x] **M20.5 API 简化 + dashboard 调整** —— dedupe 参数移除 + includeSuperseded 参数 + dashboard 数活跃告警
+- [x] **M20.6 UI 调整 + i18n** —— ToggleSwitch "显示已解决" + 状态列 superseded 分支 + i18n 双语 + reactive watch 修复
+- [x] **M20.7 backfill 脚本** —— CLI dry-run/apply + 11 单测 + README 文档 + Node 22+ engines
+- [x] `pnpm lint` / `typecheck` 全绿 —— 0 error / 4 历史 warnings baseline
+- [x] vitest 单测覆盖 + playwright e2e 覆盖 —— 914 passed + 15 e2e passed
+- [x] `pnpm check:docs` 全过 —— 102 md + 57 vue-interp OK
+- [x] 编号标记扫描 0 命中
+- [x] CLI dry-run / apply 端到端实测通过
+- [x] A 阶段 Code Auditor deep depth Pass（M20.6 0 blocker / 2 warning / 5 suggest；M20.7 Reject → 修复 → Pass）
+
+### 阶段治理记录
+
+- **总投入**：8 commits（M20.1 1 + M20.3 1 + M20.5 1 + M20.6 1 + M20.6 docs 1 + M20.7 1 + M20.7 docs 1 + M20.7 refactor 1）
+- **测试覆盖**：vitest 914 passed + 4 skipped（含 backfill 11 单测）；playwright 15 e2e passed（alerts-rowgroup 10 + alerts-sidebar 2 + alerts-fix-now 3）
+- **审计覆盖**：M20.6 deep depth Pass（0 blocker / 2 warning / 5 suggest）；M20.7 deep depth Reject → 修复 2 blocker + 3 warning → Pass
+- **关键 bug 修复**：ToggleSwitch v-model 嵌套字段 + useAsyncData watch 浅监听不触发 refetch → 改为 reactive + 显式 watch(filters, refreshAlerts, { deep: true })
+- **关键经验**：
+  - Node `--experimental-strip-types` 不支持装饰器（TypeORM entity 装饰器必须 tsx 编译）
+  - dev SQLite 是 M20.3 之前旧 schema，synchronize ADD COLUMN NOT NULL 失败
+  - engines 升级 Node 22+（Node 20 EOL）
+
+### 待迁移经验（next neat-freak 候选）
+
+- **M20.6 A 阶段 W1/W2**：alerts-sidebar 第 2 测试语义弱化 + mock data 残留废弃字段（affectedRunIds / occurrenceCount）—— 下批次 e2e 重构清理
+- **M20.7 A 阶段 W3/S1-S7**：backfill 测试覆盖盲点（success+superseded 边界 / null 混合 / 事务回滚 / 跨 DB / 性能）+ 文档优化建议 —— 下批次治理
 
 ---
 
-## M7.2: 平台能力深化（已归档）
+## M19: 治理 + 能力扩展 + 测试补强（M19.1+M19.2+M19.3+M19.4+M19.5 全部已闭环 / 2026-08-31 归档）
 
-> 归档日期: 2026-08-12（T702/T704/T708/T709/T710 代码交付完成；T711 覆盖率冲刺进行中不归档；T705/T703 按用户指示延期至 backlog）
-> 阶段摘要: 参见 [roadmap.md §M7](roadmap.md)
-> 设计文档: [platform-scheduled-batch.md](../design/governance/platform-scheduled-batch.md)（T704，Review Gate Pass）
+> **归档日期**：2026-08-31
+> **阶段摘要**：M18 闭环后承接 backlog 候选池，按"类型平衡"原则（技术债 1 项 + 能力扩展 1 项 + 用户体验 2 项 + 测试覆盖 1 项）选取 5 项任务独立闭环。M19.1（P3，技术债）C34 存量规范严格约束挂接盘点 / M19.2（P2，能力扩展）C23 发现规模上限 max-repos / M19.3（P2，用户体验）B1 PR 关闭评论 + label / M19.4（P2，测试覆盖）T701-e2e 管理端点集成测试补强 / M19.5（P2，用户体验）C8 per-source 错误隔离；外加 M19.x 收口（孤立编号清理 commit `ae33671`）+ 配套 commits（M19 规划 `2f9eb38` + M19 任务详情更新 `bee5c3f` + M19.4/M19.5 标记完成 commits `61b3ddc` / `4231ffb`）。
+> **阶段边界**：M19 严格遵循 [规划规范 §1.1 任务粒度约束](../../docs/standards/planning.md)（≤5-6 项硬上限）+ 类型平衡；不涉及架构变更（仅 max-repos 上限参数）；不破坏既有 PAT / AuthProvider / GitHub App / viewer role check 等机制。
+> **非目标**：不引入新依赖；不升级 better-auth / PrimeVue；不破坏 C22 PAT + App 并存路径；不引入 GitHub Actions API 权限升级之外的额外权限面扩展（B1 仅扩展到 `issues: write`）；fixtures 仍 mock（e2e 真实凭据验证属 T701 真实环境验证任务保留于 backlog）。
+> **状态**：✅ 全部完成（M19.1+M19.2+M19.3+M19.4+M19.5 全部 5 子任务闭环 / 5 atomic commits + 配套 commits 已全部推送至 origin/master；ahead=0 `git rev-list HEAD ^origin/master --count` 2026-08-31 实测；M19.1 standard depth Pass / M19.2 standard depth Pass（含 1 blocker + 3 warning 已全部修复）/ M19.3 standard depth Pass（2 warning 已全部修复）/ M19.4 quick depth Pass（1 blocker + 3 warning 已全部修复）/ M19.5 standard depth Pass（2 warning 已修复 1 项 + 1 项登记 P3）+ 同步配套 commits；本批次清理 backlog 5 个已上收主条目：B1 PR 关闭评论 + label（M19.3 闭环）/ C23 发现规模上限 max-repos（M19.2 闭环）/ C8 per-source 错误隔离（M19.5 闭环）/ T701-e2e（M19.4 闭环）/ C34 存量规范严格约束挂接盘点（M19.1 闭环））
 
-### T702 任务队列与并发控制（BullMQ + Redis + 渐进式降级） ✅
+### 阶段闭环清单
 
-- **交付物**: 基于 BullMQ + Redis 的任务调度系统（异步扫描队列 + 并发控制 + 优先级 + 去重 + 重试）
-- **实现决策**: D1 扫描异步化（入队立即返回 + 前端轮询；B 模式结果回填异步化）；D2 Redis 基础设施（本地本机 Redis / 生产 compose / 无 Redis 同步降级）；D3 worker 部署形态（独立进程 / in-process worker / 同步降级三态）
-- **实现内容**: 子任务 1（队列基础设施）：redis.ts 连接封装（lazyConnect + ping 探测）+ scan-queue.ts（BullMQ jobId 去重 + priority 1/5/10 + 指数退避）+ scan-worker.ts + queue-mode.ts 模式决策纯函数（14 例单测）；子任务 2（扫描 API 异步化）：scan.post 三态（入队/pending/同步）+ runScanForRepository 拆分 + repos.vue 轮询（2s）+ queue.service.ts 惰性单例 + 真实 Redis 7.4.1 集成测试 4 例（入队→消费/去重/终态重建）；子任务 3（部署运维）：docker-compose redis:7-alpine + NUXT_REDIS_URL/QUEUE_*/IN_PROCESS_WORKER env + .env.example
-- **验收**: 单测 106/106 + e2e 23 用例；降级路径实测（Redis 3.0 version_too_old → sync completed）；队列闭环真实 Redis 集成测试；修复 jobId 冒号限制（scan- 前缀）与 parseQueueEnabled 布尔解析两个冒烟缺陷
-- **提交**: 93057088（T702-1）+ d909b89c（T702-2）+ 57a84a1c（T702-3），双轮 Review Gate APPROVE
-- **非目标**: webhook 触发（队列优先级预留 5，登记 backlog）、跨实例分布式锁的精细调优（BullMQ 默认即可）
-- **遗留登记（待人工验收）**: HTTP 层 pending→running→completed 状态流转 + 前端轮询体验（需后台服务/staging 环境）
+#### M19.1 C34 存量规范严格约束挂接盘点 ✅（2026-08-30 闭环）
 
-### T704 定时扫描与批量处理（cron 调度 + 批量选择 + 聚合报告） ✅
+| 子任务 | 关键 commit | 完成要点 |
+|:--|:--|:--|
+| **C34 存量规范严格约束挂接盘点** | `0c536c1`（docs(review)） | 补充 8 个强制性条款检查点到 [code-reviewer](../../.github/skills/code-reviewer/SKILL.md) skill + [code-quality-checklist](../../.github/skills/code-reviewer/references/code-quality-checklist.md)（含 audit-depth / commit 拆分 / F 阶段 coverage 强制 / M14.x code-quality-checklist 双向同步 / M17.6 better-auth 锁定 / M18.x 集成外部库 README 标准用法 / 治理规范 audit warning 修复 vs 登记决策 / M18.x audit Reject 后针对性补修）；A 阶段 quick depth Pass |
 
-- **交付物**: 定时调度 + 批量执行 + 聚合报告（到点自动触发 + 多仓库一次执行 + 跨仓库统计）
-- **实现决策**: D1 双模调度（BullMQ upsertJobScheduler / node-cron 降级）；D2 4 种仓库选择策略（all/organization/tag/explicit + tags JSON 列）；D3 聚合轮询更新（无 Worker 回调）；D4 tags JSON 字符串列
-- **实现内容**: 子任务 1（数据模型）：Schedule/BatchRun 实体 + Repository.tags + ScanRun.batchRunId + Zod 校验（scheduleSchema 交叉校验 + cronIsValid 5/6 段 + isValidTimezone，23 例单测）；子任务 2（调度服务 + API + 前端）：scheduler.service 双模单例 + selector 4 策略权限隔离 + Schedule CRUD + 手动触发 + /schedules 页面（15+29 例单测）；子任务 3（批量执行 + 聚合报告）：batch-scan API + batch-runs 列表/详情 + 聚合统计纯函数 + scheduled-scan processor + repos 复选框批量扫描 + /batch-runs 页面 + e2e 闭环
-- **验收**: platform 单测 179 过/4 条件跳过 + e2e 25 用例 + lint/typecheck/build；修复 e2e 根因（NUXT_QUEUE_ENABLED destr 布尔解析）；Review Gate 3 分区并发 + 复审（B1 聚合写回覆盖 failed 终态等 4 项关闭）
-- **提交**: 9f13aa0b（T704-1）+ 55fa20a9 + 45c3d3cf（T704-2）+ b830630e + ee0f533f + d6112649 + 81969be6 + d2898023 + 35b2e95c（T704-3）
-- **非目标**: webhook 触发（T702 预留 priority=5）、标签管理独立 UI（tags 经仓库编辑表单输入）、定时计划执行历史趋势图、邮件通知（SMTP 配置依赖，登记后续）、跨组织批量选择（随多租户 backlog）
-- **遗留登记（待人工验收）**: ① async 定时触发集成测试（BullMQ upsertJobScheduler 短间隔验证，需 Redis >= 5）；② Schedule CRUD e2e 补覆盖（当前单测覆盖，e2e 未覆盖）
+#### M19.2 C23 发现规模上限 max-repos ✅（2026-08-31 闭环）
 
-### T708 国际化 i18n（全平台 UI 双语 zh-CN / en-US） ✅
+| 子任务 | 关键 commit | 完成要点 |
+|:--|:--|:--|
+| **C23 发现规模上限 max-repos** | `c998d58`（feat(engine)） | 15 文件 / +149/-1 行；`packages/engine/src/discovery/` 实现 `maxRepos` 参数按排序截断保证确定性；CLI `--max-repos` 选项 + Action input + Platform UI 三入口统一暴露；默认值 100；单测覆盖：超过上限时截断 / 未超过时不截断 / 默认值生效；A 阶段 standard depth Pass（1 blocker MCP schema 修复 + 3 warning env normalizer / Action input / Platform UI 已全部修复） |
 
-- **交付物**: 全平台 UI 双语（zh-CN 默认 / en-US /en 前缀）+ 语言切换/检测/本地化格式
-- **实现决策**: D1 @nuxtjs/i18n v10 + prefix_and_default；D2 检测优先级 URL > Cookie > 浏览器 > 默认；D3 偏好存 Cookie（多设备同步登记 C37）；D4 PrimeVue locale 联动；D5 datetime/number 格式本地化
-- **实现内容**: 子任务 1（基建）：@nuxtjs/i18n 10.6.0 + primelocale 2.4.0 + localeDetector（resolveLocale 纯函数 7 例）+ 语言包骨架 40 键 + 切换器 + PrimeVue 联动插件；子任务 2（认证框架）：login/register/settings/users/dashboard/index 六页面文案抽取（153 键）；子任务 3（业务大页）：repos/schedules 文案 t() 化（288 键，batchModeOptions 响应式）；子任务 4（其余业务+收尾）：alerts/credentials/batch-runs/runs 抽取（410 键）+ d() 日期格式统一 + detectBrowserLanguage 修复 + e2e 基建（hydration 等待/Origin 头）+ i18n e2e 3 用例
-- **验收**: 单测 186/190 + e2e 28 用例 + lint/typecheck/build；全平台用户可见中文零命中（含全角标点口径）；README 补 i18n 说明
-- **提交**: 4 子任务分批提交（基建 / 认证框架 / 业务大页 / 其余收尾），逐批 Review Gate Pass
-- **非目标**: 服务端 API 错误消息 i18n（C36）、语言偏好多设备同步（C37）、第三方语言
-- **已知边界**: localeDetector 执行面当前未激活（@intlify/h3 惰性绑定，平台无服务端 useTranslation 调用），TypeError 隐患已消除但端到端触发验证待服务端翻译场景引入时覆盖
+#### M19.3 B1 PR 关闭评论 + label ✅（2026-08-31 闭环）
 
-### T709 治理规范收敛：验证分级矩阵与分级审计执行协议去冲突 ✅
+| 子任务 | 关键 commit | 完成要点 |
+|:--|:--|:--|
+| **B1 PR 关闭评论 + label** | `5839771`（feat(engine)） | 8 文件 / +492/-5 行；PR 创建前查重逻辑扩展：当同一仓库存在未合并修复 PR 时，在新 PR 添加评论（指向已有 PR 的链接 + 说明）+ 添加 `duplicate` label（可配置）；`GITHUB_TOKEN` 权限扩展到 `issues: write`（比当前 `pull-requests: write` 宽）；A 阶段 standard depth Pass（2 warning 集成测试 + action.yml 已全部修复） |
 
-- **交付物**: 消除两套分级体系冲突（同一张表三处重复抄写、两维关系未声明、默认 deep 覆盖不一致）
-- **实现内容**: ai-collaboration.md §1.3 升级为 audit-depth 唯一权威协议；code-reviewer SKILL / code-auditor agent / full-stack-master agent+skill 收敛为一行引用（补"未声明默认 deep"）
-- **验收**: 全库 grep 单点声明 + lint:md + check:links（115 文件）+ 编号扫描零命中；deep 审计 Pass
-- **提交**: 单批（2026-08-12）
+#### M19.4 T701-e2e 管理端点集成测试补强 ✅（2026-08-31 闭环）
 
-### T710 CI lint 警告清理（10 → 0） ✅
+| 子任务 | 关键 commit | 完成要点 |
+|:--|:--|:--|
+| **T701-e2e 管理端点集成测试补强** | `8db2fd4`（test(platform)） | 3 文件 / +841 行；`apps/platform/tests/e2e/` 新增 `users-api.e2e.test.ts` (6 case) + `credentials-api.e2e.test.ts` (19 case) + `repos-api.e2e.test.ts` (25 case) —— 用户管理端点 + 凭据管理端点 + 仓库管理端点 API 集成测试；playwright test 50 passed（users 6 + credentials 19 + repos 25）；A 阶段 quick depth Pass（1 blocker users-api 与 admin-roles 重复 + 3 warning repos 缺扫描/导入 / users 缺 impersonate/unban / credentials data.code 一致性 已全部修复） |
 
-- **交付物**: pnpm run lint 警告 10 → 0（test/release/docker 三工作流恢复绿）
-- **实现内容**: 批次 1+2（templates.ts 未用参数 + no-dynamic-delete 重建 + overrides-io 拆分）；批次 3（processRepoForFix 681 行拆 repo-fix.ts/repo-alerts.ts）；批次 4（3 个 >1000 行测试文件拆 describe + test-helpers）；批次 5（repos.vue 980 行拆 ImportReposDialog.vue）
-- **验收**: 全仓 lint 0 警告；全量测试无回归（core 129 + engine 764 + platform 186/190 + e2e 28）
-- **提交**: 8f95a2ec + 660362fb + e9998354 + 4ee9cf59
+#### M19.5 C8 per-source 错误隔离 ✅（2026-08-31 闭环）
 
-### 遗留登记（归档时点）
+| 子任务 | 关键 commit | 完成要点 |
+|:--|:--|:--|
+| **C8 per-source 错误隔离** | `a20ea02`（feat(engine)） | 5 文件 / +159/-2 行；`packages/engine/src/` 并行拉取逻辑捕获单源异常并 warn 日志；返回结构扩展 `FixError.source` 字段 + `logPartialSourceFailureSummary` 函数汇总警告可见性；CLI 输出警告（如 `[WARN] Dependabot source failed: timeout, continuing with other sources`）；核心错误隔离机制（Promise.allSettled）此前已存在，本批次主要补强 CLI 汇总警告可见性；A 阶段 standard depth Pass（2 warning：throw 路径重复提示已修复 + pnpm-audit 单源文案登记 P3） |
 
-- **转入当前任务 [todo.md](todo.md)**: T711 覆盖率冲刺（进行中，口径修正已完成，分阶段补测中）；T705 生产级部署 / T703 跨平台 Git（已延期，见 [backlog.md §M7.2](backlog.md#m72-平台能力深化)）
-- **待人工验收（真实环境）**: T701 真实凭据 3 项（OAuth 闭环 / OIDC 闭环 / 配置显示路径）；T702 HTTP 层状态流转 + 前端轮询；T704 async 定时触发集成测试 + Schedule CRUD e2e
-- **已知边界（归档时点）**: 见 [todo.md 已知边界](todo.md) 与 [backlog.md](backlog.md)（C26/C28/C29/C30、C33、C34、C36/C37、B1/B2、T904/T905/T906、D1/D2/D3/D8 触发条件项）
+#### M19.x 收口（孤立编号清理）✅
+
+| 子任务 | 关键 commit | 完成要点 |
+|:--|:--|:--|
+| **M19.x 收口** | `ae33671`（docs(refactor)） | 移除本次提交引入的孤立编号（M19.x → todo.md §M19.x）；编号标记扫描 0 命中（防御 [开发规范 §3 注释规范](../../docs/standards/development.md) 与 [code-auditor.agent.md 主责边界必查项](../../.github/agents/code-auditor.agent.md)） |
+
+### 阶段验收标准（M19 全部 5 子任务闭环 ✅）
+
+- [x] **M19.1 C34 存量规范挂接盘点** —— 8 个必查项补充到 code-reviewer skill + code-quality-checklist + 双向挂接完整；`pnpm check:docs` 通过（101 md + 57 vue-interp）；`pnpm --filter dependfix-docs build` 通过
+- [x] **M19.2 C23 发现规模上限 max-repos** —— `packages/engine/src/discovery/` 实现 `maxRepos` 参数 + CLI/Action/Platform 三入口暴露 + 单测覆盖（超过上限时截断 / 未超过时不截断 / 默认值生效）；`pnpm typecheck` 7 包全 Done / `pnpm lint` 0 error / `pnpm test` 2495 passed / `pnpm run check:docs` 通过
+- [x] **M19.3 B1 PR 关闭评论 + label** —— 当同一仓库存在未合并修复 PR 时新 PR 含评论 + `duplicate` label；GitHub API 调用 `issues: write` 权限端点；单测覆盖：重复场景评论 + label / 非重复场景不操作；`pnpm typecheck` 7 包全 Done / `pnpm lint` 0 error / `pnpm test` 2504 passed
+- [x] **M19.4 T701-e2e 管理端点集成测试补强** —— 3 个 e2e 文件（users 6 + credentials 19 + repos 25 = 50 case）覆盖用户管理 / 凭据管理 / 仓库管理端点 API 集成；mock 数据不依赖真实 GitHub API；playwright CI 环境稳定无 flaky；`pnpm typecheck` 7 包全 Done / `pnpm lint` 全通过
+- [x] **M19.5 C8 per-source 错误隔离** —— 模拟单源失败（Dependabot API 超时），其他源结果正常返回；返回结构 `FixError.source` 字段含失败源名称 + 错误信息；CLI 输出警告信息；单测覆盖：单源失败 / 全部成功 / 全部失败；`pnpm typecheck` 7 包全 Done / `pnpm lint` 0 error / `pnpm test` 2510 passed
+- [x] `pnpm lint` / `typecheck` 全绿 —— 0 error
+- [x] vitest 单测覆盖 + playwright e2e 覆盖 —— 2510 passed（M19.5 实测 baseline）
+- [x] `pnpm check:docs` 全过
+- [x] 编号标记扫描 0 命中（无孤立 `C\d+` / `T\d+` / `M\d+` / `B\d` / `R\d` 等编号——按 [开发规范 §3 注释规范](../../docs/standards/development.md) 与 [code-auditor.agent.md 主责边界必查项](../../.github/agents/code-auditor.agent.md) 防御）
+- [x] CI 端到端裁决通过 —— 5 atomic commits 已全部推送至 origin/master，ahead=0
+
+### 阶段治理记录
+
+- **总投入**：5 atomic commits（M19.1 + M19.2 + M19.3 + M19.4 + M19.5）+ 配套 commits（M19 规划 `2f9eb38` / M19 任务详情 `bee5c3f` / M19.4 标记完成 `61b3ddc` / M19.5 标记完成 `4231ffb` / M19.x 收口 `ae33671`）+ cron-preview 时区修复 `3597dcf` + cron-preview backlog 登记 `52d1649` —— 共 ~12 commits 落地（M19 批次主线 5 + 配套 5 + 顺带 2）
+- **测试覆盖**：vitest 2495 → 2510 passed（M19.2 baseline 2495 + M19.3 +9 case + M19.5 +6 case + M19.4 e2e 50 case 单独累计）；playwright e2e 新增 50 case（users 6 + credentials 19 + repos 25）
+- **审计覆盖**：M19.1 quick / M19.2 standard（含 1 blocker + 3 warning 全部修复）/ M19.3 standard（2 warning 全部修复）/ M19.4 quick（含 1 blocker + 3 warning 全部修复）/ M19.5 standard（2 warning 修复 1 项 + 1 项登记 P3）—— 5 轮独立 Review Gate Pass
+- **ahead commits 实证**：`git rev-list HEAD ^origin/master --count` 2026-08-31 实测 ahead=0（M19 全部 commits 落地后由用户主动推送或自然包含在 M19 推进批次；session 文件 stale `ahead=16` 描述在校正）
+- **文档落盘**：
+  - `docs/plan/todo-archive.md` §M19 段（本段；2026-08-31 M19 归档批次新增）
+  - `docs/plan/todo.md` §M19 任务清单 → M19 全部 [x] 已闭环切换 + 顶部 banner 更新（M19 → M20 active）
+  - `docs/plan/todo.md` §M20.1 [x] 状态更新（commit `acb2d35` 已落地，todo.md §M20.1 [ ] → [x]）
+  - `docs/plan/roadmap.md` Milestone 概述表 M19 行状态更新（进行中 → 已完成 2026-08-31 归档）+ §M19 详细实施状态段新增
+  - `docs/plan/backlog.md` 清理 5 个已上收 M19 主条目（B1 / C23 / C8 / T701-e2e / C34）+ 历史归档指针段新增 M19 条目
+  - `docs/plan/archive/index.md` §4 当前基线更新（M19 归档后）+ §5 近期归档批次登记新增 M19 行
+
+### 关键决策
+
+- **类型平衡原则**：M19 按"技术债 1 项 + 能力扩展 1 项 + 用户体验 2 项 + 测试覆盖 1 项"选取 5 项 —— 避免单一类型堆积，确保每阶段多维价值。M18.x 治理批次（已闭环）留给 M20+ 按需触发
+- **M19.3 B1 权限升级**：GitHub API 权限从 `pull-requests: write` 扩展到 `issues: write` —— 仅新增 `issues: write`（不影响 `contents: write` 等其他权限面）；用户接受 risk 后实施
+- **M19.4 e2e fixtures 仅 mock**：本次 T701-e2e 仍以 mock 数据为主（不依赖真实 GitHub API）—— T701 真实凭据 3 项（GitHub OAuth / Google OAuth / OIDC SSO）保留 backlog 真实环境验证任务（与 M18.x 决策 C 一致：mock 聚焦库契约输出作缓解措施）
+- **M19.5 throw 路径重复提示处理**：CLI 警告路径只在部分源失败时输出（避免全部成功 / 全部失败误报）—— FixError.source 字段 + logPartialSourceFailureSummary 函数统一汇总；pnpm-audit 单源文案（"pnpm-audit source failed"）作为 P3 后续优化项登记 backlog
+- **M19.2 C23 max-repos 默认值 100**：权衡"覆盖中小型 org（~50 仓库）+ 防止大 org 数百仓库一次性全量发现"—— 默认 100 覆盖 90% 场景；CLI/Action/Platform 三入口可覆盖默认值上限需求
+
+### 阶段关键经验（已沉淀至项目知识库）
+
+- **C34 双层对称挂接协议（M19.1 实证）**：code-reviewer skill + code-quality-checklist 双向挂接 —— 任一方扩展另一方必须同步（M14.x 已固化原则的二次实证）；本次补 8 个必查项同步双层；规范单点声明原则贯穿
+- **CLI/Action/Platform 三入口统一参数（M19.2 实证）**：新增参数时三入口同步暴露，避免"代码支持但 UI 不支持"或"代码支持但 CLI 不支持"的偏差 —— M19.2 C23 实施时一次性三入口同步
+- **Code Auditor standard depth 捕获未触发自检的契约漏洞（M19.2 blocker 实证）**：M19.2 audit 命中 1 blocker（MCP schema 未同步新参数）—— 实施方未主动验证所有 schema 同步；F 阶段本地验证不能替代 A 阶段审计独立核验
+- **Code Auditor quick depth 在小改动 e2e 测试补强下仍命中 blocker（M19.4 实证）**：M19.4 audit quick 命中 1 blocker（users-api.e2e 与既有 admin-roles.e2e.test.ts 测试逻辑重复）—— e2e 测试新增时主动 grep 既有 e2e 文件，避免重复覆盖
+- **per-source 错误隔离 throw 路径语义对齐（M19.5 实证）**：CLI 警告只在"部分源失败"路径触发；全部成功 / 全部失败 throw 路径不重复警告 —— 与 M18.x throw 路径语义对齐原则一致
+
+### 待迁移经验（next neat-freak 候选）
+
+- **M19.5 pnpm-audit 单源文案优化**（P3 follow-up）：当前警告文案 "pnpm-audit source failed" 不够友好（缺详细失败原因）—— 后续批次优化为 `pnpm-audit: <error.message>` 格式；与 M18.x FixError 字段模式一致
+- **M19.4 e2e fixtures 复用**（P3 follow-up）：M19.4 实施时新建 `users-api.e2e.test.ts` 等 3 个新 e2e 文件 —— 后续批次可考虑抽取 fixtures helper（如 `apps/platform/tests/e2e/helpers/api-roles.helper.ts` 统一封装 viewer/admin/org_admin 三角色 mock），与 M17.5 `authedCookieHeader` 抽取同源策略
+- **M19.x 收口 commit 风格一致性**（P3 follow-up）：M19.x 收口 `ae33671` 是 refactor 类型 commit + 编号清理 —— 与 M14.x `b45f55e` git.md 双空行格式修复 + `84b4e1a` test 名孤立编号清理同模式（neat-freak 批次顺手处理）；建议统一为 `chore(refactor)` 类型而非 `docs(refactor)` —— 类型分类微调不影响 commit 内容
+- **M19 backlog 候选池（M20+ 可拣选）**：B2（固定分支单线）/ B3（PR 自动合并闭环）/ C24（org 级 alerts 批量拉取）/ C33（MCP P3）/ C9（summary 字段未渲染）/ C13（循环依赖）/ C14（多 cs 告警性能）—— 详见 [backlog.md](backlog.md) §短期 / 一次性候选任务
+
+---
+
+## M18: 平台 GitHub App BYO App 模式（已归档 → 2026-09-01 M22 归档批次预防性分片迁出）
+
+> 详见 [archive/todo-archive-phases-m18.md §M18](archive/todo-archive-phases-m18.md#m18-平台-github-app-byo-app-模式m180m181m182m183m184m18x-全部已闭环--2026-08-30-归档)。
+
+---
+
+
+## M17: 安全与可用性收口（已归档 → 2026-08-31 M20 归档批次预防性分片迁出）
+
+> 详见 [archive/todo-archive-phases-m16-m17.md §M17](archive/todo-archive-phases-m16-m17.md#m17-安全与可用性收口m171m172m173m174m175m176-全部已闭环--2026-08-28-归档)。
+
+---
+
+## M16: 平台可用性深化（已归档 → 2026-08-31 M20 归档批次预防性分片迁出）
+
+> 详见 [archive/todo-archive-phases-m16-m17.md §M16](archive/todo-archive-phases-m16-m17.md#m16-平台可用性深化m161m162m163m164m165-全部已闭环--2026-08-28-归档)。
+
+---
+
+## M13: 治理 + UX 反馈 + 网络治理 + Code Scanning（已归档 → 2026-08-30 M18 归档批次预防性分片迁出）
+
+> **2026-08-30 M18 归档批次预防性分片迁出**：M13 段（12 子任务 / 26 commits / T1310 同步推进）已迁至新分片 [archive/todo-archive-phases-m13.md](archive/todo-archive-phases-m13.md)。M18 段新增前主窗口 673 行接近 700 分片阈值，预防性迁出与 M16/M15 归档批次同源策略。主窗口不再保留完整实施记录，仅保留导航指针。
+>
+> **迁出触发**：todo-archive.md M18 归档批次新增后主窗口将超 700 强制分片阈值；M13 是 2026-08-26 闭环阶段（距今 4 天），按"主窗口保留 3-5 个阶段"健康策略迁出。
+>
+> **关键导航**：
+> - **backlog 历史归档指针段**：详见 [todo-archive.md](todo-archive.md)
+> - **roadmap 状态**：[roadmap.md §M13](roadmap.md#m13-治理--ux-反馈--网络治理--code-scanning已完成-2026-08-26-归档) + Milestone 概述表 M13 行
+> - **archive 索引**：[archive/index.md §4 当前基线](archive/index.md) + §5 近期归档批次登记 M13 行
+> - **关键 commit 实证**：T1301 `b57b8d8` / T1302 `f43edf1` / T1303 `c2e3d7b` `7282f65` / T1304 `25b46eb` / T1305 `0f08c40` `5269d0a` `9c79fc9` / T1306 `e3d93b7` `4447ff8` `2ae2a77` / T1309 `6023da8` `e9197c1` `1cb0364` `9b536e1` `56de1a1` / T1307 `792e8c8` `7b1ac01` `3cccce0` / T1308 `b0f6e84` `e63cdb9` / T1401 `2dce01d` / T1402+T1403 `bb3b49a` / T1310 `300b318` `1819b59` `733e198` `7b40a2c` `a74d07d`
+> - **完整实施记录 / commit 引用 / 验证矩阵 / 关键决策 / 关键经验 / 待迁移经验**：见 [archive/todo-archive-phases-m13.md](archive/todo-archive-phases-m13.md)
+
+## M14: platform release 通道闭环 + UX 反馈跟进（已归档 → 2026-08-31 M19 归档批次预防性分片迁出）
+
+> **2026-08-31 M19 归档批次预防性分片迁出**：M14 段（4 子阶段 + M14.y 依赖批量治理，约 115 行）已从 `todo-archive.md` 主窗口迁至新分片 [archive/todo-archive-phases-m14-m15.md](archive/todo-archive-phases-m14-m15.md)。M19 段新增前主窗口 699 行 + M19 段预估 80-100 行 = 779-799 行，超 700 强制分片阈值；M14 是 2026-08-26 闭环阶段（距今 5 天），按"主窗口保留 3-5 个阶段"健康策略迁出。M14 + M15 同源批次同期迁出。
+>
+> **关键导航**：
+> - **backlog 历史归档指针段**：详见 [todo-archive.md](todo-archive.md)
+> - **roadmap 状态**：[roadmap.md Milestone 概述表 M14 行](roadmap.md) + roadmap.md §M14 段历史上未单独列出（与 §M18 段缺失说明同模式 —— 2026-08-31 M19 归档批次校正）
+> - **archive 索引**：[archive/index.md §4 当前基线](archive/index.md) + §5 近期归档批次登记 M14 行
+> - **关键 commit 实证**：T1310 `300b318` / `1819b59` / `733e198` / `7b40a2c` / `a74d07d` / `1fd38c1` / M14.1 收口 / M14.2 `81bd8d2` `581e1a9` `1a9eddf` 收口 + `17b5643` / M14.3 `5ccaaf4` / M14.x `92cc348` `ea0e24f` `84b4e1a` `b45f55e` / M14.y dependabot PR commits
+> - **完整实施记录 / commit 引用 / 验证矩阵 / 关键决策 / 关键经验 / 待迁移经验**：见 [archive/todo-archive-phases-m14-m15.md §M14](archive/todo-archive-phases-m14-m15.md#m14-platform-release-通道闭环--ux-反馈跟进m14123xy-全部已闭环)
+
+## M15: 扫描历史详情侧栏增强（UX-R2）（已归档 → 2026-08-31 M19 归档批次预防性分片迁出）
+
+> **2026-08-31 M19 归档批次预防性分片迁出**：M15 段（1 子阶段 4 子任务，约 65 行）已从 `todo-archive.md` 主窗口迁至新分片 [archive/todo-archive-phases-m14-m15.md](archive/todo-archive-phases-m14-m15.md)。M19 段新增前主窗口 699 行 + M19 段预估 80-100 行 = 779-799 行，超 700 强制分片阈值；M15 是 2026-08-26 闭环阶段（距今 5 天），按"主窗口保留 3-5 个阶段"健康策略迁出。M14 + M15 同源批次同期迁出。
+>
+> **关键导航**：
+> - **backlog 历史归档指针段**：详见 [todo-archive.md](todo-archive.md)
+> - **roadmap 状态**：[roadmap.md §M15](roadmap.md#m15-扫描历史详情侧栏增强ux-r2已完成-2026-08-26-归档) + Milestone 概述表 M15 行
+> - **archive 索引**：[archive/index.md §4 当前基线](archive/index.md) + §5 近期归档批次登记 M15 行
+> - **关键 commit 实证**：`5c65177` P 阶段 docs + `1112017` UX-R2 实施（5 文件 / +425/-12）+ `0a60e3d` test 覆盖（2 文件 / +251）+ `d517a7f` release.yml CI 修复（不计入 M15 总投入）
+> - **完整实施记录 / commit 引用 / 验证矩阵 / 关键决策 / 关键经验 / 待迁移经验**：见 [archive/todo-archive-phases-m14-m15.md §M15](archive/todo-archive-phases-m14-m15.md#m15-扫描历史详情侧栏增强ux-r2已闭环)
+
+---
+
+## M12: 平台 UX 一致性 + i18n 治理（已归档 → 2026-08-28 M17 归档批次预防性分片迁出）
+
+> **2026-08-28 M17 归档批次预防性分片迁出**：M12 段（19 commits / C65-A 5 + C65-B 2 + standards check:docs 1 + C65-C 2 + C65-D 5 + CI 修复 1 + CI 稳定性 1 + network-audit 2）已迁出至新分片 [archive/todo-archive-phases-m12.md](archive/todo-archive-phases-m12.md)。M17 段 152 行新增后主窗口接近 700 分片阈值，预防性迁出与 M16 批次预防性迁出 M10/T912/C53/C59-C61 同源策略。主窗口不再保留完整实施记录，仅保留导航指针。
+>
+> **迁出触发**：todo-archive.md M17 归档批次新增 152 行后主窗口 ≈ 738 行 > 700 强制分片阈值；M12 是 2026-08-21 闭环阶段（距今 7 天），按"主窗口保留 3-5 个阶段"健康策略迁出。
+>
+> **关键导航**：
+> - **backlog 历史归档指针段**：详见 [todo-archive.md](todo-archive.md)
+> - **roadmap 状态**：[roadmap.md §M12](roadmap.md#m12-平台-ux-一致性--i18n-治理已完成-2026-08-21-归档) + Milestone 概述表 M12 行
+> - **archive 索引**：[archive/index.md §4 当前基线](archive/index.md) + §5 近期归档批次登记 M12 行
+> - **关键 commit 实证**：C65-A1 `1d7c5c8` / C65-A3 `b10e270` / C65-B1 `789ed2f` / C65-C1+C2 `5dff002` / C65-D1 `348502d` / C65-D2 `132b944` / C65-D3 `374a278` / C65-D4 `ad6ce70` / CI 修复 `0c57211` `4043918` / network-audit `2104b9f` `0eb8704`
+> - **关键经验沉淀**：`docs/standards/platform.md §7.2` i18n 单点声明条款 + `docs/standards/development.md §3` 同模式扫描 + `docs/standards/git.md §3` F 阶段本地验证口径差异
+> - **完整实施记录 / commit 引用 / 验证矩阵 / 关键决策 / 关键经验 / 待迁移经验**：见 [archive/todo-archive-phases-m12.md](archive/todo-archive-phases-m12.md)
+
+---
+
+---
+
+
+## M8: 安全加固与容器执行完备（已归档 → 迁出至分片）
+
+> **2026-08-20 neat-freak 归档批次迁出**：M8 段已迁至 [archive/todo-archive-phases-m6-m7-t711.md](archive/todo-archive-phases-m6-m7-t711.md)（M6 / M7.1 / M7.2 / T711 / M8），不再在 todo-archive.md 主窗口保留。本条仅保留导航指针。
+>
+> **原始背景**：M8 阶段 6 任务（T801-T806）由 C38-C45 治理项驱动，20 个提交本地待推送。详见分片文档。
+
+---
+
+
+## C53 / M10 / T912 / 2026-08-20 平台 UI 增强（C59-C61）/ 2026-08-20 M11 推进批次（已归档 → 迁出至分片）
+
+> **2026-08-28 M16 归档批次预防性迁出**：本节段 5 个早期批次（C53 / M10 / T912 / 2026-08-20 平台 UI 增强 C59-C61 / 2026-08-20 M11 推进批次摘要）已迁至新分片 [archive/todo-archive-phases-m10-c53-c59c61.md](archive/todo-archive-phases-m10-c53-c59c61.md) 与既有分片 [archive/todo-archive-phases-m11.md §M11 推进批次](archive/todo-archive-phases-m11.md#m11-推进批次业务可见性--沙箱落地--安全文档--通知基建)（C53-后-A/B/C 衍生子任务）。主窗口不再保留完整实施记录，仅保留导航指针与本批次归档背景说明。
+>
+> **迁出触发**：M16 段 110 行新增前主窗口 618 行接近 700 分片阈值，预防性迁出与 M15 归档批次同源策略。
+
+| 批次 | 关键 commit 数 | 详情 |
+|:--|:--:|:--|
+| **C53** 平台集成模式 fix 修复结果推送远程 | 3 commits（`83ec736` / `46b7c15` / `3ed8303`） | [分片 §C53](archive/todo-archive-phases-m10-c53-c59c61.md#c53-平台集成模式-fix-修复结果推送远程已归档)（含 C53-1 push 链路 + C53-2 PR 创建 + C53-3 清理时序；衍生子任务 C53-后-A/B/C 在 [archive-phases-m11.md](archive/todo-archive-phases-m11.md) §M11 推进批次） |
+| **M10** 独立沙箱容器 C26 实施规划 | 13 commits（T1001 B1+B2 + T1002 + T1003 + T1004） | [分片 §M10](archive/todo-archive-phases-m10-c53-c59c61.md#m10-独立沙箱容器-c26-实施规划已归档)（含 Docker rootless + 出站白名单代理 + cgroup v2 资源限制 + 文档收口） |
+| **T912** SMTP 邮件发送器主体收口 | 3 commits（`edc9c94` / `6f00937` / `6e28207`） | [分片 §T912](archive/todo-archive-phases-m10-c53-c59c61.md#t912-smtp-邮件发送器主体收口t9123--c28-联动)（T912-3 合并入 C28） |
+| **2026-08-20 平台 UI 增强**（C59-C61） | 10 commits（C59 `9949504` + `03ba3b2` / C60 `a1d5bd9` `532ea78` `6b994b5` `5bba3f4` `5fbad71` / C61 `ffacfca` `5abd914` `402dc03`） | [分片 §2026-08-20 平台 UI 增强](archive/todo-archive-phases-m10-c53-c59c61.md#2026-08-20-平台-ui-增强c59--c60--c61)（C59 mixin 修复 + C60 sortable + C61 dashboard 图表） |
+| **2026-08-20 M11 推进批次** | 22 commits（M11 推进批次 12 + M11 启动批次 10） | [分片 §M11 推进批次](archive/todo-archive-phases-m11.md#m11-推进批次业务可见性--沙箱落地--安全文档--通知基建)（C53-后-A/B/C + T1005-A/B/C/D + C28 + C56/C57 + C58 + C-ENV-CHANGE-ALERT） |
+
+---
+
+
+## M24: PR Check MVP + 治理债 + 测试补强 + 用户体验（M24.1+M24.2+M24.3+M24.4+M24.5 全部已闭环 / 2026-09-03 归档）
+
+> **2026-09-03 M24 归档批次预防性分片迁出**：M24 段（5 原子条目 12 commits / ~2960 行净增 / 方案 B 能力突破优先）已从 `todo-archive.md` 主窗口迁出至新分片 [archive/todo-archive-phases-m24.md](archive/todo-archive-phases-m24.md)。M24 段完整实施记录 / 关键经验 / 待迁移经验均在分片中。主窗口仅保留导航指针（与 M18 / M17 / M16 / M13 同源策略）。
+>
+> **关键导航**：
+> - **roadmap 状态**：[roadmap.md §M24](roadmap.md#m24-pr-check-mvp--治理债--测试补强--用户体验) + Milestone 概述表 M24 行
+> - **archive 索引**：[archive/index.md §4 当前基线](archive/index.md) + §5 近期归档批次登记 M24 行
+> - **关键 commit 实证**：`36ee026` PRCheck 实体 / `1068d6e` service + scheduler / `89e1344` API + i18n / `e841b82` UI / `19037d5` UI follow-up / `4803372` UI 重构 / `7120533` Phase 5 docs / `bbb8f30` M24.2 根因 / `ad1ab17` CI 修复 / `a0be125` M24.3 cron-preview / `aaf8e7b` M24.4 治理债 / `7c926a9` Wisdom 蒸馏
+> - **完整实施记录 / 关键经验 / 待迁移经验**：见 [archive/todo-archive-phases-m24.md §M24](archive/todo-archive-phases-m24.md)
+

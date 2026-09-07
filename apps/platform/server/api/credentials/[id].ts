@@ -4,6 +4,7 @@ import { ensureDatabaseInitialized } from '#server/database'
 import { credentialUpdateSchema } from '#server/schemas/credential'
 import { encryptToken, getEncryptionKey } from '#server/services/credential.service'
 import { requireAuth, requireOrgResource, requireRole } from '#server/utils/guard'
+import { createLocalizedError } from '#server/utils/localized-error'
 
 /** GET /api/credentials/[id]：凭据详情（脱敏） */
 const getCredential = async (event: H3Event, id: string) => {
@@ -13,7 +14,7 @@ const getCredential = async (event: H3Event, id: string) => {
 
     const found = await repo.findOne({ where: { id } })
     if (!found) {
-        throw createError({ statusCode: 404, statusMessage: 'Not Found', message: '凭据不存在' })
+        throw createLocalizedError(event, { statusCode: 404, code: 'CREDENTIAL_NOT_FOUND' })
     }
     return {
         id: found.id,
@@ -23,21 +24,28 @@ const getCredential = async (event: H3Event, id: string) => {
         lastUsedAt: found.lastUsedAt,
         createdAt: found.createdAt,
         updatedAt: found.updatedAt,
-        hasToken: Boolean(found.encryptedToken),
+        hasToken: found.type === 'github-app'
+            ? Boolean(found.encryptedPrivateKey)
+            : Boolean(found.encryptedToken),
+        ...(found.type === 'github-app' && {
+            appId: found.appId,
+            installationId: found.installationId,
+            botLogin: found.botLogin,
+        }),
     }
 }
 
-/** PUT /api/credentials/[id]：更新凭据（token 为空表示不修改；写操作限 admin/org_admin） */
+/** PUT /api/credentials/[id]：更新凭据（token / privateKey 为空表示不修改；写操作限 admin/org_admin） */
 const updateCredential = async (event: H3Event, id: string) => {
     await requireRole(event, ['admin', 'org_admin'])
     const body = await readBody<Record<string, unknown>>(event)
     const parsed = credentialUpdateSchema.safeParse(body)
 
     if (!parsed.success) {
-        throw createError({
+        throw createLocalizedError(event, {
             statusCode: 400,
-            statusMessage: 'Bad Request',
-            message: parsed.error.issues.map((i) => i.message).join('；'),
+            code: 'CREDENTIAL_VALIDATION_FAILED',
+            data: { issues: parsed.error.issues },
         })
     }
 
@@ -46,9 +54,11 @@ const updateCredential = async (event: H3Event, id: string) => {
 
     const found = await repo.findOne({ where: { id } })
     if (!found) {
-        throw createError({ statusCode: 404, statusMessage: 'Not Found', message: '凭据不存在' })
+        throw createLocalizedError(event, { statusCode: 404, code: 'CREDENTIAL_NOT_FOUND' })
     }
     await requireOrgResource(event, found.organizationId)
+
+    const encryptionKey = getEncryptionKey()
 
     if (parsed.data.name !== undefined) {
         found.name = parsed.data.name
@@ -56,8 +66,22 @@ const updateCredential = async (event: H3Event, id: string) => {
     if (parsed.data.type !== undefined) {
         found.type = parsed.data.type
     }
+    // PAT 路径 token 更新
     if (parsed.data.token !== undefined && parsed.data.token !== '') {
-        found.encryptedToken = encryptToken(parsed.data.token, getEncryptionKey())
+        found.encryptedToken = encryptToken(parsed.data.token, encryptionKey)
+    }
+    // GitHub App 路径字段更新
+    if (parsed.data.appId !== undefined) {
+        found.appId = parsed.data.appId
+    }
+    if (parsed.data.encryptedPrivateKey !== undefined && parsed.data.encryptedPrivateKey !== '') {
+        found.encryptedPrivateKey = encryptToken(parsed.data.encryptedPrivateKey, encryptionKey)
+    }
+    if (parsed.data.installationId !== undefined) {
+        found.installationId = parsed.data.installationId
+    }
+    if (parsed.data.botLogin !== undefined) {
+        found.botLogin = parsed.data.botLogin
     }
     if (parsed.data.note !== undefined) {
         found.note = parsed.data.note
@@ -74,7 +98,7 @@ const deleteCredential = async (event: H3Event, id: string) => {
 
     const found = await repo.findOne({ where: { id } })
     if (!found) {
-        throw createError({ statusCode: 404, statusMessage: 'Not Found', message: '凭据不存在' })
+        throw createLocalizedError(event, { statusCode: 404, code: 'CREDENTIAL_NOT_FOUND' })
     }
     await requireOrgResource(event, found.organizationId)
     await repo.remove(found)
@@ -84,7 +108,7 @@ const deleteCredential = async (event: H3Event, id: string) => {
 export default defineEventHandler(async (event) => {
     const id = getRouterParam(event, 'id') as string
     if (!id) {
-        throw createError({ statusCode: 400, statusMessage: 'Bad Request', message: '缺少凭据 id' })
+        throw createLocalizedError(event, { statusCode: 400, code: 'CREDENTIAL_ID_MISSING' })
     }
     switch (event.method) {
         case 'GET':
@@ -94,6 +118,6 @@ export default defineEventHandler(async (event) => {
         case 'DELETE':
             return deleteCredential(event, id)
         default:
-            throw createError({ statusCode: 405, statusMessage: 'Method Not Allowed' })
+            throw createLocalizedError(event, { statusCode: 405, code: 'METHOD_NOT_ALLOWED' })
     }
 })

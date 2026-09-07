@@ -1,4 +1,5 @@
 import { createGitHubClient, discoverRepositories, type RepoPolicy } from '@dependfix/engine'
+import { fromPat } from '@dependfix/engine/auth'
 import { requireToken, toToolError } from './errors'
 
 /** `discover_repos` 返回结构 */
@@ -26,6 +27,7 @@ export const discoverRepos = async (input: {
     include?: string[]
     exclude?: string[]
     probe_dependabot?: boolean
+    max_repos?: number
 }): Promise<DiscoverReposResult> => {
     const token = requireToken()
     if (typeof token !== 'string') {
@@ -36,7 +38,7 @@ export const discoverRepos = async (input: {
     }
 
     try {
-        const client = createGitHubClient({ token })
+        const client = createGitHubClient({ auth: fromPat(token) })
         const policy: RepoPolicy = {
             include: input.include && input.include.length > 0 ? input.include : undefined,
             exclude: input.exclude && input.exclude.length > 0 ? input.exclude : undefined,
@@ -47,6 +49,7 @@ export const discoverRepos = async (input: {
             topics: input.topics,
             policy,
             probeDependabot: input.probe_dependabot ?? true,
+            maxRepos: input.max_repos,
         })
         return {
             ok: true,

@@ -41,11 +41,11 @@ docs/
 - **代码块**: 标注语言 ` ```typescript `、` ```bash `、` ```yaml `
 - **图表**: 优先使用 Mermaid，不嵌入难维护的图片描述
 - **VitePress 容器**: 关键信息使用 `::: info` / `::: warning` / `::: danger`
-- **链接**: 使用相对路径，确保路径真实可用。本地文件链接默认**不带锚点**（`path.md`）：锚点 slug 规则跨平台不一致（GitHub 移除全角标点 `（）`、`、` 等，VS Code / VitePress 保留），带锚点链接在部分平台会失效；必须带锚点时，目标标题避免全角标点，且锚点需能被 [`check:links` 脚本](../../scripts/check-links.mjs) 验证通过
-- **链接检查**: `pnpm run check:links`（`scripts/check-links.mjs`，零依赖）验证全部 md 文件的本地路径存在性与锚点匹配——按宽松规范化（小写 + 移除标点/符号/空白）兼容 GitHub / VS Code / VitePress 三种 slug 规则差异，只抓真实断链与假锚点；**同时拒绝本地绝对路径**（POSIX 斜杠开头、Windows 盘符形式、UNC 网络共享前缀）与**路径穿越**（`../..` 解析超出仓库根）——md 本地链接必须使用项目内相对路径。已接入 CI（test.yml）。**归档/重命名标题时**：内容移入归档文件（标题带"已归档"等后缀）或标题改写后，必须全局检索指向该标题的锚点链接（`rg -n '\[[^]]*\]\([^)]*#.*'` 链接文本），同步改指新位置/新锚点——check:links 是最后防线，会在 CI 滞后暴露（2026-08-07 roadmap → todo-archive 锚点失效案例，见 [经验归档 §二十二](../design/governance/experience-archive.md)）
-- **正文路径禁令**: 文档正文与行内代码中禁止出现个人机器绝对路径（Windows 盘符形式、UNC 网络共享路径等），引用项目内位置时使用相对路径或 `<repo-root>/` 占位符；fenced code block 内的示例代码不受限（教学示例可保留）。`check:links` 会拒绝正文中的 Windows 盘符 / UNC 路径（2026-08-09 全局 temp 路径泄漏案例，见 [经验归档 §二十三](../design/governance/experience-archive.md)）
+- **链接**: 使用相对路径，确保路径真实可用。本地文件链接默认**不带锚点**（`path.md`）：锚点 slug 规则跨平台不一致（GitHub 移除全角标点 `（）`、`、` 等，VS Code / VitePress 保留），带锚点链接在部分平台会失效；必须带锚点时，目标标题避免全角标点，且锚点需能被 [`check:docs` 脚本](../../scripts/check-docs.mjs) 验证通过
+- **链接检查**: `pnpm run check:docs`（`scripts/check-docs.mjs`，零依赖）验证全部 md 文件的本地路径存在性与锚点匹配——按宽松规范化（小写 + 移除标点/符号/空白）兼容 GitHub / VS Code / VitePress 三种 slug 规则差异，只抓真实断链与假锚点；**同时拒绝本地绝对路径**（POSIX 斜杠开头、Windows 盘符形式、UNC 网络共享前缀）与**路径穿越**（`../..` 解析超出仓库根）——md 本地链接必须使用项目内相对路径。已接入 CI（test.yml）。**归档/重命名标题时**：内容移入归档文件（标题带"已归档"等后缀）或标题改写后，必须全局检索指向该标题的锚点链接（`rg -n '\[[^]]*\]\([^)]*#.*'` 链接文本），同步改指新位置/新锚点——check:docs 是最后防线，会在 CI 滞后暴露（2026-08-07 roadmap → todo-archive 锚点失效案例，见 [经验归档 §二十二](../design/governance/experience-archive.md)）
+- **正文路径禁令**: 文档正文与行内代码中禁止出现个人机器绝对路径（Windows 盘符形式、UNC 网络共享路径等），引用项目内位置时使用相对路径或 `<repo-root>/` 占位符；fenced code block 内的示例代码不受限（教学示例可保留）。`check:docs` 会拒绝正文中的 Windows 盘符 / UNC 路径（2026-08-09 全局 temp 路径泄漏案例，见 [经验归档 §二十三](../design/governance/experience-archive.md)）
 - **Markdown 格式检查**: `pnpm run lint:md`（`@lint-md/cli`，`--fix` 自动格式化：中英文/数字间距、标题规范、列表缩进等）与 `pnpm run lint:md:check`（无 `--fix`，CI 门禁用，已接入 test.yml / release.yml）。规则裁剪见根目录 [`.lintmdrc`](../../.lintmdrc)（关闭半角标点等与中文技术文档冲突的规则，参照 momei 项目做法）。提交前运行 `pnpm run lint:md` 保持文档格式化一致；lint-staged 已挂载 `*.md` 自动执行
-- **裸 HTML 标签禁令（必须）**: 正文与表格中引用 `<tag>` / `<file>` / `<hash>` 等占位符、命令或路径时，**必须用反引号包裹**（`` `<hash>` ``）——markdown 中裸 `<tag>` 会被 markdown-it 按 raw HTML 原样透传，VitePress 的 vue 模板编译把任何非自闭合标签视为需要闭合 → `docs:build` 报 `Element is missing end tag`；报错行号是**转换产物行号**，不能按源文件行号找（2026-08-10 release.md `<path>` 案例 → 2026-08-13 experience-archive `<hash>` 复现，见 [经验归档 §三十三/§三十九](../design/governance/experience-archive.md)）。同理加粗 `**...**` 内的裸 `*`（如 `*.test.ts`）会破坏强调解析，须反引号包裹。lint:md 与 check:links 均**不检查 HTML 标签配对**，`docs:build`（`pnpm --filter dependfix-docs build`）是唯一防线——**新增/修改 docs/ 站点内 md 时必须本地执行**；裸标签排查：`rg '<[a-z][a-z0-9-]*>'` 后人工过滤反引号内命中
+- **裸 HTML 标签禁令（必须）**: 正文与表格中引用 `<tag>` / `<file>` / `<hash>` 等占位符、命令或路径时，**必须用反引号包裹**（`` `<hash>` ``）——markdown 中裸 `<tag>` 会被 markdown-it 按 raw HTML 原样透传，VitePress 的 vue 模板编译把任何非自闭合标签视为需要闭合 → `docs:build` 报 `Element is missing end tag`；报错行号是**转换产物行号**，不能按源文件行号找（2026-08-10 release.md `<path>` 案例 → 2026-08-13 experience-archive `<hash>` 复现，见 [经验归档 §三十三/§三十九](../design/governance/experience-archive.md)）。同理加粗 `**...**` 内的裸 `*`（如 `*.test.ts`）会破坏强调解析，须反引号包裹。lint:md 与 check:docs 均**不检查 HTML 标签配对**，`docs:build`（`pnpm --filter dependfix-docs build`）是唯一防线——**新增/修改 docs/ 站点内 md 时必须本地执行**；裸标签排查：`rg '<[a-z][a-z0-9-]*>'` 后人工过滤反引号内命中
 
 ## 3. 文档行数阈值
 
@@ -137,7 +137,38 @@ docs/
 - 设计文档先于大规模实现落盘
 - README 简洁入口，细节回收到 `docs/` 专题页
 
-## 7. 相关文档
+## 7. `plan/` 文档范围严格区分
+
+`docs/plan/` 下 4 个文档**不重叠**——任何条目只能出现在唯一一个文档，禁止重复登记。
+
+| 文档 | 范围 | 禁止内容 |
+|:--|:--|:--|
+| `todo.md` | 当前阶段未完成待办 | 已闭环摘要 / commit 序列 / 验证矩阵 / ahead 数 / known-issue / 延期项 / 远期登记 |
+| `todo-archive.md` | 已闭环阶段归档（主窗口保留 3-5 段） | 当前阶段待办 / 未排期增强候选 |
+| `backlog.md` | 未排期 / 延期 / 远期 + known-issue | 已闭环阶段归档 / 当前阶段待办 |
+| `roadmap.md` | 里程碑概览 | 单任务级管理 / commit / 待办 |
+
+**条目分流判定**：
+
+- 当前阶段需要推进 → `todo.md`
+- 已完成但本批归档 → `todo-archive.md`
+- 延期 / 用户指示暂缓 → `backlog.md`（延期/暂缓段）
+- 远期登记 / 触发条件未达 → `backlog.md`（远期登记段）
+- known-issue / 已知边界 → `backlog.md`（已知边界段）或对应阶段归档段
+
+**反模式（违规）**：
+
+- ❌ `todo.md` 顶部 banner 写"M11 闭环 N commits + 验证矩阵 + commit 序列"——已闭环内容归 `todo-archive.md`
+- ❌ `backlog.md` 重复登记已闭环项——避免双点维护漂移
+- ❌ `todo.md` "未完成项目"段罗列远期项——远期归 `backlog.md`
+- ❌ known-issue 写在 `todo.md`——`todo.md` 只含待办，known-issue 归 `backlog.md` 或归档段
+- ❌ 把 ahead 数 / commit 序列 / 验证矩阵当"进度信息"塞 `todo.md`——这些是归档元数据，不是待办
+
+**执行检查**：每次编辑 `docs/plan/` 任一文档前，用 §7 表自检条目归属；编辑后用 `rg` 扫描违规关键词（"ahead / commit.*[0-9a-f]{7} / 验证矩阵 / 已闭环 / M\d 闭环 / done / completed / closed"），命中即重新分类。
+
+**判定理由与背景**：见 [docs/archive/2026-08-20-standards-revisions.md §1](../archive/2026-08-20-standards-revisions.md)。
+
+## 8. 相关文档
 
 - [开发规范](./development.md)
 - [项目规划规范](./planning.md)

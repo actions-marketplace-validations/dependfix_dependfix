@@ -1,6 +1,7 @@
 import { describe, expect, it, afterEach } from 'vitest'
 import nock from 'nock'
 import { AppError } from '@dependfix/core'
+import { fromPat } from '../auth'
 import { createGitHubClient } from './client'
 import { fetchDependabotAlerts } from './dependabot-fetcher'
 import fixtureAlerts from './__fixtures__/dependabot-alerts.json'
@@ -11,7 +12,7 @@ const GET_ALERTS_PATH = '/repos/foo/bar/dependabot/alerts'
 function setupClient(token = 'test-token', retry = { maxRetries: 0 }) {
     // 默认关闭限流重试：本文件聚焦错误映射语义；
     // 重试行为由 client.test.ts 的 rate-limit retry 专项覆盖
-    return createGitHubClient({ token, retry })
+    return createGitHubClient({ auth: fromPat(token, { retry }) })
 }
 
 describe('fetchDependabotAlerts', () => {
@@ -48,6 +49,7 @@ describe('fetchDependabotAlerts', () => {
 
         expect(alert.id).toBe(1)
         expect(alert.source).toBe('dependabot')
+        expect(alert.upstreamId).toBe('dependabot:1')
         expect(alert.repository).toBe('foo/bar')
         expect(alert.defaultBranch).toBe('')
         expect(alert.severity).toBe('critical')
@@ -60,6 +62,9 @@ describe('fetchDependabotAlerts', () => {
         expect(alert.fixable).toBe(true)
         expect(alert.fixStrategy).toBe('upgrade')
         expect(alert.recommendedVersion).toBe('4.17.21')
+        // M23.3 C66-A2：透传 GHSA + CVE 字段
+        expect(alert.ghsaId).toBe('GHSA-xxxx-xxxx-xxxx')
+        expect(alert.cveIds).toEqual(['CVE-2021-23337'])
     })
 
     it('sets fixable=true and fixStrategy=upgrade when first_patched_version exists', async () => {
@@ -125,6 +130,8 @@ describe('fetchDependabotAlerts', () => {
         expect(alerts).toHaveLength(2)
         expect(alerts[0].id).toBe(1)
         expect(alerts[1].id).toBe(2)
+        expect(alerts[0].upstreamId).toBe('dependabot:1')
+        expect(alerts[1].upstreamId).toBe('dependabot:2')
     })
 
     it('handles scoped package names correctly', async () => {

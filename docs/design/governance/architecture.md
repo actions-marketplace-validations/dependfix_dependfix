@@ -61,7 +61,7 @@ flowchart TD
 
 ### GitHub 集成层
 
-- 认证与 API 客户端
+- 认证与 API 客户端（PAT 路径 + GitHub App installation token 路径双轨；详见 [C22 PAT 无感升级评估](./c22-pat-backward-compat.md)）
 - 告警拉取
 - 仓库发现
 - 分支、提交、PR、评论操作
@@ -259,7 +259,7 @@ flowchart TD
 
 - **M6（最小平台 MVP）**：仓库 CRUD + 凭据管理 + 手动扫描 + 仪表板 + 单用户 + Docker Compose/SQLite（已交付 2026-08-08）
 - **M7.1（认证与用户体系）**：RBAC 三角色（admin/org_admin/viewer）+ 用户管理 + 个人界面 + 认证扩展（AUTH_MODE 互斥：OIDC SSO / GitHub·Google OAuth / 域名黑白名单）；单组织模型（默认组织）——规划定稿 + 设计先行完成（2026-08-09）
-- **M7.2（平台能力深化）**：BullMQ/Redis 任务队列 + 定时批量 + i18n + 生产部署（PostgreSQL/Helm/Sentry）+ 跨平台 Git + MCP 发布（见 [backlog.md §M7](../../plan/backlog.md#m7-企业级平台增强)）
+- **M7.2（平台能力深化）**：BullMQ/Redis 任务队列 + 定时批量 + i18n + 生产部署（PostgreSQL/Helm/Sentry）+ 跨平台 Git + MCP 发布（见 [archive/todo-archive-phases-m6-m7-t711.md §M7.2](../../plan/archive/todo-archive-phases-m6-m7-t711.md#m72-平台能力深化已归档)）
 
 ### 分层架构
 
@@ -348,8 +348,12 @@ packages/core (@dependfix/core)
 
 ### 凭据安全
 
-- GitHub PAT 使用平台级密钥（环境变量 `ENCRYPTION_KEY`）做 AES-256-GCM 加密后存储
-- 解密仅在任务执行时、在 worker 内存中进行，用完即丢弃
+- GitHub 凭据（PAT 或 GitHub App PEM 私钥）使用平台级密钥（环境变量 `NUXT_ENCRYPTION_KEY`）做 AES-256-GCM 加密后存储——M17.1 C38 标准化 + M18.3 接入 GitHub App 路径
+- 凭据类型双轨并存：
+  - **PAT 路径**（默认）：`type='classic-pat' | 'fine-grained-pat'`，加密字段 `encryptedToken`，commit author 固定 `dependfix[bot]`
+  - **GitHub App 路径**（自部署多仓 org 推荐）：`type='github-app'`，加密字段 `encryptedPrivateKey`（PEM 私钥），commit author 动态生成 `{app_id}+{bot_login}[bot]@users.noreply.github.com`（GitHub App 协议要求）
+- 解密仅在任务执行时、在 worker 内存中进行，用完即丢弃；token / privateKey 明文永不落库、永不进日志、永不进前端响应（API 返回 `hasToken` 布尔）
+- 完整设计与落地步骤见 [C22 PAT 无感升级评估](./c22-pat-backward-compat.md)
 - M6 单用户模式下凭据管理简化；M7 多用户模式下按组织隔离
 
 ### 暗色模式
@@ -366,7 +370,7 @@ packages/core (@dependfix/core)
 - URL 策略：`prefix_and_default`（zh-CN 无前缀，en-US 加 `/en`）
 - 语言检测：Cookie + 浏览器偏好 + URL
 
-> M7.2 T708 任务定义与验收见 [todo-archive.md §M7.2](../../plan/todo-archive.md#m72-平台能力深化已归档)。
+> M7.2 T708 任务定义与验收见 [todo-archive.md §M7.2](../../plan/archive/todo-archive-phases-m6-m7-t711.md#m72-平台能力深化已归档)。
 
 ### 认证
 
@@ -395,3 +399,4 @@ packages/core (@dependfix/core)
 | AI 研判误判 | AI 修复代码必须通过 lint/typecheck/build；PR 不自动合并；置信度低于阈值时仅输出建议；限制 patch 范围 |
 | Prompt 注入攻击 | 限制触发权限为管理员；输入仅限结构化数据；系统指令硬编码；外部内容做清洗 |
 | 多租户安全 | 仓库间数据隔离；用户 Token 加密存储；操作审计日志完整记录 |
+| **监测系统 vs 自动合并解耦**（M24.1 关键决策 D8）| 依赖监测系统（PRCheck）**不**阻断 mergify 自动合并决策：`mergify 负责通过即合`（按 `check-success=Test` 单条件触发 rebase merge）；`PRCheck 负责失败即显`（监测 + alert firing + ack UI）——两条链路**互不干扰**，监测 alert firing 仅记录 alert_event 写库 + UI 告警，**不**修改 check 状态 / **不**修改 `check-success=Test` 判定。**根因**：监测系统目标是"用户感知"（失败即显 + ack），合并系统目标是"通过即合"（check 通过即合）——两类系统目标正交，强行耦合会导致监测 bug（如 alert firing 偶发）阻塞 mergify 合并。**M24.1 实施**：`.github/mergify.yml` 注释明确边界 + dependfix README + experience-archive §五十六 三处同步。详见 [经验归档 §五十六 M24.1 关键决策 D8（experience-archive.md §五十六段）](../governance/experience-archive.md) + [.github/mergify.yml 注释](../../../.github/mergify.yml)。ernance/experience-archive.md#五十六) + [.github/mergify.yml 注释](../../../.github/mergify.yml)。 |

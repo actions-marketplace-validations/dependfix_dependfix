@@ -3,6 +3,7 @@
 // 双层 re-export 造成同名符号冲突与类型来源歧义）。
 export * from './github'
 export * from './code-scanning/rule-classifier'
+export * from './code-scanning/rule-config'
 export * from './code-scanning/templates'
 export * from './fixers/dependency'
 export * from './fixers/pnpm'
@@ -17,3 +18,5 @@ export * from './runners'
 export * from './alerts'
 export * from './ai'
 export * from './app'
+// auth 抽象层通过子路径 '@dependfix/engine/auth' 暴露（避免与 github 子模块重名）
+export type { AuthProvider, AuthProviderOptions, FromAppParams, FromPatParams } from './auth/auth-provider'

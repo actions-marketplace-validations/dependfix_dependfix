@@ -1,5 +1,8 @@
 <script setup lang="ts">
 // 仪表板：仓库数/告警数（按严重级别）/已修复数/最近扫描
+// 图表配置抽取为 useDashboardStats composable（apps/platform/app/composables/use-dashboard-stats.ts），
+// 供 alerts.vue 复用，消除代码重复（Nuxt auto-import）
+
 const { session } = useSession()
 const { t } = useI18n()
 
@@ -7,36 +10,22 @@ definePageMeta({
     middleware: 'auth',
 })
 
-interface DashboardStats {
-    repositoryCount: number
-    alertsTotal: number
-    severityCounts: Record<string, number>
-    fixedCount: number
-    latestRun: {
-        id: string
-        repository: string | null
-        status: string
-        startedAt: string | null
-        finishedAt: string | null
-    } | null
-}
-
-const loading = ref(true)
-const error = ref('')
-const stats = ref<DashboardStats | null>(null)
-
-const fetchStats = async () => {
-    loading.value = true
-    error.value = ''
-    try {
-        const res = await $fetch('/api/dashboard/stats')
-        stats.value = res as DashboardStats
-    } catch (e: any) {
-        error.value = t('dashboard.errors.loadFailed', { message: e?.data?.message ?? e?.message ?? t('common.errors.unknown') })
-    } finally {
-        loading.value = false
-    }
-}
+const {
+    stats,
+    loading,
+    error,
+    fetchStats,
+    severityChartData,
+    severityChartOptions,
+    hasSeverityData,
+    fixRateChartData,
+    fixRateChartOptions,
+    fixRatePercent,
+    fixRateIsEmpty,
+    topPackagesChartData,
+    topPackagesChartOptions,
+    hasTopPackages,
+} = useDashboardStats()
 
 onMounted(fetchStats)
 
@@ -128,6 +117,77 @@ const severityTagSeverity = (severity: string) => {
                     </span>
                 </div>
             </div>
+
+            <div class="dashboard__charts">
+                <h3>{{ t('dashboard.chartTitle') }}</h3>
+                <div class="dashboard__charts-grid">
+                    <Card class="dashboard__chart-card">
+                        <template #content>
+                            <h4 class="dashboard__chart-title">
+                                {{ t('dashboard.severityChartTitle') }}
+                            </h4>
+                            <ClientOnly>
+                                <div class="dashboard__chart-canvas">
+                                    <chart-canvas
+                                        type="doughnut"
+                                        :data="severityChartData"
+                                        :options="severityChartOptions"
+                                        :aria-label="`${t('dashboard.severityChartTitle')}: ${Object.entries(stats.severityCounts).map(([k, v]) => `${k} ${v}`).join(', ')}`"
+                                    />
+                                    <p v-if="!hasSeverityData" class="dashboard__chart-overlay-empty text-muted">
+                                        {{ t('dashboard.chartEmpty') }}
+                                    </p>
+                                </div>
+                            </ClientOnly>
+                        </template>
+                    </Card>
+                    <Card class="dashboard__chart-card">
+                        <template #content>
+                            <h4 class="dashboard__chart-title">
+                                {{ t('dashboard.fixRateChartTitle') }}
+                            </h4>
+                            <ClientOnly>
+                                <div class="dashboard__chart-canvas dashboard__chart-canvas--with-center">
+                                    <chart-canvas
+                                        type="doughnut"
+                                        :data="fixRateChartData"
+                                        :options="fixRateChartOptions"
+                                        :aria-label="`${t('dashboard.fixRateChartTitle')}: ${t('dashboard.fixRateValue', {percent: fixRatePercent})}`"
+                                    />
+                                    <div class="dashboard__chart-center">
+                                        <span v-if="fixRateIsEmpty" class="dashboard__chart-center-value dashboard__chart-center-value--muted">—</span>
+                                        <span v-else class="dashboard__chart-center-value">{{ t('dashboard.fixRateValue', {percent: fixRatePercent}) }}</span>
+                                    </div>
+                                    <p v-if="fixRateIsEmpty" class="dashboard__chart-overlay-empty text-muted">
+                                        {{ t('dashboard.chartEmpty') }}
+                                    </p>
+                                </div>
+                            </ClientOnly>
+                        </template>
+                    </Card>
+                    <Card class="dashboard__chart-card dashboard__chart-card--wide">
+                        <template #content>
+                            <h4 class="dashboard__chart-title">
+                                {{ t('dashboard.topPackagesChartTitle') }}
+                                <span class="dashboard__chart-hint text-muted">{{ t('dashboard.packageTruncated') }}</span>
+                            </h4>
+                            <ClientOnly>
+                                <div class="dashboard__chart-canvas dashboard__chart-canvas--bar">
+                                    <chart-canvas
+                                        type="bar"
+                                        :data="topPackagesChartData"
+                                        :options="topPackagesChartOptions"
+                                        :aria-label="`${t('dashboard.topPackagesChartTitle')}: ${stats.topPackages.map((p) => `${p.packageName} ${p.count}`).join(', ')}`"
+                                    />
+                                    <p v-if="!hasTopPackages" class="dashboard__chart-overlay-empty text-muted">
+                                        {{ t('dashboard.chartEmpty') }}
+                                    </p>
+                                </div>
+                            </ClientOnly>
+                        </template>
+                    </Card>
+                </div>
+            </div>
         </template>
         <p v-else-if="loading" class="text-muted">
             {{ t('common.empty.loading') }}
@@ -177,6 +237,109 @@ const severityTagSeverity = (severity: string) => {
     &__severity-count {
         font-size: $font-size-lg;
         font-weight: 600;
+    }
+
+    &__charts {
+        margin-top: $space-6;
+    }
+
+    &__charts-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: $space-4;
+        margin-top: $space-3;
+        align-items: stretch;
+    }
+
+    @media (max-width: 768px) {
+        &__charts-grid {
+            // 768px 以下：severity + fixRate 单列，Top-10 单独一行
+            grid-template-columns: 1fr;
+        }
+    }
+
+    &__chart-card {
+        height: 100%;
+
+        &--wide {
+            grid-column: 1 / -1;
+        }
+    }
+
+    &__chart-title {
+        margin: 0 0 $space-3;
+        font-size: $font-size-base;
+        font-weight: 600;
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: $space-3;
+    }
+
+    &__chart-hint {
+        font-size: $font-size-sm;
+        font-weight: 400;
+    }
+
+    &__chart-canvas {
+        position: relative;
+        height: 280px;
+
+        &--bar {
+            height: 360px;
+        }
+
+        &--with-center {
+            position: relative;
+        }
+    }
+
+    &__chart-empty {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        margin: 0;
+    }
+
+    &__chart-overlay-empty {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0;
+        pointer-events: none;
+        font-size: $font-size-sm;
+    }
+
+    &__chart-center {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        pointer-events: none;
+    }
+
+    &__chart-center-value {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: $color-text;
+
+        &--muted {
+            color: $color-text-muted;
+        }
+    }
+}
+
+@include dark-mode {
+    .dashboard__chart-center-value {
+        color: $color-text-dark;
+
+        &--muted {
+            color: $color-text-muted;
+        }
     }
 }
 </style>

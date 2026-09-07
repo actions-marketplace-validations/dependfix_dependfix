@@ -1,4 +1,4 @@
-export type AlertSource = 'dependabot' | 'code-scanning' | 'pnpm-audit'
+export type AlertSource = 'dependabot' | 'code-scanning' | 'code-quality' | 'pnpm-audit'
 
 export type AlertSeverity = 'critical' | 'high' | 'medium' | 'low' | 'unknown'
 
@@ -44,7 +44,35 @@ export interface NormalizedSecurityAlert {
      * 报告/PR body 建议区块展示。
      */
     suggestion?: string
+    /**
+     * 上游告警唯一 ID（M20 新增）。
+     * 平台 ScanResult 用此作为去重键（unique index `(repositoryId, upstreamId)`）。
+     * 格式：`${source}:${identifier}`，详见 [`./upstream-id.ts`](./upstream-id.ts)。
+     * - dependabot / code-scanning / code-quality：`${source}:${alertNumber|findingNumber}`
+     * - pnpm-audit：`${source}:${packageName-sha256Prefix}:${advisoryId-sha256Prefix}`
+     */
+    upstreamId: string
+    /**
+     * GitHub Security Advisory ID（M23.3 C66-A2 新增）。
+     * - dependabot：`security_advisory.ghsa_id`
+     * - pnpm-audit：`advisory.github_advisory_id`（GitHub Advisory Database 收录时）
+     * - code-scanning / code-quality：无此概念（缺省 undefined）
+     */
+    ghsaId?: string
+    /**
+     * CVE ID 列表（M23.3 C66-A2 新增）。
+     * - dependabot：从 `security_advisory.identifiers[]` 提取 type === 'CVE' 列表
+     * - pnpm-audit：从 `advisory.cves[]` 字符串数组
+     * - code-scanning / code-quality：无此概念（缺省空数组）
+     */
+    cveIds?: string[]
 }
+
+/**
+ * M20 新增：上游告警 ID 规范化。
+ * 见 [./upstream-id.ts](./upstream-id.ts)。
+ */
+export { normalizeUpstreamId } from './upstream-id'
 
 export const SEVERITY_MAP = {
     dependabot: {

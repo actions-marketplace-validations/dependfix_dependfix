@@ -1,4 +1,4 @@
-import { execSync } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
 import { copyFileSync, existsSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -13,6 +13,7 @@ export type LockfileFailureCategory =
     | 'CORRUPTED_LOCKFILE'
     | 'CREDENTIAL_ERROR'
     | 'RESOLVE_ERROR'
+    | 'MINIMUM_RELEASE_AGE'
     | 'UNKNOWN'
 
 export type RepairStrategy =
@@ -77,7 +78,7 @@ interface ClassificationResult {
  */
 export function classifyLockfileFailure(workDir: string): ClassificationResult {
     try {
-        execSync('pnpm install --frozen-lockfile', {
+        execFileSync('pnpm', ['install', '--frozen-lockfile'], {
             cwd: workDir,
             stdio: 'pipe',
             timeout: 120_000,
@@ -100,6 +101,9 @@ const FAILURE_PATTERNS: [LockfileFailureCategory, RegExp][] = [
     ['CREDENTIAL_ERROR', /E401|ERR_PNPM_FETCH_401|ERR_PNPM_FETCH_403|authentication failed|Authorization/i],
     ['CORRUPTED_LOCKFILE', /\b(broken|corrupted|Cannot read).*lockfile|ERR_PNPM_BROKEN_LOCKFILE/i],
     ['LOCKFILE_VERSION_MISMATCH', /lockfileVersion.*incompatible|unsupported lockfile version|lockfile had been generated with/i],
+    // 目标仓库显式配置 minimumReleaseAge（strict 模式）时，解析与 lockfile 校验均可能被
+    // 冷却期约束阻止：ERR_PNPM_NO_MATURE_MATCHING_VERSION（解析）/ ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION（frozen 校验）
+    ['MINIMUM_RELEASE_AGE', /ERR_PNPM_NO_MATURE_MATCHING_VERSION|ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION|minimumReleaseAge/i],
     ['RESOLVE_ERROR', /ERR_PNPM_NO_MATCHING_VERSION|resolution|resolve.*failed|ERR_PNPM_PEER_DEP_ISSUES/i],
 ]
 
@@ -136,8 +140,8 @@ function getStderrText(err: ExecError): string {
     return err.stderr.toString('utf-8')
 }
 
-function execRepair(command: string, workDir: string, timeoutMs = 180_000): void {
-    execSync(command, { cwd: workDir, stdio: 'pipe', timeout: timeoutMs })
+function execRepair(binary: string, args: string[], workDir: string, timeoutMs = 180_000): void {
+    execFileSync(binary, args, { cwd: workDir, stdio: 'pipe', timeout: timeoutMs })
 }
 
 /**
@@ -155,6 +159,10 @@ function getStrategyChain(category: LockfileFailureCategory): RepairStrategy[] {
             return ['PIN_TOOLCHAIN', 'REGENERATE', 'REINSTALL']
         case 'RESOLVE_ERROR':
             return ['REGENERATE', 'FIX_ENTRIES', 'REINSTALL']
+        // 冷却期约束：重新解析可能选中满足 minimumReleaseAge 的旧版本（range 允许时），
+        // 写死精确版本时解析依旧失败 → 回滚并由 failureDetail 说明策略约束
+        case 'MINIMUM_RELEASE_AGE':
+            return ['REGENERATE', 'REINSTALL']
         case 'UNKNOWN':
             return ['REGENERATE', 'REINSTALL']
         case 'CREDENTIAL_ERROR':
@@ -168,21 +176,27 @@ function getStrategyChain(category: LockfileFailureCategory): RepairStrategy[] {
  *   （corepack 不可用/下载失败时命令本身失败 → 策略链 REGENERATE/REINSTALL 兜底，
  *   行为不劣于现状）
  * - `pnpmVersion` 缺省：回退裸 `pnpm install --lockfile-only`（保持旧 stub 语义）
+ *
+ * 返回 `{ binary, args }` 而非完整 shell 命令字符串，便于 `execFileSync` 参数化调用
+ * 避免 shell 解释（`execSync` 模板拼接是 Code Scanning 命令注入告警源头）。所有
+ * 参数均受 `isValidPnpmVersion` 白名单约束，无 shell metacharacter。
  */
-function getStrategyCommand(strategy: RepairStrategy, pnpmVersion?: string | null): string {
+function getStrategyCommand(strategy: RepairStrategy, pnpmVersion?: string | null): { binary: string, args: string[] } | null {
     switch (strategy) {
         case 'REGENERATE':
-            return 'pnpm install --lockfile-only'
+            return { binary: 'pnpm', args: ['install', '--lockfile-only'] }
         case 'FIX_ENTRIES':
-            return 'pnpm install --fix-lockfile --lockfile-only'
+            return { binary: 'pnpm', args: ['install', '--fix-lockfile', '--lockfile-only'] }
         case 'REINSTALL':
-            return 'pnpm install --no-frozen-lockfile'
+            return { binary: 'pnpm', args: ['install', '--no-frozen-lockfile'] }
         case 'PIN_TOOLCHAIN':
-            return pnpmVersion
-                ? `corepack pnpm@${pnpmVersion} install --lockfile-only`
-                : 'pnpm install --lockfile-only'
+            if (!pnpmVersion) {
+                return { binary: 'pnpm', args: ['install', '--lockfile-only'] }
+            }
+            // corepack pnpm@<version> install --lockfile-only（<version> 受 PNPM_VERSION_RE 白名单约束）
+            return { binary: 'corepack', args: [`pnpm@${pnpmVersion}`, 'install', '--lockfile-only'] }
         default:
-            return ''
+            return null
     }
 }
 
@@ -264,7 +278,7 @@ function countLockfilePackages(path: string): number {
 
 /**
  * pnpm 版本白名单格式（安全加固：拒绝不可信 packageManager/config 的任意字符串，
- * 防命令注入——corepack 命令是唯一动态拼接的 execSync 命令）。
+ * 防命令注入——corepack 命令参数 `pnpm@<version>` 受 PNPM_VERSION_RE 白名单约束）。
  * 兼容标准 semver 与 corepack 哈希后缀（pnpm@10.5.2+sha512.xxx）。
  */
 const PNPM_VERSION_RE = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/
@@ -320,7 +334,7 @@ const LOCKFILE_NAME = 'pnpm-lock.yaml'
  */
 function verifyFrozenLockfile(workDir: string): { ret: number, stderr: string } {
     try {
-        execSync('pnpm install --frozen-lockfile', {
+        execFileSync('pnpm', ['install', '--frozen-lockfile'], {
             cwd: workDir,
             stdio: 'pipe',
             timeout: 120_000,
@@ -428,14 +442,18 @@ export function repairLockfile(params: RepairLockfileParams): LockfileRepairResu
     const startTimestamp = Date.now()
 
     for (const strategy of strategyChain) {
-        const command = getStrategyCommand(strategy, pnpmVersion)
+        const cmd = getStrategyCommand(strategy, pnpmVersion)
+        if (!cmd) {
+            continue
+        }
+        const command = [cmd.binary, ...cmd.args].join(' ')
         const t0 = Date.now()
 
         let strategySuccess = false
         let strategyError: string | undefined
 
         try {
-            execRepair(command, workDir_)
+            execRepair(cmd.binary, cmd.args, workDir_)
             strategySuccess = true
         } catch (err) {
             strategyError = getStderrText(err as ExecError) || (err as Error).message
@@ -487,10 +505,14 @@ export function repairLockfile(params: RepairLockfileParams): LockfileRepairResu
         durationMs,
     })
 
+    const categoryNote = category === 'MINIMUM_RELEASE_AGE'
+        ? 'target repo has a minimumReleaseAge policy; locked versions are too fresh. Retry after the cooldown period, or relax the policy: '
+        : ''
+
     return {
         success: false,
         failureCategory: category,
-        failureDetail: truncate(lastError, 500),
+        failureDetail: `${categoryNote}${truncate(lastError, 500)}`,
         attemptHistory: attempts,
     }
 }

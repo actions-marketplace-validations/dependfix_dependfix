@@ -36,6 +36,34 @@ metadata:
 3. **方案设计**：输出受影响文件清单、验证矩阵和阶段交接顺序。
 4. **任务落点**：仅对允许执行的事项进入 Do。
 
+#### P 阶段开工前归档检查（hard requirement）
+
+启动下一阶段 P 阶段前必须执行**强制归档检查**（PDTFC+ 闭环后下一阶段开始前的衔接工作流），避免数据漂移：
+
+```bash
+# 1. 检查 todo.md 数据漂移信号
+rg "^- ### \[ \]" docs/plan/todo.md  # 找出 [ ] 未闭环条目
+
+# 2. 检查 session Wisdom 活跃条目数
+cd /root/projects/dependfix && pnpm distill:wisdom --check
+
+# 3. 检查 experience-archive.md 最新§号连续性
+wc -l docs/design/governance/experience-archive.md
+```
+
+**强制提醒**：当 todo.md 仍有 `[ ]` 条目（数据漂移信号）时，执行角色必须**主动询问**"是否需要先归档上一阶段？"——不得直接添加下一阶段待办。这是 [ai-collaboration.md §1.5 阶段归档检查 + 沉淀工作流](../../../docs/standards/ai-collaboration.md) + §1.4 P 阶段规划暂停协议的延伸。
+
+**完整衔接工作流**：
+```
+阶段闭环 F → 归档批次 → 沉淀工作流 → 下一阶段 P 阶段
+       ↓           ↓             ↓
+  todo-archive    experience    docs/standards/*
+  backlog.md     -archive.md    .github/agents/*
+  roadmap.md
+```
+
+详见 [ai-collaboration.md §1.5 阶段归档检查 + 沉淀工作流](../../../docs/standards/ai-collaboration.md)。
+
 - **技能**：`requirement-analyst`、`context-analyzer`
 
 ### D (Do) — 开发实现
@@ -95,3 +123,14 @@ metadata:
 - 强行插入 typecheck、lint 等质量关卡。
 - 对迭代中途新增事项强制执行"先规划、后实现"。
 - 明确安全等级和数据保护点。
+
+## 七、PDTFC+ 修复工作流补充
+
+修复类任务在 PDTFC+ 循环各阶段中补充以下约束：
+
+| PDTFC+ 阶段 | 本项目的补充约束 |
+|:---|:---|
+| P — 根因排查 | 默认 **根因分析** 推理模式；先编最小复现测试（一个假设 / <5s），不跑全量测试 |
+| D — 方案验证 | 先改 1 个代表性文件 → 定向 subset（3-5 文件）验证 → 确认有效后批量应用 |
+| F — 提交 | 本地 `typecheck` + `lint` 通过后提交；**CI 通过 = 最终裁决**，本地通过 ≠ 完成 |
+| CI 回执 | CI 失败则分析具体失败点针对性补修，**不得**回退到全量重试模式 |

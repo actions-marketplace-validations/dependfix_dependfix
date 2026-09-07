@@ -1,8 +1,9 @@
+/* eslint-disable max-lines -- M18.4（todo.md §M18.4 范围）测试层补强 stageAndCommit author 路径回归 + 既有 955 行；按职责不拆分 */
 import { execSync } from 'node:child_process'
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { describe, expect, it, afterEach, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Octokit } from '@octokit/rest'
 import { createEmptyRunSummary, type FixAction, type NormalizedSecurityAlert, type RunResult } from '@dependfix/core'
 import {
@@ -12,11 +13,14 @@ import {
     createFixBranch,
     findDependfixOpenPR,
     closePullRequest,
+    commentOnPullRequest,
+    addLabelToPullRequest,
     generatePRBody,
     listDependfixBranches,
     getBranchPrStatus,
     deleteRemoteBranch,
     isConfirmAnswer,
+    stageAndCommit,
     type DependfixOpenPR,
 } from './pr-creator'
 
@@ -82,6 +86,10 @@ function mockOctokit(options?: {
             git: {
                 listMatchingRefs: vi.fn().mockResolvedValue({ data: options?.matchingRefs ?? [] }),
                 deleteRef: vi.fn().mockResolvedValue({ data: {} }),
+            },
+            issues: {
+                createComment: vi.fn().mockResolvedValue({ data: {} }),
+                addLabels: vi.fn().mockResolvedValue({ data: {} }),
             },
         },
     } as unknown as Octokit
@@ -337,6 +345,300 @@ describe('closePullRequest', () => {
             state: 'closed',
         })
     })
+})
+
+// ---------------------------------------------------------------------------
+// commentOnPullRequest / addLabelToPullRequest（todo.md §M19.3 重复 PR 评论 + label）
+// ---------------------------------------------------------------------------
+
+describe('commentOnPullRequest', () => {
+    it('calls issues.createComment with the provided body', async () => {
+        const octokit = mockOctokit()
+        await commentOnPullRequest(octokit, 'owner', 'repo', 42, 'duplicate notice body')
+
+        expect(octokit.rest.issues.createComment).toHaveBeenCalledWith({
+            owner: 'owner',
+            repo: 'repo',
+            issue_number: 42,
+            body: 'duplicate notice body',
+        })
+    })
+
+    it('propagates errors from the API', async () => {
+        const octokit = mockOctokit()
+        vi.mocked(octokit.rest.issues.createComment).mockRejectedValueOnce(new Error('403 Forbidden'))
+
+        await expect(
+            commentOnPullRequest(octokit, 'owner', 'repo', 42, 'body'),
+        ).rejects.toThrow('403 Forbidden')
+    })
+})
+
+describe('addLabelToPullRequest', () => {
+    it('calls issues.addLabels with the provided labels', async () => {
+        const octokit = mockOctokit()
+        await addLabelToPullRequest(octokit, 'owner', 'repo', 42, ['duplicate'])
+
+        expect(octokit.rest.issues.addLabels).toHaveBeenCalledWith({
+            owner: 'owner',
+            repo: 'repo',
+            issue_number: 42,
+            labels: ['duplicate'],
+        })
+    })
+
+    it('supports multiple labels', async () => {
+        const octokit = mockOctokit()
+        await addLabelToPullRequest(octokit, 'owner', 'repo', 42, ['duplicate', 'auto-fix'])
+
+        expect(octokit.rest.issues.addLabels).toHaveBeenCalledWith({
+            owner: 'owner',
+            repo: 'repo',
+            issue_number: 42,
+            labels: ['duplicate', 'auto-fix'],
+        })
+    })
+
+    it('propagates errors from the API', async () => {
+        const octokit = mockOctokit()
+        vi.mocked(octokit.rest.issues.addLabels).mockRejectedValueOnce(new Error('403 Forbidden'))
+
+        await expect(
+            addLabelToPullRequest(octokit, 'owner', 'repo', 42, ['duplicate']),
+        ).rejects.toThrow('403 Forbidden')
+    })
+})
+
+// ---------------------------------------------------------------------------
+// stageAndCommit / ensureGitConfig (author 路径回归)
+// ---------------------------------------------------------------------------
+
+/**
+ * `stageAndCommit` / `ensureGitConfig` 可选 `author` 参数回归覆盖。
+ *
+ * - PAT 路径（author 不传）→ 使用 `PAT_DEFAULT_COMMIT_AUTHOR`（保持 PAT 路径行为零变化）
+ * - GitHub App 路径（author 传入 `{app_id}+{bot_login}[bot]`）→ 使用传入 author
+ *
+ * 关键回归约束（与 todo.md §M18.0 决策 2 PAT 用户行为零变化一致）：
+ * - 已有 `user.name` / `user.email` 时**不**覆盖（用户/CI 上游可能预设 git config）
+ *
+ * **测试隔离**：本测试通过 `GIT_CONFIG_GLOBAL=/dev/null` + `GIT_CONFIG_NOSYSTEM=1` 隔离
+ * host 全局 git config（避免 host 全局 `user.name = CaoMeiYouRen` 等干扰导致
+ * `git config user.name` 误判"已配置"而不设 local）。所有 execSync 都通过 `git` helper 走隔离 env。
+ *
+ * @see [C22 PAT 无感升级评估 §5.1 兼容性](../../../../docs/design/governance/c22-pat-backward-compat.md)
+ * @see [todo.md §M18.4（测试层）](../../../../docs/plan/todo.md)
+ */
+describe('stageAndCommit (author 路径回归)', () => {
+    const tempDirs: string[] = []
+
+    /** execSync helper for git command in test tempDir（不屏蔽 host global，避免 `git init` 抛 `bad config line 1 in file /dev/null`） */
+    function git(cmd: string, cwd: string): string {
+        try {
+            return execSync(`git ${cmd}`, {
+                cwd,
+                stdio: 'pipe',
+                encoding: 'utf-8',
+            }).trim()
+        } catch {
+            // `git config --local --get <key>` 在 local 没设时 exit 1（抛错）—— 返回空字符串便于测试断言
+            return ''
+        }
+    }
+
+    /**
+     * 创建 git repo 但**不**预设 user.name / user.email（用于测 ensureGitConfig 自动设置路径）。
+     * 注意：第一次 init commit 也需要 author，必须通过 `git -c user.name= -c user.email=` 注入。
+     */
+    function createGitRepoWithoutGitConfig(): string {
+        const dir = mkdtempSync(join(tmpdir(), 'dependfix-test-stage-'))
+        tempDirs.push(dir)
+        git('init -b main', dir)
+        // 第一次 init commit：注入临时 user.name/email（不会写入 repo config）
+        writeFileSync(join(dir, 'README.md'), '# test\n')
+        git('add .', dir)
+        git('-c user.name=test -c user.email=test@example.com commit -m init', dir)
+        return dir
+    }
+
+    /**
+     * 创建 git repo 且**预设** user.name / user.email（用于测 ensureGitConfig 不覆盖回归）。
+     */
+    function createGitRepoWithGitConfig(): string {
+        const dir = mkdtempSync(join(tmpdir(), 'dependfix-test-stage-'))
+        tempDirs.push(dir)
+        git('init -b main', dir)
+        git('config user.email test@example.com', dir)
+        git('config user.name test', dir)
+        writeFileSync(join(dir, 'README.md'), '# test\n')
+        git('add .', dir)
+        git('commit -m init', dir)
+        return dir
+    }
+
+    /** 读取当前 commit 的 author 字段（git log -1 第一个 commit） */
+    function readCommitAuthor(workDir: string): { name: string, email: string } {
+        const formatted = git('log -1 --format=%an%n%ae', workDir)
+        const lines = formatted.split('\n')
+        return { name: lines[0] ?? '', email: lines[1] ?? '' }
+    }
+
+    beforeEach(() => {
+        // 注：原 M18.4 测试曾用 ISOLATED_GIT_ENV (GIT_CONFIG_GLOBAL=/dev/null) 屏蔽 host 全局，
+        // 但 `/dev/null` 不是合法 git config 文件 → `git init` 抛 `bad config line 1 in file /dev/null`。
+        // W3 修复改用 stageAndCommit 内部 `-c user.name=X -c user.email=Y` 显式传，
+        // 强制 commit author 用传入值（lookup order 中最高优先），无需屏蔽 host 全局。
+    })
+
+    afterEach(() => {
+        for (const dir of tempDirs.splice(0)) {
+            try {
+                rmSync(dir, { recursive: true, force: true })
+            } catch {
+                /* ignore */
+            }
+        }
+    })
+
+    it('PAT 路径（author 不传）+ repo 无 config → local git config 设置成 PAT_DEFAULT_COMMIT_AUTHOR', () => {
+        const dir = createGitRepoWithoutGitConfig()
+        writeFileSync(join(dir, 'change.txt'), 'fixed\n')
+
+        stageAndCommit('fix: dependabot', dir) // PAT 路径
+
+        // 用 --local 验证 ensureGitConfig 设置的是 local 级别（不被 host 全局 config 干扰）
+        const userName = git('config --local --get user.name', dir)
+        const userEmail = git('config --local --get user.email', dir)
+        expect(userName).toBe('dependfix[bot]')
+        expect(userEmail).toBe('dependfix[bot]@users.noreply.github.com')
+    }, 15_000)
+
+    it('App 路径（author 传入）+ repo 无 config → local git config 设置成传入 author', () => {
+        const dir = createGitRepoWithoutGitConfig()
+        writeFileSync(join(dir, 'change.txt'), 'fixed\n')
+
+        // 模拟 todo.md §M18.2（集成层）调用：传入 AppAuthProvider.getCommitAuthor() 动态生成的 author
+        stageAndCommit('fix: dependabot', dir, {
+            name: '123456[bot]',
+            email: '123456+dependfix-bot[bot]@users.noreply.github.com',
+        })
+
+        const userName = git('config --local --get user.name', dir)
+        const userEmail = git('config --local --get user.email', dir)
+        expect(userName).toBe('123456[bot]')
+        expect(userEmail).toBe('123456+dependfix-bot[bot]@users.noreply.github.com')
+    }, 15_000)
+
+    it('已有 user.name / user.email + 传入 author → 不覆盖（关键回归：传入 author 不破坏既有 config）', () => {
+        const dir = createGitRepoWithGitConfig()
+        writeFileSync(join(dir, 'change.txt'), 'fixed\n')
+
+        // 即使传入 App author，已有 git config 不被覆盖
+        stageAndCommit('fix: dependabot', dir, {
+            name: '123456[bot]',
+            email: '123456+dependfix-bot[bot]@users.noreply.github.com',
+        })
+
+        const userName = git('config --local --get user.name', dir)
+        const userEmail = git('config --local --get user.email', dir)
+        expect(userName).toBe('test')
+        expect(userEmail).toBe('test@example.com')
+    }, 15_000)
+
+    it('完整 stageAndCommit 端到端：App author 实际生效（git log -1 看到正确 author）', () => {
+        const dir = createGitRepoWithoutGitConfig()
+        writeFileSync(join(dir, 'change.txt'), 'fixed\n')
+
+        stageAndCommit('fix: dependabot', dir, {
+            name: '123456[bot]',
+            email: '123456+dependfix-bot[bot]@users.noreply.github.com',
+        })
+
+        // 验证 git commit 实际使用传入 author（不只是 git config 设置）
+        const author = readCommitAuthor(dir)
+        expect(author.name).toBe('123456[bot]')
+        expect(author.email).toBe('123456+dependfix-bot[bot]@users.noreply.github.com')
+    }, 15_000)
+
+    it('完整 stageAndCommit 端到端：PAT 默认 author 实际生效（git log -1 看到 dependfix[bot]）', () => {
+        const dir = createGitRepoWithoutGitConfig()
+        writeFileSync(join(dir, 'change.txt'), 'fixed\n')
+
+        stageAndCommit('fix: dependabot', dir) // PAT 路径
+
+        const author = readCommitAuthor(dir)
+        expect(author.name).toBe('dependfix[bot]')
+        expect(author.email).toBe('dependfix[bot]@users.noreply.github.com')
+    }, 15_000)
+
+    /**
+     * W3 回归：stageAndCommit 显式传 `-c user.name=X -c user.email=Y` 保证 commit author
+     * 用传入值，不受 host 全局 user.name 污染。
+     *
+     * 修复前：`git config user.name` 查询会查到 host 全局 `CaoMeiYouRen`，
+     * `ensureGitConfig.hasName=true` → 不 set local config → `git commit` 用 host 全局 author
+     * → 破坏 PAT 路径"commit author 硬编码 dependfix[bot]"承诺 + App 路径
+     * `{app_id}+{bot_login}[bot]` 协议。
+     *
+     * 修复后：`stageAndCommit` 显式传 `-c user.name=X -c user.email=Y`，在 `git commit` lookup
+     * order（env → `-c` config → local → global → system）中最高优先，**强制** commit author
+     * 用传入值，与 host 全局 config 无关。
+     */
+    it('W3 回归：stageAndCommit 显式 -c user.name -c user.email 覆盖 host 全局 user.name', () => {
+        // 场景：worker 创建 tempDir + git init，host 全局有 user.name=CaoMeiYouRen（不屏蔽）
+        const dir = createGitRepoWithoutGitConfig()
+        // 模拟 host 全局有 user.name（在 local 写入等效——git commit lookup order：local 优先）
+        git('config user.name host-global-user', dir)
+        git('config user.email host-global@example.com', dir)
+        writeFileSync(join(dir, 'change.txt'), 'fixed\n')
+
+        stageAndCommit('fix: dependabot', dir, {
+            name: '123456[bot]',
+            email: '123456+dependfix-bot[bot]@users.noreply.github.com',
+        })
+
+        // 验证 commit author 用传入值（不被 host-global-user 覆盖）
+        const author = readCommitAuthor(dir)
+        expect(author.name).toBe('123456[bot]')
+        expect(author.email).toBe('123456+dependfix-bot[bot]@users.noreply.github.com')
+    }, 15_000)
+
+    // W1 回归：host 全局 git config 含 user.name 但 repo 无 local config → ensureGitConfig
+    // 写入 local config（不被 host 全局污染）—— 验证 gitConfigExists 用 --local flag 路径
+    it('W1 回归：host 全局 git config 存在 user.name 但 repo 无 local config → ensureGitConfig 写入 local config（不被 host 污染）', () => {
+        // 模拟开发者机器的 host 全局 git config（不应被 dependfix 错误读取）
+        const globalDir = mkdtempSync(join(tmpdir(), 'dependfix-global-'))
+        const globalConfig = join(globalDir, 'gitconfig')
+        writeFileSync(globalConfig, '[user]\n\tname = GlobalHost\n\temail = host@example.com\n')
+        vi.stubEnv('GIT_CONFIG_GLOBAL', globalConfig)
+        vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1')
+
+        try {
+            const dir = createGitRepoWithoutGitConfig()
+            writeFileSync(join(dir, 'change.txt'), 'fixed\n')
+
+            // 验证前置状态：local config 无 user.name / user.email（用 --local 查询应返回空）
+            // 关键：如果 gitConfigExists 不带 --local flag，会错误读到 host global 的 GlobalHost，
+            // 误判"已配置" → ensureGitConfig 跳过 set → commit author 失败
+            expect(git('config --local --get user.name', dir)).toBe('')
+            expect(git('config --local --get user.email', dir)).toBe('')
+
+            stageAndCommit('fix: dependabot', dir) // PAT 路径
+
+            // 验证：local config 是 PAT author（不是 host global 的 GlobalHost）
+            const userName = git('config --local --get user.name', dir)
+            const userEmail = git('config --local --get user.email', dir)
+            expect(userName).toBe('dependfix[bot]')
+            expect(userEmail).toBe('dependfix[bot]@users.noreply.github.com')
+        } finally {
+            vi.unstubAllEnvs()
+            try {
+                rmSync(globalDir, { recursive: true, force: true })
+            } catch {
+                /* ignore */
+            }
+        }
+    }, 15_000)
 })
 
 // ---------------------------------------------------------------------------
@@ -880,6 +1182,7 @@ describe('generatePRBody', () => {
             alertClass: 'suggested',
             startLine: 42,
             suggestion: '使用参数化查询',
+            upstreamId: 'code-scanning:2',
         }]
         const body = generatePRBody(result)
 
@@ -922,6 +1225,35 @@ function makeBodyAlert(overrides: Partial<NormalizedSecurityAlert>): NormalizedS
         fixable: true,
         fixStrategy: 'upgrade',
         recommendedVersion: '3.1.5',
+        upstreamId: 'dependabot:1',
         ...overrides,
     }
 }
+
+// ---------------------------------------------------------------------------
+// generatePRBody supply chain warnings
+// ---------------------------------------------------------------------------
+
+describe('generatePRBody supply chain warnings', () => {
+    it('renders warning section with package and script types', () => {
+        const result = {
+            ...buildRunResult(),
+            supplyChainWarnings: [
+                { repository: 'owner/repo', packageName: 'esbuild', version: '0.25.12', scriptTypes: ['postinstall'] },
+            ],
+        }
+        const body = generatePRBody(result)
+
+        expect(body).toContain('### ⚠️ Supply Chain Warnings')
+        expect(body).toContain('`esbuild`')
+        expect(body).toContain('`0.25.12`')
+        expect(body).toContain('`postinstall`')
+        expect(body).toContain('owner/repo')
+    })
+
+    it('omits section when no warnings', () => {
+        const body = generatePRBody(buildRunResult())
+
+        expect(body).not.toContain('Supply Chain Warnings')
+    })
+})

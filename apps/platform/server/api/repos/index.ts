@@ -1,8 +1,9 @@
 import type { H3Event } from 'h3'
-import { parseTags, Repository } from '#server/entities/repository'
+import { parseSandboxLimits, parseTags, Repository } from '#server/entities/repository'
 import { ensureDatabaseInitialized } from '#server/database'
 import { repositorySchema } from '#server/schemas/repository'
 import { requireAuth, requireRole } from '#server/utils/guard'
+import { createLocalizedError } from '#server/utils/localized-error'
 import { resolveOrganizationId } from '#server/utils/organization'
 
 const toView = (r: Repository) => ({
@@ -18,6 +19,7 @@ const toView = (r: Repository) => ({
     executorKind: r.executorKind,
     note: r.note,
     tags: parseTags(r.tags),
+    sandboxLimits: parseSandboxLimits(r.sandboxLimits),
     lastScanAt: r.lastScanAt,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
@@ -43,10 +45,11 @@ const createRepository = async (event: H3Event) => {
     const parsed = repositorySchema.safeParse(body)
 
     if (!parsed.success) {
-        throw createError({
+        // 顶层 message 用 code 翻译的静态文本，data.issues 保留 zod 原 issue 数组供客户端细化展示
+        throw createLocalizedError(event, {
             statusCode: 400,
-            statusMessage: 'Bad Request',
-            message: parsed.error.issues.map((i) => i.message).join('；'),
+            code: 'REPO_VALIDATION_FAILED',
+            data: { issues: parsed.error.issues },
         })
     }
 
@@ -61,10 +64,9 @@ const createRepository = async (event: H3Event) => {
         },
     })
     if (existing) {
-        throw createError({
+        throw createLocalizedError(event, {
             statusCode: 409,
-            statusMessage: 'Conflict',
-            message: '该仓库已存在',
+            code: 'REPO_DUPLICATE',
         })
     }
 
@@ -76,6 +78,12 @@ const createRepository = async (event: H3Event) => {
     if (parsed.data.tags !== undefined && parsed.data.tags !== null) {
         tags = parsed.data.tags.length > 0 ? JSON.stringify(parsed.data.tags) : null
     }
+
+    // sandboxLimits 对象 → JSON 字符串列（与 tags 同模式；null → 走平台 SANDBOX_DEFAULTS）
+    // 空对象 `{}` 归一为 null：避免 POST `{}` → GET 拿到 undefined 的语义不对称（与 parseSandboxLimits 的字段裁剪对齐）
+    const sandboxLimits: string | null = parsed.data.sandboxLimits && Object.keys(parsed.data.sandboxLimits).length > 0
+        ? JSON.stringify(parsed.data.sandboxLimits)
+        : null
 
     const entity = repo.create({
         organizationId,
@@ -89,6 +97,7 @@ const createRepository = async (event: H3Event) => {
         executorKind: parsed.data.executorKind,
         note: parsed.data.note ?? null,
         tags,
+        sandboxLimits,
     })
     const saved = await repo.save(entity)
     // 保存后重查以加载 relations（创建响应与 GET 语义一致，credentialName 不恒为 null）
@@ -106,5 +115,5 @@ export default defineEventHandler(async (event) => {
     if (event.method === 'GET') {
         return listRepositories(event)
     }
-    throw createError({ statusCode: 405, statusMessage: 'Method Not Allowed' })
+    throw createLocalizedError(event, { statusCode: 405, code: 'METHOD_NOT_ALLOWED' })
 })

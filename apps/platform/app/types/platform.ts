@@ -21,7 +21,10 @@ export interface RepoView {
     updatedAt: string
 }
 
-/** 凭据视图（server/api/credentials 返回结构，token 永不返回） */
+/** 凭据视图（server/api/credentials 返回结构，token 永不返回）
+ *
+ * GitHub App 路径（type='github-app'）下额外包含 appId / installationId / botLogin 公开信息。
+ */
 export interface CredentialView {
     id: string
     name: string
@@ -31,12 +34,20 @@ export interface CredentialView {
     createdAt: string
     updatedAt: string
     hasToken: boolean
+    /** GitHub App 路径：公开信息（明文） */
+    appId?: string
+    /** GitHub App 路径：公开信息 */
+    installationId?: string
+    /** GitHub App 路径：bot 用户名（可选） */
+    botLogin?: string | null
 }
 
 /** 全局角色（与 server guard.ts Role 对齐；前端只读消费） */
 export type Role = 'admin' | 'org_admin' | 'viewer'
 
-/** 用户管理视图（server/api/users 返回结构） */
+/** 用户管理视图（server/api/users 返回结构）
+ * _roleRank 是前端排序键派生字段（由 withRoleRank 注入），不入库，
+ * 仅供 PrimeVue `<Column sortable field="_roleRank">` 业务语义排序使用。 */
 export interface UserView {
     id: string
     email: string
@@ -48,6 +59,7 @@ export interface UserView {
     emailVerified: boolean
     createdAt: string
     updatedAt: string
+    _roleRank?: number
 }
 
 /** 仓库选择策略（与 server ScheduleSelectorKind 对齐） */
@@ -80,7 +92,11 @@ export interface BatchRunSummary {
     fixedCount: number
 }
 
-/** 批量运行视图（server/api/batch-runs 返回结构；列表为存储值，详情为实时聚合值） */
+/** 批量运行视图（server/api/batch-runs 返回结构；列表为存储值，详情为实时聚合值）。
+ * updatedAt 用于前端增量 reconcile：仅当服务端 updatedAt 与本地不同时替换行引用，
+ * 避免 PrimeVue DataTable 整表 reconcile 引发屏闪。
+ * _statusRank 是前端排序键派生字段（由 withStatusRank 注入），不入库，
+ * 仅供 PrimeVue `<Column sortable field="_statusRank">` 业务语义排序使用。 */
 export interface BatchRunView {
     id: string
     source: 'scheduled' | 'manual'
@@ -96,6 +112,8 @@ export interface BatchRunView {
     status: BatchRunStatus
     finishedAt: string | null
     createdAt: string
+    updatedAt: string
+    _statusRank?: number
 }
 
 /** 批量运行下属 ScanRun（详情 runs 数组元素，与 /api/runs 视图同构） */

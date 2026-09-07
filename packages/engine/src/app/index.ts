@@ -17,6 +17,7 @@ import {
     type FixAction,
     type FixError,
 } from '@dependfix/core'
+import { fromPat } from '../auth'
 import {
     createFixBranch,
     stageAndCommit,
@@ -26,16 +27,22 @@ import {
     computeFixFingerprint,
     computeFixAndPrPlan,
     findDependfixOpenPR,
+    commentOnPullRequest,
+    addLabelToPullRequest,
+    type DependfixOpenPR,
     createGitHubClient,
     discoverRepositories,
     mergeRepositories,
     filterExplicitRepositories,
+    checkTokenPermissions,
     type RepoPolicy,
 } from '../github'
 import { runWithConcurrency } from '../multirepo/scheduler'
 import { writeArchive } from '../report/archiver'
 import type { RuntimeConfig } from '../config'
 import { enforceVerificationGate } from '../runners/verification-gate'
+import { collectSupplyChainWarnings } from '../supply-chain'
+import { loadRulesConfigFromEnv, resetActiveRulesConfig, setActiveRulesConfig } from '../code-scanning/rule-config'
 import { fetchRepoAlerts, fetchDefaultBranch, truncatedWarning } from './repo-alerts'
 import { processRepoFix, type AiUsageRef } from './repo-fix'
 import {
@@ -58,6 +65,11 @@ import {
     type AppContext,
 } from './helpers'
 
+// 仅 re-export 平台直接调用的辅助函数（PR 创建在平台 A 模式复用）
+export { buildPrTitle } from './helpers'
+export { fetchDefaultBranch } from './repo-alerts'
+export { closeSupersededPRs } from './branch-cleanup'
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -73,6 +85,17 @@ export interface DependfixAppOptions {
     verbose?: boolean
     /** 自定义验证命令（覆盖默认命令链） */
     commands?: string[]
+    /**
+     * 执行环境：`local`（CLI/MCP 等用户机器直接执行）| `container`（平台容器沙箱）。
+     * 默认 `local`。容器内执行属于设计内隔离行为（非 root + 临时目录），
+     * 不触发本地模式不可信代码风险警告。
+     */
+    executionEnvironment?: 'local' | 'container'
+    /**
+     * 自定义 Logger（平台层注入 MemoryLogger 用于捕获执行日志）。
+     * 未提供时使用内部 createLogger（输出到 console）。
+     */
+    logger?: Logger
 }
 
 export interface DependfixRunResult {
@@ -80,6 +103,60 @@ export interface DependfixRunResult {
     result: RunResult
     /** 进程退出码：0=全部成功, 1=部分失败, 2=全部失败 */
     exitCode: number
+}
+
+// ---------------------------------------------------------------------------
+// Per-source 错误隔离汇总（todo.md §M19.5 C8）
+// ---------------------------------------------------------------------------
+
+/**
+ * 输出"部分源拉取失败"汇总（todo.md §M19.5 C8 per-source 错误隔离）。
+ *
+ * 触发条件（必须全部满足，避免与"全部源失败"语义重叠）：
+ * 1. allErrors 至少包含一个 `stage='fetch' + category='FETCH_FAILED'` 错误（per-source 失败）
+ * 2. **至少一个仓库成功拉取了部分告警**（isAnyRepoSuccessful = true）——
+ *    否则就是"全部源失败"语义，已由 processRepoForReport catch + logger.error 单独处理，
+ *    本函数聚焦"warn + 保留成功源"场景的汇总输出，避免重复提示。
+ *
+ * 汇总按 source 分组（'dependabot' / 'code-scanning' / 'code-quality' / 'pnpm-audit'），
+ * 列出每个源失败的仓库数 + 示例错误消息，便于用户快速定位是 token 权限还是网络问题。
+ */
+export function logPartialSourceFailureSummary(
+    allErrors: FixError[],
+    logger: Logger,
+    isAnyRepoSuccessful: boolean,
+): void {
+    const fetchErrors = allErrors.filter((e) => e.stage === 'fetch' && e.category === 'FETCH_FAILED')
+    if (fetchErrors.length === 0) {
+        return
+    }
+    if (!isAnyRepoSuccessful) {
+        // 全部源失败：避免与 fetchRepoAlerts 抛错路径的 logger.error 重复提示
+        return
+    }
+
+    // 按 source 分组
+    const bySource = new Map<string, { repos: Set<string>, sampleMessage: string }>()
+    for (const err of fetchErrors) {
+        const source = err.source ?? 'unknown'
+        const existing = bySource.get(source)
+        if (existing) {
+            existing.repos.add(err.repository)
+        } else {
+            bySource.set(source, {
+                repos: new Set([err.repository]),
+                sampleMessage: err.message,
+            })
+        }
+    }
+
+    const summary = [...bySource.entries()]
+        .map(([source, { repos, sampleMessage }]) => `${source}（${repos.size} 个仓库: ${[...repos].slice(0, 3).join(', ')}${repos.size > 3 ? '...' : ''}）: ${sampleMessage}`)
+        .join('\n  - ')
+
+    logger.warn(
+        `[alerts] 部分源拉取失败（M19.5 per-source 错误隔离）— 成功源已保留继续处理，详细如下：\n  - ${summary}`,
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -93,6 +170,7 @@ export class DependfixApp {
     private readonly logger: Logger
     private readonly verbose: boolean
     private readonly customCommands?: string[]
+    private readonly executionEnvironment: 'local' | 'container'
     private readonly runId: string
 
     private readonly allAlerts: NormalizedSecurityAlert[] = []
@@ -113,12 +191,32 @@ export class DependfixApp {
         this.reportOutputDir = options.reportOutputDir ?? './dependfix-reports'
         this.verbose = options.verbose ?? false
         this.customCommands = options.commands
+        this.executionEnvironment = options.executionEnvironment ?? 'local'
         this.runId = `dependfix-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 
-        this.logger = createLogger({
+        // 使用自定义 Logger（平台层注入 MemoryLogger）或内部创建
+        this.logger = options.logger ?? createLogger({
             name: 'dependfix',
             minLevel: this.verbose ? 'debug' : 'info',
         })
+
+        // Code Scanning 规则分类配置：env `CODE_SCANNING_RULES_CONFIG_PATH`
+        // 指向的 JSON 文件加载并替换默认分类表；env 未设 / 文件缺失 / 解析失败
+        // 均降级默认（向后兼容）。错误信息已由 loadRulesConfigFromEnv 写入 stderr，
+        // 此处不重复（避免双写）。
+        //
+        // 进程级状态生命周期：active config 是模块级单例，每次构造 DependfixApp
+        // 先 reset 再按需 set，避免前一个 app 残留配置污染当前 run
+        // （同一进程多次 new DependfixApp 场景，如 cli 测试 / 多 batch 调度）。
+        resetActiveRulesConfig()
+        const ruleConfig = loadRulesConfigFromEnv(process.env)
+        if (ruleConfig) {
+            setActiveRulesConfig(ruleConfig)
+            this.logger.debug('Loaded custom code-scanning rules config from env', {
+                autoFixableCount: ruleConfig.autoFixable.size,
+                suggestedCount: ruleConfig.suggested.size,
+            })
+        }
     }
 
     /** 供辅助方法使用的状态切片。 */
@@ -146,6 +244,8 @@ export class DependfixApp {
     /** 执行完整的编排流程，返回结构化结果和退出码。 */
     async run(): Promise<DependfixRunResult> {
         this.startedAt = new Date().toISOString()
+        // 启动安全自检（best-effort，失败不阻断运行）
+        await this.runStartupSecurityChecks()
         // 记录运行前工作区状态（验证门禁回滚时保护用户已有未提交改动）
         this.preExistingDirty = hasGitChanges(this.workDir)
         this.logger.info(`Starting dependfix run ${this.runId}`, {
@@ -169,7 +269,10 @@ export class DependfixApp {
         this.finishedAt = new Date().toISOString()
         computeSummary(this.ctx)
 
-        const runResult = buildRunResult(this.ctx, this.aiUsageRef.aggregate)
+        // 供应链信号收集（路径 A 投毒合入前确认依据）：本次升级包带脚本且被目标仓库批准
+        const supplyChainWarnings = collectSupplyChainWarnings(this.workDir, this.allActions)
+
+        const runResult = buildRunResult(this.ctx, this.aiUsageRef.aggregate, supplyChainWarnings)
         const exitCode = computeExitCode(this.ctx)
 
         // 生成并写入报告
@@ -200,7 +303,50 @@ export class DependfixApp {
                 `[ai] run 总计: ${u.calls} 次调用, ${u.inputTokens} in / ${u.outputTokens} out tokens${costText}`,
             )
         }
+        // 部分源拉取失败汇总（todo.md §M19.5 C8）：
+        // 仅当至少 1 个源成功 + 至少 1 个源失败时输出（避免与"全部源失败"语义重叠）。
+        const isAnyRepoSuccessful = this.repoResults.some((r) =>
+            r.alertsCount > 0 || r.fixed > 0 || r.verificationPassed === true,
+        )
+        logPartialSourceFailureSummary(this.allErrors, this.logger, isAnyRepoSuccessful)
         return { result: runResult, exitCode }
+    }
+
+    // -----------------------------------------------------------------------
+    // Startup security checks
+    // -----------------------------------------------------------------------
+
+    /**
+     * 启动安全自检（best-effort，任何失败不阻断运行）：
+     * - 本地模式风险提示：fix/fix-and-pr 会在用户机器直接执行目标仓库的
+     *   依赖脚本（不可信代码）；容器环境（平台沙箱）属于设计内隔离，跳过。
+     * - token 权限面探测：超权限 token（classic repo scope）启动即警告，
+     *   Code Scanning 开启但缺 security-events 权限时提示。
+     */
+    private async runStartupSecurityChecks(): Promise<void> {
+        const isLocalFix = this.executionEnvironment === 'local'
+            && !this.config.dryRun
+            && (this.config.mode === 'fix' || this.config.mode === 'fix-and-pr')
+        if (isLocalFix && process.env.DEPENDFIX_SUPPRESS_LOCAL_EXECUTION_WARNING !== '1') {
+            this.logger.warn(
+                '[local-exec] 本地模式将直接执行目标仓库的依赖安装/验证脚本（install/lint/build 钩子，属不可信代码）'
+                + '——若仓库或依赖被恶意控制，脚本可读取本机环境变量（含 GITHUB_TOKEN）。'
+                + '建议：使用专用低权限 token，并在专用环境（容器/VM/CI runner）运行；'
+                + '已确认风险可设置 DEPENDFIX_SUPPRESS_LOCAL_EXECUTION_WARNING=1 抑制本提示'
+                + '（详见 quick-start 安全注意事项）。',
+            )
+        }
+
+        if (this.config.alertSource === 'github-dependabot' && this.config.githubToken) {
+            const result = await checkTokenPermissions(this.createClient(), {
+                codeScanningEnabled: this.config.codeScanningEnabled,
+            })
+            if (result.ok && result.warnings.length > 0) {
+                for (const warning of result.warnings) {
+                    this.logger.warn(`[token-scope] ${warning.message}`)
+                }
+            }
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -425,9 +571,10 @@ export class DependfixApp {
             // 6. Create PR (one PR covering all repos)
             const defaultBranch = await fetchDefaultBranch(client, owner, repo)
 
-            // Build RunResult for PR body
+            // Build RunResult for PR body（供应链信号：升级包带脚本且被批准 → PR 警示区）
             computeSummary(this.ctx)
-            const runResult = buildRunResult(this.ctx, this.aiUsageRef.aggregate)
+            const supplyChainWarnings = collectSupplyChainWarnings(this.workDir, this.allActions)
+            const runResult = buildRunResult(this.ctx, this.aiUsageRef.aggregate, supplyChainWarnings)
             const prBody = generatePRBody(
                 runResult,
                 plan.supersedePRs.map((pr) => pr.number),
@@ -458,6 +605,11 @@ export class DependfixApp {
                 success: true,
                 durationMs: 0,
             })
+
+            // 6.5 Duplicate PR handling: comment + label on the new PR
+            // pointing to the superseded PRs (avoid manual dedup by users).
+            // Requires `issues: write` token scope; failure is logged but not fatal.
+            await this.handleDuplicatePRs(client, owner, repo, pr.number, plan.supersedePRs)
 
             // 7. Close superseded PRs only after new PR created successfully
             await closeSupersededPRs(this.ctx, client, owner, repo, plan.supersedePRs)
@@ -490,6 +642,63 @@ export class DependfixApp {
         const client = this.createClient()
         for (const repo of this.config.repositories) {
             await runBranchCleanupForRepo(this.ctx, client, repo)
+        }
+    }
+
+    /**
+     * 重复 PR 处理：在新 PR 上添加评论指向被取代的旧 PR + 添加 `duplicate` label。
+     *
+     * 失败仅记录 warning（家务活 best-effort），不阻断主流程：
+     * - 新 PR 已创建成功，用户已可访问
+     * - 评论失败不影响 PR 本身的可用性
+     * - 但需要 `issues: write` token scope（比 `pull-requests: write` 宽）；
+     *   若 token 权限不足，error 会被记录但不阻塞
+     */
+    private async handleDuplicatePRs(
+        client: Octokit,
+        owner: string,
+        repo: string,
+        newPRNumber: number,
+        supersededPRs: DependfixOpenPR[],
+    ): Promise<void> {
+        if (supersededPRs.length === 0) {
+            return
+        }
+
+        const supersededLinks = supersededPRs
+            .map((pr) => `- [#${pr.number}](${pr.htmlUrl})`)
+            .join('\n')
+
+        const commentBody = [
+            '## ⚠️ Duplicate PR Notice',
+            '',
+            'This PR supersedes the following dependfix PR(s) with different content:',
+            '',
+            supersededLinks,
+            '',
+            'The superseded PR(s) have been closed. Please review this PR as the new canonical fix.',
+        ].join('\n')
+
+        try {
+            await commentOnPullRequest(client, owner, repo, newPRNumber, commentBody)
+            this.logger.info(`Added duplicate notice comment to PR #${newPRNumber}`)
+        } catch (error: unknown) {
+            const message = toErrorMessage(error)
+            this.logger.warn(
+                `Failed to add duplicate notice comment to PR #${newPRNumber}: ${message}`
+                + '（token may lack `issues: write` scope）',
+            )
+        }
+
+        try {
+            await addLabelToPullRequest(client, owner, repo, newPRNumber, ['duplicate'])
+            this.logger.info(`Added 'duplicate' label to PR #${newPRNumber}`)
+        } catch (error: unknown) {
+            const message = toErrorMessage(error)
+            this.logger.warn(
+                `Failed to add 'duplicate' label to PR #${newPRNumber}: ${message}`
+                + '（token may lack `issues: write` scope）',
+            )
         }
     }
 
@@ -579,6 +788,7 @@ export class DependfixApp {
                 topics: this.config.repoTopics,
                 // 策略在发现探测前应用（被排除仓库不触达 contents API）
                 policy,
+                maxRepos: this.config.maxRepos,
             })
             // 显式列表：仅 exclude 约束（include 不适用于显式，显式优先）
             const explicitFiltered = filterExplicitRepositories(policy, this.config.repositories)
@@ -618,12 +828,13 @@ export class DependfixApp {
 
     private createClient(token: string = this.config.githubToken): Octokit {
         return createGitHubClient({
-            token,
-            // 429 / rate limit 指数退避重试（0 可关闭；退避上限可配）
-            retry: {
-                maxRetries: this.config.maxRetries,
-                maxBackoffMs: this.config.maxBackoffMs,
-            },
+            auth: fromPat(token, {
+                // 429 / rate limit 指数退避重试（0 可关闭；退避上限可配）
+                retry: {
+                    maxRetries: this.config.maxRetries,
+                    maxBackoffMs: this.config.maxBackoffMs,
+                },
+            }),
         })
     }
 }

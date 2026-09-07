@@ -17,7 +17,7 @@ Agent-First 的完整项目级定义以 `AGENTS.md` 为准。Agent 是默认任�
 3. **简洁优先**：默认选择满足当前验收标准的最小实现，不得借机引入与当前目标无关的抽象或未来能力预埋。
 4. **外科式改动**：改动范围应与用户请求、Todo 验收点或 blocker 一一对应；发现无关问题时可以记录，但不得顺手并入当前实现。
 5. **目标驱动验证**：在进入实现前应明确成功标准、最低验证矩阵与首条区分性检查；完成首个实质改动后，优先做最小充分验证，再决定是否继续扩写。
-6. **批量替换纪律**：脚本/正则批量改写代码时，先改 1 个代表性文件 → typecheck + diff 审查 → 确认无误再铺开全量；正则必须限定上下文（注释行、字符串前缀、精确清单），禁止 `[^)]*`、`.*?` 等通配在注释与代码混合文件中跨上下文匹配；写文件必须按行保留原行尾（混合行尾仓库整体转换会制造全文件噪音 diff）；统一行尾是**按文件**的操作——先 `git show HEAD:<file>` 检测 repo 存储方向（`core.autocrlf=false` 时 repo 可能存 CRLF），转错方向 = 全文件 diff；替换后验证矩阵 = typecheck + 定向测试 + `git diff --stat`/`--ignore-space-at-eol` diff 规模核验 + 残留扫描，涉及外链文本时额外核对（check-links 只查本地链接）。PowerShell 环境含 <span v-pre>`${{`</span>、`${`、反引号、嵌套引号等特殊字符的脚本一律写临时 .cjs 文件执行（写入位置见第 7 条），不再尝试内联 `node -e`。教训见 [经验归档 §十七 / §二十三](../design/governance/experience-archive.md)。
+6. **批量替换纪律**：脚本/正则批量改写代码时，先改 1 个代表性文件 → typecheck + diff 审查 → 确认无误再铺开全量；正则必须限定上下文（注释行、字符串前缀、精确清单），禁止 `[^)]*`、`.*?` 等通配在注释与代码混合文件中跨上下文匹配；写文件必须按行保留原行尾（混合行尾仓库整体转换会制造全文件噪音 diff）；统一行尾是**按文件**的操作——先 `git show HEAD:<file>` 检测 repo 存储方向（`core.autocrlf=false` 时 repo 可能存 CRLF），转错方向 = 全文件 diff；替换后验证矩阵 = typecheck + 定向测试 + `git diff --stat`/`--ignore-space-at-eol` diff 规模核验 + 残留扫描，涉及外链文本时额外核对（check-links 只查本地链接）。PowerShell 环境含 <span v-pre>`${{`</span>、`${`、反引号、嵌套引号等特殊字符的脚本一律写临时 .cjs 文件执行（写入位置见第 7 条），不再尝试内联 `node -e`。**文件内容批量修改（替换/插入/行尾转换）一律优先 JS 脚本实现（`node -e` 或临时 .cjs：读取 → 处理 → 写回），非必要不使用 PowerShell 执行批量替换**——PowerShell 的 `-replace` 替换文本不做转义解释（`\r?\n` 按字面量写入）、单引号字符串完全字面（反引号+n 字面序列不解释为换行）、`String.Replace` 全局替换会误伤所有短字符序列（如"反引号+n"命中后拆坏 `npm_config_registry` 为"换行 + pm_config_registry"）；批量文本操作后必须**内容级验证**（Node 字节抽查字面量残留与关键内容存在性 + `git diff` 审查既有内容未被意外改动，lint/check:links/docs:build 均不检测文本语义）。批量替换合规核验由 review 阶段执行。教训见 [经验归档 §十七 / §二十一 / §二十三 / §四十](../design/governance/experience-archive.md)。
 7. **临时文件写入位置**：需要写入临时文件或执行临时脚本时，一律优先写入项目根目录 `temp/`（已被 `.gitignore` 忽略，可安全写入），不得默认写入全局 temp（避免触发权限审批）；仅当工具或流程确实要求全局临时目录（系统级临时卷、跨进程/跨项目共享、外部工具硬编码路径等）时才使用全局 temp。
 
 ### 1.3 搜索优先
@@ -82,8 +82,45 @@ Agent-First 的完整项目级定义以 `AGENTS.md` 为准。Agent 是默认任�
 - **dry-run 纪律**：所有会写盘/执行/变更的路径，在 mutation 前必须 guard dry-run（零写盘、零 install、零 mutation）。
 - **交付检查所有暴露层**：能力交付前检查四层——CLI flag / env / action input / 文档表，缺一层即不完整。
 - **不可行证明优先于硬实现**：需求与实现约束冲突时，记录论证过程后放弃是合规决策；不引入不可验证的修复器。
+- **方案设计接受「用户引导收敛」**：用户对方案的修订往往收敛到"更简 + 更实用"——典型三轮收敛：大方案（后端全量 + 前端滚动）→ 用户「还是多了」→ 中方案（纯前端分页）→ 用户「加缓存优化」→ 终方案（缓存 + 轻量分页）。实战意义：第一轮方案不必过度优化，接受「用户会引导收敛」的预期；主动问「还有优化空间吗」常能得到缓存等非显式需求。
+
+### 1.4 单次提交审计阈值（10 文件 / 800 行）
+
+- 单次 commit/diff 超出 **10 文件** 或 **800 行新增** → 必须拆分 multiple atomic commits，否则第 1 轮 audit Reject。
+- 拆分依据：按职责切分（utils / 表格 / 后端 / 前端 / docs），每个批次 ≤ 5 文件 / ≤ 350 行。
+- **依赖关系处理（拆分时必填）**：拆分后确保 commit 1 独立可测（基础设施层如字典 + helper 同步落地，codeSet 测试覆盖新 code）；commit 2 业务 throw 改造依赖 commit 1（引用新 code）；commit 3 测试调整依赖 commit 2（验证 throw 改造行为）。任何 commit 不可被独立运行验证即拆分错位。M17.4 总 13 文件拆 2 commits 实证：commit 1 字典 + helper + API throw 改造（9 文件 / 独立可测——codeSet 测试通过）；commit 2 既有测试 message→code 断言调整（4 文件 / 依赖 commit 1 新 code——commit 2 时 typecheck / test 必须实测确认 commit 1 已落地）。
+- 例外：纯新增文件（如新建测试文件或工具模块）单文件超过 800 行（如生成的 d.ts）不强制拆分——但需在 audit prompt 中声明"超出阈值但属单文件生成产物"理由。
+
+### 1.5 风险分级 vs blocker 区分（依赖审计 vs 依赖风险）
+
+- 依赖审计门禁缺失（如 `pnpm audit` 未进 CI）≠ 依赖本身有漏洞。**两个独立维度**，分开处理：
+  - 依赖风险：单一包版本钉定 + lockfile + integrity hash 校验通过 → 不构成 blocker，纳入 backlog 跟进
+  - 审计门禁缺失：纳入「依赖审计进 CI」backlog 条目（如 C60/C61 RG-B04）
+- typecheck + lint + e2e 全过已足够验证本次改动对依赖本身的兼容性；CI 依赖审计门禁是流程问题，不阻塞当前 PR。
 
 ## 2. PDTFC+ 工作流
+
+### 2.0 D 阶段自检三向验证纪律
+
+D 阶段自检不能仅依赖 `pnpm exec eslint --fix`（自动修复 import/order + eol-last 等警告级问题），必须分别跑以下三向独立命令并取 0 error 证据：
+
+```bash
+# 1. ESLint 无 --fix（避免 lint 警告被自动压制后误判为"通过"）
+pnpm exec eslint <本批改动文件>
+
+# 2. nuxt typecheck（CI 实际命令；vitest 走 esbuild 不触发 TS 严格检查）
+pnpm --filter @dependfix/platform run typecheck
+
+# 3. vitest 全套（不破坏现有测试）
+pnpm --filter @dependfix/platform exec vitest run
+```
+
+**根因教训**（M24.1 + M24.2 + M24.3 阶段累积）：
+- vitest 用 esbuild 转译不触发 TS 严格检查，CI 通过 ≠ 本地 typecheck 通过；CI 自动 rebuild workspace dist 掩盖本地 dev 过期
+- ESLint --fix 自动修复 import/order + eol-last 等问题，可能掩盖"0 error 自检证据"覆盖盲区
+- M24.1 Phase 2 两次 audit Reject 实证 B1（polling-source.test.ts import 错误）+ B2（`Array<T>` 错误）都是 D 阶段自检仅跑 --fix 漏掉
+
+**CI 失败兜底**：上述三向验证通过 + `pnpm run check:docs` exit 0 + (含 SCSS/CSS 改动时) `pnpm --filter @dependfix/platform build` exit 0，才能进入 A 阶段审计。CI 通过 = 最终裁决，本地通过 ≠ 完成。
 
 所有写操作任务必须严格遵循以下执行顺序。**严禁跨越关键质量阈值。**
 
@@ -95,12 +132,23 @@ Agent-First 的完整项目级定义以 `AGENTS.md` 为准。Agent 是默认任�
 - **任务定义**：更新 `todo.md`，将任务标记为 `进行中`。
 - **方案设计**：输出受影响文件清单及技术实现路径。
 
+#### P.1 ahead 状态动态描述原则（避免 staleness）
+
+P 阶段规划写入 `todo.md` 顶部 banner / M 段 banner 时，ahead 状态描述必须**用 commits 列表 + `git rev-list HEAD ^origin/master --count` 实证命令替代具体 ahead 数字**：
+
+- **禁止**：`ahead=N 待推送` / `ahead=3 仅 X 三 commits 待推送` / `M13 归档批次已落地 5 atomic commits ... ahead=8 待用户推送`（ahead 是动态变化，写具体数字极易过时——用户可能在 banner 写后已推送 commits）
+- **正确**：`ahead commits 实证命令` + commits 列表（如 `M13.4 三 commits 2dce01d + bb3b49a + 8762a4b 推送至 origin/master`）—— 即便部分已推送也只损失"哪些未推"信息，不损失准确性
+- **附议**：sub-task ID 跨 commit 引用时（如 "T1310 ahead 5 commits + T1401 + T1402 + T1403"）typo 风险显著，建议 `rg -n "T\d{4}" docs/plan/*.md` 校对
+
+教训：M14 P 阶段规划 commit `1fd38c1` 写错 2 处（① sub-task ID typo `T1402+T1303` 应为 `T1402+T1403`；② banner ahead 描述写"ahead=3 仅 M13.4 三 commits 待用户推送" + "ahead=8"——实际 M13.4 三 commits + M13 归档批次 5 commits 均已被用户推送至 origin/master，ahead=0；M14.1 P 阶段规划 commit 落地后 ahead=1）。M14.1 收口 commit `e7103f6` 修正（ahead 改用 commits 列表 + 实证命令；typo 修正）。详见 [规划规范 §4.4 §5 ahead commits 实证 + 动态描述](./planning.md#44-大批量归档批次操作规范) + [session wisdom 蒸馏机制](../design/governance/session-wisdom-distillation.md)。
+
 ### D (Do) — 业务执行
 
 - **实现准则**：遵循 TypeScript 架构，禁止使用 `any`。
 - **最小实现**：默认先做满足当前验收标准的最小切片。
 - **范围稳定**：开发过程中发现的额外问题不得直接扩写，必须回到 P 阶段判断。
 - **自检**：开发完成必须通过本地质量校验（lint + typecheck）。
+- **集成外部库实施完成 ≠ Done**：D 阶段「单测全过 + typecheck 0 error」仅证明本地可跑，**不**等于集成 Done——必须有「真实路径调用 + 断言关键行为」的可执行验证。详细规范 + 教训见 [development.md §5.1.15](./development.md) + [testing.md §6.3](./testing.md) + [经验归档 §四十三](../../docs/design/governance/experience-archive.md#四十三集成外部库必须读-readme-标准用法--e2e-真实路径冒烟测试2026-08-29m18.4-audit-round-1-reject-后补修)；A 阶段 code-auditor 主责边界已挂「集成外部库 README 标准用法 + e2e 真实路径冒烟测试存在」必查项（[code-auditor.agent.md 主责边界](../../.github/agents/code-auditor.agent.md)）。
 
 ### A (Audit) — 代码审计（强制 Review Gate）
 
@@ -123,13 +171,136 @@ Agent-First 的完整项目级定义以 `AGENTS.md` 为准。Agent 是默认任�
 - **分批提交（长任务强制）**：每个原子条目独立提交，长任务先回 P 阶段拆分（规模约束见 [规划规范 §1.1 任务粒度约束](./planning.md)）。每批提交前加载 `conventional-committer` skill，生成符合 Conventional Commits 格式的消息，执行 `git commit`。
 - **推送禁令**：commit 后不得自动 `git push`，仅限用户明确要求时执行。
 
+## 1.4 P 阶段规划暂停协议（user-driven）
+
+- **P 阶段仅文档改动**：规划阶段只允许改动 `docs/plan/*` + `docs/index.md` + 相关规范/技能/智能体文件；**不**写实现代码、不改 `apps/platform/` / `packages/` 等运行时代码。
+- **提交后暂停**：P 阶段规划 commit 后必须立即暂停，等待用户指令进入 D 阶段；不得自行提前启动实现。
+- **用户驱动工作流**：用户在 "确认方案" / "提交本次改动" / "开始规划" 等明确指令出现前，执行角色只交付 P 阶段产出 + 收口摘要 + 下一步建议；任何后续动作（commit / push / D 阶段实现）须用户显式触发。
+- **会话沉淀**：P 阶段规划落地后必须同步更新 `.session/current-task.yaml` 与 `.session/runtime-state.json`，标注 `phase = "P 阶段文档已落地，待用户指令进入 D 阶段"` + `blocked_on = "用户发布"`。
+- **经验闭环**：P 阶段收口时同步更新 `docs/standards/*` 与 `.github/skills/*`，把本次 P 阶段的字段切分 / 标题层级 / 锚点规则等决定固化进规范（避免经验仅留会话）。
+
+## 1.5 阶段归档检查 + 沉淀工作流（PDTFC+ 闭环后必经）
+
+PDTFC+ 闭环（F 阶段提交后）的下一阶段启动前，必须执行"阶段归档检查 + 沉淀"独立流程——**不**是归档阶段本身，是阶段之间的衔接工作：
+
+### 1. 阶段开工前归档检查（hard requirement）
+
+启动下一阶段 P 阶段前必须执行**强制归档检查**，避免数据漂移：
+
+```bash
+# 1. 检查 todo.md 是否有未 [x] 条目（数据漂移信号）
+rg "^- ### \[" docs/plan/todo.md  # 找出所有 ### [...] 条目
+rg "^- ### \[ \]" docs/plan/todo.md  # 找出 [ ] 未闭环条目（数据漂移）
+
+# 2. 检查 wisdom.md 活跃条目数（接近 20 阈值需蒸馏）
+cd /root/projects/dependfix && pnpm distill:wisdom --check
+
+# 3. 检查 experience-archive.md 健康窗口
+wc -l docs/design/governance/experience-archive.md  # 当前最新§号连续性
+```
+
+**强制提醒**：当**上一阶段 todo.md 仍有 `[ ]` 条目时**，执行角色必须**主动询问**"是否需要先归档上一阶段？"——不得直接添加下一阶段待办。这是 §1.4 "P 阶段规划暂停协议"的延伸：阶段间的衔接也是用户驱动工作流。
+
+### 2. 阶段闭环后沉淀工作流（PDTFC+ 闭环必经）
+
+阶段归档（PDTFC+ F 阶段提交后）→下一阶段 P 阶段规划前，必须执行沉淀工作流（**与归档同源**但更细粒度）：
+
+```
+阶段闭环 F → 归档批次 → 沉淀工作流 → 下一阶段 P 阶段
+        ↓
+   [规划规范 §4.4]  [经验归档沉淀]      [PDTFC+ 启动]
+   todo-archive       experience-archive  docs/plan/*
+   backlog.md         docs/standards/*    roadmap.md
+   roadmap.md         docs/index.md       (M21+ 候选)
+```
+
+沉淀工作流步骤：
+
+1. **经验提炼**：本阶段是否有值得沉淀的教训/决策？判断标准（[experience-archive.md §准入标准](../design/governance/experience-archive.md)）：
+   - 教训未落入规范（可执行方法论尚未迁移到 `docs/standards/` 或 skill/agent 定义）
+   - 决策需要溯源（产品/技术方向的关键决策，未来需回答"为什么当时这么做"）
+   - 重复违规预警（同一模式已违规 ≥ 2 次）
+   - 工具/环境陷阱（本地不可测、跨平台差异、工具默认值覆盖等）
+
+2. **经验归档**：在 `experience-archive.md` 末尾追加新§（编号连续），结构含：案例 / 教训 / 与既有教训的关联 / 挂接治理检查点 / 准入标准复核。
+
+3. **规范迁移**：把案例抽象出的可执行方法论挂接到 `docs/standards/*.md` 或 `.github/skills/*/SKILL.md` 或 `.github/agents/*.agent.md`——单点声明原则（[documentation.md §4](./documentation.md)），不重复抄写完整条款。
+
+4. **session Wisdom 沉淀**：活跃条目 ≥ 20 阈值时执行 `pnpm distill:wisdom`；新 pattern 按 `pattern-*` / `principle-*` / `practice-*` 格式追加到 `.session/wisdom.md` 当前条目段。
+
+### 3. 归档/沉淀 commits 必须经过 A 阶段 code-auditor 深度审计（hard requirement）
+
+归档/沉淀 commits 涉及的 `docs/standards/*.md` / `docs/design/governance/*.md` / `.github/agents/*.agent.md` 等治理定义修改，**必须**经过 A 阶段 code-auditor 深度审计（与 D 阶段 feature commits 同等标准），不得因为"仅文档改动"或"非业务代码"就跳过审计。
+
+**审计必查项**（新增 code-auditor 必查项）：
+- **跨文件 cross-reference 完整性**：新增 / 修改 / 迁出章节标题时，必须 `rg -n "<标题>"` 全仓库扫描引用并同步更新（参考 [规划规范 §4.4 第 10 条](./planning.md) 预防性迁出后 cross-reference 更新）
+- **锚点格式正确性**：用 `pnpm run check:docs` 验证 0 error；commit message 必须包含 "check:docs 全过" 证据
+- **规范单点声明**：新规则仅在权威文档完整声明一次，其他文档/skill/agent 仅一行链接引用（[documentation.md §4](./documentation.md)）
+- **活跃 Wisdom 条目数**：本批次新增 pattern 累计后是否触达 20 阈值（若是必须先蒸馏）
+
+**实证教训**：
+- M20 经验教训沉淀 commits（`7a3d746`/`b23251c`/`5e81b19`/`f56e9a1`）提交后 `pnpm run check:docs` 发现 2 处断链（experience-archive.md:781 路径错误 + development.md:237 锚点格式错误），返工 commit `edef93b` 修复——若沉淀前 A 阶段审计检查 cross-reference + check:docs 可避免返工。
+- M18 / M19 归档批次同样有"删过头"教训（§四十五 经验沉淀）——沉淀/归档操作不是无风险，D 阶段标准必须套用。
+
+### 4. 与既有规范的关联
+
+- **§1.4 P 阶段规划暂停协议**：本节是其在阶段间的延伸——阶段内 P → D → A → F → 下一阶段 P 之间的衔接也是用户驱动工作流。
+- **§2.1 迭代中途发现事项处理**：阶段间检查可能发现"上一阶段未完成事项需插队处理"——按 §2.1 决策（插队 vs 延期）。
+- **§规划规范 §4.4 第 10 条**：本节是其在沉淀工作流的具体执行——预防性迁出后 cross-reference 更新。
+- **§开发规范 §3 注释规范**：本节文档涉及"PDTFC+ 闭环"、"A 阶段"等术语引用——不得孤立编号标记（如 "1.5"），必须带文档路径或章节名引用。
+
+## 1.6 commit 前轻量级审核流程（PDTFC+ F 阶段必经）
+
+执行 `git commit` 前必须走轻量级审核，禁止随意提交 commit message。
+
+### 1. 执行方 self-check（4 项必查）
+
+写完 commit message 后，过一遍 self-check 清单：
+
+1. **执行命令 + 结果数字**：是否含 `pnpm ... 0 error` / `N passed` / `+N/-M` 等？→ 删除
+2. **改动行数描述**：是否含"改动了多少行"？→ 删除（git diff 直接可见）
+3. **没实证的废话**：是否含"确切路径需源码进一步实证"等？→ 删除或精简
+4. **关键决策 / 教训 / 关联 commit**：是否有实质信息？→ 保留
+
+self-check 通过后方可触发下一步。
+
+### 2. code-auditor quick depth 触发条件
+
+self-check 通过后，按以下条件判断是否触发 code-auditor quick depth 审核：
+
+- **触发**（任一）：
+  - commit message 信息密度异常（堆砌命令/数字/废话但 self-check 未识别）
+  - 改动跨多个独立模块（如 `packages/core` + `apps/platform` + `docs/standards`）
+  - diff 文件数 > 8 或新增行数 > 800（quick depth 触发阈值，与 [§1.4 单次提交审计阈值](#14-单次提交审计阈值10-文件--800-行) hard split 阈值 10 文件 / 800 行区分——8 是 audit 触发点，10 是 hard split 阈值）
+  - commit message 中含关键决策 / 风险声明 / 插队理由（需审计背书）
+- **不触发**：
+  - 单文件改动 + 单类型 + 信息密度合规
+  - 已有相同模式 commit 走过的标准流程（如 hotfix test(e2e) commit）
+
+### 3. 与既有规范的关联
+
+- **§4.4 F 阶段本地验证**：本节是其在 commit message 维度的延伸——F 阶段本地验证 ≠ commit message 堆砌执行结果。
+- **§4.6 audit warning 修复决策协议**：commit 前轻量级审核走的就是"低成本 + 对齐验收"的修复维度（self-check 即修复）。
+- **git.md §3.6 commit message 信息密度规范**：本节是其在 AI 协作流程维度的执行——commit 必经 self-check + code-auditor quick depth 触发条件。
+- **AGENTS.md §提交规范**：本节补强"质量前置"维度——commit message 本身也是质量的一部分。
+
+---
+
 ## 2.1 迭代中途发现事项处理
 
 1. **先暂停扩写**：停止直接继续实现，先判断是否已在当前待办或验收范围内。
-2. **允许插队**：仅限阻塞当前交付、明确功能回归、高风险安全/合规问题。
-3. **默认延期**：体验优化、代码重构、探索性能力、未来功能、非紧急依赖升级。
+2. **允许插队（hard requirement）**：**仅限**§3.1 插队例外清单中的 3 类——直接影响可用性的生产事故 + 安全漏洞 + 依赖链高危漏洞；插队事项须补充"为何插队"说明 + 用户明确授权；其余全部按 §3.1 默认延期到 backlog，不得擅自升级。
+3. **默认延期**：体验优化、代码重构、探索性能力、未来功能、非紧急依赖升级；按 [§3.1 新需求默认走"评估 → backlog"原则](./planning.md#31-新需求默认走评估--backlog原则hard-requirement) 处理。
 4. **记录要求**：插队事项须补充"为何插队"说明；延期事项须记录到 `backlog`。
 5. **禁止静默膨胀**：不得在未告知用户的情况下把原子任务扩展成新的功能包。
+
+### 2.1.1 新需求总原则（跨工作流适用）
+
+按 [planning.md §3.1](./planning.md#31-新需求默认走评估--backlog原则hard-requirement)：
+- **新需求默认走"评估 → backlog"**：用户提出新需求 → AI 不直接进入 D 阶段，先评估（[requirement-analyst skill](../../.github/skills/requirement-analyst/SKILL.md)）→ 形成 [backlog.md §短期候选](../plan/backlog.md#短期--一次性候选任务上收后去重) 条目 → 等待用户明确决策阶段
+- **不默认赋予阶段编号**：backlog 候选不得自动获得 `Mxx` 编号，未经用户明确授权不得写入 `todo.md` §当前阶段
+- **不默认最高优先级判断**：候选池按"类型平衡"原则选取是用户决策行为，AI 不得推断"X 应作为本批次最高优先级"并默认启动 X
+- **合规核验**：本原则由 [code-auditor 主责边界必查项](../../.github/agents/code-auditor.agent.md) + planning.md §3.1 强制约束，违规即 Reject
 
 ## 2.2 验证分级矩阵
 
@@ -155,6 +326,7 @@ Agent-First 的完整项目级定义以 `AGENTS.md` 为准。Agent 是默认任�
 | API / 鉴权 / 数据模型 | V0 + V1 + V2 + RG（若影响关键写路径则升级到 V3） |
 | UI 组件 / 页面交互 | V0 + V1 + V2 + V3 + RG |
 | 修复型 Hotfix | V0 + V1 + (对应层级 V2/V3) + RG（必须补复现+修复后结果） |
+| 配置 / 依赖 / CI / 技能与 agent 定义 | V0 + V1 + RG（定向验证：手工跑对应脚本 / workflow / skill 调用）+ skill/agent 定义补 LLM 单测或契约测试 |
 
 ### 测试升级口径
 
@@ -208,6 +380,61 @@ CI 失败后不得回退到全量重试，应分析具体失败点针对性修�
 
 - 配置文件显式写"空默认值"（如 `excludeFiles: []`）会覆盖工具内置保护，修改前先确认工具默认值。
 - composite action（action.yml）中 <span v-pre>`${{ }}`</span> 只允许出现在合法上下文（runs 步、outputs 表达式、with 表达式值）；description / 纯文本 / 注释内嵌表达式会被 manifest 模板校验求值并可能引用不可用上下文。action.yml 变更后应跑一次真实 action（本仓库 `security-auto-fix.yml` dogfood workflow）验证。
+
+### 4.4 F 阶段本地验证口径差异（`pnpm --filter <pkg> test` ≠ `pnpm test` 全 workspace）+ coverage 强制（hard requirement）+ **typecheck 实测必须（nuxt typecheck 不等于 TS 0 error）**
+
+- F 阶段本地验证用 `pnpm --filter <pkg> test`（仅跑特定包，例：platform → 705+4skip）≠ CI 跑 `pnpm test` 全 workspace（2128+5skip）+ coverage 4 维度（stmts/branch/funcs/lines）。
+- **陷阱**：本地 F 阶段验证全过、vitest 全绿、无回归——**完全漏掉 apps/platform/server / packages/cli / packages/engine / scripts 等非 platform 包引起的分支回归**。CI Coverage job 失败（branches 79.88% < 80%）时常因此发生。
+- **修复协议（hard requirement）**：F 阶段"完整验证"必须含 `pnpm run test:coverage`（全 workspace）+ 检查 4 维度（statements / branches / functions / lines）是否 ≥ 80% 阈值 + 定位新增文件未覆盖分支 + 补测至 ≥ 阈值，而非仅 `pnpm --filter <pkg> test`。CI 通过 = 最终裁决，本地通过 ≠ 完成。
+- **二次固化警告**：本节规则曾在 [CI run 32880889750](https://github.com/dependfix/dependfix/actions/runs/32880889750) 二次复发——branches 79.98% < 80% 失败，根因是 M13.3 T1308 新增 `code-quality-fetcher.ts` 等 4 个新文件未被既有测试覆盖（防御分支 cursor 重复死循环 / URL parse catch / RATE_LIMITED 兜底 / 三源错误隔离）。**默认 80% 阈值即通过但漏了多包增量回归**。F 阶段验证清单须把 `pnpm run test:coverage` 列入 hard requirement，不得用"基线已通过"做理由省略。
+- 实证：某次 platform UX 治理阶段 12 commits 推送后 CI Coverage job 失败，但本地 F 阶段验证显示全过，**回归 +8 分支**才发现（详见 commit `0c57211`，2026-08-21 推送；背景见 [经验归档 §二十八](../design/governance/experience-archive.md)）+ M13.3 补测 commit `e63cdb9`（branches 79.98% → 80.17%，14 case）。
+
+- **`pnpm --filter @dependfix/platform typecheck` 输出 "Done" ≠ TS 0 error（nuxt typecheck 容忍部分 TS error）**：nuxt typecheck 走 `vue-tsc` pipeline，在某些情况下容忍 TS error（如 `Record<string, unknown>` 索引访问得到 `{}` 时不报错；strict 模式下访问 `err.data?.code` 仍会 TS2339 但 build 不阻断）。执行方"typecheck 7 包全 Done"宣称**不可信**——必须实测确认 0 error。M17.4 commit 2 audit Reject 实测 7 个 TS2304 + TS2339 error（`batch.post.test.ts:2` 缺 `afterEach` import + 6 处 `err.data?.code/field/resource` 属性访问失败）此前未触发实测；Reject 后针对性补修闭环。F 阶段验证必须实测 typecheck 0 error，不能仅看 "Done" 输出。其他文档（git.md、testing.md、skill/agent 定义）仅作一行引用。
+  - 实操：执行 `pnpm --filter @dependfix/platform typecheck 2>&1 | grep -E "error TS|Done"` 看完整输出；或跑 audit 时让 code-auditor agent 实测 typecheck（不能信执行方证据）。
+
+### 4.5 Code Auditor quick depth 时长校准（≤ 5min 时间盒，实测 ~79s）
+
+- quick depth 时间盒 ≤ 5min，实测常见 ~60-100s（含完整 SUT 行号核对 + case 路径推演 + 验证证据矩阵 + 未覆盖边界列表），远低于阈值。
+- **校准结论**：quick 适用于 (1) 测试补强 (2) 文档措辞 (3) 简单配置 (4) 重命名——核心是改动不引入新逻辑、diff < 800 行、不涉及鉴权/外部调用/数据写入。
+- **复审只审修复点（第 2+ 轮）**，不重发全量 diff（提升效率且符合 reviewer 边界）。
+- 与 §1.3 分级审计协议对照：`audit-depth: quick` 必须**主动声明**，未声明默认按 `deep` 防御执行（实测用时显著拖长）。
+- 数据来源口径：上述 `~60-100s` 数值来自 caller 宿主系统时钟事后实测的多次 quick depth 历史调用 elapsed 数据，**不含审计方自报**（审计方不自报时长、不检查时间，按 §1.3 防御方向）。time-box ≤ 5min 是否超时由 caller 事后判定，不在本节展开。
+
+### 4.6 audit warning 修复决策协议（修复 vs 登记 backlog）+ **audit suggest 跨 batch 累积跟踪 + audit Reject 后针对性补修**
+
+- audit warning 必须明确决策，禁止跳过：(1) **修复**（低成本且对齐验收/正确性，例：清理 test.fixme 残留 / 保留 span 整体可点击 + 删 chevron 方案 A / 缩写注释清理 / 清理 dead mock + stale doc + describe 标题）；(2) **登记 backlog**（实现成本过高或与已知问题耦合，例：PrimeVue 4 rowToggleButton 默认无 aria-expanded——Pass-through 不传 context，低成本 dynamic 实现不可行，登记待 PrimeVue 升级 / viewMode 快速切换请求竞态——低概率 UI 闪一下旧数据，可加 lastRequestId 守卫但本次 PR 范围外）。
+- **audit suggest 跨 batch 累积跟踪**：当 suggest 跨多个 commit 延后处理时（例：M17.2 audit suggest S-1 ServerErrorCode 字母序跨 M17.2/M17.3/M17.4 多次延后；M17.6 audit suggest S-1 update-user 端点 + S-2 admin 200 双向断言），必须在每个 commit message 中显式登记 backlog 跟踪项（"延后到 M.x 合并处理 / admin 200 双向断言延后到 viewer 403 矩阵稳定后追加"），便于后续追踪 + 跨 session 蒸馏累积。统一 backlog 跟踪条目（如 audit suggest #2 累积跟踪）优于单次登记——后者容易在多次 commit 中重复登记或遗漏。
+- **audit Reject 后针对性补修 + 重验证三件套**：audit Reject 后必须针对性补修 blocker + 重验证 typecheck + lint + test 三件套确认 0 error 才能重新 commit；不回退到全量重试模式（PDTFC+ 修复工作流"不回退到全量重试模式"）。M17.4 commit 2 audit Reject 后实测：补修 2 个 blocker（`batch.post.test.ts:2` 加 afterEach import + `api-helper.ts:32` 返回类型放宽 `Record<string, any>`）→ 重跑 typecheck 0 error + test 859 passed → 重新 commit `a1c7c4e` 通过。
+- 判断标准（三选一独立评估，命中任一"修复"维度则选修复）：
+  - **是否影响用户行为**：用户可见问题 / 影响数据正确性 → 修复；仅 UI 闪烁 / 边缘场景 → 登记
+  - **是否与 todo.md 验收条款一致**：验收标准明确 → 修复；偏离验收 → 登记或调整验收
+  - **实现成本**：< 30min + 不引入新依赖 → 修复；> 30min 或需新依赖 → 登记
+- 三维度全为"登记"则统一登记 backlog；任一为"修复"则必须在本次 commit 内处理。warning 不允许"跳过"决策。
+- 跨领域补充：本节与 [§4.5](#45-code-auditor-quick-depth-时长校准5min-时间盒实测-79s) + [code-reviewer SKILL.md §2.5 分级审计协议](../../.github/skills/code-reviewer/SKILL.md) 配合使用——`audit-depth: quick` + 实测时间 + warning 决策框架三件套决定 F 阶段放行。
+
+### 4.7 CI 偶发错误三阶段协议（PDTFC+ F 阶段修复工作流）
+
+> 教训来源：M22.7 hotfix commit `f617b56`（CI run 33525721103 E2E global-setup ECONNRESET）+ M22.8 hotfix commit `bdcd900`（CI run 33533376712 未认证 API 测试 cookie 注入）+ [经验归档 §五十一](../design/governance/experience-archive.md) + §五十二。
+
+CI 失败时按以下三阶段协议处理（避免"无限本地复现"陷阱）：
+
+**阶段 1：穷举排查**
+- handler 逻辑 / 单测 / 本地复现全部走一遍
+- 通过即接受兜底修复 + 根因 backlog 分离（不要在本地无限复现根因）
+- 通过判定：handler 单测全过 + vitest 集成测试通过 + 本地 fresh context 复现稳定
+
+**阶段 2：helper 层兜底修复（而非 handler 层）**
+- 测试代码改 helper，不动 server handler
+- helper 层加 `maxRetries` / `storageState: { cookies: [], origins: [] }` 等防御性参数
+- server 不感知，本地/CI 行为等价
+- handler 单元测试 0 改动
+
+**阶段 3：根因 backlog 分离 + M 阶段规划时优先排查**
+- 根因登记 backlog §已知边界 衍生段
+- M 阶段规划时按 ROI 排序候选根因（候选 3-4 项）
+- 实施 M 阶段时优先排查，避免"兜底修复 = 完成"心理陷阱
+
+**JSDoc 精度要求**：helper 兜底代码必须穷举"哪些错误重试"+"哪些错误不重试"——避免维护者误判覆盖范围（例：`maxRetries: 2` JSDoc 必须说明"仅对 e.code === 'ECONNRESET' 触发 250ms 指数 backoff 重试，其他错误码错误不重试"）
 
 ## 5. 相关文档
 

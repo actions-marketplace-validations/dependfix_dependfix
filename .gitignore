@@ -2,6 +2,7 @@
 node_modules
 
 # local env files
+.env
 .env.local
 .env.*.local
 
@@ -53,6 +54,11 @@ docs/.vitepress/.temp
 .opencode/agents
 .opencode/skills
 
+# OpenCode 运行时配置
+# opencode.json 由 .opencode/configs/ 下的预设通过 scripts/setup/switch-models.mjs 生成，
+# 不再固定单一套渠道配置，避免 PR 反复 churn 默认值。
+opencode.json
+
 # dependfix
 dependfix-reports/
 
@@ -68,5 +74,9 @@ release-plan.md
 
 # 发布结果临时产物（release:publish 写入 → release:github 消费）
 release-publish-result.json
+
+# Playwright e2e 报告与快照（platform 子目录已在 apps/platform/.gitignore 排除）
+test-results/
+playwright-report/
 
 

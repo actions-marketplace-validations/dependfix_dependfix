@@ -9,6 +9,15 @@ import { resolveRuntimeConfig } from '../config'
 import { DependfixApp } from './index'
 
 // ---------------------------------------------------------------------------
+// 禁止真实外联：未匹配请求（含启动安全检查的 GET /user 权限探测）抛错，
+// 由 checkTokenPermissions 静默 catch（best-effort 设计），零真实网络调用。
+// ---------------------------------------------------------------------------
+
+beforeEach(() => {
+    nock.disableNetConnect()
+})
+
+// ---------------------------------------------------------------------------
 // Mock pnpm-audit fetcher（pnpm-audit 集成测试注入固定告警，避免真实 spawn）
 // ---------------------------------------------------------------------------
 
@@ -34,6 +43,7 @@ function makeAuditAlert(overrides: Partial<NormalizedSecurityAlert> = {}): Norma
         fixable: true,
         fixStrategy: 'upgrade',
         recommendedVersion: '3.1.5',
+        upstreamId: 'pnpm-audit:fast-uri:a1b2c3d4e5f6a7b8',
         ...overrides,
     }
 }

@@ -1,4 +1,4 @@
-import { execFileSync, execSync } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import type { Octokit } from '@octokit/rest'
 import {
@@ -57,8 +57,19 @@ export interface DependfixOpenPR {
 // Constants
 // ---------------------------------------------------------------------------
 
-const BOT_NAME = 'dependfix[bot]'
-const BOT_EMAIL = 'dependfix[bot]@users.noreply.github.com'
+/**
+ * PAT 路径默认 commit author（保持现有 PAT 路径用户行为零变化）。
+ *
+ * 注：此常量仅作为 PAT 路径的默认值；GitHub App 路径（M18.2 之后接入）走动态 commit author。
+ * 现有 PAT 路径仍硬编码 `dependfix[bot]@users.noreply.github.com`，虽非真实 bot 身份（字符串约定），
+ * 但保持行为不变以确保 PAT 用户无感升级。已知缺陷由 C22 范围之外的后续阶段修复。
+ *
+ * @see [C22 PAT 无感升级评估 §5.1 兼容性](../../../../docs/design/governance/c22-pat-backward-compat.md)
+ */
+const PAT_DEFAULT_COMMIT_AUTHOR = {
+    name: 'dependfix[bot]',
+    email: 'dependfix[bot]@users.noreply.github.com',
+} as const
 
 /** 自动修复分支统一前缀（分支名 = 前缀 + 内容指纹 8 位） */
 const BRANCH_PREFIX = 'dependfix/auto-fix-'
@@ -187,16 +198,27 @@ export function createFixBranch(branchName: string, workDir: string): FixBranchR
  * 自动设置 git user.name / user.email（如未设置）。
  * 使用 `execFileSync` 参数数组形式（不经 shell），保证多行 commit message
  * 与 UTF-8 字符（如 →）在 Windows/Linux 双平台传递一致。
+ *
+ * W3 修复（M18.4 audit round 2）：显式传 `-c user.name=X -c user.email=Y` 强制 commit author
+ * 使用传入值，不受 host 全局 `user.name`（如 CaoMeiYouRen）污染——`git commit` 走 lookup order
+ * (env → `-c` config → local → global → system)，显式 `-c` 在 lookup order 中最高优先。
+ *
+ * @param author - 可选 commit author 信息；不传时使用 PAT 默认值（保持现有 PAT 路径行为零变化）。
+ *   M18.2 之后 GitHub App 路径会传入动态生成的 `{app_id}+{bot_login}[bot]` author。
+ *
+ * @see [C22 PAT 无感升级评估 §5.1 兼容性](../../../../docs/design/governance/c22-pat-backward-compat.md)
  */
-export function stageAndCommit(message: string, workDir: string): void {
-    ensureGitConfig(workDir)
-    execSync('git add .', { cwd: workDir, stdio: 'pipe' })
-    execFileSync('git', ['commit', '-m', message], { cwd: workDir, stdio: 'pipe' })
+export function stageAndCommit(message: string, workDir: string, author?: { name: string, email: string }): void {
+    ensureGitConfig(workDir, author)
+    const effectiveAuthor = author ?? PAT_DEFAULT_COMMIT_AUTHOR
+    execFileSync('git', ['add', '.'], { cwd: workDir, stdio: 'pipe' })
+    execFileSync('git', [
+        '-c', `user.name=${effectiveAuthor.name}`,
+        '-c', `user.email=${effectiveAuthor.email}`,
+        'commit',
+        '-m', message,
+    ], { cwd: workDir, stdio: 'pipe' })
 }
-
-/**
- * 推送分支到远程 origin。
- */
 export function pushBranch(branchName: string, workDir: string): void {
     execFileSync('git', ['push', 'origin', branchName], { cwd: workDir, stdio: 'pipe' })
 }
@@ -247,6 +269,52 @@ export async function closePullRequest(
         repo,
         pull_number: pullNumber,
         state: 'closed',
+    })
+}
+
+/**
+ * 在 Pull Request 上添加评论。
+ *
+ * 使用 `issues.createComment` 端点（GitHub PR 评论复用 issue comment API），
+ * 需要 token 具备 `issues: write` 权限（比 `pull-requests: write` 宽）。
+ *
+ * 用于在新 PR 上评论指向被取代的旧 PR，避免用户手动排查重复 PR。
+ */
+export async function commentOnPullRequest(
+    octokit: Octokit,
+    owner: string,
+    repo: string,
+    pullNumber: number,
+    body: string,
+): Promise<void> {
+    await octokit.rest.issues.createComment({
+        owner,
+        repo,
+        issue_number: pullNumber,
+        body,
+    })
+}
+
+/**
+ * 在 Pull Request 上添加 label。
+ *
+ * 使用 `issues.addLabels` 端点（GitHub PR label 复用 issue label API），
+ * 需要 token 具备 `issues: write` 权限。
+ *
+ * 用于标记重复 PR（如 `duplicate` label），便于用户过滤和管理。
+ */
+export async function addLabelToPullRequest(
+    octokit: Octokit,
+    owner: string,
+    repo: string,
+    pullNumber: number,
+    labels: string[],
+): Promise<void> {
+    await octokit.rest.issues.addLabels({
+        owner,
+        repo,
+        issue_number: pullNumber,
+        labels,
     })
 }
 
@@ -479,6 +547,23 @@ export function generatePRBody(result: RunResult, supersededNumbers?: number[]):
         '',
     ]
 
+    // Supply Chain Warnings（路径 A 投毒合入前人工确认依据：升级包带脚本且被批准）
+    const supplyChainWarnings = result.supplyChainWarnings ?? []
+    if (supplyChainWarnings.length > 0) {
+        lines.push(
+            '### ⚠️ Supply Chain Warnings',
+            '',
+            '> 以下升级的包带 lifecycle scripts 且已被仓库 `allowBuilds` 批准——安装时脚本将真实执行。合入本 PR 前请人工确认。',
+            '',
+            '| Package | Version | Scripts | Repository |',
+            '|---------|---------|---------|------------|',
+        )
+        for (const w of supplyChainWarnings) {
+            lines.push(`| \`${escapeTableCell(w.packageName)}\` | \`${escapeTableCell(w.version)}\` | ${w.scriptTypes.map((t) => `\`${escapeTableCell(t)}\``).join(', ')} | ${escapeTableCell(w.repository)} |`)
+        }
+        lines.push('')
+    }
+
     // Upgraded dependencies（按包聚合，每包一行）
     const upgrades = aggregateUpgradeActions(actions, (a) => a.success)
     if (upgrades.length > 0) {
@@ -639,21 +724,26 @@ function branchExists(branchName: string, workDir: string): boolean {
     }
 }
 
-function ensureGitConfig(workDir: string): void {
+function ensureGitConfig(workDir: string, author?: { name: string, email: string }): void {
+    const effectiveAuthor = author ?? PAT_DEFAULT_COMMIT_AUTHOR
     const hasName = gitConfigExists('user.name', workDir)
     const hasEmail = gitConfigExists('user.email', workDir)
 
     if (!hasName) {
-        execSync(`git config user.name "${BOT_NAME}"`, { cwd: workDir, stdio: 'pipe' })
+        execFileSync('git', ['config', 'user.name', effectiveAuthor.name], { cwd: workDir, stdio: 'pipe' })
     }
     if (!hasEmail) {
-        execSync(`git config user.email "${BOT_EMAIL}"`, { cwd: workDir, stdio: 'pipe' })
+        execFileSync('git', ['config', 'user.email', effectiveAuthor.email], { cwd: workDir, stdio: 'pipe' })
     }
 }
 
 function gitConfigExists(key: string, workDir: string): boolean {
+    // 必须用 `--local` 限定 local config 查询——否则 `git config user.name`（无 flag）
+    // 走 lookup order (local → global → system)，会返回 host 全局 user.name（如
+    // CaoMeiYouRen）误判"已配置"，让 ensureGitConfig 跳过 set local config。
+    // W3 修复（M18.4 audit round 2）：见 stageAndCommit 内 `-c user.name=X` 注释。
     try {
-        execSync(`git config ${key}`, { cwd: workDir, stdio: 'pipe' })
+        execFileSync('git', ['config', '--local', '--get', key], { cwd: workDir, stdio: 'pipe' })
         return true
     } catch {
         return false

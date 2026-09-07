@@ -1,6 +1,7 @@
 import Aura from '@primeuix/themes/aura'
 import { definePreset } from '@primeuix/themes'
 import { parseDomainList } from './server/utils/email-domain'
+import { localeDetectorFile, nuxtI18n } from './i18n/nuxt-i18n-config'
 
 // 自定义 PrimeVue 主题预设：语义主色（青灰）跟随明暗模式
 const DependfixPreset = definePreset(Aura, {
@@ -29,31 +30,11 @@ export default defineNuxtConfig({
         '@primevue/nuxt-module',
         '@nuxtjs/i18n',
     ],
-    // 国际化：zh-CN 默认无前缀 / en 加 /en 前缀；语言检测见 i18n/localeDetector.ts
+    // 国际化：单点声明见 i18n/i18n.config.ts（locales / strategy / detectBrowserLanguage / detector 路径）
     i18n: {
-        strategy: 'prefix_and_default',
-        defaultLocale: 'zh-CN',
-        locales: [
-            { code: 'zh-CN', name: '简体中文', file: 'zh-CN.json', language: 'zh-CN' },
-            // code 决定 URL 前缀（/en）；language 保留完整语言标识用于 Accept-Language 匹配
-            { code: 'en', name: 'English', file: 'en-US.json', language: 'en-US' },
-        ],
-        langDir: 'locales',
-        lazy: true,
-        // 语言偏好持久化：useCookie 启用 setLocale 写 i18n_locale（切换器/设置页）；
-        // redirectOn 'root' 仅根路径做浏览器检测（首页立即跳转无影响），其余路径 locale 由
-        // URL 前缀决定（无前缀 = zh-CN / en 前缀 = en），避免客户端检测重置前缀页 locale
-        detectBrowserLanguage: {
-            useCookie: true,
-            cookieKey: 'i18n_locale',
-            redirectOn: 'root',
-            alwaysRedirect: false,
-        },
-        // Vue I18n 构建期配置（datetime/number 格式本地化），相对 app/i18n/ 解析
+        ...nuxtI18n,
         vueI18n: './i18n.config.ts',
-        experimental: {
-            localeDetector: 'localeDetector.ts',
-        },
+        experimental: { localeDetector: localeDetectorFile },
     },
     css: [
         'primeicons/primeicons.css',
@@ -77,7 +58,16 @@ export default defineNuxtConfig({
         // 服务端私有配置（NUXT_ 前缀环境变量可覆盖）
         // 构建期默认值仅用于开发；生产必须通过 NUXT_AUTH_SECRET 注入（getAuth 启动校验强制）
         authSecret: process.env.AUTH_SECRET || 'dev-secret-change-me',
-        encryptionKey: process.env.ENCRYPTION_KEY || '',
+        encryptionKey: process.env.NUXT_ENCRYPTION_KEY || '',
+        // SMTP 配置（私有，运行时 NUXT_ 前缀可覆盖；不进 public bundle）。
+        // smtpEnabled 派生自 smtpHost 存在性，向后兼容旧 env-only 行为。
+        // 端口默认 587（STARTTLS 明文升级）；SMTP_PORT=465 走 TLS；user/pass 可选（匿名 relay 场景）。
+        // SMTP_PASS 仅在服务端私有 config 读取；不暴露给前端（runtimeConfig.public 不引用）。
+        smtpHost: process.env.SMTP_HOST || '',
+        smtpPort: parseInt(process.env.SMTP_PORT || '587', 10),
+        smtpUser: process.env.SMTP_USER || '',
+        smtpPass: process.env.SMTP_PASS || '',
+        smtpFrom: process.env.SMTP_FROM || '',
         smtpEnabled: !!process.env.SMTP_HOST,
         // 关闭注册（保留登录）：公开部署时设置 REGISTRATION_DISABLED=true
         registrationDisabled: process.env.REGISTRATION_DISABLED === 'true',
@@ -111,6 +101,12 @@ export default defineNuxtConfig({
         queueBackoffMs: process.env.QUEUE_BACKOFF_MS || '',
         // 单容器部署：Nuxt 进程内消费队列（无需独立 worker 进程）
         inProcessWorker: process.env.IN_PROCESS_WORKER === 'true',
+        // e2e/fixtures 端点放行开关（hard requirement：platform.md §3.6 + security.md §2.1.4）：
+        // 生产构建默认 false（NUXT_E2E_FIXTURES_ALLOWED 未设）；仅 e2e webServer 启动时显式开启。
+        // 注意：不能直接用 process.env.NODE_ENV 作第二门控——Nitro/esbuild 构建期会把
+        // process.env.NODE_ENV 静态替换为构建时值，折叠表达式导致 prod build 永远 404。
+        // runtimeConfig 是 Nuxt 官方运行时覆盖通道（NUXT_ 前缀），可绕开 esbuild define。
+        e2eFixturesAllowed: process.env.NUXT_E2E_FIXTURES_ALLOWED === 'true' || process.env.E2E_TEST === 'true',
         public: {
             // 客户端可见配置（前端可见 env 一律 NUXT_PUBLIC_* 优先，普通 env 兜底：
             // 构建时内联 + 运行时 NUXT_PUBLIC_* 覆盖双通道，对齐 momei 写法）
