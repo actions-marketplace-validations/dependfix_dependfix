@@ -35,7 +35,7 @@
 ## 相关文档
 
 - 架构设计：[docs/design/governance/architecture.md](docs/design/governance/architecture.md)
-- 数据模型：[docs/design/packages/data-model.md](docs/design/packages/data-model.md)
+- 数据模型：[docs/design/modules/data-model.md](docs/design/modules/data-model.md)
 - 安全设计：[docs/design/governance/security.md](docs/design/governance/security.md)
 - 技术栈：[docs/guide/tech-stack.md](docs/guide/tech-stack.md)
 - AI 协同指南：[docs/guide/ai-development.md](docs/guide/ai-development.md)
@@ -60,6 +60,36 @@
 | 规划 | [docs/standards/planning.md](docs/standards/planning.md) |
 
 momei 仅作为 1.0.0 前的参考蓝本，1.0.0 后按本项目自身实践演进，形成自有规范体系。
+
+## 命名规范
+
+阶段编号分配规则：
+
+- `M\d+` 主阶段：一段完整规划周期（如 M0 / M25）
+- `M\d+.\d+` 子阶段：阶段内原子条目（如 M25.1 / M25.2a），按类型平衡原则选取 4-6 个独立闭环
+- `M\d+.\d+.\d+` 任务/工作流：子阶段内具体任务
+
+**约束**：backlog 候选不得包含 `M\d+` 阶段编号（除非经用户明确授权上收）。完整规则见 [规划规范 §3.1](./docs/standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement)。
+
+## 设计文档架构
+
+`docs/design/` 下分两类目录，按文档对象分流：
+
+- **`modules/`** —— 单 monorepo 包总设计（`packages/core`、`packages/engine`、`packages/cli`、`packages/mcp`、`packages/skills`、`apps/platform`）
+- **`governance/`** —— 跨模块 / 治理 / 重大变更专项设计 + 经验归档（`architecture.md` / `security.md` / `experience-archive.md` 等）
+
+**硬阈值**：改动预计 > 10 文件 / > 800 行 → **必须有** governance 文档；> 5 文件 / > 350 行 → 建议有；跨 ≥ 2 个独立模块 → 必须有。完整规则见 [规范与文档治理设计 §2.4](./docs/design/governance/spec-and-doc-governance.md#24-设计文档硬阈值hard-requirement)。
+
+## 审计触发
+
+A 阶段 `code-auditor` 审计必须触发的场景：
+
+- 治理定义改动（`docs/standards/*.md` / `docs/design/governance/*.md` / `.github/skills/*.md` / `.github/agents/*.md`）
+- 设计文档硬阈值触发（按设计文档架构章节）
+- 跨 ≥ 2 个独立模块的代码改动
+- 公开 API / 鉴权 / 数据写入 / 外部调用
+
+未触发审计的 F 阶段 commit 视为不合规，由 code-auditor Reject 退回。完整规则见 [规范与文档治理设计 §6.1](./docs/design/governance/spec-and-doc-governance.md#61-a-阶段-audit-required-触发判定hard-requirement)。
 
 ## 必要检查
 
@@ -122,3 +152,22 @@ momei 仅作为 1.0.0 前的参考蓝本，1.0.0 后按本项目自身实践演�
 4. **原子粒度**：一个提交对应一个逻辑变更，关联且仅关联 `todo.md` 中的一个原子条目。
 5. **推送禁令**：`git commit` 后不得自动执行 `git push`，推送仅限用户明确要求时执行。提交完成后应告知用户"已提交到本地，等待推送确认"。
 6. **src/dist 不一致时 build 在先（monorepo 纪律）**：改动涉及 `packages/*/src/**`（被其他 workspace 包 import）时，**提交前必须先 `pnpm -r build`（或定向 `pnpm --filter <changed-pkg> build`）重建 dist**，否则下游包的 typecheck 会报 TS2339（缺新字段）。CI 自动 rebuild 掩盖本地 dev 过期，导致 `pnpm exec tsc --noEmit` 通过但 `pnpm run typecheck`（含 nuxt typecheck pipeline）失败。**验证协议**：commit 前实测 `pnpm run typecheck` exit 0（覆盖 root tsc + nuxt typecheck）；如失败，第一动作是 `pnpm -r build` 而非修改源码。教训见 [经验归档 §五十五（M23.3 C66-C standard depth audit W1）](docs/design/governance/experience-archive.md)。
+
+## 安全与行为红线
+
+### 核心文件保护
+
+-   严禁修改或删除 `.env`，非必要也不得读取 `.env`，应当优先参考 `.env.full.example` 了解环境变量字段。
+-   修改本文件 `AGENTS.md` 前应该询问用户，并得到用户明确指示。
+-   严禁在代码中硬编码任何 API Key、Token 或敏感凭据。
+
+### 终端操作安全
+
+在执行脚本或命令前，必须进行环境检查与路径校验。具体的脚本安全准则请参考 [安全开发规范](./docs/standards/security.md)。
+
+
+## 其他要求
+
+1.  **多语言响应**: 在与用户沟通时，应使用用户发送的语言进行回复（默认为中文）。如果可以，请优先使用用户发送的语言进行思考（think）
+2.  **重大变更确认**: 在进行涉及架构、核心逻辑或项目路线图的重大变更前，必须主动向用户请求确认。
+3.  **性能下限原则**：使用的 AI 智能体，其基础能力不应低于 Claude Sonnet 4.6 / GPT-5.3 / DeepSeek V4 Flash 0731 这一档的大模型水平。

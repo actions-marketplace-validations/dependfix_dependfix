@@ -6,11 +6,11 @@
 docs/
 ├── index.md                 # 文档站首页（VitePress）
 ├── design/                  # 设计文档
-│   ├── packages/            # 模块设计（已实现/正在实现，参照 monorepo packages）
+│   ├── modules/             # 模块设计（已实现/正在实现，单 monorepo 包）
 │   │   ├── index.md         # 模块索引
 │   │   ├── data-model.md    # 标准化告警/配置/报告模型
 │   │   └── ...              # dependabot-fetcher / dependency-fixer / pnpm-lockfile-fixer 等
-│   └── governance/          # 专项设计与治理
+│   └── governance/          # 专项设计与治理（跨模块 / 治理 / 重大变更）
 │       ├── index.md         # 治理索引
 │       ├── architecture.md  # 系统架构与模块边界
 │       ├── security.md      # 安全设计
@@ -28,7 +28,6 @@ docs/
 ├── research/                # 调研文档（命名规范见 §5.0 / §5.1）
 │   ├── README.md            # 目录定位（简要，规范见本文档）
 │   ├── 2026-07-26-competitive-research.md
-│   ├── 2026-08-04-github-token-dependabot-bug-or-design.md
 │   └── ...
 ├── standards/               # 项目规范（本目录）
 └── .vitepress/              # VitePress 站点配置（导航/侧边栏）
@@ -65,7 +64,7 @@ docs/
 |:----:|------|------|
 | L0 | `AGENTS.md` | 项目级 AI 行为准则、安全红线、角色矩阵 |
 | L1 | `docs/standards/*.md` | 专项规范（开发、测试、文档等） |
-| L2 | `docs/design/packages/*.md` + `docs/design/governance/*.md` | 模块设计 / 专项设计与治理 |
+| L2 | `docs/design/modules/*.md` + `docs/design/governance/*.md` | 模块设计 / 专项设计与治理 |
 | L3 | 平台适配文件 | 工具差异、目录发现 |
 
 冲突顺序：L0 > L1 > L2 > L3。
@@ -74,11 +73,45 @@ docs/
 
 ## 5. 设计文档分层
 
-- **模块设计**: 稳定模块总设计写入 `docs/design/packages/`（当前实现/正在实现的模块，参照 monorepo packages 划分）
-- **治理/专题**: 专项治理、迁移方案、评估报告写入 `docs/design/governance/`
-- **索引**: `docs/design/packages/index.md` 与 `docs/design/governance/index.md` 分别维护索引；过时且暂不删除的文档归档到 `docs/design/governance/archive/`（按需创建）
+### 5.0 modules/ vs governance/ 分流依据
 
-### 5.0 通用带日期文件命名规范
+| 分流依据 | `modules/` | `governance/` |
+|---|---|---|
+| **文档对象** | 单个 monorepo workspace 包（`packages/core`、`packages/engine`、`packages/cli`、`packages/mcp`、`packages/skills`、`apps/platform`）| 跨模块 / 跨包 / 平台级 / 治理级 / 重大变更 |
+| **文档数量** | 1 包 = 1 个模块文档 | 1 主题 = 1 个治理文档（不按包拆分）|
+| **职责** | 当前已实现或正在实现的稳定模块总设计 | 专项设计 / 评估报告 / 治理边界 / 迁移方案 / 经验归档 |
+| **状态字段** | `✅ 已落地` + 修订时间戳 | `✅ 已落地` / `🔶 设计中` / `🔶 设计先行稿（backlog 候选）` / `✅ 持续追加` |
+| **重命名触发** | 跟随 monorepo 包重命名（如 `packages/` → `modules/`）| 不跟随包重命名，治理文档独立存续 |
+
+**模块设计**：稳定模块总设计写入 `docs/design/modules/`（当前实现/正在实现的模块，与 monorepo 包对应）
+
+**治理/专题**：专项治理、迁移方案、评估报告写入 `docs/design/governance/`（跨模块 / 治理 / 重大变更）
+
+**索引**：`docs/design/modules/index.md` 与 `docs/design/governance/index.md` 分别维护索引；过时且暂不删除的文档归档到 `docs/design/governance/archive/`（按需创建）
+
+### 5.1 设计文档硬阈值（hard requirement）
+
+> **本条是设计文档强制要求的唯一权威声明**。其他文档 / skill / agent 定义仅作一行引用。
+
+**适用范围（仅以下 4 类改动触发本硬阈值）**：
+
+| 改动类型 | 示例 |
+|---|---|
+| **专项设计** | 重大功能预研 / 架构调整 / 跨包契约重写 |
+| **专项治理** | 治理决策落地 / 经验沉淀 / 文档治理批次 |
+| **重大变更设计** | breaking change / 数据迁移 / 协议变更 |
+| **新增模块** | 新 monorepo 包 / 新平台子系统 / 新核心抽象层 |
+
+**不适用范围（普通功能改动不触发本硬阈值）**：bug fix / 小优化 / 体验调整 / 文档措辞 / 测试补强 / 配置调整 / 依赖升级 / 现有模块功能扩展。
+
+**硬阈值规则**（仅适用范围内的改动需满足）：
+
+- **改动预计 > 10 文件 / > 800 行** → **必须有**专项设计文档（`docs/design/governance/<slug>.md`）+ A 阶段 `code-auditor deep depth` 审计
+- **跨 ≥ 2 个独立模块的代码改动** → **必须有**专项设计文档（不论规模）
+
+完整规则、触发判定、A 阶段必查项见 [规范与文档治理设计 §2.4](../design/governance/spec-and-doc-governance.md#24-设计文档硬阈值hard-requirement)。
+
+### 5.2 通用带日期文件命名规范
 
 **需要带日期的文件**（调研、评估、归档、快照、报告等）统一使用 `{YYYY-MM-DD}-{topic-slug}.md`：
 
@@ -89,22 +122,22 @@ docs/
 5. **例外（持续追加型文档不设日期）**：跨阶段持续追加、不随单一产出结束的文档使用**固定名**，不套日期规则——如 [经验归档](../design/governance/experience-archive.md)（`experience-archive.md`，章节按序追加，见其文件头"准入标准"）；再如 `todo-archive.md`、`backlog.md` 等规划滚动文档。判断标准：文档的"完成日期"不存在（永远在追加）→ 不设日期。
 
 **示例**：
-- `2026-08-04-github-token-dependabot-bug-or-design.md`（调研）
+- `2026-08-02-release-tools-comparison.md`（调研）
 - `experience-archive.md`（经验归档）
 - `2026-08-06-audit-report-v2.md`（同天第二版审计报告）
 
-### 5.1 调研文档规范（docs/research/）
+### 5.3 调研文档规范（docs/research/）
 
 调研 / 研究类文档（竞品分析、技术调研、决策依据等）统一存放 `docs/research/`，
 与 `docs/design/`（设计落地）和 `docs/plan/`（规划）分离。
 
-**命名规范**（沿用 [§5.0 通用带日期文件命名规范](#50-通用带日期文件命名规范)）:
+**命名规范**（沿用 [§5.2 通用带日期文件命名规范](#52-通用带日期文件命名规范)）:
 
 1. 文件名必须包含日期，格式 `{YYYY-MM-DD}-{topic-slug}.md`
-   - 示例：`2026-08-04-github-token-dependabot-bug-or-design.md`
+   - 示例：`2026-08-02-release-tools-comparison.md`
    - 日期为调研**完成日期**；topic-slug 为小写 kebab-case 主题词
 2. 同一天对同一主题多次调研（追加搜索、数据更新、结论修正）时，**追加版本后缀**：
-   - `2026-08-04-github-token-audit-v2.md`（保留旧版本作为历史决策依据，新版本 `-v{n}` 从 2 起）
+   - `2026-08-02-release-tools-audit-v2.md`（保留旧版本作为历史决策依据，新版本 `-v{n}` 从 2 起）
 3. 旧版被新版完全覆盖且无决策参考价值时，可删除旧版
 
 **内容结构（建议）**:
@@ -124,7 +157,7 @@ docs/
 
 **内容处置流程**: 调研完成后按优先级处置，并在文档末尾注明去向——
 
-1. **落地**: 结论进入设计文档（`design/packages/` 或 `design/governance/`）与规划（`plan/`）
+1. **落地**: 结论进入设计文档（`design/modules/` 或 `design/governance/`）与规划（`plan/`）
 2. **保留**: 作为未来决策依据（如发布工具对比支撑发布方案）
 3. **归档 / 删除**: 被覆盖或价值已尽
 
@@ -166,7 +199,7 @@ docs/
 
 **执行检查**：每次编辑 `docs/plan/` 任一文档前，用 §7 表自检条目归属；编辑后用 `rg` 扫描违规关键词（"ahead / commit.*[0-9a-f]{7} / 验证矩阵 / 已闭环 / M\d 闭环 / done / completed / closed"），命中即重新分类。
 
-**判定理由与背景**：见 [docs/archive/2026-08-20-standards-revisions.md §1](../archive/2026-08-20-standards-revisions.md)。
+**判定理由**：规范定义本身已完整说明边界，无需追溯历史档案。
 
 ## 8. 相关文档
 

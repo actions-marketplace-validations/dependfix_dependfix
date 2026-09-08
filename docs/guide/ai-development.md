@@ -14,7 +14,7 @@
 |------|------|------|
 | L0 | `AGENTS.md` | 项目级 AI 行为准则、安全红线 |
 | L1 | `docs/standards/*.md` | 专项规范（开发、测试、文档、安全等） |
-| L2 | `docs/design/packages/*.md` + `docs/design/governance/*.md` | 模块设计 / 专项设计与治理 |
+| L2 | `docs/design/modules/*.md` + `docs/design/governance/*.md` | 模块设计 / 专项设计与治理 |
 | L3 | 平台适配文件 | 工具差异、目录发现 |
 
 冲突顺序：L0 > L1 > L2 > L3。
@@ -61,7 +61,7 @@
 | typecheck 失败 | `pnpm --filter @dependfix/<pkg> typecheck` |
 | 本地 lint 缺依赖 | `pnpm --filter @dependfix/<pkg> lint` |
 
-**判定准则**：除非实测报错 + 有具体错误信息，否则不放弃本地路径。背景与反模式案例：见 [docs/archive/2026-08-20-standards-revisions.md §3](../archive/2026-08-20-standards-revisions.md)。
+**判定准则**：除非实测报错 + 有具体错误信息，否则不放弃本地路径。
 
 ## 6. 相关文档
 
