@@ -8,8 +8,15 @@ export default defineConfig({
     lastUpdated: true,
     cleanUrls: true,
     ignoreDeadLinks: true,
+    // 文档站 favicon 与品牌资产（与仓库根 assets/brand/svg/ 同步；
+    // 复制而非符号链接，避免 Windows + WSL 跨平台 symlink 兼容问题）
+    head: [
+        ['link', { rel: 'icon', type: 'image/svg+xml', href: '/brand/favicon.svg' }],
+    ],
 
     themeConfig: {
+        // 站点 logo（mark 版本，teal 主色在浅/深主题下均可辨识）
+        logo: { src: '/brand/logo-mark.svg', alt: 'dependfix' },
         search: {
             provider: 'local',
         },
@@ -51,6 +58,7 @@ export default defineConfig({
                         { text: '安全设计', link: '/design/governance/security' },
                         { text: 'GitHub Action 工作流', link: '/design/governance/github-action-workflow' },
                         { text: 'MCP Server 设计（M6）', link: '/design/governance/mcp-server' },
+                        { text: '平台 AI 研判集成设计', link: '/design/governance/platform-ai-integration' },
                     ],
                 },
             ],

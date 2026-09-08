@@ -64,6 +64,20 @@ a {
         font-weight: 600;
     }
 
+    &__brand-logo {
+        // 与 $header-height (56px) 对齐，logo 占约一半高度
+        width: 28px;
+        height: 28px;
+        flex-shrink: 0;
+
+        // 透明背景的 logo-mark.svg (teal-600 #0D9488) 在 header 深背景（slate-800 #1E293B）
+        // 上对比度偏弱（约 4:1，WCAG AA 边缘）；用 filter 提亮 + 增饱和，保证暗色模式
+        // 视觉权重与浅色模式平衡；不需要切换 asset（保持单一来源 + 无新资源依赖）
+        @include dark-mode {
+            filter: brightness(1.15) saturate(1.25);
+        }
+    }
+
     &__nav {
         display: flex;
         align-items: center;
@@ -157,10 +171,24 @@ a {
         max-width: 420px;
     }
 
+    &__logo {
+        // auth 页（登录/注册/首页）品牌 mark：方形图标 + 下方 h1 文本组合
+        // 用 logo-light / logo-navy 方形 mark（无文字），与 h1 文本分离避免冗余
+        // 标题文本由 h1 + 副标题提供（i18n 支持），不再需要 lockup 自带文字
+        // 由 Vue computed :src="authLogoSrc" 跟随 .dark class 切换主题（不是 prefers-color-scheme），
+        // 与 PrimeVue darkModeSelector: .dark 一致
+        display: block;
+        width: 96px;
+        height: 96px;
+        margin: 0 auto $space-3;
+    }
+
     &__title {
+        // auth 页主标题：与上方 96×96 mark 形成层次，视觉权重略大于 xl 但不喧宾夺主
         margin: 0 0 $space-1;
-        font-size: $font-size-xl;
-        font-weight: 600;
+        font-size: 1.875rem;
+        font-weight: 700;
+        letter-spacing: -0.01em;
         text-align: center;
     }
 

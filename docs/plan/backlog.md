@@ -88,10 +88,70 @@
 
 - **C33 MCP P3**：pnpm-audit 本地 tool（需 workDir 语义，等本地场景真实需求）/ 统一错误包装 helper（token 检查 + try/catch → ok:false 模板代码收口）/ 返回结构对齐完整 `RunResult`（当前 run_scan 只映射 8 字段，保持简化 + 文档声明）
 
-#### i18n 治理
-
 - **C36** 服务端 API 错误消息 i18n（当前 API 错误消息硬编码英文如 `error.code.field_required`；用户体验：中文用户看不懂；触发：M8 国际化后未覆盖服务端；验收：所有 `apps/platform/server/api/**` 端点错误响应 `code` 键维持英文 + `message` 键按请求 locale 返回）
 - **C37** 语言偏好多设备同步（当前仅单一设备语言偏好；多设备切换需重新设置；触发：用户实测反馈多设备用户；前置：先有 C36 服务端 API i18n 基础）
+- **C69 文档站 + 包 README 多语言实施（en-US）** —— 2026-09-08 用户调研触发。**现状盘点**：[`docs/standards/i18n.md`](../standards/i18n.md) 191 行完整规范已落地；[`apps/platform/i18n/locales/`](../../apps/platform/i18n/locales/) 平台 UI 国际化已落地（zh-CN + en-US）；CI 审计工具链 `pnpm i18n:audit:missing` / `pnpm i18n:audit:unused` / `pnpm i18n:audit:duplicates` / `pnpm docs:check:i18n` / `pnpm lint:i18n` 全部就绪。**缺口**：`docs/.vitepress/config.ts` 无 `locales` 配置（默认仅 root = zh-CN），`docs/i18n/<locale>/` 物理目录不存在；所有 `packages/*/README.md` 单语，未配 `README.en-US.md`。**目标**：参照 [momei `docs/i18n/<locale>/` 镜像结构 + VitePress locales + rewrites 模式](../standards/i18n.md)，补齐文档站 en-US 接入与包 README 双语化；过渡期策略按 [`i18n.md` §2.1 freshness 分层](../standards/i18n.md#21-文档翻译-freshness-分层)（must-sync 高频入口 + summary-sync 治理入口 + source-only 中文事实源）。**完整设计先行稿**：[docs-and-readme-i18n.md](../design/governance/docs-and-readme-i18n.md)。
+  - **架构决策**：
+    - **目录结构**：`docs/i18n/en-US/` 镜像中文根目录（vs `docs/en-US/` 平行结构 —— 已被 §6.2 第 4 条禁止；vs URL 前缀 `i18n/en-US/` —— 暴露内部组织）；VitePress `rewrites` 去掉 `i18n/<locale>/` 前缀，对外 URL 保持 `/<locale>/...`
+    - **包 README 双语**：`README.md`（中文原版）+ `README.en-US.md`（英文翻译版）+ 顶部切换链接 `[简体中文](./README.md) | [English](./README.en-US.md)`（与 momei 完全一致 + 遵循 [`i18n.md` §4 README 多语言规范](../standards/i18n.md#4-readme-多语言规范)）
+    - **翻译方式**：手动翻译 + 人工 review（vs AI 自动翻译——momei 实践验证技术术语 + 代码块 + Markdown 表格自动翻译质量不稳定）
+    - **首批范围**：仅 en-US（按 [`i18n.md` §2 语言发布分级](../standards/i18n.md#2-语言发布分级) 三阶段准入；不立即多语言并进，先验证 en-US 流程跑通再评估 `zh-TW` / `ja-JP` / `ko-KR`）
+    - **freshness 分层映射**：must-sync（首页 / quick-start / configuration / tech-stack / standards/i18n.md）/ summary-sync（governance 入口 / 高频设计文档）/ source-only（plan / research / 低频 guide / 设计文档深层）—— 直接沿用 §2.1 规范
+    - **同步门禁**：新增 `pnpm check:readme-i18n` 脚本（双向链接 + 章节结构比对）+ CI test job 步骤，避免回归
+    - **本次只文档 + 挂 backlog**：与 C68 决策一致，先文档沉淀 + 评估，避免一次性大改动
+  - **范围（建议落地步骤）**：
+    - **P0 文档站 en-US 接入**（5 commits）：① 文档站目录脚手架（`docs/i18n/en-US/` + VitePress locales + rewrites + nav/sidebar 双语）；② 首批 en-US 翻译（首页 + 4 个 guide + 1 个 standards + 2 个 governance = 8 个 md 文件）；③ 包 README 双语化（cli / mcp 完整双语 + 其他 3 个包 README 头部 + 切换链接）；④ 新增 `pnpm check:readme-i18n` 同步门禁脚本；⑤ CI workflow 更新（test.yml 添加 `pnpm check:readme-i18n` 步骤）
+    - **P1 增强**：语言切换入口增强（顶部 badge / 弹窗）+ SEO 基础（hreflang + sitemap-locale-xml + canonical）+ 翻译自动化脚手架（README 章节结构比对脚本）+ 其他语言接入评估
+  - **不做什么**：不引入 AI 自动翻译工具（momei 经验：质量不稳定）/ 不重写 `apps/platform` 现有 i18n 体系（已落地）/ 不修改 `docs/standards/i18n.md` 既有规范（除非落地过程中发现矛盾）/ 不立即支持 `zh-TW` / `ja-JP` / `ko-KR`（先聚焦 zh-CN + en-US 双语）/ 不翻译 `plan/` 与 `research/` 子目录（中文事实源优先）/ 不翻译 CHANGELOG.md（自动生成且高频变更）
+  - **首批翻译范围（按 freshness 分层）**：
+    - `must-sync`（30 天软上限）：`docs/i18n/en-US/index.md` / `docs/i18n/en-US/guide/{quick-start,configuration,tech-stack}.md` / `docs/i18n/en-US/standards/i18n.md`
+    - `summary-sync`（45 天软上限）：`docs/i18n/en-US/design/governance/index.md` / `docs/i18n/en-US/design/governance/platform-ai-integration.md`
+    - `source-only`（仅提供中文事实源入口，不承诺持续维护）：其他 design/* / 低频 guide/* / plan/* / research/*
+  - **包 README 首批翻译范围**：
+    - **完整双语**：`packages/cli/README.md` + `packages/cli/README.en-US.md` / `packages/mcp/README.md` + `packages/mcp/README.en-US.md`（cli / mcp 是用户最常 npm install 的入口）
+    - **仅头部双语**：`packages/core` / `packages/engine` / `packages/skills` —— 仅 README 头部含 `[简体中文] | [English]` 切换链接，详细文档由 docs 站承载
+  - **预估工作量**：P0 5 commits / 约 0.5-1 阶段切片容量（与 C68 量级相近但侧重 docs 翻译）
+  - **A 阶段 audit 阈值**：commit 涉及 VitePress locales + rewrites + 多 md 翻译 + README 双语 + CI 步骤变更，**standard depth**（与 C67 / C68 audit 决策一致）
+  - **上收触发条件**（任一）：① 用户实测反馈需要 en-US 文档（典型：海外 GitHub 用户询问 dependfix 但不会中文）；② 用户实测反馈需要英文 npm README（npm 平台 UI 多英文用户）；③ momei 多语言架构验证稳定（参考周期：6 个月观察期）；④ 与 C68 AI 研判平台集成联动（M28 阶段合并实施）；⑤ 用户明确触发上收
+  - **关键决策回顾（2026-09-08 用户确认）**：
+    - **目录结构 docs/i18n/en-US/** vs 平行 docs/en-US/：选 docs/i18n/en-US/ —— 与 momei 一致 + 已被 §6.2 第 4 条禁止旧目录回流 + rewrites 自动重写 URL
+    - **手动翻译 + 人工 review** vs AI 自动翻译：选手动 —— momei 实践验证质量可控 + AI 翻译对技术术语 / 代码块不稳定 + 翻译流程与贡献者门槛平衡
+    - **首批仅 en-US** vs 同时多语言：选仅 en-US —— 三阶段准入（draft / ui-ready / seo-ready）+ 先验证 en-US 流程跑通再扩展，避免一次性大改动
+    - **freshness 直接沿用 §2.1** vs 自定义分层：选沿用 —— i18n 规范已成熟（与 C68 决策一致"先规范后实施"），避免重复声明
+    - **新增 check:readme-i18n 脚本** vs 仅靠人工 review：选新增 —— CI 回归门禁（与 §6.3 提交前校验 + §6.4 Blocker 矩阵一致），防止 README 与 README.en-US.md 章节结构漂移
+    - **本次只写文档 + 挂 backlog** vs 直接落地：选前者（用户决策 2026-09-08）—— 与 C68 决策一致，避免与当前 M24+ 阶段排期冲突；触发条件达到后再上收
+  - **关联文档**：[`docs/standards/i18n.md`](../standards/i18n.md)（本文档遵循的唯一权威规范，§2 分级 / §2.1 freshness / §4 README / §5 术语 / §6 贡献流程 / §7 回归 / §8 PR 建议全部沿用）/ [`docs/design/governance/platform-ai-integration.md`](../design/governance/platform-ai-integration.md)（平行设计先行稿 C68，本文档即 C69 候选）/ [`docs/standards/git.md` §3 atomic commit 边界](../standards/git.md)（commit 拆分依据）/ [`docs/standards/documentation.md`](../standards/documentation.md)（文档规范）/ [`apps/platform/i18n/locales/`](../../apps/platform/i18n/locales)（平台 UI i18n 现有实现参照）/ <a href="https://github.com/CaoMeiYouRen/momei/blob/master/docs/guide/translation-governance.md">momei translation-governance.md</a>（多语言治理参考）/ <a href="https://github.com/CaoMeiYouRen/momei/blob/master/docs/.vitepress/config.ts">momei docs/.vitepress/config.ts</a>（VitePress locales 配置参考）/ <a href="https://github.com/CaoMeiYouRen/momei/blob/master/packages/cli/README.md">momei packages/cli/README.md</a>（包 README 双语模板参考）
+
+#### 协议与依赖合规
+
+- **C70 apps/platform PrimeUI 主题库降级（@primeuix/themes 3.x → 2.x）** —— 2026-09-08 用户调研触发。**现状**：[`@primeuix/themes@3.0.0`](../standards/index.md) 是 PrimeUI 商业 License（社区免费版有年收入< $1M USD / 开发者< 5 / 员工< 10 / 风投< $3M 限制，**强制 license key**，缺失/无效/过期会显示 license notice）；`apps/platform/nuxt.config.ts` 直接 import `import Aura from '@primeuix/themes/aura'` + `import { definePreset } from '@primeuix/themes'`；`primeicons@8.0.0` + `@primeui/license-manager@1.0.0` 同为 PrimeUI License（5 个 PrimeUI License 包）。**目标**：把 `@primeuix/themes` 从 `^3.0.0` 降到 `^2.0.3`（MIT 协议），消除商业 license 风险与 license key 配置负担。**完整设计先行稿**：[primeui-themes-v2-downgrade.md](../design/governance/primeui-themes-v2-downgrade.md)。
+  - **架构决策**：
+    - **降级 v2 vs 维持 v3 + 申请 license key**：选降级 v2 —— 改动最小（1 import + 1 版本号）+ 协议 MIT + 不依赖用户/组织规模
+    - **仅降级 themes vs PrimeVue 4.x 全栈迁移**：选仅 themes —— PrimeVue 4.x 框架本体仍 MIT，迁移全栈成本远高于 license 风险
+    - **v2 兼容性验证**：`definePreset` API 在 v2/v3 一致；自定义 DependfixPreset（仅改 `semantic.primary` 50-950 色阶）大概率无需改；需小范围跑 typecheck + test + build + dev 视觉回归
+    - **本次只文档 + 挂 backlog**：与 C68 / C69 一致，先文档沉淀 + 评估，避免一次性大改动
+  - **范围（建议落地步骤）**：
+    - **P0 降级落地**（2-3 commits）：① `apps/platform/package.json` `@primeuix/themes` 版本约束 `^3.0.0` → `^2.0.3` + `pnpm install`；② `apps/platform/nuxt.config.ts` 检查 import 路径（如 v2 import 路径有变化需调整）；③ `docs/guide/tech-stack.md` 修正版本号标注（已写 `^2.x` 但实际是 `^3.x`，需对齐）
+    - **P1 评估（可选）**：`primeicons@8.x` → `7.x`（MIT）降级 —— 项目仅用 2 个图标（pi-check-circle / pi-times-circle），license 风险有限但可一并清理；`THIRD_PARTY_NOTICES.md`（仓库根）补 PrimeUI License 治理记录 + caniuse-lite CC-BY-4.0 等；`pnpm licenses:audit` 加 CI 步骤
+  - **不做什么**：不升级 PrimeVue 5.x（避免全栈 PrimeUI License）/ 不迁移其他 UI 库（Element Plus / Naive UI / Vuetify 成本极高）/ 不申请 PrimeUI 商业 license（依赖用户/组织资格，本文档不替用户决策）/ 不重写 DependfixPreset（definePreset API 在 v2 一致，理论上无需改）
+  - **预估工作量**：P0 2-3 commits / 约 30 分钟（含 typecheck + test + build + 视觉回归）
+  - **A 阶段 audit 阈值**：commit 涉及版本号变更 + import 路径调整 + 主题渲染回归，**standard depth**（与 C68 / C69 audit 决策一致）
+  - **落地前 baseline**（用于落地后 diff 对比）：
+    - `pnpm list @primeuix/themes --filter @dependfix/platform`：`@primeuix/themes@3.0.0`
+    - `pnpm licenses list --prod --json | jq '.["Unknown"] | length'`：7（其中 5 个 PrimeUI 相关）
+    - `pnpm view @primeuix/themes@3.0.0 license`：PrimeUI License（社区免费版）
+  - **落地后预期**（验证生效）：
+    - `pnpm list @primeuix/themes --filter @dependfix/platform`：`@primeuix/themes@2.0.3`
+    - `pnpm view @primeuix/themes@2.0.3 license`：**MIT**
+    - `pnpm licenses list --prod --json | jq '.["Unknown"] | length'`：2（移除 5 个 PrimeUI 相关）
+    - 全 license 分布 MIT 占比：84.1% → 84.7%（+5 个）
+  - **回滚预案**：v2 验证失败 → pin `@primeuix/themes@2.0.0`（v2 最早版避免 minor 变更）/ 评估 OpenVue 1.0 迁移 / 申请 PrimeUI 商业 license（用户决策）
+  - **上收触发条件**（任一）：① 用户实测反馈 apps/platform 部署出现 PrimeUI license notice（合规紧迫）；② 用户实测反馈需要长期 license 合规（公开部署 / 商业化）；③ 与 C68 / C69 联动（M28 阶段合并 license 治理 + i18n 治理 + AI 研判）；④ 用户明确触发上收
+  - **关键决策回顾（2026-09-08 用户确认）**：
+    - **降级 v2 vs 维持 v3 + 申请 license key**：选降级 v2 —— 改动最小 + 协议 MIT + 不依赖用户/组织规模
+    - **仅降级 themes vs PrimeVue 全栈迁移**：选仅降级 themes —— PrimeVue 4.x 框架本体仍 MIT，迁移全栈成本远高于 license 风险
+    - **本次只文档 + 挂 backlog**：与 C68 / C69 决策一致，避免一次性大改动；触发条件达到后再上收
+  - **关联文档**：[`docs/standards/index.md`](../standards/index.md)（平台 UI 主题现状）/ [`docs/standards/platform.md`](../standards/platform.md)（`@primeuix/themes` + Aura preset + `darkModeSelector: '.dark'`）/ [`docs/guide/tech-stack.md`](../guide/tech-stack.md)（技术栈文档，需修正版本号）/ [`docs/design/governance/platform-ai-integration.md`](../design/governance/platform-ai-integration.md)（C68 平行设计）/ [`docs/design/governance/docs-and-readme-i18n.md`](../design/governance/docs-and-readme-i18n.md)（C69 平行设计）
 
 #### 多组织 / 多租户
 
@@ -152,6 +212,28 @@
   - 关键决策回顾（2026-08-25 用户确认）：
     - **B1 数据层去重** vs B2 UI 层 GROUP BY / B3 每次清空：选 B1 —— 彻底解决重复 + 自然支持 fix 复用 + 不破坏审计（fixStatus + scanRunId 仍可追溯）；B2 实现简单但数据膨胀 + fix 复用难做；B3 最简单但破坏"何时发现"审计信号。**备注：B1 数据层去重暂缓，应用层去重（方案 B2 等价）已实施且满足当前业务需求；如未来需要 fix 复用 / 历史 fixStatus 跨次保留再迁移到 B1**
     - **C3 单列智能** vs C1 两列分开 / C2 单列合并：选 C3 —— 用户原话"GHSA ID ... 这才是能真正跨平台追溯漏洞的关键信息"（GHSA 在 GitHub Advisory Database 统一收录多个 CVE，反向追溯更强）；C1 多列占空间但实际查看价值有限；C2 简单但 GHSA / CVE 视觉权重平等，跨平台追溯信号被稀释
+
+#### 平台治理扩展
+
+- **C68 平台 AI 研判集成（apps/platform 端到端联通）** —— 2026-09-08 用户调研触发。**现状**：AI breaking change 研判引擎层 `packages/engine/src/ai/` M5 已闭环（commit 3475e6e），CLI / MCP / GitHub Action 三条用户路径全部支持 `--ai` 系列参数；apps/platform（管理平台）作为执行入口时**零集成**——`POST /api/repos/[id]/scan` 不接收 ai 字段、`ScanRequest` schema 无 ai 字段、三执行器（container / sandbox / github-action）未透传 `RuntimeConfig.ai`、UI 无 AI 配置入口、RunDetailDialog / alerts 视图不消费 `result.aiUsage`。**目标**：让用户在管理平台点 "扫描" 即可启用 AI 研判，集中管理 AI API Key（避免散落 CLI / Action 用户），并在 UI 上可观测 AI 用量与评估结果。**完整设计先行稿**：[platform-ai-integration.md](../design/governance/platform-ai-integration.md)。
+  - **架构决策**：
+    - **API Key 挂载层**：Organization 级加密存储 + 单仓库级开关（vs Repository 级 Key / 全局 platform.config / Credential 复用）—— 一个 Key 服务多仓库避免重复采购 + Organization 实体（M7.1 已落地）天然支持；单仓库独立 aiEnabled 控制成本 / 合规
+    - **未来三层扩展**：评估个人使用（platform.config）/ 组织（本文档）/ 公开（仅 CLI / Action）三种区分
+    - **三执行器一致**：container / sandbox / github-action 同步补齐（vs 仅 container 先落地）
+    - **合并优先级**：API override > Repository 默认 > Organization 共享 Key
+  - **范围（建议落地步骤）**：
+    - **P0 核心集成**（6 步 / 估算 7-9 commits）：① 数据模型（Organization.aiApiKeyEncrypted + aiProvider + aiModel + aiBaseUrl + aiApiUrl + Repository.aiEnabled + aiTrigger + ScanRun.aiConfigSnapshot） + migration；② Schema + Service + Executor 透传；③ 4 个 API 端点（POST scan 扩展 + PATCH organization-ai-config + GET repo-ai-config + POST repo-ai-config）；④ UI（Organization AI 配置表单 + 仓库 AI 开关 + 扫描对话框 override + RunDetailDialog 用量 + alerts 评估列）；⑤ i18n（zh-CN + en-US 加 `ai.*` 命名空间）；⑥ docs/design/governance/architecture.md 同步更新
+    - **P1 增强**：AI 输出安全门与审计（[architecture.md §AI 研判误判处理](../design/governance/architecture.md) 对齐：lint/typecheck/build 验证 + PR 不自动合并 + 置信度阈值 + maskSecrets 日志脱敏）
+  - **不做什么**：不重写 AI 研判引擎本身（engine 层 M5 已闭环）/ 不引入新 AI provider（OpenAI 兼容 + Anthropic 双 provider 足够）/ 不立即支持"个人层"配置（按触发条件评估）/ 不修改 CLI / MCP / GitHub Action 已有的 AI 参数（避免回归）/ 不破坏现有 ScanRequest schema（仅扩展字段，向后兼容）
+  - **预估工作量**：P0 7-9 commits / 约 1.5-2 阶段切片容量（与 C66 量级相近）
+  - **A 阶段 audit 阈值**：commit 涉及 schema / migration / 三执行器透传 / 4 个 API 端点 / UI 状态机变更，**standard depth**（与 C67 audit 决策一致）
+  - **上收触发条件**（任一）：① 用户实测反馈需要管理平台触发 AI 研判（典型：组织内多人协作希望统一管理 Key）；② 公开部署（docker 一键部署）后用户配置 AI 研判门槛太高；③ M28+ 阶段（含 M7.2 平台能力深化续期）启动时；④ 与 C66 告警视图增强联动（M28 阶段合并实施）；⑤ 用户明确触发上收
+  - **关键决策回顾（2026-09-08 用户确认）**：
+    - **AI Key 挂 Organization 级** vs Repository 级 / 全局 / Credential 复用：选 Organization 级 —— 一个 Key 服务多仓库 + Organization 实体已支持 + 多组织 / 多租户场景天然隔离；Repository 级 Key 散落不合规；全局 platform.config 违反多租户方向；Credential 复用混职责
+    - **三执行器同步补齐** vs 仅 container 先落地：选三执行器同步 —— 不一致会埋"未来 sandbox 启用后才发现 AI Key 透传缺失"的坑（参考 sandbox-executor 设计.md §8 类似教训）；container / sandbox / github-action 链路一致才完整
+    - **合并优先级 API override > Repository 默认** vs 完全 override：选前者 —— API override 用于"本次扫描特殊覆盖"（如一次性大版本升级），日常按仓库默认；完全 override 会让 API 调用方每次都要传，运维负担重
+    - **本次只写设计文档 + 挂 backlog** vs 直接落地：选前者（用户决策 2026-09-08）—— 先文档沉淀 + 评估，避免一次性大改动与当前 M24 阶段排期冲突；触发条件达到后再上收
+  - **关联文档**：[architecture.md §AI 研判误判处理](../design/governance/architecture.md) / [sandbox-security-governance.md §A §C](../design/governance/sandbox-security-governance.md)（AI 研判在供应链防护的角色）/ [platform-auth-users.md](../design/governance/platform-auth-users.md)（Organization 实体扩展基线）/ [platform-scheduled-batch.md](../design/governance/platform-scheduled-batch.md)（定时扫描链路统一应用 AI 研判）/ [standards/index.md](../standards/index.md)（"AI 研判不自动合并"治理原则）/ [experience-archive.md](../design/governance/experience-archive.md)（经验沉淀持续追加）
 
 #### 平台批量导入 / Resource owner 抽象
 

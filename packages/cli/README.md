@@ -1,3 +1,7 @@
+<p align="center">
+  <img alt="dependfix" src="../../assets/brand/png/banner.png">
+</p>
+
 # dependfix
 
 > 自动化处理 GitHub Dependabot / Code Scanning 安全告警的 CLI 工具。
