@@ -1,5 +1,8 @@
 # @dependfix/mcp
 
+<!-- i18n: switch -->
+[简体中文](./README.md) | [English](./README.en-US.md)
+
 > dependfix 的 MCP Server 包。通过 [Model Context Protocol](https://modelcontextprotocol.io/) 将 dependfix 的扫描/修复能力暴露给 AI 编程助手（Claude、Copilot、Cursor 等）。
 
 ## 安装

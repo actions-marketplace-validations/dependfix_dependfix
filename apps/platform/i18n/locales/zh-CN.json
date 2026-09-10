@@ -189,8 +189,13 @@
             "batchFailed": "批量扫描失败：{message}",
             "repoFetchFailed": "拉取仓库失败：{message}",
             "importFailed": "批量导入失败：{message}",
-            "selectAtLeastOne": "请至少选择一个仓库"
-        }
+            "selectAtLeastOne": "请至少选择一个仓库",
+            "ownersFetchFailed": "加载 owner 列表失败：{message}"
+        },
+        "importOwner": "Resource owner",
+        "importOwnerPlaceholder": "请先选择凭据",
+        "importOwnerPersonalBadge": "个人",
+        "importOwnerOrgBadge": "组织"
     },
     "schedules": {
         "title": "定时计划",
@@ -842,9 +847,72 @@
             "zh-CN": "请求方法不被允许",
             "en": "Method not allowed"
         },
+        "ORG_ID_MISSING": {
+            "zh-CN": "缺少组织 id",
+            "en": "Organization id is missing"
+        },
+        "ORG_NOT_FOUND": {
+            "zh-CN": "组织不存在",
+            "en": "Organization not found"
+        },
+        "AI_CONFIG_VALIDATION_FAILED": {
+            "zh-CN": "AI 研判配置校验失败",
+            "en": "AI assessment config validation failed"
+        },
+        "AI_KEY_REQUIRED": {
+            "zh-CN": "Organization 未配置 AI API Key，请先在设置中添加",
+            "en": "Organization has no AI API Key configured. Please add one in settings"
+        },
         "UNKNOWN": {
             "zh-CN": "未知错误",
             "en": "Unknown error"
+        }
+    },
+    "ai": {
+        "title": "AI 研判配置",
+        "subtitle": "管理 Organization 级 AI API Key 与仓库级研判开关",
+        "orgSection": "Organization AI 配置",
+        "providerLabel": "Provider",
+        "modelLabel": "Model",
+        "apiKeyLabel": "API Key",
+        "baseUrlLabel": "OpenAI 兼容端点",
+        "anthropicUrlLabel": "Anthropic 端点",
+        "apiKeyHint": "API Key 落库前自动加密（AES-256-GCM），仅运行时解密注入引擎",
+        "apiKeyPlaceholder": "留空表示不修改；输入新 Key 覆盖",
+        "apiKeySetBadge": "已配置",
+        "apiKeyRequiredWarning": "Organization 未配置 AI Key，启用前请先配置",
+        "testConnection": "测试连接",
+        "saveConfig": "保存配置",
+        "repoSection": "仓库 AI 研判",
+        "repoEnabledLabel": "启用 AI 研判",
+        "triggerLabel": "触发范围",
+        "scanOverrideSection": "本次扫描 AI 覆盖",
+        "scanOverrideEnabledLabel": "覆盖仓库默认",
+        "scanOverrideEnabledHint": "默认 = 仓库默认设置",
+        "scanOverrideDisabledHint": "Organization 未配置 AI Key，本次扫描无法启用 AI 研判",
+        "saveSuccess": "AI 配置已保存",
+        "saveFailed": "保存失败：{message}",
+        "loadFailed": "加载失败：{message}",
+        "usageSectionTitle": "AI 用量",
+        "usageCalls": "调用次数",
+        "usageInputTokens": "输入 token",
+        "usageOutputTokens": "输出 token",
+        "usageTotalTokens": "总 token",
+        "usageCostUsd": "估算费用 (USD)",
+        "alertsEvaluatedColumn": "AI 评估",
+        "alertsEvaluatedTag": "已评估",
+        "alertsSkippedTag": "跳过",
+        "evaluationConfidence": "置信度",
+        "evaluationBreaking": "Breaking 风险",
+        "evaluationPatch": "Patch 建议",
+        "providerOptions": {
+            "openaiCompatible": "OpenAI 兼容",
+            "anthropic": "Anthropic"
+        },
+        "triggerOptions": {
+            "failure": "验证失败时",
+            "major": "跨大版本升级时",
+            "both": "两者都触发"
         }
     }
 }
