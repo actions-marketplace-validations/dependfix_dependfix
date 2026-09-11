@@ -77,7 +77,6 @@
 - **T703 跨平台 Git**（GitLab + Bitbucket）—— 2026-08-12 用户指示暂缓排期
 - **C30 Publish Docker build job 失败排查** —— 2026-08-18 用户决策暂缓（双平台构建 23m 2s 成功证明当前 docker.yml 可稳定工作）；恢复条件：① master 分支 push 频率显著提升；② 镜像实际发布成为强需求（v1.0.0 正式发布前）；③ 用户明确恢复
 - **§M14.2 PrimeVue 4 → 5 升级评估** —— 2026-08-26 dependabot #49 触发评估，Nuxt build 报 `Rolldown failed to resolve import "primevue/inputcolor"`（v5 改组件导入约定）。`@primevue/nuxt-module` 5.x + `@primeuix/themes` 3.x 需联动升级，影响 `apps/platform/nuxt.config.ts` 及可能的 DataTable 等组件用法。PR 已关闭，恢复条件：① 评估 PrimeVue 5 migration guide 工作量；② 与主线 #1（PrimeVue 4 hydration 已知 bug）联动决策——若主线已迁移到 v5 修复版本，则直接评估；否则需先评估"独立升级 PrimeVue 5 vs 等主线修复"的取舍；③ 用户明确恢复
-- ~~**M22 规范单点声明收敛（neat-freak 批次）**~~ —— **已闭环 2026-09-02 M23.0 G1**（commit `f8a8640` docs(standards)，详见 [todo-archive.md §M23.0](todo-archive.md#m23-m22-治理债收口--根因排查--能力扩展--测试补强m230m231m232m233m234-全部已闭环--2026-09-02-归档)）：security.md §2.1 为 SQLite 防护规则权威完整声明（§2.1.1-§2.1.5 五子节），development.md §5.1.18 + platform.md §3.7 第 1/2/3 条收敛为引用 + 仅保留差异化信息
 - **db-restore 审计未采纳项（M22.2 落地遗留）** —— 2026-09-01 M22.2 A 阶段审计 S-1 第 2/3/4 项 + S-2 未采纳：① `inspectSqliteFile` 能打开但 `integrity_check != 'ok'` 分支未覆盖（需用 `PRAGMA writable_schema` 构造损坏 fixture）；② 恢复后 `integrity_check` 失败分支未覆盖（需 mock 注入）；③ sidecar `unlinkSync` 部分失败的 `removedSidecars` 状态一致性未覆盖；④ `--from` / `--to` 未做路径规范化（不校验 `..` / 符号链接）。当前 `db-restore` 是本地管理员工具，攻击面极低；恢复条件：脚本被远程 / 容器自动化触发，或补测试成本下降（对应实现见 `apps/platform/server/database/scripts/db-restore.ts`）
 
 ### 远期登记 / 未排期增强候选
@@ -90,7 +89,6 @@
 
 - **C36** 服务端 API 错误消息 i18n（当前 API 错误消息硬编码英文如 `error.code.field_required`；用户体验：中文用户看不懂；触发：M8 国际化后未覆盖服务端；验收：所有 `apps/platform/server/api/**` 端点错误响应 `code` 键维持英文 + `message` 键按请求 locale 返回）
 - **C37** 语言偏好多设备同步（当前仅单一设备语言偏好；多设备切换需重新设置；触发：用户实测反馈多设备用户；前置：先有 C36 服务端 API i18n 基础）
-- ~~**C69 文档站 + 包 README 多语言实施（en-US）**~~ —— **已上收 2026-09-08 M26.3**（用户决策 P0 范围 / VitePress 脚手架 + 首批 8 个 en-US md 文件 + 包 README 双语化 + check:readme-i18n 同步门禁 + CI 步骤 / 5 commits / standard depth audit；详见 [todo.md §M26.3](todo.md#m263-p2--治理--ux-c69-文档站--包-readme-多语言-en-us-p05-commits--05-1-切片--standard-depth-audit) + [docs/design/governance/docs-and-readme-i18n.md](../design/governance/docs-and-readme-i18n.md) 设计先行稿）；P1 增强（语言切换入口 + SEO + 翻译自动化脚手架）留 M27+
 
 #### 多组织 / 多租户
 
@@ -104,13 +102,11 @@
 
 #### 测试基础设施清理
 
-- ~~**cron-preview 时区测试 wall-clock 依赖消除**~~ —— **已闭环 2026-09-02 M23.4 + 2026-09-03 M24.3**（M23.4 commit `df4ba9b`：双分支固定-now 用例 + `=== 8 || === 160` 简化断言；M24.3：cron-preview.ts 顶部注释"测试 helper 模式评估"段 + todo.md §M24.3 验收 [x]；详见 [todo-archive.md §M23.4](todo-archive.md#m234-测试补强🧪-测试补强--治理收口2026-09-02-闭环) + [todo-archive.md §M24.3](archive/todo-archive-phases-m24.md#m243-p3-🧪-测试-cron-preview-wall-clock-依赖消除1-commit--25-行)）
+（无活跃候选 —— cron-preview 时区测试 wall-clock 依赖消除已 M23.4 + M24.3 闭环）
 
 #### PR 管理
 
 - **B2** 固定分支单线设计（独立平台部署后修复频率上升，需要固定修复分支如 `dependfix/auto-fix` 避免频繁向 master 提交 PR；触发：v1.0.0 后 M12 平台 UX 修复链路上线；关联：T210 指纹方案整合复用/重建策略 + force push 语义）
-
-- ~~**PR Check 状态监测**~~ —— **已上收 2026-09-03 M24.1**（用户决策方案 B；详见 [roadmap.md §M24](roadmap.md#m24-pr-check-mvp--治理债--测试补强--用户体验) + [todo-archive.md §M24](todo-archive.md#m24-pr-check-mvp--治理债--测试补强--用户体验m241m242m243m244m245-全部已闭环--2026-09-03-归档)）。P 阶段决策纪要 D1-D8 全部 2026-09-02 用户决策落地：PRCheck 实体独立于 ScanResult；Polling 间隔 5min/仓；失败 PR firing alert + ack UI（回归 success 自动 ack）；用户手动创建 schedule 启用；webhook MVP 仅接口预留；仅 per-org scope；env 开关 `ACTION_STATUS_MONITOR_ENABLED` 默认 false；文档明确 mergify 仍是主控（[dependfix README + `.github/mergify.yml` 注释 + PRCheck 设计文档](#)）
 
 #### Code Scanning 规则体系
 
@@ -140,21 +136,18 @@
 
 #### 平台告警视图增强
 
-- **C66 告警视图增强（GHSA/CVE 关联 + 跨次扫描去重 + fix 复用）** —— 2026-08-25 用户实测反馈触发；候选评估完成待上收；用户决策：Q1 去重粒度 = **B1 数据层去重（upsert 唯一索引）** / Q2 GHSA/CVE 展示 = **C3 单列智能**（优先 GHSA，fallback CVE）。5 原子子任务：
-  - **C66-A1 ScanResult 数据模型扩展** —— 加 `ghsaId` / `cveIds` 列 + TypeORM migration；保留 `ruleId` 兼容 code-scanning 源（[apps/platform/server/entities/scan-result.ts](../../apps/platform/server/entities/scan-result.ts)）
-  - **C66-A2 fetcher 提取 GHSA + CVE** —— Dependabot API `cve_id` + `identifiers[]` 透传 / pnpm-audit `cves[]` 透传（[packages/engine/src/github/dependabot-fetcher.ts](../../packages/engine/src/github/dependabot-fetcher.ts) + [__fixtures__/dependabot-alerts.json](../../packages/engine/src/github/__fixtures__/dependabot-alerts.json) / [packages/engine/src/alerts/pnpm-audit-fetcher.ts](../../packages/engine/src/alerts/pnpm-audit-fetcher.ts)）；`NormalizedSecurityAlert` 接口加字段（[packages/core/src/alerts/index.ts](../../packages/core/src/alerts/index.ts)）
-  - **C66-B ScanResult 跨次扫描去重** —— upsert 唯一索引 `(repositoryId, source, packageName, advisoryKey)` + 历史 `fixStatus` 保留（fingerprint = `${repositoryId}|${packageName}|${ruleId ?? ''}` + 应用层 Map 聚合 + occurrenceCount / firstSeenAt / lastSeenAt / affectedRunIds 字段已实施，B1 数据层去重暂缓；如未来需"fix 复用复用同一 scan_run_id 跨次刷新"语义时再考虑迁移到数据层 upsert，关联 C66-D）
-  - **C66-C alerts UI 增加 GHSA / CVE 列** —— 单列智能（`Identifiers` 列） + 多 CVE 显示首个 + 展开全部（当前 `ruleId` 字段已轻量覆盖：Dependabot 显示 GHSA 编号 / pnpm-audit 显示 CVE 编号或 advisory URL / code-scanning 显示 CodeQL rule id；完整 schema 扩展（A1+A2 后做"独立 `Identifiers` 列"）保留为后续增强候选，触发条件：用户要求按 GHSA 单独搜索/过滤 / 多 CVE 展开视图）
-  - **C66-D fix 模式复用 scanRunId** —— `POST /api/repos/[id]/scan` 接受 `reuseScanRunId` 跳过重拉 + alerts 视图加 "立即修复此仓库" 入口（[scan.post.ts](../../apps/platform/server/api/repos/[id]/scan.post.ts) + alerts.vue）
+- **C66 告警视图增强（GHSA/CVE 关联 + 跨次扫描去重 + fix 复用）** —— 2026-08-25 用户实测反馈触发；候选评估完成待上收；用户决策：Q1 去重粒度 = **B1 数据层去重（upsert 唯一索引）** / Q2 GHSA/CVE 展示 = **C3 单列智能**（优先 GHSA，fallback CVE）。5 原子子任务状态（2026-09-10 M27.1 重复评估教训更新）：
+  - **C66-A1 ScanResult 数据模型扩展** —— ✅ **已闭环（M23.3 commit `f44a527` feat(platform)）** —— 加 `ghsaId` / `cveIds` 列 + TypeORM migration；保留 `ruleId` 兼容 code-scanning 源（[apps/platform/server/entities/scan-result.ts](../../apps/platform/server/entities/scan-result.ts)）
+  - **C66-A2 fetcher 提取 GHSA + CVE** —— ✅ **已闭环（M23.3 commit `b6e7716` feat(core,engine)）** —— Dependabot API `cve_id` + `identifiers[]` 透传 / pnpm-audit `cves[]` 透传（[packages/engine/src/github/dependabot-fetcher.ts](../../packages/engine/src/github/dependabot-fetcher.ts) + [__fixtures__/dependabot-alerts.json](../../packages/engine/src/github/__fixtures__/dependabot-alerts.json) / [packages/engine/src/alerts/pnpm-audit-fetcher.ts](../../packages/engine/src/alerts/pnpm-audit-fetcher.ts)）；`NormalizedSecurityAlert` 接口加字段（[packages/core/src/alerts/index.ts](../../packages/core/src/alerts/index.ts)）
+  - **C66-B ScanResult 跨次扫描去重** —— ⏸️ **暂缓（M23.3 决策）** —— upsert 唯一索引 `(repositoryId, source, packageName, advisoryKey)` + 历史 `fixStatus` 保留（fingerprint = `${repositoryId}|${packageName}|${ruleId ?? ''}` + 应用层 Map 聚合 + occurrenceCount / firstSeenAt / lastSeenAt / affectedRunIds 字段已实施，B1 数据层去重暂缓；如未来需"fix 复用复用同一 scan_run_id 跨次刷新"语义时再考虑迁移到数据层 upsert，关联 C66-D）
+  - **C66-C alerts UI 增加 GHSA / CVE 列** —— ✅ **已闭环（M23.3 commit `650a0d2` feat(platform) + 经验归档 §五十五 commit `9c64ee0` + commit hash 回填 commit `6e53616`）** —— 单列智能（`Identifiers` 列） + 多 CVE 显示首个 + 折叠剩余数量（hover title 展示完整列表）—— apps/platform/app/pages/alerts.vue L520-562 完整渲染（GHSA 优先 → fallback CVE[0] → 多 CVE 折叠 +N → code-scanning/code-quality 兜底 —）+ alertGhsaUrl / alertCveUrl helper + SCSS 列宽 180px + i18n colIdentifiers / fixNow 双语（zh-CN + en-US）+ /api/alerts 透传 ghsaId + cveIds（DB JSON 字符串反序列化为数组）；当前 `ruleId` 字段仍轻量覆盖 Dependabot GHSA / pnpm-audit CVE / code-scanning CodeQL rule id 三源；A1+A2 完整 schema 扩展后做的"独立 `Identifiers` 列"已在 M23.3 闭环，不再保留为后续增强候选
+  - **C66-D fix 模式复用 scanRunId + 立即修复入口** —— ✅ **已闭环（M16.2 + M23.3 表格 L86 标注 "M16.2 闭环（不计入本批）"）** —— `POST /api/repos/[id]/scan` 接受 `reuseScanRunId` 跳过重拉（[scan.post.ts](../../apps/platform/server/api/repos/[id]/scan.post.ts)）+ scan.post.test.ts L144-208 4 case（sync mode / async queue mode / 404 校验 / 跨仓库 400 校验）+ useFixNow composable（[apps/platform/app/composables/use-fix-now.ts](../../apps/platform/app/composables/use-fix-now.ts) 87 行：fixingRunId / fixError / fixSuccess 三态 + triggerFix 复用 run_id 跳 /scans）+ alert-run-sidebar 立即修复按钮（[apps/platform/app/components/alert-run-sidebar.vue](../../apps/platform/app/components/alert-run-sidebar.vue) L143-153：`pi pi-bolt` 图标 + report-only 模式守卫 + fixingRunId loading 反馈）+ alerts-fix-now.e2e.test.ts 6 case（[apps/platform/tests/e2e/alerts-fix-now.e2e.test.ts](../../apps/platform/tests/e2e/alerts-fix-now.e2e.test.ts)）+ alerts.vue L256 调用 `useFixNow()`
   - 不做什么：不重写 Dependabot 详情页（详情在 dependabot 那边有，UI 只展示关键标识 + 跳链）/ 不立即支持自定义 advisory 来源（GitLab Advisory Database 等）/ 不破坏现有 fixStatus / 修复链路
-  - 上收触发条件（任一）：用户实测反馈升级（重复告警问题再次出现 / 用户明确要求上收）/ fix 复用被 B 模式（GitHub Action）性能瓶颈触发
-  - 关键决策回顾（2026-08-25 用户确认）：
+  - **C66 整体上收触发条件**：C66-B 数据层去重暂缓迁移（C66-C/D 已闭环，无重复工作需求）/ C66-C 按 GHSA 单独搜索/过滤 / C66 多 CVE 展开视图增强
+  - 关键决策回顾（2026-08-25 用户确认 + 2026-09-10 M27.1 修正）：
     - **B1 数据层去重** vs B2 UI 层 GROUP BY / B3 每次清空：选 B1 —— 彻底解决重复 + 自然支持 fix 复用 + 不破坏审计（fixStatus + scanRunId 仍可追溯）；B2 实现简单但数据膨胀 + fix 复用难做；B3 最简单但破坏"何时发现"审计信号。**备注：B1 数据层去重暂缓，应用层去重（方案 B2 等价）已实施且满足当前业务需求；如未来需要 fix 复用 / 历史 fixStatus 跨次保留再迁移到 B1**
     - **C3 单列智能** vs C1 两列分开 / C2 单列合并：选 C3 —— 用户原话"GHSA ID ... 这才是能真正跨平台追溯漏洞的关键信息"（GHSA 在 GitHub Advisory Database 统一收录多个 CVE，反向追溯更强）；C1 多列占空间但实际查看价值有限；C2 简单但 GHSA / CVE 视觉权重平等，跨平台追溯信号被稀释
-
-#### 平台治理扩展
-
-- **C68 平台 AI 研判集成（apps/platform 端到端联通）** —— 2026-09-08 用户调研触发。**现状（M25.2a 闭环后）**：AI breaking change 研判引擎层 `packages/engine/src/ai/` M5 已闭环（commit 3475e6e），CLI / MCP / GitHub Action 三条用户路径全部支持 `--ai` 系列参数；apps/platform 端到端联通**按 P0 基础层 + P1 应用层拆分两步实施**：**P0 基础层 M25.2a 已闭环**（5 commits / ~992 行，commit `1c65582` 数据模型 + `f174cce` Schema+Service + `7250ec1` 三执行器透传 + `49480a6` typecheck 修复 + `782fa27` 收口）—— Organization.aiApiKeyEncrypted / Repository.aiEnabled / ScanRun.aiConfigSnapshot 数据模型 + scan-orchestrator 透传 + container/sandbox/github-action 三执行器同步；**P1 应用层 M26.1 承接**（5 commits / ~1130 行，详见 [todo.md §M26.1](todo.md#m261-p1--能力--ux-m252b-应用层5-commits--1130-行--standard-depth-audit) + [platform-ai-integration.md](../design/governance/platform-ai-integration.md) 设计先行稿）—— 4 个 API 端点（PATCH organization-ai-config / GET repo-ai-config / POST repo-ai-config / 扩展 POST scan）+ UI（Organization AI 配置表单 + 仓库 AI 开关 + 扫描对话框 override + RunDetailDialog 用量展示 + alerts 评估列）+ i18n（zh-CN + en-US `ai.*` 命名空间）+ docs architecture.md AI 研判段扩展。
+    - **2026-09-10 M27.1 重复评估教训修正**（commit `0ddd4e2` 决策 D2 错误归类）：C66-C + C66-D 已 100% 闭环，不应作为 M27.1 任务条目；详见 [experience-archive §六十四 M27.1 重复评估教训](../design/governance/experience-archive-§49-§57-recent-investigation.md#六十四m271c66告警视图增强重复评估教训阶段启动决策时未对照已闭环清单导致规划无效工作20260910commit决策d2错误)
 
 #### devEx / lint 治理
 
@@ -254,10 +247,10 @@
 - **背景**：2026-09-01 `apps/platform/data/dependfix.sqlite` 业务数据被清空事故（详见 [经验归档 §五十](../design/governance/experience-archive-§49-§57-recent-investigation.md#五十sqlite-数据库业务数据被清空开发环境不可恢复事故2026-09-01)）。代码内无清空路径，最可能清空来源在代码外部（shell / CI / 运维）。
 - **当前状态**：✅ M22 全部 6 原子条目已闭环 + 2026-09-01 archive batch（M22.1 启动期自动备份 + M22.2 db-restore 命令式恢复 + M22.3 db-doctor 自检工具 + M22.4 synchronize opt-in + M22.5 migrationsRun opt-in + M22.6 e2e/fixtures 双门控；详见 [todo-archive.md §M22](todo-archive.md#m22-sqlite-数据保护防御加固m221m222m223m224m225m226-全部已闭环--2026-09-01-归档)）。事故防御加固完成；后续"双门控兜底 / 备份保留 / 自检工具"可独立评估升级。
 - **持续观察项**：
-  - TypeORM 1.x 升级 / 替换为 0.3.x（1.x 已停止维护）—— 见 M23 候选
-  - PostgreSQL 多写者迁移 —— 见 M23 候选
-  - better-sqlite3 WAL 模式启用 + auto-checkpoint 调整（减少断电时数据丢失风险）
-  - SQLite 文件 inode 监控（`fs.watch` 检测 .sqlite 文件被外部 rm / rename 触发紧急备份）
+  - TypeORM 1.x 升级 / 替换为 0.3.x（1.x 已停止维护）—— 当前无明确上收时机，待后续评估
+  - PostgreSQL 多写者迁移 —— 当前 single-org 模型限制（依赖 D3 多租户组织体系上线），D3 未上收
+  - better-sqlite3 WAL 模式启用 + auto-checkpoint 调整（减少断电时数据丢失风险）—— M22.1 + M23.1 已落地 journal_mode=WAL，但 better-sqlite3 库升级路径未评估
+  - SQLite 文件 inode 监控（`fs.watch` 检测 .sqlite 文件被外部 rm / rename 触发紧急备份）—— 与 M22.1 启动期备份互补，可作后续加固
 - **规范挂接**：[development.md §5.1.18](./../standards/development.md) + [§5.1.19](./../standards/development.md) + [platform.md §3.6](./../standards/platform.md) + [§3.7](./../standards/platform.md) + [security.md §2.1](./../standards/security.md)
 
 ### E2E global-setup 串行场景 ECONNRESET 根因（M22.7 hotfix 衍生 + M23.1 已闭环）
@@ -290,8 +283,8 @@
 
 | 内容类型 | 位置 |
 |:--|:--|
-| 当前阶段活跃任务 | [todo.md](todo.md) 顶部"当前阶段"段（M26 阶段 2026-09-08 用户决策启动方案 A + M26.4 拆分：M25.2b 应用层 + C67 批量导入 Resource owner 化 + C69 文档站 + 包 README 多语言 en-US P0 + primeicons 降级 + baseline 9 warnings 治理 + 经验归档沉淀 / M26.1+M26.2+M26.3+M26.4a+M26.4b+M26.5 共 6 原子条目 / 承接 M25.2b；M25 阶段全部 17 commits 已 2026-09-08 用户主动推送，ahead=0） |
-| 已完成阶段归档 | [todo-archive.md](todo-archive.md)（主窗口保留最近 5 阶段：M25 / M24 / M23 / M22 / M21 / M20；早期阶段见 [archive/](archive/)） |
-| 里程碑与阶段交付 | [roadmap.md](roadmap.md)（M26 段已 2026-09-08 用户决策启动 + 6 原子条目方案 A + M26.4 拆分决策；M25 段状态从「进行中」→「已闭环」） |
-| 长期主线 / 候选 / 待人工验收 / 已知边界 | 本文档（按四象限结构；2026-09-09 新增「devEx / lint 治理」段登记 W1 apps/platform 增配 stylelint + lint 系列候选） |
+| 当前阶段活跃任务 | [todo.md](todo.md)（当前无活跃阶段；M26 已 2026-09-10 归档，详见 [todo-archive.md §M26](todo-archive.md#m26-平台-ai-研判应用层--批量导入-resource-owner-化--文档站-i18n--license-收口--经验沉淀m261m262m263m264am264bm264cm265-全部已闭环--2026-09-10-归档) + [archive/todo-archive-phases-m26.md](archive/todo-archive-phases-m26.md)） |
+| 已完成阶段归档 | [todo-archive.md](todo-archive.md)（主窗口保留最近 3 个完整段：M26 指针 + M23 + M22 完整段；M19/M20/M21 预防性分片迁出至 [archive/todo-archive-phases-m19-m21.md](archive/todo-archive-phases-m19-m21.md)；早期阶段见 [archive/](archive/)） |
+| 里程碑与阶段交付 | [roadmap.md](roadmap.md)（M26 段已 2026-09-10 完整闭环 + 归档；M26 ahead=0 / 7 原子条目 × 23 commits + 配套 13 commits = 36 commits 全部已推送 origin/master；详见 [roadmap.md §M26](roadmap.md#m26-平台-ai-研判应用层--批量导入-resource-owner-化--文档站-i18n--license-收口--经验沉淀2026-09-08-用户决策方案-a--m264-拆分--m264c-e2e-适配--2026-09-10-已闭环--归档)） |
+| 长期主线 / 候选 / 待人工验收 / 已知边界 | 本文档（按四象限结构；**M26 归档批次同步清理**：C67（已 M26.2 闭环）/ C68（已 M26.1 闭环）/ C69（已 M26.3 闭环）/ M25 follow-up #3 primeicons 降级（已 M26.4a 闭环）/ M25 follow-up #4 baseline 22 warnings 治理（已 M26.4b 闭环）/ M25 follow-up #5 经验归档沉淀（已 M26.5 闭环）全部已闭环移除） |
 | 历史归档索引 | [archive/index.md](archive/index.md) |
