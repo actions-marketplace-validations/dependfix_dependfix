@@ -26,7 +26,7 @@ jobs:
       # §T1310：触发 docker.yml workflow_dispatch 需要 actions 写入权限
       actions: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 0
