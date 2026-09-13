@@ -242,6 +242,23 @@ describe('buildRegressionWindowEntry', () => {
         expect(entry.body).toContain('窗口健康')
     })
 
+    it('artifact 以行内代码引用，不使用 markdown 链接', () => {
+        const entry = buildRegressionWindowEntry({
+            artifactJsonPath: '/project/artifacts/review-gate/2026-09-05-weekly-regression.json',
+            artifactMarkdownPath: '/project/artifacts/review-gate/2026-09-05-weekly-regression.md',
+            dateStr: '2026-09-05',
+            logHealth,
+            profile,
+            projectRoot: '/project',
+            results,
+            summary,
+        })
+        // artifacts/ 被 .gitignore 排除，写成链接会被 check-docs 拦下（CI 中文件不存在）
+        expect(entry.body).not.toMatch(/\]\(/)
+        expect(entry.body).toContain('`artifacts/review-gate/2026-09-05-weekly-regression.md`')
+        expect(entry.body).toContain('`artifacts/review-gate/2026-09-05-weekly-regression.json`')
+    })
+
     it('dry-run 时显示 dry-run 标记', () => {
         const entry = buildRegressionWindowEntry({
             artifactJsonPath: '/a/result.json',
