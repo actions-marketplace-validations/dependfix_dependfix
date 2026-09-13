@@ -24,7 +24,6 @@ import { fileURLToPath } from 'node:url'
 import { isDirectExecution, parseCliOptions } from '../shared/cli.mjs'
 import {
     resolveRegressionWindowPath,
-    toPosixRelativePath,
     upsertRegressionWindowEntry,
 } from '../shared/regression-window.mjs'
 
@@ -451,9 +450,10 @@ export function buildRegressionWindowEntry({
     results,
     summary,
 }) {
-    const regressionWindowPath = resolveRegressionWindowPath(projectRoot)
-    const artifactMarkdownRelative = toPosixRelativePath(regressionWindowPath, artifactMarkdownPath)
-    const artifactJsonRelative = toPosixRelativePath(regressionWindowPath, artifactJsonPath)
+    // artifact 落在 .gitignore 排除的 artifacts/ 下，只能以仓库相对路径引用；
+    // 一旦写成 markdown 链接，check-docs 会因"链接目标被 .gitignore 排除（CI 中不存在）"拦下
+    const artifactMarkdownRelative = path.relative(projectRoot, artifactMarkdownPath).split(path.sep).join('/')
+    const artifactJsonRelative = path.relative(projectRoot, artifactJsonPath).split(path.sep).join('/')
     const executedSummary = results
         .map((result) => `${result.label}=${formatRegressionResultStatus(result)}`)
         .join('，')
@@ -461,7 +461,7 @@ export function buildRegressionWindowEntry({
     return {
         body: [
             `- 执行入口: \`pnpm regression:${profile.key}${dryRun ? ' -- --dry-run' : ''}\``,
-            `- 证据 artifact: [md](${artifactMarkdownRelative}) / [json](${artifactJsonRelative})`,
+            `- 证据 artifact: \`${artifactMarkdownRelative}\` / \`${artifactJsonRelative}\`（本地生成，不入 Git；CI 见 run artifacts）`,
             `- 结果摘要: \`${summary.conclusion}\`；blocker=${summary.blockers.length}，warning=${summary.warnings.length}。`,
             `- 已执行验证: ${executedSummary || '无'}`,
             `- 回归窗口: ${logHealth.lineCount} 行 / ${logHealth.entryCount} 条，归档判定=${logHealth.shouldArchive ? '需要滚动归档' : '窗口健康'}。`,

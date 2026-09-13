@@ -89,6 +89,14 @@ jobs:
         with:
           name: dist-artifacts
           path: ${{ github.workspace }}/packages
+      # Nuxt 平台 vitest + eslint 依赖 .nuxt/tsconfig.json（Nuxt 生成的 tsconfig，含 #server/* 别名
+      # 与 auto-import 类型）。build-deps 任务虽跑了 `nuxt prepare` 但只上传了 dist/*，
+      # .nuxt/ 未共享：regression job 直接跑 `pnpm test:coverage` 会触发 vite:oxc 报
+      # `[TSCONFIG_ERROR] Failed to load tsconfig 'apps/platform/.nuxt/tsconfig.json'`，cascade 到
+      # vitest 211 个 test file 全部 Failed Suites + coverage-v8 rolldown 大量 PARSE_ERROR。
+      # 修复 run 34773727575（head 0bcb703）：补齐 prepare 与 test.yml 第 32 行保持一致。
+      - name: Prepare Nuxt platform
+        run: pnpm --filter @dependfix/platform exec nuxt prepare
 
       # ── Phase 1: 核心回归（regression:weekly profile） ─────────────────
       #  包含：test:coverage + security:audit-deps + docs:check:*
