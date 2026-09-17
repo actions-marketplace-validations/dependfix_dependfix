@@ -1,7 +1,12 @@
 pull_request_rules:
   - name: automatic merge for Dependabot pull requests
     conditions:
+      # Coverage 与 Test / E2E 是 test.yml 中并列的独立 job，各自生成独立 check run，
+      # 因此 check-success=Test 不覆盖 Coverage job。覆盖率工具链断裂只会在 Coverage job
+      # 暴露（表现为覆盖率归零而非显式依赖错误），必须单独作为合并门禁，
+      # 否则该类回归会被自动合并进 master。
       - check-success=Test
+      - check-success=Coverage
       - author~=^dependabot(|-preview)\[bot\]$
       - label=dependencies
     actions:
