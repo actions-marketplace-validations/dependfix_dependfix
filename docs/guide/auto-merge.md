@@ -37,6 +37,9 @@ dependfix 扫描告警 → 创建修复分支 → push 提交 PR (author=dependf
 pull_request_rules:
   - name: automatic merge for Dependabot pull requests
     conditions:
+      # check-success 匹配的是「job 名」而非 workflow 名：workflow 中每个 job 都是独立
+      # check run，必须逐 job 各写一条。目标仓库若另有独立 job（如 Coverage / E2E），
+      # 需按实际 job 名补充，否则该 job 失败仍会触发自动合并。
       - check-success=Test
       - author~=^dependabot(|-preview)\[bot\]$
       - label=dependencies
@@ -54,6 +57,10 @@ pull_request_rules:
 ```
 
 依赖 dependabot 的项目保留第一条规则；非依赖 dependabot 的项目可删除第一条。
+
+> `check-success` 只约束被列出的 job。dependfix 自身仓库的 Dependabot 规则同时要求
+> `check-success=Test` 与 `check-success=Coverage`（`test.yml` 的 Test 与 Coverage 是并列
+> 独立 job，只写 `Test` 会漏掉覆盖率门禁）。复制模板后请按目标仓库实际 job 名逐条对齐。
 
 ### 3. 验证
 
