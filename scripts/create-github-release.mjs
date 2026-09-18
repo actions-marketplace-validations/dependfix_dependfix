@@ -36,7 +36,7 @@ const ROOT_CHANGELOG = 'CHANGELOG.md'
  * 返回该版本段全文（版本标题行到下一个版本段前），无匹配返回 null。
  */
 export function extractSection(content, version) {
-    const lineRe = /^#{1,2} \[?(\d+\.\d+\.\d+)\]?(?:\([^)]*\))?\s/
+    const lineRe = /^#{1,2} \[?(\d+\.\d+\.\d+(?:-(?:alpha|beta)(?:\.\d+)?)?)\]?(?:\([^)]*\))?\s/
     const lines = content.split('\n')
     let start = -1
     for (let i = 0; i < lines.length; i++) {
@@ -83,10 +83,11 @@ export function buildReleasePlan(result, files, deps) {
     }
     const matrix = published.map((p) => `- ${p.pkg}@${p.version}`).join('\n')
     const notes = `## 本轮发布包\n\n${matrix}\n\n## 变更日志（${source}）\n\n${section}\n`
+    const hasPreReleaseTag = /(alpha|beta)/i.test(anchorVersion)
     return {
         tag: `v${anchorVersion}`,
         notes,
-        prerelease: anchorVersion.startsWith('0.'),
+        prerelease: hasPreReleaseTag,
         action: 'create',
     }
 }

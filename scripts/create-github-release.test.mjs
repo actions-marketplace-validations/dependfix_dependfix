@@ -76,7 +76,7 @@ describe('buildReleasePlan', () => {
         const plan = buildReleasePlan(result, files, { readFile })
         expect(plan.action).toBe('create')
         expect(plan.tag).toBe('v0.2.1')
-        expect(plan.prerelease).toBe(true)
+        expect(plan.prerelease).toBe(false)
         expect(plan.notes).toContain('## 本轮发布包')
         expect(plan.notes).toContain('- dependfix@0.2.1')
         expect(plan.notes).toContain('- @dependfix/core@0.3.0')
@@ -96,10 +96,48 @@ describe('buildReleasePlan', () => {
         expect(plan.notes).toContain('新 API')
     })
 
-    it('marks prerelease only for 0.x versions', () => {
-        const result = { published: [{ pkg: 'dependfix', version: '1.0.0' }], anchorVersion: '1.0.0', anchorPkg: 'dependfix' }
-        const plan = buildReleasePlan(result, files, { readFile })
-        expect(plan.prerelease).toBe(false)
+    it('marks prerelease only when version contains alpha or beta', () => {
+        const stable = buildReleasePlan({ published: [{ pkg: 'dependfix', version: '1.0.0' }], anchorVersion: '1.0.0', anchorPkg: 'dependfix' }, files, { readFile })
+
+        const betaChangelog = [
+            '# dependfix',
+            '',
+            '## [1.1.0-beta.1](https://github.com/dependfix/dependfix/compare/1.0.0...1.1.0-beta.1) (2026-08-11)',
+            '',
+            '### ✨ 新功能',
+            '',
+            '* **cli:** beta 能力',
+            '',
+        ].join('\n')
+
+        const alphaChangelog = [
+            '# dependfix',
+            '',
+            '## [1.1.0-alpha.2](https://github.com/dependfix/dependfix/compare/1.0.0...1.1.0-alpha.2) (2026-08-11)',
+            '',
+            '### ✨ 新功能',
+            '',
+            '* **cli:** alpha 能力',
+            '',
+        ].join('\n')
+
+        const beta = buildReleasePlan(
+            { published: [{ pkg: 'dependfix', version: '1.1.0-beta.1' }], anchorVersion: '1.1.0-beta.1', anchorPkg: 'dependfix' },
+            files,
+            { readFile: (path) => (path === files.root ? betaChangelog : readFile(path)) },
+        )
+
+        const alpha = buildReleasePlan(
+            { published: [{ pkg: 'dependfix', version: '1.1.0-alpha.2' }], anchorVersion: '1.1.0-alpha.2', anchorPkg: 'dependfix' },
+            files,
+            { readFile: (path) => (path === files.root ? alphaChangelog : readFile(path)) },
+        )
+
+        expect(stable.prerelease).toBe(false)
+        expect(beta.action).toBe('create')
+        expect(beta.prerelease).toBe(true)
+        expect(alpha.action).toBe('create')
+        expect(alpha.prerelease).toBe(true)
     })
 
     it('skips when nothing published', () => {
