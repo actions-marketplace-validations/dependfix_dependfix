@@ -1,6 +1,18 @@
 # @dependfix/skills
 
 
+# [0.2.0](https://github.com/dependfix/dependfix/compare/@dependfix/skills@0.1.0...@dependfix/skills@0.2.0) (2026-09-18)
+
+
+### ✨ 新功能
+
+* **platform:** M26.3 C69 包 README 双语化 ([bb61814](https://github.com/dependfix/dependfix/commit/bb61814))
+
+
+### 🐛 Bug 修复
+
+* **changelog:** 增量追加生成修复非增量问题，补齐 0.1.0 分段锚点产物 ([40d3085](https://github.com/dependfix/dependfix/commit/40d3085))
+
 # [0.1.0](https://github.com/dependfix/dependfix/compare/21fae4d...@dependfix/skills@0.1.0) (2026-08-07)
 
 

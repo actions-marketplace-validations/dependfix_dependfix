@@ -1,5 +1,25 @@
 # @dependfix/mcp
 
+# [0.2.0](https://github.com/dependfix/dependfix/compare/@dependfix/mcp@0.1.4...@dependfix/mcp@0.2.0) (2026-09-18)
+
+
+### ✨ 新功能
+
+* **engine:** 新增发现规模上限 max-repos（C23） ([c998d58](https://github.com/dependfix/dependfix/commit/c998d58))
+* **mcp:** runScan 返回结构 RunResult 对齐 5 字段 ([5cf2d22](https://github.com/dependfix/dependfix/commit/5cf2d22))
+* **mcp:** 新增 pnpm_audit 本地回退数据源 tool ([9207481](https://github.com/dependfix/dependfix/commit/9207481))
+* **platform:** M26.3 C69 包 README 双语化 ([bb61814](https://github.com/dependfix/dependfix/commit/bb61814))
+
+
+### 🐛 Bug 修复
+
+* **docs:** 恢复 packages/mcp/README.md 中文源描述 ([a461c4c](https://github.com/dependfix/dependfix/commit/a461c4c))
+
+
+### 📦 代码重构
+
+* **engine+test+mcp+platform:** 调用点改造为 auth 路径 ([67a1a2f](https://github.com/dependfix/dependfix/commit/67a1a2f))
+
 ## [0.1.4](https://github.com/dependfix/dependfix/compare/@dependfix/mcp@0.1.2...@dependfix/mcp@0.1.4) (2026-08-26)
 
 
