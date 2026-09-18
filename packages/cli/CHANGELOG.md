@@ -1,5 +1,18 @@
 # dependfix
 
+# [0.5.0](https://github.com/dependfix/dependfix/compare/dependfix@0.4.0...dependfix@0.5.0) (2026-09-18)
+
+
+### ✨ 新功能
+
+* **engine:** 新增发现规模上限 max-repos（C23） ([c998d58](https://github.com/dependfix/dependfix/commit/c998d58))
+* **platform:** M26.3 C69 包 README 双语化 ([bb61814](https://github.com/dependfix/dependfix/commit/bb61814))
+
+
+### 🐛 Bug 修复
+
+* 修复 CI3 处失败（check:docs 断链 + E2E batch 断言 + pipeline 覆盖率） ([24d02b1](https://github.com/dependfix/dependfix/commit/24d02b1))
+
 # [0.4.0](https://github.com/dependfix/dependfix/compare/dependfix@0.3.2...dependfix@0.4.0) (2026-08-26)
 
 

@@ -1,5 +1,15 @@
 # @dependfix/core
 
+# [0.5.0](https://github.com/dependfix/dependfix/compare/@dependfix/core@0.4.0...@dependfix/core@0.5.0) (2026-09-18)
+
+
+### ✨ 新功能
+
+* **core,engine:** NormalizedSecurityAlert 接口 + fetcher 透传 GHSA + CVE ([b6e7716](https://github.com/dependfix/dependfix/commit/b6e7716))
+* **engine,core:** NormalizedSecurityAlert 新增 upstreamId 字段（M20.1） ([acb2d35](https://github.com/dependfix/dependfix/commit/acb2d35))
+* **engine:** per-source 错误隔离汇总（M19.5 C8） ([a20ea02](https://github.com/dependfix/dependfix/commit/a20ea02))
+* **platform:** M26.3 C69 包 README 双语化 ([bb61814](https://github.com/dependfix/dependfix/commit/bb61814))
+
 # [0.4.0](https://github.com/dependfix/dependfix/compare/@dependfix/core@0.2.0...@dependfix/core@0.4.0) (2026-08-26)
 
 

@@ -1,5 +1,42 @@
 # @dependfix/engine
 
+# [0.4.0](https://github.com/dependfix/dependfix/compare/@dependfix/engine@0.3.0...@dependfix/engine@0.4.0) (2026-09-18)
+
+
+### ✨ 新功能
+
+* **core,engine:** NormalizedSecurityAlert 接口 + fetcher 透传 GHSA + CVE ([b6e7716](https://github.com/dependfix/dependfix/commit/b6e7716))
+* **engine,core:** NormalizedSecurityAlert 新增 upstreamId 字段（M20.1） ([acb2d35](https://github.com/dependfix/dependfix/commit/acb2d35))
+* **engine:** AppAuthProvider + InstallationTokenCache 完整实施 + 单测补强 ([adf370a](https://github.com/dependfix/dependfix/commit/adf370a))
+* **engine:** Code Scanning 真实仓库样本采集脚本 + 报告模板（M28.3 / C15） ([99302b5](https://github.com/dependfix/dependfix/commit/99302b5))
+* **engine:** per-source 错误隔离汇总（M19.5 C8） ([a20ea02](https://github.com/dependfix/dependfix/commit/a20ea02))
+* **engine:** 新增 AuthProvider 接口契约 + PatAuthProvider 单测 ([e9b9c0a](https://github.com/dependfix/dependfix/commit/e9b9c0a))
+* **engine:** 新增发现规模上限 max-repos（C23） ([c998d58](https://github.com/dependfix/dependfix/commit/c998d58))
+* **engine:** 重复 PR 自动评论 + duplicate label（B1） ([5839771](https://github.com/dependfix/dependfix/commit/5839771))
+* **platform:** M26.3 C69 包 README 双语化 ([bb61814](https://github.com/dependfix/dependfix/commit/bb61814))
+* **platform:** 执行日志捕获与展示（Winston + MemoryLogger + Axiom） ([59f70d5](https://github.com/dependfix/dependfix/commit/59f70d5))
+
+
+### 🐛 Bug 修复
+
+* **engine:** execFileSync 替换 fixers/pnpm execRepair（Code Scanning RG-W02） ([a77e557](https://github.com/dependfix/dependfix/commit/a77e557))
+* **engine:** execFileSync 替换 pr-creator.ts execSync（Code Scanning RG-W01） ([0a83c74](https://github.com/dependfix/dependfix/commit/0a83c74))
+* **engine:** M18.4 测试层补强 + app-provider auth 字段 bug 修复 ([b5c23a0](https://github.com/dependfix/dependfix/commit/b5c23a0))
+* **engine:** M24.4 RG-W02 治理债清理（fixers/pnpm execSync 替换） ([aaf8e7b](https://github.com/dependfix/dependfix/commit/aaf8e7b))
+* **engine:** runCodeScanningFixes 批处理 + 测试覆盖 ([eaaa997](https://github.com/dependfix/dependfix/commit/eaaa997))
+* **engine:** W3 修复 stageAndCommit host 全局 git config 干扰 bug ([6866eb7](https://github.com/dependfix/dependfix/commit/6866eb7))
+* **engine:** 修复 M18.1 commit 1 audit Reject 阻断问题 ([0866830](https://github.com/dependfix/dependfix/commit/0866830))
+* **engine:** 修复 pr-creator 中的命令注入漏洞 ([2d3419b](https://github.com/dependfix/dependfix/commit/2d3419b))
+* **engine:** 修复 quickVerifyProject 在缺少 setup 步骤时 lint OOM ([7810ae4](https://github.com/dependfix/dependfix/commit/7810ae4))
+
+
+### 📦 代码重构
+
+* **engine+test+mcp+platform:** 调用点改造为 auth 路径 ([67a1a2f](https://github.com/dependfix/dependfix/commit/67a1a2f))
+* **engine:** commit author 动态化（pr-creator stageAndCommit 接受可选 author） ([e84ff58](https://github.com/dependfix/dependfix/commit/e84ff58))
+* **engine:** 引入 AuthProvider 抽象层 + PatAuthProvider 基础实施 ([026078a](https://github.com/dependfix/dependfix/commit/026078a))
+* **platform:** 引擎降级为 fix+commit + 平台接管 push/PR 交付 ([3738dbf](https://github.com/dependfix/dependfix/commit/3738dbf))
+
 # [0.3.0](https://github.com/dependfix/dependfix/compare/@dependfix/engine@0.1.3...@dependfix/engine@0.3.0) (2026-08-26)
 
 
