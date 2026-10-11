@@ -259,7 +259,7 @@ if (value) { ... }  // 对 0, "", false 失效
 
 > **定位**：`docs/standards/*.md` 已发布严格约束（必须 / 阈值 / 禁令）的**统一 review 落点**。上方「规范执行分层」检查新增条款**是否**挂接；本条给出**已挂接条款 → 可执行检查动作**的逐条映射。新增严格约束时，必须在本矩阵登记一行（或在 code-auditor 主责边界 / 本 checklist 挂接独立小节），否则按「规范执行分层」退回补挂。
 
-改动触及下表「触发改动」列描述的实现面时，逐条核验对应「review 检查动作」：
+改动触及下表「触发改动」列描述的实现面时，逐条核验对应「review 检查动作」；**同一规范条款可对应多行**（不同触发面 / 不同检查动作，如 `platform.md §7.4` 的接线约定与哨兵值两条）：
 
 | 规范条款 | 触发改动 | review 检查动作 |
 |:--|:--|:--|
@@ -284,7 +284,7 @@ if (value) { ... }  // 对 0, "", false 失效
 | [platform.md §3.9](../../../../docs/standards/platform.md) | `.github/dependfix.yml` 读取 / 合并 | **中央优先**（防目标仓库绕过）与**不提供 UI 入口**两条约束是否保持 |
 | [planning.md §2.3](../../../../docs/standards/planning.md) | 候选上收 / 关闭 | 父段标题括号枚举是否同步收敛；已失效候选是否清理 |
 | [planning.md §2.5](../../../../docs/standards/planning.md) | 条目含统计数字 / 跨文档引用同一批需求 | **量化断言**可复现口径：量级区间 + 测量方 + 可复现命令（第三方可复现）；**跨文档同源区分**：用户报告项数 / 登记候选数 / 上收原子数是否给出一致换算（无互相矛盾数字） |
-| [planning.md §4.4 第 13 条](../../../../docs/standards/planning.md) | 跨文件同步事实性口径 | 复扫是否用**结构化查询**（语义站点清单 + 组合 `rg`）而非字面 pattern；双语镜像是否单独扫 |
+| [planning.md §4.4 第 13 条](../../../../docs/standards/planning.md) | 跨文件同步事实性口径 + 同源断言全仓改净 | 复扫是否用**结构化查询**（语义站点清单 + 组合 `rg`）而非字面 pattern；双语镜像是否单独扫 |
 | [planning.md §4.4 第 14 条](../../../../docs/standards/planning.md) | 已知边界条目闭环 | 除 backlog 整段删除外，是否同步 `archive/index.md` §4 的「保留」清单与「当前基线」前向描述（`rg` 确认全部落点） |
 | [planning.md §4.4 第 3 条](../../../../docs/standards/planning.md) | 跨目录相对路径 / 批量替换相对路径前缀 | old 片段是否**从路径字符（`../`）起写、未带上 `](`**（防吞 `]` 使链接退化）；改完是否做 malformed 检测（精确形态 `rg -n "\[[^]\n]*\((\.\.?/|/)"` 0 命中）并人工确认每处 `](` 与 `)` 成对（自建校验器对坏语法静默跳过，不能作为唯一证据） |
 | [ai-collaboration.md §1.3 分级审计执行协议](../../../../docs/standards/ai-collaboration.md) | 规划 / 阶段启动批次 | 是否声明 `standard`（非 `quick`）；审计 prompt 是否携带 audit-depth + 变更清单 + 已验证证据 |
@@ -309,8 +309,15 @@ if (value) { ... }  // 对 0, "", false 失效
 | [platform.md §7.4 caomei-ui 接线约定](../../../../docs/standards/platform.md#74-caomei-ui-接线约定) | 筛选 / 偏好类下拉的「全部 / 未设置」项 | `SelectItem` 的 `value` 是否非空串（空串触发 SSR 500）；哨兵值是否在对外提交前映射为「不传参」或 `null`，且**不落盘 / 不参与枚举校验** |
 | [platform.md §7.4 caomei-ui 接线约定](../../../../docs/standards/platform.md#74-caomei-ui-接线约定) | `CaomeiDialog` 响应式宽度 / 弹窗宽度写法 | 需要响应式宽度时是否用设计钩子 `--caomei-dialog-width`（非 inline `:style="{width}"`——inline 恒胜 `:breakpoints`，会使其成为死代码，窄视口失效） |
 | [platform.md §7.6 运行时 env 开关的 UI 状态暴露](../../../../docs/standards/platform.md#76-运行时-env-开关的-ui-状态暴露用只读端点) | UI 反映服务端运行时 env 开关（如 `ACTION_STATUS_MONITOR_ENABLED`） | 是否用服务端**只读端点**按请求读 `process.env`（非 `runtimeConfig.public`——构建期烘焙会漂移）；UI 文案是否说明「设置后需重启」 |
+| [testing.md §6.5](../../../../docs/standards/testing.md) | 交互断言（点击 / 提交）区分度 | 点击目标是否确认为**事件绑定元素**？断言是否只能由该行为产生的状态（如排序属性）满足？三态控件是否逐次操作并等待属性回写（避免过冲）？ |
+| [testing.md §6.6](../../../../docs/standards/testing.md) | ESM 接线断言 | 是否用 `vi.mock` + `importOriginal` **部分 mock**（记录实参后委托真实实现），而非整体 mock 破坏依赖真实行为的既有用例？ |
+| [testing.md §6.7](../../../../docs/standards/testing.md) | 页面可见改动 → 视觉基线 | 改动页面的整页基线是否重建？**以该页为背景的视口基线**是否连带重建？是否连跑两遍验证幂等？无视觉守卫的页面是否显式登记？ |
+| [testing.md §6.10](../../../../docs/standards/testing.md) | 脚本级测试 / 被测服务同进程验证 | 入口脚本是否用真实 shell + PATH 桩测试？被测服务与测试同进程时是否**避免** `spawnSync`（阻塞事件循环导致观察为空）？ |
+| [development.md §5.1.39](../../../../docs/standards/development.md) | 删除公共导出 | 是否全仓（**含全部测试目录**）grep 引用？是否区分代码引用与文档 / 归档描述性文本？ |
+| [development.md §5.1.40](../../../../docs/standards/development.md) | 与外部工具语义对齐的判定 | 是否用该工具权威实现逐形态（**含反例**）实测比对？等价类扩展方向是否倾向保守（宁可多报不可漏判）？ |
+| [documentation.md §6](../../../../docs/standards/documentation.md) | 阶段状态口径翻转 | 「暂无进行中阶段」↔「Mxx 进行中」翻转时，是否同步**全部承载位置**（待办速查表 + 路线图指针 + 各文档速查表 + 首页里程碑）？ |
 
-> **维护纪律**：本矩阵为严格约束检查点的**单点落点**，其他文档 / skill / agent 只做一行链接引用（见上方「规范单点声明」）。矩阵行与条款一一对应；条款废弃 / 合并时同步删行。
+> **维护纪律**：本矩阵为严格约束检查点的**单点落点**，其他文档 / skill / agent 只做一行链接引用（见上方「规范单点声明」）。矩阵行与条款对应（**同一条款可对应多行**，见上方说明）；条款废弃 / 合并时同步删行。
 
 ### todo.md / todo-archive.md 子任务详细度审计（必查项）
 
