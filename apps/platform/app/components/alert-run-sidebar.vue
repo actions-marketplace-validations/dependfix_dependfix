@@ -11,6 +11,7 @@
 import type { DataTableColumn } from 'caomei-ui'
 import { Eye, Zap } from '@lucide/vue'
 import { alertsFound, formatRunDuration, runExecutorLabel, runModeLabel, shortRunId } from '~/utils/run-view'
+import { scanSeverityLabel } from '~/utils/scan-options'
 import { useFixNow } from '~/composables/use-fix-now'
 import { alertsRunStatusTone } from '~/utils/alerts-view'
 
@@ -127,7 +128,7 @@ const columns = computed<DataTableColumn<AlertSidebarRun>[]>(() => [
                         <code :title="row.id">{{ shortRunId(row.id) }}</code>
                         <span>{{ modeLabel(row.mode) }}</span>
                         <small class="text-muted">
-                            {{ row.severityThreshold }} · {{ executorLabel(row.executorKind) }}
+                            {{ scanSeverityLabel(row.severityThreshold, t) }} · {{ executorLabel(row.executorKind) }}
                         </small>
                     </div>
                 </template>

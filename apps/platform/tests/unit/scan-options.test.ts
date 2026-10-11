@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { scanModeOptions, scanSeverityOptions } from '../../app/utils/scan-options'
+import { scanModeOptions, scanSeverityLabel, scanSeverityOptions } from '../../app/utils/scan-options'
 import { SCAN_MODES, SCAN_SEVERITIES } from '../../app/composables/use-scan-preferences'
 
 /** i18n key 直出（标签即 key），便于断言选项取值与文案 key */
@@ -29,5 +29,15 @@ describe('utils/scan-options', () => {
             'Medium',
             'common.severity.all',
         ])
+    })
+
+    it('展示标签按值查找（含「全部」走 i18n）；未命中原样返回', () => {
+        expect(scanSeverityLabel('critical', t)).toBe('Critical')
+        expect(scanSeverityLabel('high', t)).toBe('High')
+        expect(scanSeverityLabel('medium', t)).toBe('Medium')
+        expect(scanSeverityLabel('all', t)).toBe('common.severity.all')
+        // 未知 / 历史值原样返回（不空白、不误映射）
+        expect(scanSeverityLabel('unknown', t)).toBe('unknown')
+        expect(scanSeverityLabel('', t)).toBe('')
     })
 })

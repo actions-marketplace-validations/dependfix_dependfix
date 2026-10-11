@@ -8,7 +8,6 @@ import {
     RUN_FAILURE_STAGE_OPTIONS,
     runExecutorLabel,
     runModeLabel,
-    runThresholdLabel,
     shortRunId,
 } from '../../app/utils/run-view'
 import { RUN_FAILURE_KINDS, RUN_FAILURE_STAGES } from '#server/services/run-failure-classify'
@@ -70,16 +69,6 @@ describe('utils/run-view', () => {
 
         it('其它走平台容器', () => {
             expect(runExecutorLabel('container', t)).toBe('repos.platformContainer')
-        })
-    })
-
-    describe('runThresholdLabel', () => {
-        it('all 走 common.severity.all', () => {
-            expect(runThresholdLabel('all', t)).toBe('common.severity.all')
-        })
-
-        it('其他原样返回', () => {
-            expect(runThresholdLabel('high', t)).toBe('high')
         })
     })
 

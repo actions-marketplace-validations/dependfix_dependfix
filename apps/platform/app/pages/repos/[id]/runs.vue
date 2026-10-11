@@ -3,6 +3,7 @@
 // 注意：本页面已被应用层修复迁入 `repo-history-dialog`，但保留兼容——
 // 用户直接访问 /repos/{id}/runs 仍可使用（候选删除条目见 docs/plan/backlog.md）。
 import { ArrowLeft, ExternalLink, Eye } from '@lucide/vue'
+import { scanSeverityLabel } from '~/utils/scan-options'
 import type { DataTableColumn } from 'caomei-ui'
 import { withRunStatusRank } from '~/utils/sort-helpers'
 
@@ -202,6 +203,9 @@ const resultsColumns = computed<DataTableColumn<RunResultView>[]>(() => [
                     <CaomeiTag tone="neutral">
                         {{ row.executorKind === 'github-action' ? t('repos.githubAction') : row.executorKind === 'sandbox' ? t('repos.sandboxContainer') : t('repos.platformContainer') }}
                     </CaomeiTag>
+                </template>
+                <template #cell-severityThreshold="{row}">
+                    {{ scanSeverityLabel(row.severityThreshold, t) }}
                 </template>
                 <template #cell-startedAt="{row}">
                     {{ row.startedAt ? d(new Date(row.startedAt), 'long') : '—' }}

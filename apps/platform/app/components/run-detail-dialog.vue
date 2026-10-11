@@ -6,9 +6,9 @@ import {
     formatRunDuration,
     runExecutorLabel,
     runModeLabel,
-    runThresholdLabel,
     shortRunId,
 } from '~/utils/run-view'
+import { scanSeverityLabel } from '~/utils/scan-options'
 import { downloadFile } from '~/utils/download'
 
 interface RunResultView {
@@ -86,7 +86,7 @@ const visible = computed({
 
 const modeLabel = (mode: string) => runModeLabel(mode, t)
 const executorLabel = (executorKind: string) => runExecutorLabel(executorKind, t)
-const thresholdLabel = (severityThreshold: string) => runThresholdLabel(severityThreshold, t)
+const thresholdLabel = (severityThreshold: string) => scanSeverityLabel(severityThreshold, t)
 const formatDuration = (startedAt: string | null, finishedAt: string | null) => formatRunDuration(startedAt, finishedAt, t)
 
 const statusLabel = (status: string) => ({

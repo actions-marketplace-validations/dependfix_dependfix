@@ -28,15 +28,6 @@ export const runExecutorLabel = (executorKind: string, t: Translator) => {
 }
 
 /**
- * 阈值标签：`all` 走 i18n；其余级别（critical / high / medium）为专有名词**原样小写直通**。
- * 与 `scanSeverityOptions` 的展示标签（`Critical` / `High` / `Medium`，首字母大写）**策略不同**，
- * 故此处**不收敛**到选项数组——收敛会改变运行列表的展示大小写，属行为变更（口径见 platform.md §7.3）。
- */
-export const runThresholdLabel = (severityThreshold: string, t: Translator) => (
-    severityThreshold === 'all' ? t('common.severity.all') : severityThreshold
-)
-
-/**
  * 失败阶段下拉选项顺序（与 `server/services/run-failure-classify.ts` 的 `RUN_FAILURE_STAGES` 同序；
  * 分类口径单一事实源在服务端，前端仅复制枚举词汇用于筛选控件）。
  */

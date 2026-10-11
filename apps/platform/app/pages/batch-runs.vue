@@ -15,6 +15,7 @@ import type { DataTableColumn } from 'caomei-ui'
 import type { BatchRunRun, BatchRunSummary, BatchRunView } from '~/types/platform'
 import { reconcileBatchRuns } from '~/utils/reconcile-batch-runs'
 import { runModeLabel } from '~/utils/run-view'
+import { scanSeverityLabel } from '~/utils/scan-options'
 import { updateStatusRank, withStatusRank } from '~/utils/sort-helpers'
 
 definePageMeta({
@@ -59,14 +60,7 @@ const detailMap = ref<Record<string, {
 // 模式标签复用 `utils/run-view` 的 `runModeLabel`（单一事实源，见 platform.md §7.3）
 const modeLabel = (mode: string) => runModeLabel(mode, t)
 
-// 严重级别标签：与 `run-view` 的 `runThresholdLabel`（小写直通）策略不同（此处大驼峰，对齐
-// 扫描选项的展示口径），故保留独立实现；统一展示策略属独立议题（已登记 backlog）。
-const severityLabel = (severity: string) => ({
-    critical: 'Critical',
-    high: 'High',
-    medium: 'Medium',
-    all: t('common.severity.all'),
-})[severity] ?? severity
+// 严重级别标签复用 `utils/scan-options` 的展示口径单一事实源（与扫描选项、运行列表同源）
 
 const statusTag = (status: string) => {
     if (status === 'completed') {
@@ -397,7 +391,7 @@ const nestedColumns = computed<DataTableColumn<BatchRunRun>[]>(() => [
                     {{ d(new Date(row.createdAt), 'long') }}
                 </template>
                 <template #cell-params="{row}">
-                    {{ modeLabel(row.mode) }} · {{ severityLabel(row.severityThreshold) }}
+                    {{ modeLabel(row.mode) }} · {{ scanSeverityLabel(row.severityThreshold, t) }}
                 </template>
                 <template #cell-repositoryCount="{row}">
                     <span v-if="row.pendingCount > 0" class="text-muted">

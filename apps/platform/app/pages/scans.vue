@@ -27,6 +27,7 @@ import {
     runExecutorLabel,
     runModeLabel,
 } from '~/utils/run-view'
+import { scanSeverityLabel } from '~/utils/scan-options'
 import { downloadFile } from '~/utils/download'
 
 definePageMeta({
@@ -742,7 +743,7 @@ onMounted(refresh)
                             {{ runModeLabel(row.mode, t) }}
                         </template>
                         <template #cell-threshold="{row}">
-                            {{ row.severityThreshold === 'all' ? t('common.severity.all') : row.severityThreshold }}
+                            {{ scanSeverityLabel(row.severityThreshold, t) }}
                         </template>
                         <template #cell-executor="{row}">
                             <CaomeiTag tone="neutral">

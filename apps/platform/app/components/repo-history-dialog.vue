@@ -10,6 +10,7 @@
 // 默认 pageSize=10，rows-per-page-options=[10, 25, 50]，最大 200 由 server 钳制。
 import type { DataTableColumn, DataTablePageEvent } from 'caomei-ui'
 import { ArrowLeft, Copy, Download, ExternalLink, Eye } from '@lucide/vue'
+import { scanSeverityLabel } from '~/utils/scan-options'
 import { downloadFile } from '~/utils/download'
 
 const props = withDefaults(defineProps<{
@@ -487,6 +488,9 @@ watch(() => route.query[props.queryKey], async (newVal) => {
                     >
                         {{ statusLabel(row.status) }}
                     </CaomeiTag>
+                </template>
+                <template #cell-severityThreshold="{row}">
+                    {{ scanSeverityLabel(row.severityThreshold, t) }}
                 </template>
                 <template #cell-startedAt="{row}">
                     {{ row.startedAt ? d(new Date(row.startedAt), 'long') : '—' }}

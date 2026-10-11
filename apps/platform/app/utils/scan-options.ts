@@ -23,3 +23,12 @@ export const scanSeverityOptions = (t: Translator): { label: string, value: Scan
     { label: 'Medium', value: 'medium' },
     { label: t('common.severity.all'), value: 'all' },
 ]
+
+/**
+ * 严重级别**展示标签**（展示口径单一事实源）：按值从选项数组查找，未命中（历史数据 / 未知枚举）原样返回。
+ *
+ * 全仓 `severityThreshold` 展示点一律经此函数渲染——含 `all` 走 i18n、`critical` / `high` / `medium`
+ * 统一首字母大写。此前存在三种口径（小写直通 / 大驼峰硬编码映射 / raw 直通），收敛后口径变更只改本函数。
+ */
+export const scanSeverityLabel = (value: string, t: Translator): string =>
+    scanSeverityOptions(t).find((option) => option.value === value)?.label ?? value
