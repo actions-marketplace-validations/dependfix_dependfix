@@ -60,6 +60,17 @@
 
 ### 候选评估中（待评估 / 本阶段延后项）
 
+- **容器内 `pnpm install` 环境性失败的可观测性与归因口径（待评估）** —— 现象（2026-10-11 生产实证）：fix 扫描下容器内 `pnpm install` 反复以**非零退出且无任何 stderr** 结束（`execFileSync` 错误消息仅剩 `Command failed: pnpm install --no-frozen-lockfile`），导致 lockfile 诊断（`classifyLockfileFailure`）归类 `UNKNOWN` + 修复链（`REGENERATE` / `REINSTALL`）全部失败 + 基线验证同样失败（被判 `PRE_EXISTING_FAILURE` 不归因）→ 无任何修复产出 → `computeExitCode` 返回 2 → 平台以 `engine_exit_2`「所有仓库失败或全量回滚」呈现，实为环境/安装层面的单点问题，UI 文案构成误归因。
+  - **现状锚点**：`packages/engine/src/fixers/pnpm/index.ts`（`classifyLockfileFailure` 79-96 / `execRepair` 143-145 用 `execFileSync` 丢弃 signal 与退出码 / `failureDetail` 515 取 `getStderrText(err) || err.message`）、`packages/engine/src/app/repo-fix.ts:817`（`finalizeRepoFix` 对**零告警**仓库也无条件跑一次 lockfile repair 与验证链）、`packages/engine/src/app/result-assembly.ts`（`computeExitCode` 归因口径）、`apps/platform/server/services/scan-run-state.ts:141-142`（`engine_exit_2` 定义）+ `apps/platform/app/utils/run-view.ts`（失败 stage / kind → i18n 标签映射层；`engine_exit_2` 的 message 由 `apps/platform/app/components/repo-history-dialog.vue` 直接渲染）。
+  - **待评估点**：① 是否在 `execRepair` / 分类结果中保留并上报 `stderr` / `exit code` / `signal`（当前外部只看到 `Command failed: …`，无法定位是 OOM / 信号杀死 / 静默失败）；② 唯一失败为「环境性安装失败 + 既有基线失败」且零告警时，整次运行是否仍应判 failed（归因口径）；③ 零告警仓库是否仍需跑 lockfile repair + 完整验证链（成本与误报面）；④ 若判定为环境问题，是否走环境事件 / `failure_kind=transient` 而非 `failed`。
+  - **触发条件**：再次出现「`pnpm install` 无 stderr 死亡」实例；或用户要求补齐该链路的可观测性。
+  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
+
+- **`hasGitChanges` 非仓库目录语义（返回 `true` 的 fail-open 误判）（待评估）** —— 现象：`hasGitChanges`（`packages/engine/src/app/helpers.ts`）以「两条 `git diff` 是否失败」推断有无变更，非 git 目录下命令必失败 → 恒返回 `true`（误判为「有变更」）；当前 2 处调用点（`app/index.ts:273` `preExistingDirty` 采样、`app/index.ts:547` fix-and-pr 的 PR 判定）在平台路径**均不可达**（fix 路径必先 clone），故仅属潜在 landmine。同类隐患已在 `commitLocalChanges` 前置 `isGitRepository` 守卫处消除（2026-10-11 hotfix）。
+  - **待评估点**：① 是否让 `hasGitChanges` 在非仓库目录返回 `false`（语义 = 无可提交内容），或统一前置 `isGitRepository` 判定；② 若改语义，`preExistingDirty=true` 的保护语义（验证门禁回滚时不误伤用户改动）是否需同步调整；③ 是否需要一条「workDir 非仓库」的统一前置校验（fail-fast）替代各处分散判定。
+  - **触发条件**：再次出现「非仓库 workDir 被当作有变更」的误判实例；或为 `packages/engine/src/app/helpers.ts` 的 `commitLocalChanges` JSDoc 所述「守卫有意 fail-open，代价是只留日志、不留结构化信号」补一条结构化信号时。
+  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
+
 - **`architecture.md` 存在畸形 markdown 链接（未成对 `](`）（待评估）** —— 现象：`docs/design/governance/architecture.md` 的「监测系统 vs 自动合并解耦」表行末残留一处未成对的链接片段（`…experience-archive-§49-§57-recent-investigation.md#五十六) + …`），`check:docs` 因无法识别 `](` 而成对性静默跳过（不报错）。
   - **待评估点**：① 是否为重复拼接残留；② 自建链接校验器是否需补「未成对 `](` / `)` 计数」检测（当前只匹配合规 `](`）。
   - **触发条件**：下次改动该文件时；或加固 check-docs 链接校验口径时。
