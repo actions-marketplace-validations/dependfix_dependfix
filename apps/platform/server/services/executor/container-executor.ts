@@ -213,7 +213,10 @@ export async function moveToPending(
  *
  * 设计要点（见 executor-sandbox.md §2.2 / §5.1）：
  * - 平台容器即沙箱（进程级隔离）：非 root 运行（镜像 USER）、临时工作目录、凭据最小化、超时
- * - report-only：不 clone（GitHub API 拉取告警，快）；fix/fix-and-pr：先 clone 到 workDir（fix 需操作仓库文件）
+ * - report-only：不 clone、不 commit（GitHub API 拉取告警，快）；fix/fix-and-pr：先 clone 到 workDir（fix 需操作仓库文件）
+ *   - ⚠️ clone 判定与下方引擎 config 覆写必须同源（`isReportOnly`）：report-only 若只跳过 clone 却把引擎降级为
+ *     `fix + commit:true`，引擎会在空 workDir 上执行 `git config user.name` → `fatal: not in a git directory`
+ *     → `COMMIT_FAILED` → 平台 `engine_delivery_failed`（2026-10-11 生产实证）
  * - 凭据来源单一：credential 由 credential service 解密传入，填充 RuntimeConfig.githubToken/alertsToken
  * - 执行结果直接复用 DependfixApp 的 RunResult（扫描结果落库数据源）
  * - A 模式 fix / fix-and-pr 完成后推送修复分支到远程；push 失败归类 `push_failed`
@@ -254,8 +257,14 @@ export class ContainerExecutor implements ScanExecutor {
         const startedAt = new Date().toISOString()
         const { owner, name, defaultBranch } = ctx.repository
         const workDir = join(this.workRoot, ctx.runId)
-        // fix / fix-and-pr 模式：app.run() 成功后需推送修复分支到远程
-        const needsPush = ctx.config.mode === 'fix' || ctx.config.mode === 'fix-and-pr'
+        // 扫描模式单一事实源：report-only 为只读扫描（仅拉告警 + 出报告，无 clone / commit / push）；
+        // fix / fix-and-pr 才需要本地仓库文件与交付链路。
+        // ⚠️ needsClone / needsPush / needsPr 与下方引擎 config 覆写（mode / commit）必须同源，
+        // 否则会出现「引擎被降级为 fix + commit:true 却没有 clone」→ 在空目录上 commit → COMMIT_FAILED。
+        const isReportOnly = ctx.config.mode === 'report-only'
+        // 非 report-only：需要本地仓库文件（clone）+ 成功后推送修复分支到远程
+        const needsClone = !isReportOnly
+        const needsPush = !isReportOnly
         // fix-and-pr 模式：push 成功后再创建 PR
         const needsPr = ctx.config.mode === 'fix-and-pr'
         // push 成功 + PR 失败时保留 workDir 24h 供诊断（pendingRoot = workRoot/_pending）
@@ -272,8 +281,7 @@ export class ContainerExecutor implements ScanExecutor {
         try {
             await mkdir(workDir, { recursive: true })
 
-            // fix / fix-and-pr 需要本地仓库文件：clone 到工作目录
-            const needsClone = ctx.config.mode !== 'report-only'
+            // 非 report-only（fix / fix-and-pr）需要本地仓库文件：clone 到工作目录
             if (needsClone) {
                 await this.cloneRepository(owner, name, defaultBranch, workDir, { token: ctx.credential?.token, logger: memLogger })
             }
@@ -282,16 +290,17 @@ export class ContainerExecutor implements ScanExecutor {
             const preRunHead = needsPush ? await readHeadSha(workDir).catch(() => null) : null
 
             // 构造 RuntimeConfig：凭据来自 credential service 解密结果（来源单一，见契约要点 1）
-            // 关键修复（M25）：fix-and-pr 在平台模式下被降级为 `mode: 'fix' + commit: true + createPullRequest: false`，
+            // 平台交付降级口径：fix / fix-and-pr 被降级为 `mode: 'fix' + commit: true + createPullRequest: false`，
             // 让引擎只做本地修复+commit（不动 push/PR），由 [platform-delivery] 接管带凭据的 push + PR
             // 见 [executor-sandbox.md §8.5 push + PR 链路修复后流程]
+            // report-only：保持原模式与 `commit: false`（只读扫描不产出提交），与上方 needsClone / needsPush 同源
             const config: RuntimeConfig = {
                 ...ctx.config,
-                mode: 'fix',
+                mode: isReportOnly ? ctx.config.mode : 'fix',
                 repositories: [`${owner}/${name}`],
                 githubToken: ctx.credential?.token ?? ctx.config.githubToken,
                 alertsToken: ctx.credential?.token ?? ctx.config.alertsToken,
-                commit: true,
+                commit: !isReportOnly,
                 createPullRequest: false,
             }
 
