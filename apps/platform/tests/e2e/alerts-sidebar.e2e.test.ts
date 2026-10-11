@@ -110,7 +110,8 @@ test.describe('alerts 去重视图受影响运行 Sidebar', () => {
         const sidebar = page.locator('.caomei-drawer__content')
         await expect(sidebar).toContainText('12345678')
         await expect(sidebar).toContainText('仅报告')
-        await expect(sidebar).toContainText('high')
+        // 阈值展示口径已统一（级别首字母大写，与扫描选项 / 运行列表同源）
+        await expect(sidebar).toContainText('High')
         await expect(sidebar).toContainText('GitHub Action')
         await expect(sidebar).toContainText('2')
 

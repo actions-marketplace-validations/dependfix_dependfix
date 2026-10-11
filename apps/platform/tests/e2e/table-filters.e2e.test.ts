@@ -70,10 +70,24 @@ test.describe('仓库列表筛选与分页', () => {
         await expect(page.locator('.caomei-select__content .caomei-select__item').filter({ hasText: '50' })).toBeVisible({ timeout: 5000 })
         await page.keyboard.press('Escape')
 
-        // 「排序 + 分页」叠加：点「仓库」列头升序排序 → 分页容量不变（仍 10 行），首行为最小名称
-        await page.locator('.caomei-data-table__th').filter({ hasText: '仓库' }).first().click()
+        // 「排序 + 分页」叠加：点「仓库」列头排序 → 分页容量不变（仍 10 行）
+        // 注意：caomei 的排序触发器是 th 内的 `button.caomei-data-table__sort`（th 本身无 click），
+        // 且排序为三态往返（none → asc → desc → none）、属性回写是异步渲染——故逐次点击并等待属性真正变化，
+        // 最后 lock 到升序（避免「恰好未排序」也满足首行断言）
+        const nameHeader = page.locator('.caomei-data-table__th').filter({ hasText: '仓库' }).first()
+        const sortTrigger = nameHeader.locator('.caomei-data-table__sort')
+        const readSort = () => nameHeader.getAttribute('aria-sort')
+        for (let attempt = 0; attempt < 4; attempt++) {
+            if (await readSort() === 'ascending') {
+                break
+            }
+            const before = await readSort()
+            await sortTrigger.click()
+            await expect.poll(readSort, { timeout: 5000 }).not.toBe(before)
+        }
+        await expect(nameHeader).toHaveAttribute('aria-sort', 'ascending', { timeout: 10000 })
         await expect(rows).toHaveCount(PAGE_SIZE, { timeout: 10000 })
-        await expect(rows.first()).toContainText('repo-00')
+        await expect(rows.first()).toContainText('repo-00', { timeout: 10000 })
 
         // 「下一页」→ 第 2 页展示剩余 2 条，且内容仍属本用例前缀
         await page.getByRole('button', { name: '下一页' }).click()
