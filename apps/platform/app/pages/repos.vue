@@ -272,6 +272,98 @@ const {
 // ===== 批量导入（子组件 `import-repos-dialog` 承载；visible 由本页控制）=====
 const importDialogVisible = ref(false)
 
+// ===== 列表筛选 / 搜索 / 分页（客户端实现；服务端 `/api/repos` 契约不变）=====
+// 评估结论（用户 2026-10-10）：客户端筛选 + 客户端分页——`/api/repos` 返回全量，无需后端分页参数。
+const searchQuery = ref('')
+
+/** 筛选态（`'all'` = 不筛选；凭据列 `'none'` = 仅未关联） */
+const repoFilters = reactive({
+    executorKind: 'all',
+    packageManager: 'all',
+    credentialId: 'all',
+})
+
+/** 每页条数（caomei DataTable 内建分页，`rows` 为初值）与候选 */
+const ROWS_PER_PAGE = 10
+const ROWS_PER_PAGE_OPTIONS = [10, 25, 50]
+
+const executorFilterOptions = computed(() => [
+    { label: t('repos.filterAll'), value: 'all' },
+    { label: t('repos.platformContainer'), value: 'container' },
+    { label: t('repos.githubAction'), value: 'github-action' },
+    { label: t('repos.sandboxContainer'), value: 'sandbox' },
+])
+
+const packageManagerFilterOptions = computed(() => [
+    { label: t('repos.filterAll'), value: 'all' },
+    { label: 'pnpm', value: 'pnpm' },
+    { label: 'npm', value: 'npm' },
+    { label: 'yarn', value: 'yarn' },
+])
+
+const credentialFilterOptions = computed(() => [
+    { label: t('repos.filterAll'), value: 'all' },
+    { label: t('repos.filterNotLinked'), value: 'none' },
+    ...credentials.value.map((credential) => ({ label: credential.name, value: credential.id })),
+])
+
+/** 是否存在生效中的搜索 / 筛选（用于空态文案与「重置」按钮可用性） */
+const hasActiveRepoFilter = computed(() => Boolean(
+    searchQuery.value.trim()
+    || repoFilters.executorKind !== 'all'
+    || repoFilters.packageManager !== 'all'
+    || repoFilters.credentialId !== 'all',
+))
+
+const resetRepoFilters = () => {
+    searchQuery.value = ''
+    repoFilters.executorKind = 'all'
+    repoFilters.packageManager = 'all'
+    repoFilters.credentialId = 'all'
+}
+
+/**
+ * 客户端「搜索（owner / 仓库名 / 标签 / 凭据名）+ 筛选（执行方式 / 包管理器 / 凭据）」叠加结果。
+ *
+ * 与行选择的交互（现状语义，本次未改变）：`selectedRows` 是独立持有的已选集合，筛选变化本身不清空它；
+ * 但**任意一次勾选 / 取消勾选都会以当前过滤后的集合回写选择**（caomei DataTable 行为），
+ * 因此被筛选隐藏的已选行会在下一次勾选时被静默移出（跨页选择不受影响）。
+ * 「批量扫描」计数可能大于当前可见行数——筛选是视图态，不改变集合本身。
+ *
+ * 页码：`:data` 变化（搜索 / 筛选）时由 DataTable 内部（`@tanstack` autoResetPageIndex）回到第 1 页。
+ */
+const filteredRepos = computed(() => {
+    const keyword = searchQuery.value.trim().toLowerCase()
+    return repos.value.filter((repo) => {
+        if (repoFilters.executorKind !== 'all' && repo.executorKind !== repoFilters.executorKind) {
+            return false
+        }
+        if (repoFilters.packageManager !== 'all' && repo.packageManager !== repoFilters.packageManager) {
+            return false
+        }
+        if (repoFilters.credentialId === 'none') {
+            if (repo.credentialId) {
+                return false
+            }
+        } else if (repoFilters.credentialId !== 'all' && repo.credentialId !== repoFilters.credentialId) {
+            return false
+        }
+        if (!keyword) {
+            return true
+        }
+        return [
+            repo.owner,
+            repo.name,
+            (repo.tags ?? []).join(' '),
+            repo.credentialName ?? '',
+        ].some((field) => field.toLowerCase().includes(keyword))
+    })
+})
+
+const reposEmptyText = computed(() => (
+    hasActiveRepoFilter.value ? t('repos.emptyFiltered') : t('repos.empty')
+))
+
 /**
  * 列定义（caomei DataTable 用 `columns` 数组 + `#cell-{key}` 插槽替代迁移前的 `<Column>`）。
  * - `key` 即排序字段（`field` 语义并入 `key`）；`actions` 等非排序列用语义名保证唯一 key
@@ -332,6 +424,57 @@ const columns = computed<DataTableColumn<RepoView>[]>(() => [
             </div>
         </div>
 
+        <!-- 列表筛选 / 搜索（客户端；服务端 `/api/repos` 契约不变） -->
+        <section class="repos__filters">
+            <div class="repos__filter-field repos__filter-field--search">
+                <label for="repos-filter-search">{{ t('repos.filterSearch') }}</label>
+                <CaomeiInput
+                    id="repos-filter-search"
+                    v-model="searchQuery"
+                    :placeholder="t('repos.filterSearchPlaceholder')"
+                />
+            </div>
+            <div class="repos__filter-field">
+                <label for="repos-filter-executor">{{ t('repos.colExecutor') }}</label>
+                <CaomeiSelect
+                    id="repos-filter-executor"
+                    v-model="repoFilters.executorKind"
+                    :options="executorFilterOptions"
+                    option-label="label"
+                    option-value="value"
+                />
+            </div>
+            <div class="repos__filter-field">
+                <label for="repos-filter-package-manager">{{ t('repos.colPackageManager') }}</label>
+                <CaomeiSelect
+                    id="repos-filter-package-manager"
+                    v-model="repoFilters.packageManager"
+                    :options="packageManagerFilterOptions"
+                    option-label="label"
+                    option-value="value"
+                />
+            </div>
+            <div class="repos__filter-field">
+                <label for="repos-filter-credential">{{ t('repos.colCredential') }}</label>
+                <CaomeiSelect
+                    id="repos-filter-credential"
+                    v-model="repoFilters.credentialId"
+                    :options="credentialFilterOptions"
+                    option-label="label"
+                    option-value="value"
+                />
+            </div>
+            <CaomeiButton
+                v-if="hasActiveRepoFilter"
+                tone="neutral"
+                size="sm"
+                class="repos__filter-reset"
+                @click="resetRepoFilters"
+            >
+                {{ t('repos.filterReset') }}
+            </CaomeiButton>
+        </section>
+
         <CaomeiMessage
             v-if="error"
             tone="danger"
@@ -371,13 +514,16 @@ const columns = computed<DataTableColumn<RepoView>[]>(() => [
 
         <CaomeiCard v-if="!loading">
             <CaomeiDataTable
-                :data="repos"
+                :data="filteredRepos"
                 :columns="columns"
                 row-key="id"
                 selection-mode="multiple"
                 :selection="selectedRows"
                 striped
-                :empty-text="t('repos.empty')"
+                :paginator="true"
+                :rows="ROWS_PER_PAGE"
+                :rows-per-page-options="ROWS_PER_PAGE_OPTIONS"
+                :empty-text="reposEmptyText"
                 @update:selection="onSelectionChange"
             >
                 <template #cell-tags="{row}">
@@ -583,6 +729,36 @@ const columns = computed<DataTableColumn<RepoView>[]>(() => [
             margin: 0;
             font-size: $font-size-sm;
         }
+    }
+
+    // 列表筛选 / 搜索工具栏（客户端筛选与分页，服务端契约不变）
+    &__filters {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-end;
+        gap: $space-3;
+        margin-bottom: $space-4;
+    }
+
+    &__filter-field {
+        display: flex;
+        flex-direction: column;
+        gap: $space-1;
+        min-width: 160px;
+
+        label {
+            font-size: $font-size-sm;
+            color: $color-text-muted;
+        }
+    }
+
+    &__filter-field--search {
+        flex: 1 1 220px;
+        max-width: 320px;
+    }
+
+    &__filter-reset {
+        margin-bottom: 1px;
     }
 
     &__header-actions {

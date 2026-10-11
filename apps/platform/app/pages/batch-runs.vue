@@ -242,6 +242,52 @@ onUnmounted(stopPolling)
  * - `_statusRank` 保留为排序字段（与 sort-helpers 的 rank 注入一致）；原 `:default-sort-order="-1"`
  *   仅影响初始排序方向，而本页初始无排序，故迁移后行为一致
  */
+// ===== 列表筛选 / 分页（客户端实现；`/api/batch-runs` 契约与增量 reconcile 不变）=====
+// 与 repos 页同源口径：客户端筛选 + caomei DataTable 内建分页。
+const batchFilters = reactive({
+    source: 'all',
+    status: 'all',
+})
+
+/** 每页条数（caomei DataTable 内建分页，`rows` 为初值）与候选 */
+const BATCH_ROWS_PER_PAGE = 10
+const BATCH_ROWS_PER_PAGE_OPTIONS = [10, 25, 50]
+
+const batchSourceFilterOptions = computed(() => [
+    { label: t('batchRuns.filterAll'), value: 'all' },
+    { label: t('batchRuns.sourceScheduled'), value: 'scheduled' },
+    { label: t('batchRuns.sourceManual'), value: 'manual' },
+])
+
+const batchStatusFilterOptions = computed(() => [
+    { label: t('batchRuns.filterAll'), value: 'all' },
+    { label: t('batchRuns.statusCompleted'), value: 'completed' },
+    { label: t('batchRuns.statusRunning'), value: 'running' },
+    { label: t('batchRuns.statusFailed'), value: 'failed' },
+])
+
+const hasActiveBatchFilter = computed(() => batchFilters.source !== 'all' || batchFilters.status !== 'all')
+
+const resetBatchFilters = () => {
+    batchFilters.source = 'all'
+    batchFilters.status = 'all'
+}
+
+/** 客户端筛选结果；增量 reconcile 仍作用于全量 `batchRuns`（筛选只影响展示，不影响合并语义） */
+const filteredBatchRuns = computed(() => batchRuns.value.filter((run) => {
+    if (batchFilters.source !== 'all' && run.source !== batchFilters.source) {
+        return false
+    }
+    if (batchFilters.status !== 'all' && run.status !== batchFilters.status) {
+        return false
+    }
+    return true
+}))
+
+const batchRunsEmptyText = computed(() => (
+    hasActiveBatchFilter.value ? t('batchRuns.emptyFiltered') : t('batchRuns.empty')
+))
+
 const columns = computed<DataTableColumn<BatchRunView>[]>(() => [
     { key: 'expander', width: '3rem', expander: true },
     { key: 'source', header: t('batchRuns.colSource'), sortable: true },
@@ -295,14 +341,50 @@ const nestedColumns = computed<DataTableColumn<BatchRunRun>[]>(() => [
             {{ error }}
         </CaomeiMessage>
 
+        <!-- 列表筛选（客户端；服务端 `/api/batch-runs` 契约与增量 reconcile 不变） -->
+        <section class="batch-runs__filters">
+            <div class="batch-runs__filter-field">
+                <label for="batch-runs-filter-source">{{ t('batchRuns.colSource') }}</label>
+                <CaomeiSelect
+                    id="batch-runs-filter-source"
+                    v-model="batchFilters.source"
+                    :options="batchSourceFilterOptions"
+                    option-label="label"
+                    option-value="value"
+                />
+            </div>
+            <div class="batch-runs__filter-field">
+                <label for="batch-runs-filter-status">{{ t('batchRuns.colStatus') }}</label>
+                <CaomeiSelect
+                    id="batch-runs-filter-status"
+                    v-model="batchFilters.status"
+                    :options="batchStatusFilterOptions"
+                    option-label="label"
+                    option-value="value"
+                />
+            </div>
+            <CaomeiButton
+                v-if="hasActiveBatchFilter"
+                tone="neutral"
+                size="sm"
+                class="batch-runs__filter-reset"
+                @click="resetBatchFilters"
+            >
+                {{ t('batchRuns.filterReset') }}
+            </CaomeiButton>
+        </section>
+
         <CaomeiCard v-if="!firstLoad">
             <CaomeiDataTable
-                :data="batchRuns"
+                :data="filteredBatchRuns"
                 :columns="columns"
                 row-key="id"
                 striped
                 :expanded-rows="expandedRows"
-                :empty-text="t('batchRuns.empty')"
+                :paginator="true"
+                :rows="BATCH_ROWS_PER_PAGE"
+                :rows-per-page-options="BATCH_ROWS_PER_PAGE_OPTIONS"
+                :empty-text="batchRunsEmptyText"
                 @update:expanded-rows="onUpdateExpandedRows"
                 @row-expand="onRowExpand"
             >
@@ -448,6 +530,31 @@ const nestedColumns = computed<DataTableColumn<BatchRunRun>[]>(() => [
     &__header p {
         margin: 0;
         font-size: $font-size-sm;
+    }
+
+    // 列表筛选工具栏（客户端筛选与分页，服务端契约不变）
+    &__filters {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-end;
+        gap: $space-3;
+        margin-bottom: $space-4;
+    }
+
+    &__filter-field {
+        display: flex;
+        flex-direction: column;
+        gap: $space-1;
+        min-width: 160px;
+
+        label {
+            font-size: $font-size-sm;
+            color: $color-text-muted;
+        }
+    }
+
+    &__filter-reset {
+        margin-bottom: 1px;
     }
 
     &__detail {
