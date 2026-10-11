@@ -184,6 +184,15 @@
   - **触发条件**：再次出现强调渲染破损；或加固文档渲染校验时。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
+- **PR Check 监测列表缺少所属仓库标识（跨仓库 PR 编号重名不可辨）（待评估）** —— 现象（2026-10-12 用户反馈 + 截图实证）：PR Check 监测页表格首列只渲染 `#<prNumber>`，**整张表没有「仓库」列**，行内无从判断该 PR 属于哪个项目；PR 编号仅在单一仓库内递增唯一，跨仓库会重号，故「全部仓库」视图下用户只能靠逐个切换「仓库」筛选器辨认归属（实测同屏并存 `#390` / `#2367` / `#2408` / `#2411` / `#2412`，行内无任何区分依据）。
+  - **现状锚点**：列定义 `apps/platform/app/pages/pr-checks.vue:114-121`（6 列 `prNumber` / `authorLogin` / `conclusion` / `lastPolledAt` / `alertFiring` / `actions`，无仓库列）+ 首列插槽 `pr-checks.vue:311-322`（仅输出 `#` 拼接 PR 编号，无仓库前缀）；`GET /api/pr-checks` 视图层 `apps/platform/server/api/pr-checks/index.get.ts:31-47` 只返回 `repositoryId`，不含 owner/name。
+  - **旁证**：i18n 已存在**未被引用**的 `prChecks.colRepository`（「仓库」）与 `prChecks.repositoryUnknown`（「未知仓库」）键（`apps/platform/i18n/locales/zh-CN.json:524` / `:532`，en-US 同步；`pnpm i18n:audit:unused` 实证为闲置键），而同族键在 `alerts.vue:416` / `env-events.vue:191` 仍在用 —— 该列疑为计划项且未落地。
+  - **待评估点**：① 展示形态：独立「仓库」列（`owner/name`，与 alerts 页仓库列口径一致）置于 PR 列之前，还是与 PR 编号同格（`owner/name #390`）以省列宽；② 数据来源：前端用页面已拉取的 `/api/repos`（`pr-checks.vue:74-83`）做 `repositoryId → owner/name` 客户端映射（零 API 改动，但依赖该端点全量返回的仓库集合完整性，并需处理映射缺失时的回退文案）vs 服务端视图层 join 返回仓库标签（口径单一，改 API 契约 + 同步测试）；③ 长仓库名 / 窄屏截断与 tooltip 策略；④ 是否顺带启用或清理闲置的 `colRepository` / `repositoryUnknown` 键（两语言同步）；⑤ 仓库列排序与既有「仓库」筛选器的职责边界（避免同屏两处仓库信息语义重叠）。
+  - **触发条件**：用户要求补齐列表可辨识度（本次 2026-10-12 反馈）；或出现「跨仓库同号 PR 误判 / ack 关错告警」实例。
+  - **关联**：下方「待上收候选」的「PR 构建 / 部署错误多源采集」条目会扩展同一张表的列，仓库标识宜与其一并设计，避免两次改表。
+  - **不做什么**：不改 PRCheck 数据模型 / 状态机与 ack 语义。
+  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
+
 ### 待上收候选（评估完成，等待用户决策）
 
 > 本节为「评估完成、等待用户决策」候选的暂存区；候选**不含 `M\d+` 阶段编号**（[规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement)）。
