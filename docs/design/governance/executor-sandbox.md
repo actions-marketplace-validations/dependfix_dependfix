@@ -427,7 +427,7 @@ if (executorKind === 'sandbox') {
 >
 > **2026-09-04 修订（M25 事故修复）**：C53 原始设计假定 `app.run()` 内部只做本地修复 + commit，push / PR 由平台承担。但实际上引擎的 `fix-and-pr` 模式自带 `createFixBranch → pushBranch → createPullRequest` 完整链路，且 `pushBranch` 走裸 `git push` 不带凭据——容器内 `git -c http.extraheader=... clone` 也不会把 extraheader 写入 .git/config（实测 `git -c` 是 git 级 flag，非 clone 子命令），导致 push 必然缺凭据失败。
 >
-> 修复后：引擎降级为 `mode: 'fix' + commit: true`（仅本地修复+commit），push + PR 全部走平台 [platform-delivery] 模块，保留引擎的 dedup / supersede 决策。详细根因与方案见 [archive/todo-archive-phases-m25.md §M25](https://github.com/dependfix/dependfix/blob/master/docs/plan/archive/todo-archive-phases-m25.md)（M25 已 2026-09-08 归档）。
+> 修复后：引擎降级为 `mode: 'fix' + commit: true`（仅本地修复+commit），push + PR 全部走平台 [platform-delivery] 模块，保留引擎的 dedup / supersede 决策。**该降级仅适用于 fix / fix-and-pr**：report-only 为只读扫描，不 clone、不降级、`commit: false`（`isReportOnly` 同时驱动 clone 判定与引擎 config 覆写，二者必须同源——2026-10-11 生产实证「只跳过 clone 却仍强制 commit」会在空 workDir 上 commit → `fatal: not in a git directory` → `COMMIT_FAILED`）。详细根因与方案见 [archive/todo-archive-phases-m25.md §M25](https://github.com/dependfix/dependfix/blob/master/docs/plan/archive/todo-archive-phases-m25.md)（M25 已 2026-09-08 归档）。
 
 ### 8.1 流程变更（C53 → M25 修复后差异）
 
@@ -503,6 +503,7 @@ C53 引入 A 模式 `dispatched` 三分支（`scan-run-state.ts`），M25 新增
 | `createFixBranch(branchName, workDir)` | `@dependfix/engine` | `git checkout -b` 创建/切换修复分支（fix-and-pr 模式从 HEAD 拉新分支，引擎导出复用） |
 | `readHeadSha(workDir)` | `container-executor.ts` | 读 `git rev-parse HEAD`，返回 SHA 或 null（用于 hasNewCommit 判定） |
 | `checkHasNewCommit(workDir, preRunHead)` | `container-executor.ts` | 比较修复前后 HEAD SHA，引擎 commit 后才返回 true |
+| `isReportOnly` + 引擎 config 覆写 | `container-executor.ts` | 模式 / commit 覆写的**单一事实源**：report-only 只读（不 clone、不降级、`commit: false`）；fix / fix-and-pr 降级为 `mode:'fix' + commit:true`（平台接管 push / PR）。clone 判定与 config 覆写必须同源（错配 → 空 workDir 上 commit → `COMMIT_FAILED`） |
 | **platform-delivery 模块** | `executor/platform-delivery.ts` | **M25 新增**：平台侧 fix-and-pr 完整交付单元（plan / push / create / close supersede） |
 | `planFixAndPrDelivery(octokit, owner, repo, result)` | `platform-delivery.ts` | 复用引擎 `computeFixFingerprint` + `findDependfixOpenPR` + `computeFixAndPrPlan`，返回 skip / create 决策 |
 | `pushFixBranchWithCredential(branch, workDir, token)` | `platform-delivery.ts` | 与 `pushFixBranch` 等价，独立导出便于单测；失败抛 `PlatformDeliveryError(push_failed)` |
