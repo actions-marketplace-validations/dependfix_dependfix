@@ -195,23 +195,27 @@ export const triggerSchedule = async (scheduleId: string): Promise<ScheduleTrigg
 }
 
 /**
- * pr-check schedule 触发：按仓库聚合 credential → 构造 Octokit → ActionStatusMonitor.pollOnce。
+ * PR Check polling 执行（不依赖 schedule 实体）：按 credential 聚合 → Octokit → ActionStatusMonitor.pollOnce。
+ *
+ * 供两条链路共用：
+ * - schedule 触发（cron / 手动计划触发，经 `triggerSchedule`）
+ * - 手动触发端点 `POST /api/pr-checks/poll`（无 pr-check 计划时也能即时刷新列表缓存）
  *
  * env 开关（详见 docs/plan/todo.md §M24.1 关键决策 D7）：
- * - ACTION_STATUS_MONITOR_ENABLED=false（默认）→ skip + log warn + 返回 { skipped: true }
- *   （caller 据此不更新 lastTriggeredAt，避免运维调试时每分钟落触发时间戳）
- * - ACTION_STATUS_MONITOR_ENABLED=true → 实际 polling
+ * - `ACTION_STATUS_MONITOR_ENABLED=false`（默认）→ log warn + 返回 `{ processed: 0, errors: 0, skipped: true }`
+ *   （caller 据此不更新 lastTriggeredAt；前端据此显示「监测未启用」提示）
+ * - `ACTION_STATUS_MONITOR_ENABLED=true` → 实际 polling
  *
- * 当前实现仅支持 PAT 路径（GitHub App 路径留作后续阶段，本批次抛 not-implemented）。
+ * 当前实现仅支持 PAT 路径（GitHub App 路径留作后续阶段，本批次按错误计数处理）。
  */
-const triggerPrCheckSchedule = async (
+export const runPrCheckPoll = async (
     ds: Awaited<ReturnType<typeof ensureDatabaseInitialized>>,
-    schedule: Schedule,
     repositoryIds: string[],
+    options: { organizationId?: string | null, logLabel: string },
 ): Promise<PrCheckTriggerResult> => {
     if (!isActionStatusMonitorEnabled()) {
         console.warn(
-            `[scheduler] pr-check schedule ${schedule.id} 跳过触发：ACTION_STATUS_MONITOR_ENABLED 未启用（默认 false）。`
+            `[scheduler] pr-check ${options.logLabel} 跳过触发：ACTION_STATUS_MONITOR_ENABLED 未启用（默认 false）。`
             + '设置 ACTION_STATUS_MONITOR_ENABLED=true 后重启进程。',
         )
         return { processed: 0, errors: 0, skipped: true }
@@ -266,7 +270,7 @@ const triggerPrCheckSchedule = async (
         const monitor = new ActionStatusMonitor(ds, pollingSource)
 
         const result = await monitor.pollOnce({
-            organizationId: schedule.organizationId ?? null,
+            organizationId: options.organizationId ?? null,
             repositoryIds: ids,
         })
         totalProcessed += result.processed
@@ -275,6 +279,16 @@ const triggerPrCheckSchedule = async (
 
     return { processed: totalProcessed, errors: totalErrors }
 }
+
+/** schedule 触发的薄封装（保持 `triggerSchedule` 调用点不变） */
+const triggerPrCheckSchedule = async (
+    ds: Awaited<ReturnType<typeof ensureDatabaseInitialized>>,
+    schedule: Schedule,
+    repositoryIds: string[],
+): Promise<PrCheckTriggerResult> => runPrCheckPoll(ds, repositoryIds, {
+    organizationId: schedule.organizationId ?? null,
+    logLabel: `schedule ${schedule.id}`,
+})
 
 /** 供手动触发 API 与 Worker processor 复用；关闭清理（进程退出时调用，防御性） */
 export const shutdownScheduler = (): void => {
