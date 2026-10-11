@@ -126,7 +126,7 @@
 
 - **选项 A：读取时派生**（无 schema 变更）。在 API 层用纯函数 `classifyRunFailure(status, errorJson, result/summaryJson)` 计算。优点：零迁移、向后兼容；缺点：无法 SQL 索引过滤、逻辑散落读路径。
 - **选项 B：落库（推荐）**。在 run 终结时（`scan-orchestrator.service.ts` 调用 `resolveScanRunState` 之后）计算并写入新列；历史行由迁移回填（可判定则填，否则 `unknown`）。优点：可索引 / 可聚合 / 稳定可审计；缺点：需迁移 + 回填。
-- **已采纳（M37.1 实现期）：选项 B 落库**，三列均落库（§7 决策收敛）。落点覆盖全部失败写路径：orchestrator（状态机决策 + catch-all）/ batch-executor（去重合并 / 入队失败）/ stale-cleanup（孤儿清理）/ scan.post（去重合并）/ force-fail（admin 强终）。
+- **已采纳（M37.1 实现期）：选项 B 落库**，三列均落库（§7 决策收敛）。落点覆盖全部失败写路径：orchestrator（状态机决策 + catch-all）/ batch-executor（去重合并 / 入队失败）/ stale-cleanup（孤儿清理）/ scan.post（**仅「新建路径的孤儿 pending run」去重合并落库**；复用既有终态 run 的去重合并**不落失败**——既有 run 记录保持不变、仅回应「已合并」提示）/ force-fail（admin 强终）。
 
 ### 5.2 数据模型（已落地）
 
