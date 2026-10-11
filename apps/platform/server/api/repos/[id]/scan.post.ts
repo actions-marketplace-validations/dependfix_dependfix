@@ -86,19 +86,32 @@ export default defineEventHandler(async (event) => {
                 runId: pendingRun.id,
                 reuse: !!reuseExisting, // 用户主动复用：worker 端透传 reuse=true 绕过终态校验
             })
+            let mergedNotice: { code: string, message: string } | undefined
             if (reused) {
-                // 同仓库已有进行中任务（去重合并）：孤儿 pending run 置 failed + duplicate 提示，
-                // 避免前端轮询 10 分钟后误报"扫描仍在进行"
-                pendingRun.status = 'failed'
-                pendingRun.finishedAt = new Date()
-                const mergedFailure = {
-                    code: 'SCAN_PENDING_MERGED', // 与 ServerErrorCode 联合类型对齐（已定义 SCAN_PENDING_MERGED 但 throw 路径未使用）
-                    message: '该仓库已有进行中的扫描任务，本次触发已合并',
+                if (reuseExisting) {
+                    // 复用既有终态 run + 同仓库已有进行中任务（去重合并）：
+                    // **既有 run 记录保持不变**（用户指定的历史结果不得被推翻、不得落 failed），
+                    // 仅回应「已合并」提示；后续按既有 run.id 关联的历史 / 告警不受影响。
+                    mergedNotice = {
+                        code: 'SCAN_PENDING_MERGED',
+                        message: '该仓库已有进行中的扫描任务，本次触发已合并（既有 run 记录保持不变）',
+                    }
+                } else {
+                    // 新建路径产生**孤儿 pending run**（无任何 job 承载它）：置 failed + duplicate 提示，
+                    // 避免前端轮询 10 分钟后误报"扫描仍在进行"
+                    pendingRun.status = 'failed'
+                    pendingRun.finishedAt = new Date()
+                    const mergedFailure = {
+                        code: 'SCAN_PENDING_MERGED', // 与 ServerErrorCode 联合类型对齐（已定义 SCAN_PENDING_MERGED 但 throw 路径未使用）
+                        message: '该仓库已有进行中的扫描任务，本次触发已合并',
+                    }
+                    pendingRun.errorJson = JSON.stringify(mergedFailure)
+                    applyFailureClassification(pendingRun, { status: 'failed', error: mergedFailure })
+                    await ds.getRepository(ScanRun).save(pendingRun)
+                    mergedNotice = mergedFailure
                 }
-                pendingRun.errorJson = JSON.stringify(mergedFailure)
-                applyFailureClassification(pendingRun, { status: 'failed', error: mergedFailure })
-                await ds.getRepository(ScanRun).save(pendingRun)
             }
+            return { ...serializeRun(pendingRun), ...(mergedNotice ? { merged: mergedNotice } : {}) }
         } catch (error) {
             // 入队失败 failover：同步执行（续用 pending run），保证任务不丢失
             const message = error instanceof Error ? error.message : String(error)
@@ -115,7 +128,6 @@ export default defineEventHandler(async (event) => {
             })
             return serializeRun(run)
         }
-        return serializeRun(pendingRun)
     }
 
     // 同步降级：请求内完成扫描（既有行为；reuse 路径传 runId + reuse:true 让 orchestrator
