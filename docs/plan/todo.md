@@ -80,20 +80,21 @@
 
 - **实际交付**：`cb64ce2` fix(platform)（`scan.post.ts` + `scan.post.test.ts`）+ `677aa4f` docs(governance)（失败写路径落点细化）+ 本条登记 commit。**质量门**：platform lint 0 error（2 条既有 max-lines warning：scans.vue / alerts.vue）；platform typecheck exit 0；定向 `server/api/repos` 90 passed；check:docs / lint:md / check:doc-size / check:orphan-ids 全通过（新增注释中的阶段编号已按注释规范去除，保留解释正文）。**审计**：standard R1 **Pass**（0 blocker / 0 warning / 2 suggest）——RG-S01（前端不消费 `merged`，属 AC 范围外、行为改动前后一致）已登记 backlog 候选；RG-S02（`merged.message` 服务端硬编码与 i18n 文案分歧）为既有模式、非本次引入。**mutation**：反转载体判定（`if (reuseExisting)` → `if (!reuseExisting)`）→ 2 failed（新用例 + 既有新建路径用例），已还原。**残余**：前端提示未接线（候选已登记）；`merged.message` 硬编码沿用既有模式（消费方按 `code` 走 i18n）。
 
-### M42.4 [P2 🚀] PR Check 手动触发（同步端点 + 总开关门控）
+### M42.4 [P2 🚀] PR Check 手动触发（同步端点 + 总开关门控）（**已闭环** `85eb0d9` + `4aa1f7b`）
 
 - **目标**：为 PR Check 页面提供「立即检查」入口，无 `pr-check` 计划时也能即时刷新监测链路（同步端点，受 `ACTION_STATUS_MONITOR_ENABLED` 门控）。
 - **优先级**：P2
 - **范围**：新增 `apps/platform/server/api/pr-checks/poll.post.ts`（`requireRole` admin/org_admin + `requireOrgResource` 组织隔离）+ `apps/platform/server/services/scheduler/scheduler.service.ts:207`（`triggerPrCheckSchedule` 的「按 credential 聚合 → Octokit → `pollOnce`」抽为共享函数复用）+ `apps/platform/app/pages/pr-checks.vue`（「立即检查」按钮 + 结果 toast）+ i18n ×2 + 单测 + e2e。
 - **验收标准**：
-  - [ ] ① **端点单测**：未启用总开关 → 返回 `skipped` + 提示（与 schedules 触发语义一致）；启用 → 触发 `pollOnce` 并返回 processed / errors 统计。
-  - [ ] ② **权限**：非 admin / org_admin → 403；跨组织资源 → 403（`requireOrgResource`）。
-  - [ ] ③ **e2e**：pr-checks 页「立即检查」按钮可见 + 点击后 toast 呈现（未启用时提示路径覆盖）。
-  - [ ] ④ `pnpm run check:i18n` parity 0 + `pnpm typecheck` 0 error + 定向 vitest 通过。
+  - [x] ① **端点单测**：未启用总开关 → 返回 `skipped` + 提示（与 schedules 触发语义一致）；启用 → 触发 `pollOnce` 并返回 processed / errors 统计。
+  - [x] ② **权限**：非 admin / org_admin → 403；跨组织资源 → 403（`requireOrgResource`）；范围收敛另由 `resolveRepositoryIds(kind='all', organizationId)` 保证（单组织模型下 `requireOrgResource` 为恒真形状校验，`organizationId` 由服务端派生、无客户端入参）。
+  - [x] ③ **e2e**：pr-checks 页「立即检查」按钮可见 + 点击后 toast 呈现（未启用时提示路径覆盖）。
+  - [x] ④ `pnpm run check:i18n` parity 0 + `pnpm typecheck` 0 error + 定向 vitest 通过。
 - **不做什么**：不做异步入队（重方案，暂不采纳）；不新增 admin 设置项 / DB 持久化与迁移（与「不改 ActionStatusMonitor 实体」一致）；不改 `pollOnce` 内部逻辑；不改既有 `POST /api/schedules/[id]/trigger` 语义。
 - **依赖**：M39.5（`kind` 落库 + `monitor-status` 只读总开关端点，`3b8e322`）已就位，共享 `isActionStatusMonitorEnabled()`（`scheduler.service.ts:142`）与 `triggerPrCheckSchedule` 的 credential 聚合逻辑；评估结论已完成（用户 2026-10-10 裁定形态 = 同步端点 + 总开关门控）。
 - **交付物**：预计 2 commits——① 后端端点 + service 抽共享函数 + 单测（`api/pr-checks/poll.post.ts` + `.test.ts` + `scheduler.service.ts`）；② 前端按钮 + i18n ×2 + e2e。预计 6-8 文件 / 150-250 行。
-- **风险与缓解**：**R1 请求路径内直调 GitHub API，仓库多时耗时长**——同步 + 上限/超时，超限返回部分结果并披露；**R2 未启用时前端交互歧义**——复用 `monitor-status` 端点前置判定，按钮态与提示一致。
+- **风险与缓解**：**R1 请求路径内直调 GitHub API，仓库多时耗时长**——同步 + **单次仓库数上限**（`MAX_POLL_REPOSITORIES`，超出部分本次不 polling 并在响应 `truncated` / `candidateCount` 披露、前端提示仅处理部分仓库）；**HTTP 请求超时未加显式约束**（与既有 scheduled 链路同源，超时兜底来自底层 transport）——接受为已知边界（admin-only + 上限使影响面有界）；**R2 未启用时前端交互歧义**——`skipped` 分支返回 warning 提示（按钮态与提示一致）。
+- **实际交付**：`85eb0d9` feat(platform)（`poll.post.ts` + `.test.ts` 新增 + `scheduler.service.ts` 抽共享函数）+ `4aa1f7b` feat(platform)（`pr-checks.vue` + i18n ×2 + e2e 新增 + 视觉基线重建）+ 本条登记 commit。**质量门**：platform lint 0 error（2 条既有 max-lines warning）；platform typecheck exit 0；端点单测 23 passed；e2e 1 passed（服务端日志证实「点击 → 端点 → 共享函数 → skipped」全链路）；i18n parity 0 / anchor OK / lint:i18n 0；视觉回归全量两遍 11 passed（幂等）；check:docs / lint:md / check:doc-size / check:orphan-ids 全通过。**审计**：standard R1 **Reject**（RG-B1 blocker：改页头后未重建视觉基线 → CI visual job 必红，审计本机实测 1 failed；RG-W1 上限/超时未实现；RG-S1 注释措辞夸大）→ 修复（重建基线并幂等复验 + 补单次上限与披露 + 注释订正）→ R2 quick **Pass**（新增 RG-W2 文案承诺不存在的能力 → 已订正）→ R3 quick **Pass**（0 阻塞；RG-S3 注释措辞已随手应用）。**mutation**：M1 `skipped` 恒 false / M2 删 `requireOrgResource` / M3 `kind` 由 `all` 改 `explicit` / M4 去截断，四者各击杀 1 用例并全部还原。**残余**：启用总开关后的真实 polling 链路待人工验收（需真实 GitHub 凭据）；>50 仓库截断无 offset 轮转（重复触发仍取同一批，已在 JSDoc 与文案如实陈述）。
 
 ### M42.5 [P2 🎨] 平台列表页表格基础能力补强（repos / batch-runs 筛选 + 搜索 + 分页）
 
