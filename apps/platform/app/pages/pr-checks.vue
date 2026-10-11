@@ -129,6 +129,54 @@ const onUpdateMultiSortMeta = (meta: DataTableSortMeta[]) => {
 }
 
 const isAcking = ref<string | null>(null)
+const isPolling = ref(false)
+
+/**
+ * 手动触发一轮 PR Check polling（POST /api/pr-checks/poll）。
+ * 总开关未启用时后端返回 skipped:true → 以 warning 提示（不视为失败）；成功则提示统计并刷新列表缓存。
+ */
+const handlePoll = async () => {
+    isPolling.value = true
+    try {
+        const res = await requestFetch<{
+            skipped: boolean
+            processed: number
+            errors: number
+            candidateCount: number
+            truncated: boolean
+        }>('/api/pr-checks/poll', {
+            method: 'POST',
+        })
+        if (res.skipped) {
+            toast.warning({
+                title: t('prChecks.poll.disabled'),
+                duration: 5000,
+            })
+            return
+        }
+        if (res.truncated) {
+            toast.warning({
+                title: t('prChecks.poll.truncated', { candidateCount: res.candidateCount }),
+                duration: 5000,
+            })
+        }
+        toast.success({
+            title: t('prChecks.poll.success', { processed: res.processed, errors: res.errors }),
+            duration: 3000,
+        })
+        await refresh()
+    } catch (error) {
+        const message = (error as { data?: { message?: string }, message?: string }).data?.message
+            ?? (error as { message?: string }).message
+            ?? String(error)
+        toast.danger({
+            title: t('prChecks.poll.failed', { message }),
+            duration: 5000,
+        })
+    } finally {
+        isPolling.value = false
+    }
+}
 
 const handleAck = async (row: PRCheckView) => {
     isAcking.value = row.id
@@ -159,8 +207,18 @@ const handleAck = async (row: PRCheckView) => {
 <template>
     <div class="pr-checks">
         <header class="pr-checks__header">
-            <h2>{{ t('prChecks.title') }}</h2>
-            <p>{{ t('prChecks.subtitle') }}</p>
+            <div class="pr-checks__header-text">
+                <h2>{{ t('prChecks.title') }}</h2>
+                <p>{{ t('prChecks.subtitle') }}</p>
+            </div>
+            <CaomeiButton
+                tone="neutral"
+                size="sm"
+                :loading="isPolling"
+                @click="handlePoll"
+            >
+                {{ t('prChecks.poll.action') }}
+            </CaomeiButton>
         </header>
 
         <!-- 顶部统计卡片（4 张：total / firing / acknowledged / byConclusion 最大组） -->
@@ -323,6 +381,10 @@ const handleAck = async (row: PRCheckView) => {
     }
 
     &__header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: $space-3;
         margin-bottom: $space-4;
     }
 

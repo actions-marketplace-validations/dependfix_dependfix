@@ -524,6 +524,13 @@
         "colLink": "链接",
         "colActions": "操作",
         "repositoryUnknown": "未知仓库",
+        "poll": {
+            "action": "立即检查",
+            "success": "已检查 {processed} 个 PR（错误 {errors} 个）",
+            "disabled": "PR Check 监测未启用（ACTION_STATUS_MONITOR_ENABLED=false），本次已跳过",
+            "truncated": "候选仓库数（{candidateCount}）超出单次检查上限，本次仅处理前若干仓库（其余仓库未检查）",
+            "failed": "立即检查失败：{message}"
+        },
         "ack": {
             "action": "Ack 关闭告警",
             "success": "已 ack PR #{prNumber}",

@@ -524,6 +524,13 @@
         "colLink": "Link",
         "colActions": "Actions",
         "repositoryUnknown": "Unknown repository",
+        "poll": {
+            "action": "Check now",
+            "success": "Checked {processed} PRs ({errors} errors)",
+            "disabled": "PR Check monitoring is disabled (ACTION_STATUS_MONITOR_ENABLED=false); skipped",
+            "truncated": "Candidate repositories ({candidateCount}) exceed the per-run limit; only the first batch was checked (the rest were not checked).",
+            "failed": "Check failed: {message}"
+        },
         "ack": {
             "action": "Ack and close alert",
             "success": "PR #{prNumber} acknowledged",
