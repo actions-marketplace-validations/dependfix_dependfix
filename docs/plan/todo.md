@@ -96,20 +96,22 @@
 - **风险与缓解**：**R1 请求路径内直调 GitHub API，仓库多时耗时长**——同步 + **单次仓库数上限**（`MAX_POLL_REPOSITORIES`，超出部分本次不 polling 并在响应 `truncated` / `candidateCount` 披露、前端提示仅处理部分仓库）；**HTTP 请求超时未加显式约束**（与既有 scheduled 链路同源，超时兜底来自底层 transport）——接受为已知边界（admin-only + 上限使影响面有界）；**R2 未启用时前端交互歧义**——`skipped` 分支返回 warning 提示（按钮态与提示一致）。
 - **实际交付**：`85eb0d9` feat(platform)（`poll.post.ts` + `.test.ts` 新增 + `scheduler.service.ts` 抽共享函数）+ `4aa1f7b` feat(platform)（`pr-checks.vue` + i18n ×2 + e2e 新增 + 视觉基线重建）+ 本条登记 commit。**质量门**：platform lint 0 error（2 条既有 max-lines warning）；platform typecheck exit 0；端点单测 23 passed；e2e 1 passed（服务端日志证实「点击 → 端点 → 共享函数 → skipped」全链路）；i18n parity 0 / anchor OK / lint:i18n 0；视觉回归全量两遍 11 passed（幂等）；check:docs / lint:md / check:doc-size / check:orphan-ids 全通过。**审计**：standard R1 **Reject**（RG-B1 blocker：改页头后未重建视觉基线 → CI visual job 必红，审计本机实测 1 failed；RG-W1 上限/超时未实现；RG-S1 注释措辞夸大）→ 修复（重建基线并幂等复验 + 补单次上限与披露 + 注释订正）→ R2 quick **Pass**（新增 RG-W2 文案承诺不存在的能力 → 已订正）→ R3 quick **Pass**（0 阻塞；RG-S3 注释措辞已随手应用）。**mutation**：M1 `skipped` 恒 false / M2 删 `requireOrgResource` / M3 `kind` 由 `all` 改 `explicit` / M4 去截断，四者各击杀 1 用例并全部还原。**残余**：启用总开关后的真实 polling 链路待人工验收（需真实 GitHub 凭据）；>50 仓库截断无 offset 轮转（重复触发仍取同一批，已在 JSDoc 与文案如实陈述）。
 
-### M42.5 [P2 🎨] 平台列表页表格基础能力补强（repos / batch-runs 筛选 + 搜索 + 分页）
+### M42.5 [P2 🎨] 平台列表页表格基础能力补强（repos / batch-runs 筛选 + 搜索 + 分页）（**已闭环** `6a95800` + `a069c9a`）
 
 - **目标**：为 `repos` / `batch-runs` 两个列表页补齐筛选、搜索与分页能力（caomei `DataTable` 无内建 filters / globalFilter，须页面侧实现）。
 - **优先级**：P2
 - **范围**：`apps/platform/app/pages/repos.vue`（搜索：owner / name / tags / credential；筛选：executorKind / packageManager / credential；分页 10/25/50）+ `apps/platform/app/pages/batch-runs.vue`（筛选：source / status，可选 mode / severity；分页）+（可选）轻量 `useClientTableFilter` composable + i18n ×2 + e2e。
 - **验收标准**：
-  - [ ] ① **repos 页**：搜索（owner / name / tags / credential）与筛选（executorKind / packageManager / credential）叠加生效 + 分页（10/25/50）切换正确。
-  - [ ] ② **batch-runs 页**：筛选（source / status，可选 mode / severity）+ 分页切换正确，保留现有排序。
-  - [ ] ③ **e2e**：筛选 / 搜索 / 分页交互用例通过（含「排序 + 分页」叠加分支）。
-  - [ ] ④ `pnpm typecheck` 0 error + `pnpm lint` 0 error + `pnpm run check:i18n` parity 0。
+  - [x] ① **repos 页**：搜索（owner / name / tags / credential）与筛选（executorKind / packageManager / credential）叠加生效 + 分页（10/25/50）切换正确。
+  - [x] ② **batch-runs 页**：筛选（source / status）+ 分页切换正确，保留现有排序（增量 reconcile 仍作用于全量集合）。
+  - [x] ③ **e2e**：筛选 / 搜索 / 分页交互用例通过（含「排序 + 分页」叠加分支与每页条数三档）。
+  - [x] ④ `pnpm typecheck` 0 error + `pnpm lint` 0 error + `pnpm run check:i18n` parity 0。
 - **不做什么**：不改 `/api/repos` 全量返回与 `/api/batch-runs` `take: 50` 的服务端契约（客户端实现）；不延伸至 `users` / `credentials` / `env-events` / `schedules` 等其它表（后续按需另登记）；不引入 `DataTable` 内建之外的第三方表格库。
 - **依赖**：评估结论已完成（2026-10-10，推荐客户端实现——repos 服务端返全量、batch-runs 已 `take: 50`）；`repos.vue:280` / `batch-runs.vue:245` 的 `columns` 现有部分列 `sortable`。
 - **交付物**：预计 2-3 commits——① repos 页筛选/搜索/分页 + i18n；② batch-runs 页筛选/分页 + i18n；③ e2e。预计 5-8 文件 / 200-350 行。
 - **风险与缓解**：**R1 抽 composable 过度抽象**（减法原则）——先页面内实现，重复面 ≥2 处且形态一致时再抽共享；**R2 客户端分页与增量 reconcile / 排序交互**——沿用 M39.1 byRepo 客户端分页既有模式，e2e 覆盖叠加分支。
+
+- **实际交付**：`6a95800` feat(platform)（`repos.vue` + `batch-runs.vue` + i18n ×2）+ `a069c9a` test(platform)（e2e 新增 + 4 个视觉基线 PNG）+ 本条登记 commit。**质量门**：platform lint 0 error（2 条既有 max-lines warning）；platform typecheck exit 0；e2e 2 passed；i18n parity 0 / anchor OK；视觉回归全量 11 passed（4 个基线按改动重建并连跑两遍验证幂等）；check:docs / lint:md / check:doc-size / check:orphan-ids 全通过（`orphan-ids` 首跑曾因本地 e2e 产物 `test-results` 误报——该门禁缺口已在 backlog 登记为候选，清理产物后复跑 0 命中）。**审计**：quick R1 **Pass**（0 blocker / 2 warning：AC 显式要求的「排序 + 分页叠加」与「每页条数切换」缺覆盖；行选择语义未文档化）→ 补 e2e 两段断言 + JSDoc 如实描述 → R2 **Pass**（指出注释未覆盖「下一次勾选以过滤后集合回写」+ 50 档未锁定）→ 补正 → R3 **Pass**（0/0/0）。**mutation**：M1 `filteredRepos` 退化为全量 → repos e2e 失败；M2 `:paginator` 关闭 → repos e2e 失败（`Expected 10, Received 12`）；均还原。**残余**：`useClientTableFilter` 未抽（R1 决策：两页形态未完全一致，先页面内实现，待重复面扩大再抽）；行选择「下一次勾选丢弃被隐藏的已选行」为 caomei DataTable 既有行为，已在 JSDoc 如实登记（未改变语义）。
 
 ### M42.6 [P3 🎨] 严重级别展示策略统一（单一事实源）
 
