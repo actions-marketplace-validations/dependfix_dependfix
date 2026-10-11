@@ -113,17 +113,18 @@
 
 - **实际交付**：`6a95800` feat(platform)（`repos.vue` + `batch-runs.vue` + i18n ×2）+ `a069c9a` test(platform)（e2e 新增 + 4 个视觉基线 PNG）+ 本条登记 commit。**质量门**：platform lint 0 error（2 条既有 max-lines warning）；platform typecheck exit 0；e2e 2 passed；i18n parity 0 / anchor OK；视觉回归全量 11 passed（4 个基线按改动重建并连跑两遍验证幂等）；check:docs / lint:md / check:doc-size / check:orphan-ids 全通过（`orphan-ids` 首跑曾因本地 e2e 产物 `test-results` 误报——该门禁缺口已在 backlog 登记为候选，清理产物后复跑 0 命中）。**审计**：quick R1 **Pass**（0 blocker / 2 warning：AC 显式要求的「排序 + 分页叠加」与「每页条数切换」缺覆盖；行选择语义未文档化）→ 补 e2e 两段断言 + JSDoc 如实描述 → R2 **Pass**（指出注释未覆盖「下一次勾选以过滤后集合回写」+ 50 档未锁定）→ 补正 → R3 **Pass**（0/0/0）。**mutation**：M1 `filteredRepos` 退化为全量 → repos e2e 失败；M2 `:paginator` 关闭 → repos e2e 失败（`Expected 10, Received 12`）；均还原。**残余**：`useClientTableFilter` 未抽（R1 决策：两页形态未完全一致，先页面内实现，待重复面扩大再抽）；行选择「下一次勾选丢弃被隐藏的已选行」为 caomei DataTable 既有行为，已在 JSDoc 如实登记（未改变语义）。
 
-### M42.6 [P3 🎨] 严重级别展示策略统一（单一事实源）
+### M42.6 [P3 🎨] 严重级别展示策略统一（单一事实源）（**已闭环** `669584d` + `92bf299`）
 
 - **目标**：统一 `severityThreshold` 在各界面的展示策略，收敛到 `scanSeverityOptions` 单一事实源（含 `all` 走 i18n）。
 - **优先级**：P3
-- **范围**：`apps/platform/app/utils/scan-options.ts:20`（`scanSeverityOptions` 单源）+ `apps/platform/app/utils/run-view.ts:35`（`runThresholdLabel` 小写直通）+ `apps/platform/app/pages/scans.vue:745`（内联小写直通）+ `apps/platform/app/pages/batch-runs.vue:64`（`severityLabel` 大驼峰）+ `apps/platform/app/components/alert-run-sidebar.vue`（raw 直通）+ `apps/platform/app/pages/repos/[id]/runs.vue`（raw 直通，legacy 页）+ `apps/platform/app/components/repo-history-dialog.vue`（raw 直通，在用）。
+- **范围**：新增 `apps/platform/app/utils/scan-options.ts` 的 `scanSeverityLabel`（**展示口径唯一入口**）+ 六处展示点收敛（`run-detail-dialog.vue` 经 `run-view.ts` 间接 / `batch-runs.vue` 硬编码映射 / `scans.vue` 内联小写直通 / `alert-run-sidebar.vue` raw 直通 / `repo-history-dialog.vue` 列默认渲染 / `repos/[id]/runs.vue` 列默认渲染）+ 删除 `run-view.ts` 的 `runThresholdLabel` + 单测同步。
 - **验收标准**：
-  - [ ] ① 全部 `severityThreshold` 展示点统一经 `scanSeverityOptions`（或同源查找）渲染，含 `all` 走 i18n。
-  - [ ] ② 全仓 `rg` 确认无遗留「raw 直通 / 小写直通」实现（`rg -n "severityThreshold" apps/platform/app` 逐点核对）。
-  - [ ] ③ 视觉回归基线重建后幂等（`pnpm --filter @dependfix/platform test:visual`，如展示文案变更需 `--update-snapshots=all` 重建）。
-  - [ ] ④ `pnpm typecheck` 0 error + e2e 相关用例通过。
+  - [x] ① 全部 `severityThreshold` 展示点统一经 `scanSeverityOptions`（或同源查找）渲染，含 `all` 走 i18n。
+  - [x] ② 全仓 `rg` 确认无遗留「raw 直通 / 小写直通」实现（`rg -n "severityThreshold" apps/platform/app` 逐点核对；审计独立复核 6 处均已收敛、非展示点用途已甄别）。
+  - [x] ③ 视觉回归基线**无需重建**（实测全量 11 passed）——6 个改动展示点均不在视觉基线截图范围内（判定依据经审计独立核实：`repos` 页表格不含阈值列、告警侧栏与弹窗需交互打开而基线为表格/页面静态截图）。
+  - [x] ④ `pnpm typecheck` 0 error + e2e 相关用例通过（含**全量 e2e 189 passed**）。
 - **不做什么**：不改 `env-events.vue` 的 `severityOptions`（词表 `all/info/warn/error/critical` + 独立 `envEvents.*` 命名空间，属环境事件严重度非同源）；不改 `alerts.vue` 的 `severityOptions`（含 `Low` / `Unknown`）；不删除 legacy `/repos/[id]/runs` 页（属死代码候选，另登记）。
 - **依赖**：无前置。现状锚点（3 类展示面并存）——① **大驼峰 + `all` 走 i18n**：`scanSeverityOptions`（`utils/scan-options.ts:20` 单一事实源）/ `batch-runs.vue:64` 的 `severityLabel`；② **小写直通 + `all` 走 i18n**：`run-view.ts:35` 的 `runThresholdLabel` / `scans.vue:745` 内联；③ **raw 直通（连 `all` 都不翻译）**：`alert-run-sidebar.vue` 的 `row.severityThreshold` / `repos/[id]/runs.vue`（legacy 页）/ `repo-history-dialog.vue`（在用，`scans.vue` 挂载）。非同源已排除：`env-events.vue`（独立 `envEvents.*` 命名空间）/ `alerts.vue`（含 `Low` / `Unknown`）。
 - **交付物**：预计 1-2 commits——① 统一展示策略 + 视觉基线重建（如需要）；② 文档登记（如需）。预计 4-7 文件 / 40-100 行。
-- **风险与缓解**：**R1 在用界面（`repo-history-dialog`）文案变更影响视觉基线**——按 `--update-snapshots=all` 重建并幂等复验；**R2 误改非同源选项表**（env-events / alerts）——AC 显式排除 + `rg` 穷举核对。
+- **风险与缓解**：**R1 在用界面（`repo-history-dialog`）文案变更影响视觉基线**——实测 6 个展示点均不在基线范围内（见 AC ③），无需重建；**R2 误改非同源选项表**（env-events / alerts）——AC 显式排除 + `rg` 穷举核对（审计独立复核通过）。
+- **实际交付**：`669584d` feat(platform)（单源 helper + 六处展示点收敛 + 删除 `runThresholdLabel` + 单测同步，10 文件）+ `92bf299` test(platform)（e2e 断言修复，2 文件）+ 本条登记 commit。**质量门**：platform lint 0 error（2 条既有 max-lines warning）；platform typecheck exit 0；`tests/unit` 52 passed；**全量 e2e 189 passed**；视觉全量 11 passed（无需重建）；i18n parity 0 / anchor OK；check:docs / lint:md / check:doc-size / check:orphan-ids 全通过。**审计**：standard R1 **Reject**（RG-B1 blocker：`alerts-sidebar` e2e 小写阈值断言未随行为变更同步，审计实测复现 1 failed；RG-W1 排序断言弱化且 flaky；RG-W2 该项属范围外并入；RG-W3 未跑全量 e2e）→ 修复（断言改大写字面 + 定位根因：caomei 排序触发器是表头内按钮、改点击目标 + 属性回写轮询 + 锁定升序 → 跑全量 e2e）→ R2 **Pass**（0 blocker/warning；1 suggest 措辞已应用）。**行为变更说明**：级别展示由「小写直通」统一为「首字母大写」，属本条目标口径（AC ① 明示统一到选项事实源）。**残余**：`settings.vue` 的等价 `find(...)?.label ?? value` 未收敛（满足 AC ①的「同源查找」，收敛需另开范围）；`batch-runs` / `scans` / `repo-history-dialog` / `repos/[id]/runs` / `run-detail-dialog` 展示点在 e2e 层无逐点文案断言（既有覆盖边界，非本轮回归）。
