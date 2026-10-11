@@ -3,7 +3,7 @@
 // 提取为模块级函数；通过 AppContext 传入所需状态，行为与原类方法一致。
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { execSync } from 'node:child_process'
+import { execFileSync, execSync } from 'node:child_process'
 import {
     toErrorMessage,
     type AlertsDisabledRecord,
@@ -605,6 +605,12 @@ export function tryLockfileRepair(
 /**
  * 将修复产生的变更提交到本地当前分支。
  *
+ * - 工作目录不是 git 仓库时跳过（warn，不抛错）——避免异常路径（如 report-only 被误降级为
+ *   `fix + commit` 却未 clone）上以 `git config` 硬失败污染整次运行结果
+ * - 该守卫**有意 fail-open**（仅 warn、不写 `allErrors`、不影响退出码）：非仓库意味着「无可提交内容」
+ *   而非「交付失败」，故不产生 `COMMIT_FAILED`（平台会把该 category 判为 `failed`，见 run-failure-taxonomy）。
+ *   平台 fix / fix-and-pr 路径必先 clone（workDir 恒为仓库），故该分支仅在 CLI 于非 git cwd 运行 `--commit` 时可达。
+ *   代价是「请求 commit 但未交付」在 run 结果里只留日志、不留结构化信号（已登记 backlog 候选评估补信号）。
  * - 无任何变更（含已暂存变更）时跳过
  * - config 校验已保证 `commit` 与 `dryRun` / `createPullRequest` 互斥，
  *   因此这里不需要再检查这两个开关
@@ -613,6 +619,16 @@ export function commitLocalChanges(
     ctx: Pick<AppContext, 'logger' | 'workDir' | 'allActions' | 'authProvider'>,
 ): void {
     const { logger, workDir, allActions, authProvider } = ctx
+
+    // 纵深防御：非 git 仓库时不能提交（`git config` / `git add` 均会失败）。
+    // 必须显式探测——`hasGitChanges` 在非仓库目录下把「git 命令失败」当作「有变更」，
+    // 会让流程继续走到 stageAndCommit 并以 `git config user.name` 抛
+    // `fatal: not in a git directory` → 记 COMMIT_FAILED → 平台误标整次运行为失败
+    // （2026-10-11 生产实证：report-only 扫描被降级为 fix+commit 且未 clone）。
+    if (!isGitRepository(workDir)) {
+        logger.warn(`工作目录不是 git 仓库 — 跳过本地提交（${workDir}）`)
+        return
+    }
 
     if (!hasGitChanges(workDir)) {
         logger.info('No changes to commit — skipping local commit')
@@ -629,7 +645,26 @@ export function commitLocalChanges(
 }
 
 /**
+ * 判断 workDir 是否为 git 仓库工作树。
+ *
+ * 必须显式探测：git 在非仓库目录下的错误文案随子命令而异（`fatal: not in a git directory`
+ * vs `fatal: not a git repository`），且 `--local` / 写入类命令与只读类命令的行为并不统一，
+ * 因此**不能**用「某条 git 命令是否失败」反推仓库存在（`hasGitChanges` 的 catch-all 即此盲区）。
+ */
+export function isGitRepository(workDir: string): boolean {
+    try {
+        execFileSync('git', ['rev-parse', '--git-dir'], { cwd: workDir, stdio: 'pipe' })
+        return true
+    } catch {
+        return false
+    }
+}
+
+/**
  * 检查工作目录是否有未提交的变更（含未暂存与已暂存）。
+ *
+ * ⚠️ 调用前需保证 workDir 是 git 仓库（见 [isGitRepository]）：非仓库目录下两条 git 命令
+ * 都会失败，本函数会把「命令失败」当作「有变更」返回 true。
  */
 export function hasGitChanges(workDir: string): boolean {
     try {

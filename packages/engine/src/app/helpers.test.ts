@@ -1,3 +1,4 @@
+import { execSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -47,7 +48,7 @@ vi.mock('../helpers', async (importOriginal) => {
     }
 })
 
-import { ensureGitignore, normalizeGitignoreEntry, runCodeScanningFixes } from './helpers'
+import { commitLocalChanges, ensureGitignore, isGitRepository, normalizeGitignoreEntry, runCodeScanningFixes } from './helpers'
 
 // ---------------------------------------------------------------------------
 // 测试辅助
@@ -396,5 +397,99 @@ describe('ensureGitignore', () => {
         } finally {
             rmSync(plain, { recursive: true, force: true })
         }
+    })
+})
+
+// ---------------------------------------------------------------------------
+// isGitRepository / commitLocalChanges（非 git 工作目录防御）
+// ---------------------------------------------------------------------------
+
+describe('isGitRepository', () => {
+    let dir: string
+
+    beforeEach(() => {
+        dir = mkdtempSync(join(tmpdir(), 'dependfix-isrepo-'))
+    })
+
+    afterEach(() => {
+        rmSync(dir, { recursive: true, force: true })
+    })
+
+    it('returns true for a git work tree', () => {
+        execSync('git init -q', { cwd: dir })
+        expect(isGitRepository(dir)).toBe(true)
+    })
+
+    it('returns false for a plain directory (no .git)', () => {
+        writeFileSync(join(dir, 'package.json'), '{}', 'utf-8')
+        expect(isGitRepository(dir)).toBe(false)
+    })
+
+    it('returns false for a non-existent path', () => {
+        expect(isGitRepository(join(dir, 'missing'))).toBe(false)
+    })
+})
+
+describe('commitLocalChanges', () => {
+    let dir: string
+
+    beforeEach(() => {
+        dir = mkdtempSync(join(tmpdir(), 'dependfix-commit-'))
+    })
+
+    afterEach(() => {
+        rmSync(dir, { recursive: true, force: true })
+    })
+
+    /** ctx 携带可断言的 logger（`warn` 用于防御分支） */
+    function makeCommitCtx(workDir: string) {
+        const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+        return {
+            ctx: {
+                workDir,
+                logger: logger as never,
+                allActions: [] as FixAction[],
+                authProvider: undefined,
+            },
+            logger,
+        }
+    }
+
+    it('skips with a warning when workDir is not a git repository (no throw)', () => {
+        // 回归：非 git 目录下 hasGitChanges 误报 true → 旧实现继续走到 stageAndCommit，
+        // 以 `git config user.name` 抛 `fatal: not in a git directory` → 记 COMMIT_FAILED
+        const { ctx, logger } = makeCommitCtx(dir)
+
+        expect(() => commitLocalChanges(ctx)).not.toThrow()
+        expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('不是 git 仓库'))
+        expect(logger.info).not.toHaveBeenCalled()
+    })
+
+    it('skips informational when a git repository has no changes', () => {
+        execSync('git init -q', { cwd: dir })
+        execSync('git config user.name test', { cwd: dir })
+        execSync('git config user.email test@test', { cwd: dir })
+        const { ctx, logger } = makeCommitCtx(dir)
+
+        commitLocalChanges(ctx)
+
+        expect(logger.info).toHaveBeenCalledWith('No changes to commit — skipping local commit')
+    })
+
+    it('commits tracked changes in a git repository', () => {
+        execSync('git init -q', { cwd: dir })
+        execSync('git config user.name test', { cwd: dir })
+        execSync('git config user.email test@test', { cwd: dir })
+        writeFileSync(join(dir, 'tracked.txt'), 'v1\n', 'utf-8')
+        execSync('git add . && git commit -qm init', { cwd: dir })
+        writeFileSync(join(dir, 'tracked.txt'), 'v2\n', 'utf-8')
+
+        const { ctx, logger } = makeCommitCtx(dir)
+
+        commitLocalChanges(ctx)
+
+        expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('Committed fix changes to current branch'))
+        // 提交落在本地当前分支（改动已入 HEAD）
+        expect(execSync('git show HEAD:tracked.txt', { cwd: dir, encoding: 'utf-8' })).toBe('v2\n')
     })
 })
