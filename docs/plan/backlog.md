@@ -148,6 +148,11 @@
   - **执行口径（照 [迁移评估 §15.14](../design/governance/caomei-ui-migration.md#1514-caomei-ui-050-升级实证m3422026-10-01)）**：package.json + lockfile → 迁移评估新增 §15.15 + `tech-stack.md` + `platform.md` 版本口径同步 → 重建 `apps/platform/.output` → 全量 lint / typecheck / test / e2e / 视觉基线 `--update-snapshots=all` 重建（预期 alerts / pr-checks 因排序序号变化）。
   - **触发条件**：用户要求升级；或平台需跟进 0.6.0 新能力（多列排序序号）。与下方延期项「caomei-ui 0.x → 1.0 升级回归」的恢复条件①（用户指定版本）同源，但本条为 `0.6.0` 增量升级，非 1.0 分支。
 
+- **扫描触发被去重合并时的前端感知（待评估）** —— 现象：`POST /api/repos/[id]/scan` 在「同仓库已有进行中任务 → 去重合并」时返回顶层 `merged` 提示（`{ code: 'SCAN_PENDING_MERGED', message }`），但前端 `use-fix-now.ts`（alerts 视图「立即修复此仓库」入口）不消费该字段——命中合并时仍弹「成功」toast 并跳转扫描页，用户无从感知本次触发未真正执行（复用路径的既有 run 记录保持不变，前端会看到其原终态）。
+  - **待评估点**：① 前端按 `merged` 字段显示提示（toast / 跳转后 banner）；② 或统一改为按后续轮询的 run 状态呈现；③ 是否同时覆盖 `repos.vue` 的单仓库扫描入口（该入口按 `code` 走 i18n，已能提示新建路径的合并）。
+  - **触发条件**：用户反馈「点了修复但没跑」；或扫描入口体验统一梳理时。
+  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
+
 ### 待上收候选（评估完成，等待用户决策）
 
 > 本节为「评估完成、等待用户决策」候选的暂存区；候选**不含 `M\d+` 阶段编号**（[规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement)）。

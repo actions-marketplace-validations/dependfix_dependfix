@@ -63,20 +63,22 @@
 
 - **实际交付**：`fix(engine)` commit（`helpers.ts` 新增导出 `normalizeGitignoreEntry` / `isGitignoreEntryIgnored` + `ensureGitignore` 幂等判定归一化；`helpers.test.ts` 补该函数零覆盖）+ 本条登记 commit。**质量门**：engine lint / typecheck 0 error；engine 全量 64 文件 / 1260 passed | 1 skipped；定向 `helpers.test.ts` 34 passed；engine build OK；根 typecheck 7 包 Done；check:docs / lint:md / check:doc-size 全通过；编号标记与不规则空白扫描 0 命中。**语义对齐实证**：临时 git 仓库逐形态实测 15 种写法（7 IGNORED / 8 NOT-IGNORED）与本实现判定**完全一致**；尾随空格与 CR 剥离、尾随 tab 保留、行中 `#` 属字面字符、前导空白属模式本身、以斜杠结尾的内容通配不忽略目录自身。**审计**：quick R1 **Reject**（RG-B1 blocker：行中 `#` 被误当注释剥离 → 漏追加 → 报告可能随提交入库，属安全方向回归）→ 修复（含 RG-W1 前导空白 / RG-W2 内容通配假命中）→ R2 quick Pass → 顺带收窄尾随 tab 处理（RG-S3）→ R3 quick Pass；R1 实测 453 秒。**mutation 标定**：M1 恢复行中 `#` 剥离 / M2 归一化失效 / M3 前导空白归一化 / M4 尾随 tab 误剥离，四者全击杀（5 / 10 / 2 / 2 failed）。**已知边界（接受不改，非本次引入）**：取反行不构成忽略（`!dir/` 单行时仍追加）；`\r\r`、`\ \` 等反斜杠转义形态未建模——触发需手写几乎不可能的字节串，方向均为「多追加」冗余而非漏追加；canonical 写法保持 `dependfix-reports/`（不改既有已写入条目）。
 
-### M42.3 [P2 🛡️] 扫描复用路径与同仓库去重合并叠加时误置既有 run 为 failed 修复
+### M42.3 [P2 🛡️] 扫描复用路径与同仓库去重合并叠加时误置既有 run 为 failed 修复（**已闭环** `cb64ce2`）
 
 - **目标**：修复 `scan.post` 的 reuse 路径在 `queue.add` 命中同仓库去重合并（`reused: true`）时，把用户指定的既有终态 run 误置 `failed` 的数据正确性缺陷。
 - **优先级**：P2
 - **范围**：`apps/platform/server/api/repos/[id]/scan.post.ts:80-105`（reused 分支的处置）+ `apps/platform/server/api/repos/[id]/scan.post.test.ts`（补 reuse + 去重合并叠加用例）。
 - **验收标准**：
-  - [ ] ① **单测**（`pnpm --filter @dependfix/platform exec vitest run server/api/repos`）：`reuseExisting` 非空 + `queue.add` 返回 `reused: true` → 被复用的既有 run 终态**保持不变**（不置 `failed`），响应携带 duplicate 提示。
-  - [ ] ② **单测**：新建路径（无 `reuseScanRunId`）+ `reused: true` → 孤儿 pending run 仍置 `failed`（既有行为不回归）。
-  - [ ] ③ **单测**：sync / async / failover 三路径 reuse 语义一致（复用 run 不被误改状态）。
-  - [ ] ④ `pnpm typecheck` 0 error + 定向 vitest 通过。
+  - [x] ① **单测**（`pnpm --filter @dependfix/platform exec vitest run server/api/repos`）：`reuseExisting` 非空 + `queue.add` 返回 `reused: true` → 被复用的既有 run 终态**保持不变**（不置 `failed`），响应携带 duplicate 提示。
+  - [x] ② **单测**：新建路径（无 `reuseScanRunId`）+ `reused: true` → 孤儿 pending run 仍置 `failed`（既有行为不回归）。
+  - [x] ③ **单测**：sync / async（`reused: false`）/ async（`reused: true`）/ failover 四路径 reuse 语义一致（复用 run 不被误改状态）；前三者沿用既有用例、新增第四者。
+  - [x] ④ `pnpm typecheck` 0 error + 定向 vitest 通过。
 - **不做什么**：不改 reuse 校验的其他分支（存在 / 归属 / 非 running）；不改 worker 端 `reuse: true` 透传语义；不引入「同仓库存在进行中任务 → 409 前置拒绝」的新方案（仅在 reused 分支收敛既有 run 状态处置；如需前置拒绝另登记候选）。
 - **依赖**：M38.3 `scan.post` failover 透传 reuse（`9f9d067`）为邻近逻辑，本批须保持三路径同源；`scan-queue.ts:58/109` 的 `reused` 语义（同仓库进行中任务去重合并，未新建 job）。
 - **交付物**：预计 1-2 commits——① platform 修复 + 单测（`scan.post.ts` + `scan.post.test.ts`）。2 文件 / 30-60 行。
 - **风险与缓解**：**R1 改动影响异步入队主路径**——覆盖 sync / async / failover 三路径用例；**R2 与「orphan pending run 置 failed」既有语义混淆**——在 AC 中显式区分「复用既有 run」与「新建孤儿 run」两类主体分别断言。
+
+- **实际交付**：`cb64ce2` fix(platform)（`scan.post.ts` + `scan.post.test.ts`）+ `677aa4f` docs(governance)（失败写路径落点细化）+ 本条登记 commit。**质量门**：platform lint 0 error（2 条既有 max-lines warning：scans.vue / alerts.vue）；platform typecheck exit 0；定向 `server/api/repos` 90 passed；check:docs / lint:md / check:doc-size / check:orphan-ids 全通过（新增注释中的阶段编号已按注释规范去除，保留解释正文）。**审计**：standard R1 **Pass**（0 blocker / 0 warning / 2 suggest）——RG-S01（前端不消费 `merged`，属 AC 范围外、行为改动前后一致）已登记 backlog 候选；RG-S02（`merged.message` 服务端硬编码与 i18n 文案分歧）为既有模式、非本次引入。**mutation**：反转载体判定（`if (reuseExisting)` → `if (!reuseExisting)`）→ 2 failed（新用例 + 既有新建路径用例），已还原。**残余**：前端提示未接线（候选已登记）；`merged.message` 硬编码沿用既有模式（消费方按 `code` 走 i18n）。
 
 ### M42.4 [P2 🚀] PR Check 手动触发（同步端点 + 总开关门控）
 
