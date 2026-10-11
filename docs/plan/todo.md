@@ -8,123 +8,15 @@
 
 | 内容类型 | 位置 |
 |:--|:--|
-| 当前阶段任务 | **M42 进行中**——修复交付正确性 + 平台能力与体验补强（6 原子条目，见下方 §M42） |
-| 下一阶段（未授权） | 无——本阶段闭环后按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 评估 [backlog.md](backlog.md) 候选池后由用户决策 |
-| 已完成阶段归档 | [todo-archive.md](todo-archive.md)（主窗口 + [archive/](archive/) 分片；M0-M41 全部已归档） |
+| 当前阶段任务 | **暂无进行中阶段**——下一阶段按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 评估 [backlog.md](backlog.md) 候选池后由用户决策 |
+| 下一阶段（未授权） | 无 |
+| 已完成阶段归档 | [todo-archive.md](todo-archive.md)（主窗口 + [archive/](archive/) 分片；M0-M42 全部已归档） |
 | 未排期 / 延期 / 远期 / 长期主线 / 已知边界 | [backlog.md](backlog.md) |
-| 里程碑与阶段交付 | [roadmap.md](roadmap.md)（M0-M41 已归档 + M42 进行中） |
+| 里程碑与阶段交付 | [roadmap.md](roadmap.md)（M0-M42 已归档） |
 | 历史归档索引 | [archive/index.md](archive/index.md) |
 
 ---
 
-## M42: 修复交付正确性 + 平台能力与体验补强（2026-10-10 用户决策方案 A+B 混合）
+## 待激活阶段
 
-> **阶段定位**：贯穿「被 dependfix 管理的仓库的实际受害面」与「平台能力/体验补强」两条线——修复验证阶段镜像源被 deny-by-default 拦死、`.gitignore` 幂等判定失效、扫描复用路径误置既有 run 为 failed 三类影响可用性与数据正确性的缺陷；补齐 PR Check 手动触发能力与平台列表页表格基础能力；收敛严重级别展示口径。
->
-> **类型平衡**：🛡️ 2（M42.1 / M42.3）+ 🐛 1（M42.2）+ 🚀 1（M42.4）+ 🎨 2（M42.5 / M42.6）= 6 原子；**🧪 独立条目缺口显式标注**（测试随各条目内嵌，符合 [规划规范 §1.1](../standards/planning.md#11-硬性约束) 类型平衡建议的显式标注惯例）。
->
-> **§3.4 三重交叉核验**：0 项重复评估——① `todo-archive.md` + `archive/todo-archive-phases-*.md` 全量扫描（关键词 `ensureGitignore` / `npmmirror` / `DEFAULT_ALLOWED_DOMAINS` / `reuseScanRunId` / `pr-checks/poll` / `scanSeverityOptions`）零命中已闭环修复；② `git log --all` 核验无对应修复 commit（network-audit 最近改动为 `2104b9f` 追加 `rolldown.rs`；`helpers.ts` 无幂等修复；`scan.post.ts` 最近为 `9f9d067` 降级路径透传 reuse，非本缺陷）；③ 代码 anchor 逐项实测未闭环（`network-audit.ts:65` 白名单 6 域无 `npmmirror`；`helpers.ts:668` 仍精确字符串比较；`scan.post.ts:89-105` reused 分支置 failed；无 `pr-checks/poll.post.ts`；`repos.vue:280` / `batch-runs.vue:245` 无分页筛选；`run-view.ts:35` 等 3 类展示面并存）。
->
-> **审计 depth 预告**：M42.1 改变执行期网络边界 + 治理定义改动（[security.md §5.3](../standards/security.md) + [sandbox-security-governance.md §4.4](../design/governance/sandbox-security-governance.md) 治理评审为硬前置）→ `standard`（建议 2 分区并发）；M42.3 涉及 run 状态写路径 → `standard`；M42.4 新增公开 API 端点 → `standard`；M42.2 / M42.5 / M42.6 按规模 `quick`。
-
-### M42.1 [P2 🛡️] network-audit 出站白名单：预置常见镜像源 + 动态发现生效 registry（**已闭环** `380e8f4` + `47f7c42`）
-
-- **目标**：让 verification 阶段出站白名单默认覆盖常见 npm 镜像源，并能从 `workDir` 的 pnpm 配置面动态发现生效 registry，消除「镜像源被 deny-by-default 拦死 → `pnpm install` 失败 → 门禁全量回滚」链路。
-- **优先级**：P2
-- **范围**：`packages/engine/src/runners/network-audit.ts`（`DEFAULT_ALLOWED_DOMAINS` 扩充镜像站 + 新增 `extraAllowedDomains` 选项）+ 新增 `packages/engine/src/runners/registry-discovery.ts`（配置面读取 + host 校验 + 缓存与 fail-open 回退）+ `packages/engine/src/runners/verification-runner.ts`（按 `workDir` 发现并以 `startNetworkAudit({ extraAllowedDomains })` 注入）+ 测试（新增 `registry-discovery.test.ts` / `network-audit.test.ts` / `verification-runner.test.ts`）+ 文档（[security.md §5.3](../standards/security.md) / [sandbox-security-governance.md §2.2 / §4.4 / §5](../design/governance/sandbox-security-governance.md) / [executor-sandbox.md §2.2](../design/governance/executor-sandbox.md) / [quick-start.md](../guide/quick-start.md) 安全注意事项）。
-- **验收标准**：
-  - [x] ① **单测**（`pnpm --filter @dependfix/engine exec vitest run src/runners/network-audit.test.ts`）：预置清单命中镜像域（registry + CDN）+ 动态发现纳入 `registry` 与 `@scope:registry` 的 host + 非法值（`*` / 含 `/` / 空值 / 超长）被拒 + `evil.example.com` 仍不在白名单。
-  - [x] ② **行为回归**（`verification-runner.test.ts`）：既有「非白名单域名 502 + violation」用例不回归；新增「镜像域 CONNECT 不记 violation」用例。
-  - [x] ③ **真实环境（镜像站）**：以**真实 registry 外联链路**实证替代完整 `fix-and-pr` 端到端（本机无 `GITHUB_TOKEN`，端到端未复现）——新白名单 + 动态发现下真实 `pnpm view` 经审计代理 `exit = 0`、捕获 `CONNECT registry.npmmirror.com:443`、**`violations = 0`**；**同环境反例对照**（修复前旧清单）→ `violations = 2` 且命令被拦死。判据「运行日志 0 条被拦 + install 链路外联不再失败」已由该对照覆盖。
-  - [x] ④ **真实环境（非预置私服）**：临时目录 `.npmrc` 指向非预置域 `registry.example.org` → 发现结果 `{"hosts":["npm.jsr.io","registry.example.org"],"source":"pnpm-config"}`（不经 `DEPENDFIX_ALLOWED_DOMAINS` 即纳入白名单，动态发现路径成立）。
-  - [x] ⑤ **文档门禁**：`pnpm run check:docs` 0 error + `pnpm run lint:md:check` 通过 + `pnpm run check:doc-size` 无新增 warning。
-- **不做什么**：不放开 deny-by-default（未知域仍拦）；不做镜像源真实性/完整性校验与镜像源审批流程（用户 2026-10-10 裁定，恶意代码执行风险由沙箱承接）；不放行非安装链路的第三方前端 CDN（`cdn.jsdelivr.net` / `unpkg.com` 等）;不把代理覆盖到 fix 阶段的 `pnpm install`（现状不经代理，另案观察）；不改 `pnpm-audit-fetcher` 强制官方 registry 的口径；不改沙箱网络模式（bridge）与 cgroup 限额；不处理 GitHub 侧 clone / push 不可达（见 backlog §网络优化）。
-- **依赖**：治理评审**硬前置**——本改动改变执行期网络边界，须对照 [executor-sandbox.md §2.2 风险定级与缓解](../design/governance/executor-sandbox.md) 逐项评估并登记 [sandbox-security-governance.md §5 治理决议与登记](../design/governance/sandbox-security-governance.md)（未过评审不得进 D 阶段）；用户 2026-10-10 已裁定方案（预置可信镜像源 + 动态发现 + 用户配置默认可信）。**根因证据（测量方 = 执行角色，2026-10-10 排查；可复现）**：`apps/platform/data/dependfix.sqlite` 经只读连接 `sqlite3.connect('file:apps/platform/data/dependfix.sqlite?mode=ro', uri=True)` 查询 `dependfix_scan_run.logs_json`，同时含 `outbound blocked by allowlist` 与 `npmmirror` 的 run = **5 个**（2026-10-02 15:28 / 15:29 / 16:17 / 16:27 / 16:50），其中 **1 个**（`683f617ba4794d95`，status `failed`）复现完整链——日志含 **989×** `[baseline] outbound blocked by allowlist … CONNECT registry.npmmirror.com:443` + `"pnpm install --frozen-lockfile" already failing before this run (timed out)` + `Verification failed …: pnpm test — exit code 1` + `Changes rolled back`，`error_json` = `engine_delivery_failed（VERIFICATION_FAILED）`。旁证：本机 `curl` 实测 `registry.npmmirror.com/vite` → 200、tarball → 302 `cdn.npmmirror.com` → 200（镜像源与 CDN 可达，排除「沙箱无网」）。
-- **交付物**：预计 2-3 commits——① engine 实现 + 单测（`network-audit.ts` / `registry-discovery.ts` 新增 + `verification-runner.ts` + 2 测试文件）；② 规范 / 治理 / guide 文档同步（4 文档）；③ 真实环境验证结论回填（可选，1 文档）。预计 8-10 文件 / 300-450 行（单模块 engine + 文档，治理面更新既有 governance 文档、不新建）。
-- **风险与缓解**：**R1 白名单扩大 → 攻击面扩大**（第三方镜像被投毒/劫持）——仅 host 粒度 + 预置清单收敛 + 动态来源限「配置面」+ violation 记录不回退 + 沙箱为执行前提；**R2 动态解析过宽**（把通配/异常值当 host）——严格 host 正则 + 单测覆盖非法值；**R3 302 CDN 漏放行**（看似修好实则仍拦）——预置清单 registry + CDN 成对登记 + 验收 ③ 真实 install 实证；**R4 发现子进程失败/超时**——fail-open 到预置清单，仅 warn 不阻断；**R5 fix 阶段 `pnpm install` 不经代理**（既有缺口、非本方案引入）——登记独立观察项候选，不在本方案范围；**R6 规范与实现口径漂移**——以 [security.md §5.3](../standards/security.md) 为唯一事实源 + 审计必查项。
-
-- **实际交付**：本条目以 `380e8f4`（feat(engine)：`registry-discovery.ts` / `.test.ts` 新增 + `network-audit.ts` / `.test.ts` + `verification-runner.ts` / `.test.ts`，共 6 文件）、`47f7c42`（docs(standards)：4 文档）与本次登记 commit 收口。**质量门**：engine lint / typecheck 0 error；engine 全量 64 文件 / 1236 passed | 1 skipped；定向 105 passed；根 typecheck 7 包 Done；engine build OK；check:docs / lint:md / check:doc-size / check:orphan-ids / check:standards-redundant / check:experience-landing 全通过。**审计**：standard 2 分区并发 R1 均 Pass（代码面 2 warning + 3 suggest / 文档面 2 warning + 5 suggest，无 blocker）→ 全量收口（接线测试锁定、缓存上限、失败说明脱敏、治理登记补全）→ R2 quick Pass（11 点全关闭，0 新增）；R1 实测 763 秒 / R2 实测 314 秒。**mutation 标定**：M1 去 `extraAllowedDomains` 合并 / M2 去 registry 键过滤 / M3 host 校验恒真 / M4 去接线传递，四者全击杀。**残余**：完整 `fix-and-pr` 端到端未复现（本机无 `GITHUB_TOKEN`，AC ③ 以真实 registry 外联链路 + 同环境反例对照替代）；企业私服自带独立 CDN 域仍需显式 `DEPENDFIX_ALLOWED_DOMAINS`（已知限制）；`roadmap.md` M8 历史段的「G1-G7」为历史快照表述，未改。
-
-### M42.2 [P2 🐛] 目标仓库 `.gitignore` 幂等判定归一化（消除重复追加）（**已闭环** `6a258d8`）
-
-- **目标**：让 `ensureGitignore()` 的幂等判定识别语义等价的忽略写法，消除目标仓库 `.gitignore` 被重复追加 `dependfix-reports/` 的问题。
-- **优先级**：P2
-- **范围**：`packages/engine/src/app/helpers.ts:651-670`（幂等判定归一化；canonical 写法选型）+ `packages/engine/src/app/helpers.test.ts`（当前对该函数零覆盖，需补幂等 + 多等价形态单测）。
-- **验收标准**：
-  - [ ] ① **单测**（`pnpm --filter @dependfix/engine exec vitest run src/app/helpers.test.ts`）：与 git 语义一致的等价写法（`/dependfix-reports`、`dependfix-reports`、`/dependfix-reports/`、`**/dependfix-reports/`、`dependfix-reports/**`、`dependfix-reports/*`）判定为「已忽略」不追加；**订正（2026-10-11，审计 RG-B1）**：原 AC 所列「带行内注释」**不构成 git 忽略**（git 仅把行首 `#` 当注释，`dir/ # note` 是字面模式）——该形态及 `dir#suffix`、前导空白、`dir/**/` 均**必须追加**（漏追加会让报告被 `git add .` 提交），已由「仍追加」参数化用例与真实 `git check-ignore` 逐形态实测锁定。
-  - [x] ② **单测**：真正未忽略的 `.gitignore`（完全无该条目）仍追加 canonical 条目一次，且 canonical 写法与各仓库既有条目对齐口径一致。
-  - [x] ③ **幂等**：连续调用 `ensureGitignore` 两次后 `.gitignore` 内容字节级不变（新增单测）。
-  - [x] ④ **实测**：复现场景产物（`/root/projects/caomei-ui/.gitignore` 的人工条目 `/dependfix-reports`，**以只读复制到临时 git 仓库的方式复现，不改动目标仓库**）跑一次后 **内容字节级不变 / 新增行 0**。
-  - [x] ⑤ `pnpm lint` 0 error + `pnpm typecheck` 0 error。
-- **不做什么**：不改 `run()` 收尾（`app/index.ts:316`）与本地提交前（`helpers.ts:623`）两个调用点；不引入 `.gitignore` 完整语法解析依赖；不做「删除既有重复条目」的清理（仅防新增）。
-- **依赖**：实测复现证据（`/root/projects/caomei-ui/.gitignore` 第 47-50 行人工条目 `/dependfix-reports` + 工具运行后追加 `dependfix-reports/`）；调用点 `helpers.ts:623` + `app/index.ts:316` 各执行一次，任一 run 即复现。
-- **交付物**：预计 1-2 commits——① engine 修复 + 单测（`helpers.ts` + `helpers.test.ts`）；② 规范登记（如需，`development.md` 或经验登记）。1-2 文件 / 40-80 行。
-- **风险与缓解**：**R1 归一化过宽 → 误判**（如 `dependfix-reports/*` 仅忽略内容却被判为等价）——明确 `.gitignore` 语义等价集 + 误报面单测；**R2 canonical 写法与各仓库既有条目不一致**——首次追加写法与既有约定对齐并单测锁定。
-
-- **实际交付**：`fix(engine)` commit（`helpers.ts` 新增导出 `normalizeGitignoreEntry` / `isGitignoreEntryIgnored` + `ensureGitignore` 幂等判定归一化；`helpers.test.ts` 补该函数零覆盖）+ 本条登记 commit。**质量门**：engine lint / typecheck 0 error；engine 全量 64 文件 / 1260 passed | 1 skipped；定向 `helpers.test.ts` 34 passed；engine build OK；根 typecheck 7 包 Done；check:docs / lint:md / check:doc-size 全通过；编号标记与不规则空白扫描 0 命中。**语义对齐实证**：临时 git 仓库逐形态实测 15 种写法（7 IGNORED / 8 NOT-IGNORED）与本实现判定**完全一致**；尾随空格与 CR 剥离、尾随 tab 保留、行中 `#` 属字面字符、前导空白属模式本身、以斜杠结尾的内容通配不忽略目录自身。**审计**：quick R1 **Reject**（RG-B1 blocker：行中 `#` 被误当注释剥离 → 漏追加 → 报告可能随提交入库，属安全方向回归）→ 修复（含 RG-W1 前导空白 / RG-W2 内容通配假命中）→ R2 quick Pass → 顺带收窄尾随 tab 处理（RG-S3）→ R3 quick Pass；R1 实测 453 秒。**mutation 标定**：M1 恢复行中 `#` 剥离 / M2 归一化失效 / M3 前导空白归一化 / M4 尾随 tab 误剥离，四者全击杀（5 / 10 / 2 / 2 failed）。**已知边界（接受不改，非本次引入）**：取反行不构成忽略（`!dir/` 单行时仍追加）；`\r\r`、`\ \` 等反斜杠转义形态未建模——触发需手写几乎不可能的字节串，方向均为「多追加」冗余而非漏追加；canonical 写法保持 `dependfix-reports/`（不改既有已写入条目）。
-
-### M42.3 [P2 🛡️] 扫描复用路径与同仓库去重合并叠加时误置既有 run 为 failed 修复（**已闭环** `cb64ce2`）
-
-- **目标**：修复 `scan.post` 的 reuse 路径在 `queue.add` 命中同仓库去重合并（`reused: true`）时，把用户指定的既有终态 run 误置 `failed` 的数据正确性缺陷。
-- **优先级**：P2
-- **范围**：`apps/platform/server/api/repos/[id]/scan.post.ts:80-105`（reused 分支的处置）+ `apps/platform/server/api/repos/[id]/scan.post.test.ts`（补 reuse + 去重合并叠加用例）。
-- **验收标准**：
-  - [x] ① **单测**（`pnpm --filter @dependfix/platform exec vitest run server/api/repos`）：`reuseExisting` 非空 + `queue.add` 返回 `reused: true` → 被复用的既有 run 终态**保持不变**（不置 `failed`），响应携带 duplicate 提示。
-  - [x] ② **单测**：新建路径（无 `reuseScanRunId`）+ `reused: true` → 孤儿 pending run 仍置 `failed`（既有行为不回归）。
-  - [x] ③ **单测**：sync / async（`reused: false`）/ async（`reused: true`）/ failover 四路径 reuse 语义一致（复用 run 不被误改状态）；前三者沿用既有用例、新增第四者。
-  - [x] ④ `pnpm typecheck` 0 error + 定向 vitest 通过。
-- **不做什么**：不改 reuse 校验的其他分支（存在 / 归属 / 非 running）；不改 worker 端 `reuse: true` 透传语义；不引入「同仓库存在进行中任务 → 409 前置拒绝」的新方案（仅在 reused 分支收敛既有 run 状态处置；如需前置拒绝另登记候选）。
-- **依赖**：M38.3 `scan.post` failover 透传 reuse（`9f9d067`）为邻近逻辑，本批须保持三路径同源；`scan-queue.ts:58/109` 的 `reused` 语义（同仓库进行中任务去重合并，未新建 job）。
-- **交付物**：预计 1-2 commits——① platform 修复 + 单测（`scan.post.ts` + `scan.post.test.ts`）。2 文件 / 30-60 行。
-- **风险与缓解**：**R1 改动影响异步入队主路径**——覆盖 sync / async / failover 三路径用例；**R2 与「orphan pending run 置 failed」既有语义混淆**——在 AC 中显式区分「复用既有 run」与「新建孤儿 run」两类主体分别断言。
-
-- **实际交付**：`cb64ce2` fix(platform)（`scan.post.ts` + `scan.post.test.ts`）+ `677aa4f` docs(governance)（失败写路径落点细化）+ 本条登记 commit。**质量门**：platform lint 0 error（2 条既有 max-lines warning：scans.vue / alerts.vue）；platform typecheck exit 0；定向 `server/api/repos` 90 passed；check:docs / lint:md / check:doc-size / check:orphan-ids 全通过（新增注释中的阶段编号已按注释规范去除，保留解释正文）。**审计**：standard R1 **Pass**（0 blocker / 0 warning / 2 suggest）——RG-S01（前端不消费 `merged`，属 AC 范围外、行为改动前后一致）已登记 backlog 候选；RG-S02（`merged.message` 服务端硬编码与 i18n 文案分歧）为既有模式、非本次引入。**mutation**：反转载体判定（`if (reuseExisting)` → `if (!reuseExisting)`）→ 2 failed（新用例 + 既有新建路径用例），已还原。**残余**：前端提示未接线（候选已登记）；`merged.message` 硬编码沿用既有模式（消费方按 `code` 走 i18n）。
-
-### M42.4 [P2 🚀] PR Check 手动触发（同步端点 + 总开关门控）（**已闭环** `85eb0d9` + `4aa1f7b`）
-
-- **目标**：为 PR Check 页面提供「立即检查」入口，无 `pr-check` 计划时也能即时刷新监测链路（同步端点，受 `ACTION_STATUS_MONITOR_ENABLED` 门控）。
-- **优先级**：P2
-- **范围**：新增 `apps/platform/server/api/pr-checks/poll.post.ts`（`requireRole` admin/org_admin + `requireOrgResource` 组织隔离）+ `apps/platform/server/services/scheduler/scheduler.service.ts:207`（`triggerPrCheckSchedule` 的「按 credential 聚合 → Octokit → `pollOnce`」抽为共享函数复用）+ `apps/platform/app/pages/pr-checks.vue`（「立即检查」按钮 + 结果 toast）+ i18n ×2 + 单测 + e2e。
-- **验收标准**：
-  - [x] ① **端点单测**：未启用总开关 → 返回 `skipped` + 提示（与 schedules 触发语义一致）；启用 → 触发 `pollOnce` 并返回 processed / errors 统计。
-  - [x] ② **权限**：非 admin / org_admin → 403；跨组织资源 → 403（`requireOrgResource`）；范围收敛另由 `resolveRepositoryIds(kind='all', organizationId)` 保证（单组织模型下 `requireOrgResource` 为恒真形状校验，`organizationId` 由服务端派生、无客户端入参）。
-  - [x] ③ **e2e**：pr-checks 页「立即检查」按钮可见 + 点击后 toast 呈现（未启用时提示路径覆盖）。
-  - [x] ④ `pnpm run check:i18n` parity 0 + `pnpm typecheck` 0 error + 定向 vitest 通过。
-- **不做什么**：不做异步入队（重方案，暂不采纳）；不新增 admin 设置项 / DB 持久化与迁移（与「不改 ActionStatusMonitor 实体」一致）；不改 `pollOnce` 内部逻辑；不改既有 `POST /api/schedules/[id]/trigger` 语义。
-- **依赖**：M39.5（`kind` 落库 + `monitor-status` 只读总开关端点，`3b8e322`）已就位，共享 `isActionStatusMonitorEnabled()`（`scheduler.service.ts:142`）与 `triggerPrCheckSchedule` 的 credential 聚合逻辑；评估结论已完成（用户 2026-10-10 裁定形态 = 同步端点 + 总开关门控）。
-- **交付物**：预计 2 commits——① 后端端点 + service 抽共享函数 + 单测（`api/pr-checks/poll.post.ts` + `.test.ts` + `scheduler.service.ts`）；② 前端按钮 + i18n ×2 + e2e。预计 6-8 文件 / 150-250 行。
-- **风险与缓解**：**R1 请求路径内直调 GitHub API，仓库多时耗时长**——同步 + **单次仓库数上限**（`MAX_POLL_REPOSITORIES`，超出部分本次不 polling 并在响应 `truncated` / `candidateCount` 披露、前端提示仅处理部分仓库）；**HTTP 请求超时未加显式约束**（与既有 scheduled 链路同源，超时兜底来自底层 transport）——接受为已知边界（admin-only + 上限使影响面有界）；**R2 未启用时前端交互歧义**——`skipped` 分支返回 warning 提示（按钮态与提示一致）。
-- **实际交付**：`85eb0d9` feat(platform)（`poll.post.ts` + `.test.ts` 新增 + `scheduler.service.ts` 抽共享函数）+ `4aa1f7b` feat(platform)（`pr-checks.vue` + i18n ×2 + e2e 新增 + 视觉基线重建）+ 本条登记 commit。**质量门**：platform lint 0 error（2 条既有 max-lines warning）；platform typecheck exit 0；端点单测 23 passed；e2e 1 passed（服务端日志证实「点击 → 端点 → 共享函数 → skipped」全链路）；i18n parity 0 / anchor OK / lint:i18n 0；视觉回归全量两遍 11 passed（幂等）；check:docs / lint:md / check:doc-size / check:orphan-ids 全通过。**审计**：standard R1 **Reject**（RG-B1 blocker：改页头后未重建视觉基线 → CI visual job 必红，审计本机实测 1 failed；RG-W1 上限/超时未实现；RG-S1 注释措辞夸大）→ 修复（重建基线并幂等复验 + 补单次上限与披露 + 注释订正）→ R2 quick **Pass**（新增 RG-W2 文案承诺不存在的能力 → 已订正）→ R3 quick **Pass**（0 阻塞；RG-S3 注释措辞已随手应用）。**mutation**：M1 `skipped` 恒 false / M2 删 `requireOrgResource` / M3 `kind` 由 `all` 改 `explicit` / M4 去截断，四者各击杀 1 用例并全部还原。**残余**：启用总开关后的真实 polling 链路待人工验收（需真实 GitHub 凭据）；>50 仓库截断无 offset 轮转（重复触发仍取同一批，已在 JSDoc 与文案如实陈述）。
-
-### M42.5 [P2 🎨] 平台列表页表格基础能力补强（repos / batch-runs 筛选 + 搜索 + 分页）（**已闭环** `6a95800` + `a069c9a`）
-
-- **目标**：为 `repos` / `batch-runs` 两个列表页补齐筛选、搜索与分页能力（caomei `DataTable` 无内建 filters / globalFilter，须页面侧实现）。
-- **优先级**：P2
-- **范围**：`apps/platform/app/pages/repos.vue`（搜索：owner / name / tags / credential；筛选：executorKind / packageManager / credential；分页 10/25/50）+ `apps/platform/app/pages/batch-runs.vue`（筛选：source / status，可选 mode / severity；分页）+（可选）轻量 `useClientTableFilter` composable + i18n ×2 + e2e。
-- **验收标准**：
-  - [x] ① **repos 页**：搜索（owner / name / tags / credential）与筛选（executorKind / packageManager / credential）叠加生效 + 分页（10/25/50）切换正确。
-  - [x] ② **batch-runs 页**：筛选（source / status）+ 分页切换正确，保留现有排序（增量 reconcile 仍作用于全量集合）。
-  - [x] ③ **e2e**：筛选 / 搜索 / 分页交互用例通过（含「排序 + 分页」叠加分支与每页条数三档）。
-  - [x] ④ `pnpm typecheck` 0 error + `pnpm lint` 0 error + `pnpm run check:i18n` parity 0。
-- **不做什么**：不改 `/api/repos` 全量返回与 `/api/batch-runs` `take: 50` 的服务端契约（客户端实现）；不延伸至 `users` / `credentials` / `env-events` / `schedules` 等其它表（后续按需另登记）；不引入 `DataTable` 内建之外的第三方表格库。
-- **依赖**：评估结论已完成（2026-10-10，推荐客户端实现——repos 服务端返全量、batch-runs 已 `take: 50`）；`repos.vue:280` / `batch-runs.vue:245` 的 `columns` 现有部分列 `sortable`。
-- **交付物**：预计 2-3 commits——① repos 页筛选/搜索/分页 + i18n；② batch-runs 页筛选/分页 + i18n；③ e2e。预计 5-8 文件 / 200-350 行。
-- **风险与缓解**：**R1 抽 composable 过度抽象**（减法原则）——先页面内实现，重复面 ≥2 处且形态一致时再抽共享；**R2 客户端分页与增量 reconcile / 排序交互**——沿用 M39.1 byRepo 客户端分页既有模式，e2e 覆盖叠加分支。
-
-- **实际交付**：`6a95800` feat(platform)（`repos.vue` + `batch-runs.vue` + i18n ×2）+ `a069c9a` test(platform)（e2e 新增 + 4 个视觉基线 PNG）+ 本条登记 commit。**质量门**：platform lint 0 error（2 条既有 max-lines warning）；platform typecheck exit 0；e2e 2 passed；i18n parity 0 / anchor OK；视觉回归全量 11 passed（4 个基线按改动重建并连跑两遍验证幂等）；check:docs / lint:md / check:doc-size / check:orphan-ids 全通过（`orphan-ids` 首跑曾因本地 e2e 产物 `test-results` 误报——该门禁缺口已在 backlog 登记为候选，清理产物后复跑 0 命中）。**审计**：quick R1 **Pass**（0 blocker / 2 warning：AC 显式要求的「排序 + 分页叠加」与「每页条数切换」缺覆盖；行选择语义未文档化）→ 补 e2e 两段断言 + JSDoc 如实描述 → R2 **Pass**（指出注释未覆盖「下一次勾选以过滤后集合回写」+ 50 档未锁定）→ 补正 → R3 **Pass**（0/0/0）。**mutation**：M1 `filteredRepos` 退化为全量 → repos e2e 失败；M2 `:paginator` 关闭 → repos e2e 失败（`Expected 10, Received 12`）；均还原。**残余**：`useClientTableFilter` 未抽（R1 决策：两页形态未完全一致，先页面内实现，待重复面扩大再抽）；行选择「下一次勾选丢弃被隐藏的已选行」为 caomei DataTable 既有行为，已在 JSDoc 如实登记（未改变语义）。
-
-### M42.6 [P3 🎨] 严重级别展示策略统一（单一事实源）（**已闭环** `669584d` + `92bf299`）
-
-- **目标**：统一 `severityThreshold` 在各界面的展示策略，收敛到 `scanSeverityOptions` 单一事实源（含 `all` 走 i18n）。
-- **优先级**：P3
-- **范围**：新增 `apps/platform/app/utils/scan-options.ts` 的 `scanSeverityLabel`（**展示口径唯一入口**）+ 六处展示点收敛（`run-detail-dialog.vue` 经 `run-view.ts` 间接 / `batch-runs.vue` 硬编码映射 / `scans.vue` 内联小写直通 / `alert-run-sidebar.vue` raw 直通 / `repo-history-dialog.vue` 列默认渲染 / `repos/[id]/runs.vue` 列默认渲染）+ 删除 `run-view.ts` 的 `runThresholdLabel` + 单测同步。
-- **验收标准**：
-  - [x] ① 全部 `severityThreshold` 展示点统一经 `scanSeverityOptions`（或同源查找）渲染，含 `all` 走 i18n。
-  - [x] ② 全仓 `rg` 确认无遗留「raw 直通 / 小写直通」实现（`rg -n "severityThreshold" apps/platform/app` 逐点核对；审计独立复核 6 处均已收敛、非展示点用途已甄别）。
-  - [x] ③ 视觉回归基线**无需重建**（实测全量 11 passed）——6 个改动展示点均不在视觉基线截图范围内（判定依据经审计独立核实：`repos` 页表格不含阈值列、告警侧栏与弹窗需交互打开而基线为表格/页面静态截图）。
-  - [x] ④ `pnpm typecheck` 0 error + e2e 相关用例通过（含**全量 e2e 189 passed**）。
-- **不做什么**：不改 `env-events.vue` 的 `severityOptions`（词表 `all/info/warn/error/critical` + 独立 `envEvents.*` 命名空间，属环境事件严重度非同源）；不改 `alerts.vue` 的 `severityOptions`（含 `Low` / `Unknown`）；不删除 legacy `/repos/[id]/runs` 页（属死代码候选，另登记）。
-- **依赖**：无前置。现状锚点（3 类展示面并存）——① **大驼峰 + `all` 走 i18n**：`scanSeverityOptions`（`utils/scan-options.ts:20` 单一事实源）/ `batch-runs.vue:64` 的 `severityLabel`；② **小写直通 + `all` 走 i18n**：`run-view.ts:35` 的 `runThresholdLabel` / `scans.vue:745` 内联；③ **raw 直通（连 `all` 都不翻译）**：`alert-run-sidebar.vue` 的 `row.severityThreshold` / `repos/[id]/runs.vue`（legacy 页）/ `repo-history-dialog.vue`（在用，`scans.vue` 挂载）。非同源已排除：`env-events.vue`（独立 `envEvents.*` 命名空间）/ `alerts.vue`（含 `Low` / `Unknown`）。
-- **交付物**：预计 1-2 commits——① 统一展示策略 + 视觉基线重建（如需要）；② 文档登记（如需）。预计 4-7 文件 / 40-100 行。
-- **风险与缓解**：**R1 在用界面（`repo-history-dialog`）文案变更影响视觉基线**——实测 6 个展示点均不在基线范围内（见 AC ③），无需重建；**R2 误改非同源选项表**（env-events / alerts）——AC 显式排除 + `rg` 穷举核对（审计独立复核通过）。
-- **实际交付**：`669584d` feat(platform)（单源 helper + 六处展示点收敛 + 删除 `runThresholdLabel` + 单测同步，10 文件）+ `92bf299` test(platform)（e2e 断言修复，2 文件）+ 本条登记 commit。**质量门**：platform lint 0 error（2 条既有 max-lines warning）；platform typecheck exit 0；`tests/unit` 52 passed；**全量 e2e 189 passed**；视觉全量 11 passed（无需重建）；i18n parity 0 / anchor OK；check:docs / lint:md / check:doc-size / check:orphan-ids 全通过。**审计**：standard R1 **Reject**（RG-B1 blocker：`alerts-sidebar` e2e 小写阈值断言未随行为变更同步，审计实测复现 1 failed；RG-W1 排序断言弱化且 flaky；RG-W2 该项属范围外并入；RG-W3 未跑全量 e2e）→ 修复（断言改大写字面 + 定位根因：caomei 排序触发器是表头内按钮、改点击目标 + 属性回写轮询 + 锁定升序 → 跑全量 e2e）→ R2 **Pass**（0 blocker/warning；1 suggest 措辞已应用）。**行为变更说明**：级别展示由「小写直通」统一为「首字母大写」，属本条目标口径（AC ① 明示统一到选项事实源）。**残余**：`settings.vue` 的等价 `find(...)?.label ?? value` 未收敛（满足 AC ①的「同源查找」，收敛需另开范围）；`batch-runs` / `scans` / `repo-history-dialog` / `repos/[id]/runs` / `run-detail-dialog` 展示点在 e2e 层无逐点文案断言（既有覆盖边界，非本轮回归）。
+> 当前无进行中阶段；下一阶段由用户按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 评估 [backlog.md](backlog.md) 候选池后决策（候选上收时按类型平衡原则选取 4-6 项，本文件登记 8 要素条目）。
