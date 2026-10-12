@@ -51,7 +51,7 @@
 
 - **实际交付**：`23ad252` feat(platform)（`pr-checks.vue` 仓库列 + 单元截断样式 + `index.get.ts` 视图 join）+ `9f9b4b2` test(platform)（`index.get.test.ts` 视图字段断言 + `pr-checks.e2e.test.ts` 跨仓库同号 PR 用例 + `pr-checks-light.png` 基线重建）+ 本条登记 commit。**质量门**：lint 0 error（2 条既有 max-lines warning）；typecheck 全包 Done；定向单测 24 passed；定向 e2e 2 passed；视觉套件重建后连跑两遍 11 passed（仅本页基线变更，其余零 churn）；`check:orphan-ids` 0；新增行编号标记扫描 0 命中。**审计**：standard R1 **Pass**（0 blocker / 1 warning：AC ④ 截断策略无验证）→ 修复时**发现并纠正真实实现缺陷**（caomei DataTable 为 `table-layout: auto` 且 `column.width` 不约束非冻结列 → 原 `max-width: 100%` 随内容增长、截断形同虚设；改为单元内固定上限 + 移除死 prop）→ R2 quick **Pass**（0 blocker / 0 warning；RG-S4 注释精度已随手应用）。**残余**：`dialog-select-open-dark.png` 存在约 28px（ratio 0.002%）运行间非确定性差异，远低于 `maxDiffPixels` 预算、套件稳定通过，已还原为已提交基线并留观察（未纳入本批范围）；`prChecks.ack.confirm` / `colLink` / `errors.loadFailed` 仍为闲置键（既有范围外）。
 
-### M43.2 [P2 🚀] PR 构建 / 部署错误多源采集（PR Check 扩展为信号聚合层）
+### M43.2 [P2 🚀] PR 构建 / 部署错误多源采集（PR Check 扩展为信号聚合层）（**D 阶段定稿**：Option A 数据模型 + 全量只报警；拆 a/b/c 三子任务）
 
 - **目标**：把 PR Check 从单一 `Test` check 扩展为「GitHub 三源（Checks + Commit Statuses + Deployments）」聚合，使目标仓库修复 PR 的完整 CI / 预览部署失败第一时间可见。
 - **优先级**：P2
@@ -64,9 +64,18 @@
   - [ ] ⑤ **轮询节流**：只取 `updated_at` 在窗口内的 open PR + `headSha` 未变且已终态 → 跳过（限流回归用例）。
   - [ ] ⑥ **门禁**：`pnpm typecheck` 0 error + 定向 vitest 通过 + `pnpm run check:i18n` parity 0。
 - **不做什么**：不改 engine 本地构建 / 验证逻辑；不新建 GitHub App（沿用现有凭据模型）；不做 webhook（`PRCheckSyncSource` 已注释预留，后续增量）；不做部署失败自动重跑 / 自动修复；**首批不含 provider 原生 API 日志富化**（设计稿 Layer 5，按 D2 裁定为后续增量 / 留 backlog）；不追求「未装 GitHub 集成」的 provider 可见性（显式声明边界，不臆造信号）。
-- **依赖**：设计先行稿 [pr-build-deploy-signals.md](../design/governance/pr-build-deploy-signals.md) 已定稿（2026-10-10，含三源官方文档引文核对）；D 阶段须先裁定设计稿 §5 决策点 **D1**（数据模型 Option A 扩展 `PRCheck`（推荐起步）vs Option B 规范化新表）/ **D3**（「阻断关注集」配置形态，推荐起步 = 全量只报警不阻断）/ **D4**（provider 凭据承载，若不做日志富化则本批不涉及）；M39.5（`kind` 落库）+ M42.4（手动触发共享 polling 函数）为邻近链路，须保持同源。
-- **交付物**：预计 3-4 commits，**预估超 §1.1 任务粒度阈值，须拆子任务**——**M43.2a** 采集层（三源 SyncSource + 归一化 + nock 单测，预估 4-6 文件 / 250-400 行）；**M43.2b** 聚合与告警 + 实体扩展 + migration + API 视图 + UI 多源展示（预估 6-9 文件 / 250-400 行）；若 M43.2b 仍超阈值则 UI 展示再拆一子任务。**D 阶段启动前先定稿拆分**（拆分依据登记本节）。
-- **风险与缓解**：**R1 限流**（每 PR 3+ API × N 轮）——增量轮询 + 终态跳过 + 沿用既有 429 / 限流退避；**R2 单行 JSON 膨胀**（Option A）——`signalsJson` 条目截断 + `summary` 限长；**R3 多源噪音**（非关注 check 也告警）——默认全量只报警不阻断（D3），后续按需引入关注集；**R4 变更面大触发未预期回归**——按 M43.2a / M43.2b 分批审计 / 分批提交。
+- **依赖**：设计先行稿 [pr-build-deploy-signals.md](../design/governance/pr-build-deploy-signals.md) 已定稿（2026-10-10，含三源官方文档引文核对）；M39.5（`kind` 落库）+ M42.4（手动触发共享 polling 函数）为邻近链路，须保持同源。
+- **D 阶段定稿（2026-10-12 用户裁定，设计稿 §5）**：
+  - **D1 数据模型 = Option A**：`PRCheck` 增 3 列（`signalsJson` text null / `overallStatus` varchar(16) null / `failureSourcesJson` text null）；`conclusion` **保留为最坏派生态**（现有 API / UI / ack / `alertFiring` 语义不变）；理由：迁移量小（幂等 + 前缀感知 helper 直接复用）+ 与既有 `summaryJson` / `logsJson` 仓库惯例一致。
+  - **D3 告警关注集 = 全量只报警不阻断**：任一归一化信号失败（`failure` / `error` / `timed_out` / `action_required`）→ `overallStatus=failed` → `alertFiring=true`，不引入配置面（后续按需引入关注集）。
+  - **D4 provider 凭据承载 = 本批不涉及**（首批不含日志富化）。
+  - **D2 日志富化 = 不做**（留后续增量 / backlog）。
+  - **`overallStatus` 判定口径**（设计稿 §3.3）：存在任一 `failure` / `error` / `timed_out` / `action_required` → `failed`；否则存在非终态 → `pending`；否则 `success`。
+- **交付物（拆 3 子任务，各自独立验收 / 审计 / 提交）**：
+  - **M43.2a 采集层**（预估 4-6 文件 / 250-400 行）：`types.ts` 增 `UnifiedBuildSignal` + `PRCheckSnapshot.signals`；新增归一化模块（三源映射 + provider 归因 + 状态映射 + 聚合判定 + 轮询节流纯函数）；`polling-source.ts` 三源采集（check runs + combined status + deployments/statuses）；nock 夹具单测覆盖 Actions / Vercel / Cloudflare 三类 + fail-open + 节流。**中间态声明**：a 落地后 `signals` 尚未落库（由 b 消费）。
+  - **M43.2b 持久化与 API**（预估 5-8 文件 / 250-400 行）：`pr-check.ts` 增 3 列 + migration（幂等 + 前缀感知）；`action-status-monitor.ts` 落库 signals / overallStatus / failureSources 并保持幂等与状态机；`GET /api/pr-checks` 视图暴露新字段；单测（幂等 / fail-open / 聚合态 → alertFiring）。
+  - **M43.2c UI 多源展示**（预估 4-6 文件 / 200-350 行）：`pr-checks.vue` 多源详情（失败源清单 + 各信号状态 / 链接）+ i18n ×2 + e2e + 视觉基线重建。
+- **风险与缓解**：**R1 限流**（每 PR 3+ API × N 轮）——增量轮询 + 终态跳过 + 沿用既有 429 / 限流退避；**R2 单行 JSON 膨胀**（Option A）——`signalsJson` 条目截断 + `summary` 限长；**R3 多源噪音**（非关注 check 也告警）——默认全量只报警不阻断（D3），后续按需引入关注集；**R4 变更面大触发未预期回归**——按 M43.2a / M43.2b / M43.2c 分批审计 / 分批提交。
 
 ### M43.3 [P2 🛡️] 容器内 `pnpm install` 环境性失败的可观测性与归因口径
 
