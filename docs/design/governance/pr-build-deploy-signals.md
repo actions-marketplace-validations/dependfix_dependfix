@@ -137,6 +137,16 @@ interface UnifiedBuildSignal {
 
 **信号上限**：单 PR 信号按严重度（失败 → pending → neutral → skipped → success）排序后截断到 `MAX_SIGNALS_PER_PR`，摘要按 `SIGNAL_SUMMARY_MAX_LENGTH` 截断（§6 风险 R2 的缓解落点）。
 
+**轮询窗口取值**：`PR_UPDATED_WINDOW_MS = 7 天`（实现期新决策，设计稿 §3.5 仅描述「窗口内」未给取值）。取值理由：覆盖「PR 最近一次更新后 7 天内仍可能新增 check / 部署」的常见节奏，同时把陈旧 PR 的三源请求降为零；窗口外 PR 的既有 `PRCheck` 行保持原状态（`lastPolledAt` 不再推进）——**该语义由 M43.2b 显式承接**（需明确窗口外行的诊断口径与失败告警收敛路径）。
+
+**`checkRunId` / `errorMessage` 派生语义变更**：两列原为「`Test` check 专属」，现改为**最坏信号派生**——`checkRunId` 取失败 check 的 run id（无失败 check 时取任一 check），`errorMessage` 取失败信号摘要（无失败时取首条带摘要者）。列名与既有 UI 消费方不变，但语义已从「单一 check」扩展为「聚合信号代表」。
+
+**provider 归因归一化**：deployment 侧 `creator.login` 归一化 `[bot]` 后缀（`vercel[bot]` → `vercel`），使同一 provider 在 status（`context` 前缀）与 deployment 两侧归因一致，避免按 provider 归组（`failureSources` / 展示）时分裂成两项。
+
+**空集真空真**：`aggregateOverallStatus([])` / `deriveWorstConclusion([])` 返回 `success` 属真空真——采集层对无信号 PR 不产出快照（`signals.length === 0 → continue`），落库侧消费前同样须判空。
+
+**M43.2a 的运行时影响（非纯中间态）**：a 虽未落库 `signals`，但**已通过派生 `conclusion` 改变既有运行时行为**——`ActionStatusMonitor` 消费 `conclusion` 推断 `alertFiring` 与自动 ack，故「多源失败 → firing」在 a 阶段即生效。随之出现一处语义收紧需 b 承接：`deriveWorstConclusion` 在存在 `neutral` 信号时返回 `neutral`，而监控器仅在 `conclusion === 'success'` 时清 `acknowledgedAt` → 含 `neutral` 信号的 PR 不再自动清零 ack。**b 侧处置**：自动 ack 清空判定改为按 `overallStatus === 'success'`（聚合语义更准确）。
+
 
 
 ## 4. 数据模型（两个选项）
