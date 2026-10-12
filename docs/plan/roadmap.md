@@ -50,6 +50,7 @@
 | M40: 运行时可靠性与可观测性深化 | 部署产物版本戳陈旧校验 + 失败 run 落 summary 快照 + 执行超时可配置化 + 队列 worker 崩溃自动重启 + sandbox 降级回退路径落执行日志 + 平台环境变量文档完整性治理 | P2 | 已完成（2026-10-10 用户决策方案 A / D2 以环境变量文档治理替换 M40.6；2026-10-10 已闭环归档，见 [todo-archive.md §M40](todo-archive.md#m40-运行时可靠性与可观测性深化m401m406-全部已闭环--2026-10-10-归档)） |
 | M41: 规范与经验管理体系重构 | standards 去实现化瘦身 + 经验体系三层收敛与精简 + 规范/经验门禁落地（CI 阻断）+ 文档站导航分层 + 阈值与事实源唯一化 | P2-P3 | 已完成（2026-10-10 用户决策方案 B / 2026-10-10 已闭环归档，见 [todo-archive.md §M41](todo-archive.md#m41-规范与经验管理体系重构m411m415-全部已闭环--2026-10-10-归档)） |
 | M42: 修复交付正确性 + 平台能力与体验补强 | network-audit 出站白名单镜像源扩充与动态发现 + `.gitignore` 幂等判定归一化 + 扫描复用路径误置既有 run 为 failed 修复 + PR Check 手动触发 + 平台列表页表格基础能力补强 + 严重级别展示策略统一 | P2-P3 | 已完成（2026-10-10 用户决策方案 A+B 混合 / 2026-10-11 已闭环归档，见 [todo-archive.md §M42](todo-archive.md#m42-修复交付正确性--平台能力与体验补强m421m426-全部已闭环--2026-10-11-归档)） |
+| M43: PR Check 能力补强 + 运行时可靠性与工程治理 | PR Check 列表仓库标识 + PR 构建/部署错误多源采集（GitHub 三源聚合）+ 容器内 `pnpm install` 环境性失败可观测性与归因口径 + 扫描触发去重合并前端感知 + git 非仓库 / push 钩子边界收口 + 工程脚本加固（门禁产物排除 + 蒸馏计数假阴性） | P2-P3 | 进行中（2026-10-12 用户决策方案 A；6 原子条目见 [todo.md §M43](todo.md#m43-pr-check-能力补强--运行时可靠性与工程治理2026-10-12-用户决策方案-a)） |
 
 > **本路线图定位**：按 [规划规范 §2.1](../standards/planning.md) 仅维护阶段概览（目标 / 优先级 / 状态）。详细实施记录 / commit 引用 / 关键决策 / 经验教训见对应归档段（详见下方"## 详细任务"索引）。
 
@@ -821,11 +822,44 @@ per-alert 模型 + reconcile + API 简化 + UI 调整 + backfill 脚本。5 子�
 
 ---
 
+## M43: PR Check 能力补强 + 运行时可靠性与工程治理（2026-10-12 用户决策方案 A）
+
+承接 M42 归档后的「平台能力补强 + 运行时可靠性」两条线。**PR Check 能力补强**线——① 列表行内补齐所属仓库标识（2026-10-12 用户反馈：跨仓库 PR 编号重号、行内无从判断归属）；② 把 PR Check 从单一 `Test` check 扩展为 GitHub 三源（Checks + Commit Statuses + Deployments）构建 / 部署信号聚合（设计先行稿 [pr-build-deploy-signals.md](../design/governance/pr-build-deploy-signals.md) 已定稿）。**运行时可靠性与工程治理**线——③ 容器内 `pnpm install` 环境性失败（非零退出且无 stderr）的可观测性与归因口径（消除 `engine_exit_2` 误归因）；④ 扫描触发被去重合并时的前端感知；⑤ git 非仓库目录语义与 push 侧 `pre-push` 钩子隔离收口；⑥ 门禁脚本 Playwright 产物排除与 `distill-wisdom` 计数假阴性修复。
+
+经 2026-10-12 用户决策（方案 A）从 [backlog.md](backlog.md) §候选评估中 + §待上收候选上收 6 项。
+
+**6 原子条目**（覆盖 🎨 2 + 🚀 1 + 🛡️ 2 + 🛠️ 1；🧪 独立条目缺口已显式标注，测试随条目内嵌）：
+
+- **M43.1** [P2 🎨 体验] PR Check 监测列表补齐所属仓库标识（`owner/name`，消除跨仓库同号 PR 不可辨）
+- **M43.2** [P2 🚀 能力扩展] PR 构建 / 部署错误多源采集（GitHub 三源聚合 + 归一化 + 告警沿用；**预估超任务粒度阈值，须拆 M43.2a / M43.2b**）
+- **M43.3** [P2 🛡️ 可观测性 / 归因] 容器内 `pnpm install` 环境性失败的可观测性与归因口径（保留 stderr / exit code / signal + UI 文案分层）
+- **M43.4** [P2 🎨 体验] 扫描触发被去重合并（`merged`）时的前端感知（消除「点了修复但没跑」）
+- **M43.5** [P3 🛡️ 治本] git 边界收口：`hasGitChanges` 非仓库语义 + push 侧 `pre-push` 钩子隔离
+- **M43.6** [P3 🛠️ devEx] 工程脚本加固：门禁产物排除（`playwright-report` / `test-results`）+ `distill-wisdom` 计数假阴性
+
+**类型平衡复核**：🎨 2（M43.1 / M43.4）+ 🚀 1（M43.2）+ 🛡️ 2（M43.3 / M43.5）+ 🛠️ 1（M43.6）；🧪 独立条目缺口显式标注（测试随各条目内嵌）——符合 [规划规范 §1.1 L12 类型平衡建议](../standards/planning.md#11-硬性约束)。
+
+**建议顺序**：M43.1（前端先行，避免 M43.2 同表两次改动）→ M43.2（大项，D 阶段先定稿子任务拆分）→ M43.3 → M43.4 → M43.5 → M43.6。
+
+**条目容量**：6 原子符合 [规划规范 §1.1](../standards/planning.md#11-硬性约束) 的 5-6 项上限；**M43.2 预估 > 10 文件 / > 800 行，须拆 M43.2a（采集层）/ M43.2b（聚合 + 实体 + API/UI）**，拆分依据登记 `todo.md §M43.2`；其余条目未超单条阈值。**M43.1 与 M43.2 同表（`pr-checks`），仓库标识口径宜一并设计以避免两次改表。**
+
+**范围边界（不做什么）**：不改 PRCheck 数据模型 / 状态机与 ack 语义（M43.1）；不改 engine 本地构建 / 验证逻辑、不新建 GitHub App、不做 webhook、首批不含 provider 原生日志富化（M43.2）；不改 `pnpm install` 执行方式与锁文件修复策略语义（M43.3）；不改 `POST /api/repos/[id]/scan` 去重合并语义与响应结构（M43.4）；不改 `--no-verify` 选型与签名隔离常量取值（M43.5）；不改编号正则 / 真常量白名单（M43.6）。
+
+**§3.4 交叉核验**：6 项候选经 todo-archive 表格扫描（关键词零命中已闭环修复，唯一命中为 M24 PR Check MVP——属单 `Test` check MVP，非多源扩展）+ git log（`pr-checks.vue` 最近 `4aa1f7b` 手动触发入口无仓库列 / `services/monitor/**` 无 Deployments / Commit Statuses 采集 / `fixers/pnpm/index.ts` 无 signal 上报 / `pr-creator.ts` push 侧仅签名隔离）+ 代码 anchor（`pr-checks.vue:115-120` 6 列无仓库列 + `pr-checks/index.get.ts:33` 仅 `repositoryId` / `polling-source.ts` 仅单 check 名 / `use-fix-now.ts:65-84` 不消费 `merged` / `helpers.ts:669` 非仓库恒 `true` / `pushBranch` 无 hooks 隔离 / 两门禁脚本排除面缺产物目录 + `distill-wisdom.mjs:145` 正则不容忍「日期+类型」）三重核验，**0 项重复评估**。
+
+**审计 depth 预告**：M43.2（数据模型 / migration / 公开 API / 外部调用）→ `standard`（建议 2 分区并发）；M43.3（归因口径 + 展示映射）→ `standard`；M43.5（engine git 行为 + 平台 push 路径）→ `standard`；M43.1 / M43.4（前端）→ `quick`；M43.6（脚本 + 单测）→ `quick`。
+
+**commits 状态**：阶段启动规划 commit 落地后实测（`git rev-list HEAD ^origin/master --count` 双向核验），本阶段 commits 归档前均为本地 ahead，待用户推送确认。
+
+> 详细任务与 8 要素见 [todo.md §M43](todo.md#m43-pr-check-能力补强--运行时可靠性与工程治理2026-10-12-用户决策方案-a)（2026-10-12 启动规划）；上一阶段（M42）见 [todo-archive.md §M42](todo-archive.md#m42-修复交付正确性--平台能力与体验补强m421m426-全部已闭环--2026-10-11-归档)。
+
+---
+
 ## 详细任务
 
-- 当前阶段任务：**无进行中阶段**——下一阶段按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 评估 [backlog.md](backlog.md) 候选池后由用户决策；最近闭环阶段 M42（修复交付正确性 + 平台能力与体验补强）见 [todo-archive.md §M42](todo-archive.md#m42-修复交付正确性--平台能力与体验补强m421m426-全部已闭环--2026-10-11-归档)
+- 当前阶段任务：**M43 进行中**——PR Check 能力补强 + 运行时可靠性与工程治理（6 原子条目）见 [todo.md §M43](todo.md#m43-pr-check-能力补强--运行时可靠性与工程治理2026-10-12-用户决策方案-a)；上一闭环阶段 M42（修复交付正确性 + 平台能力与体验补强）见 [todo-archive.md §M42](todo-archive.md#m42-修复交付正确性--平台能力与体验补强m421m426-全部已闭环--2026-10-11-归档)
 - 已归档阶段：[todo-archive.md](todo-archive.md)（主窗口保留最近阶段完整段 + 指针段；M0-M42 全部已归档；早期阶段见 [archive/index.md](archive/index.md) 分片索引）
-- 下一阶段（未授权）：无——按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 评估 backlog 候选池后由用户决策
+- 下一阶段（未授权）：无——本阶段闭环后按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 评估 backlog 候选池后由用户决策
 - 后续阶段任务（延期项 + 未排期增强候选）：[backlog.md](backlog.md)
 
 ## 交付原则

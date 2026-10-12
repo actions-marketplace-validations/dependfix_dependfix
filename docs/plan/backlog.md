@@ -60,17 +60,6 @@
 
 ### 候选评估中（待评估 / 本阶段延后项）
 
-- **容器内 `pnpm install` 环境性失败的可观测性与归因口径（待评估）** —— 现象（2026-10-11 生产实证）：fix 扫描下容器内 `pnpm install` 反复以**非零退出且无任何 stderr** 结束（`execFileSync` 错误消息仅剩 `Command failed: pnpm install --no-frozen-lockfile`），导致 lockfile 诊断（`classifyLockfileFailure`）归类 `UNKNOWN` + 修复链（`REGENERATE` / `REINSTALL`）全部失败 + 基线验证同样失败（被判 `PRE_EXISTING_FAILURE` 不归因）→ 无任何修复产出 → `computeExitCode` 返回 2 → 平台以 `engine_exit_2`「所有仓库失败或全量回滚」呈现，实为环境/安装层面的单点问题，UI 文案构成误归因。
-  - **现状锚点**：`packages/engine/src/fixers/pnpm/index.ts`（`classifyLockfileFailure` 79-96 / `execRepair` 143-145 用 `execFileSync` 丢弃 signal 与退出码 / `failureDetail` 515 取 `getStderrText(err) || err.message`）、`packages/engine/src/app/repo-fix.ts:817`（`finalizeRepoFix` 对**零告警**仓库也无条件跑一次 lockfile repair 与验证链）、`packages/engine/src/app/result-assembly.ts`（`computeExitCode` 归因口径）、`apps/platform/server/services/scan-run-state.ts:141-142`（`engine_exit_2` 定义）+ `apps/platform/app/utils/run-view.ts`（失败 stage / kind → i18n 标签映射层；`engine_exit_2` 的 message 由 `apps/platform/app/components/repo-history-dialog.vue` 直接渲染）。
-  - **待评估点**：① 是否在 `execRepair` / 分类结果中保留并上报 `stderr` / `exit code` / `signal`（当前外部只看到 `Command failed: …`，无法定位是 OOM / 信号杀死 / 静默失败）；② 唯一失败为「环境性安装失败 + 既有基线失败」且零告警时，整次运行是否仍应判 failed（归因口径）；③ 零告警仓库是否仍需跑 lockfile repair + 完整验证链（成本与误报面）；④ 若判定为环境问题，是否走环境事件 / `failure_kind=transient` 而非 `failed`。
-  - **触发条件**：再次出现「`pnpm install` 无 stderr 死亡」实例；或用户要求补齐该链路的可观测性。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
-
-- **`hasGitChanges` 非仓库目录语义（返回 `true` 的 fail-open 误判）（待评估）** —— 现象：`hasGitChanges`（`packages/engine/src/app/helpers.ts`）以「两条 `git diff` 是否失败」推断有无变更，非 git 目录下命令必失败 → 恒返回 `true`（误判为「有变更」）；当前 2 处调用点（`app/index.ts:273` `preExistingDirty` 采样、`app/index.ts:547` fix-and-pr 的 PR 判定）在平台路径**均不可达**（fix 路径必先 clone），故仅属潜在 landmine。同类隐患已在 `commitLocalChanges` 前置 `isGitRepository` 守卫处消除（2026-10-11 hotfix）。
-  - **待评估点**：① 是否让 `hasGitChanges` 在非仓库目录返回 `false`（语义 = 无可提交内容），或统一前置 `isGitRepository` 判定；② 若改语义，`preExistingDirty=true` 的保护语义（验证门禁回滚时不误伤用户改动）是否需同步调整；③ 是否需要一条「workDir 非仓库」的统一前置校验（fail-fast）替代各处分散判定。
-  - **触发条件**：再次出现「非仓库 workDir 被当作有变更」的误判实例；或为 `packages/engine/src/app/helpers.ts` 的 `commitLocalChanges` JSDoc 所述「守卫有意 fail-open，代价是只留日志、不留结构化信号」补一条结构化信号时。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
-
 - **`architecture.md` 存在畸形 markdown 链接（未成对 `](`）（待评估）** —— 现象：`docs/design/governance/architecture.md` 的「监测系统 vs 自动合并解耦」表行末残留一处未成对的链接片段（`…experience-archive-§49-§57-recent-investigation.md#五十六) + …`），`check:docs` 因无法识别 `](` 而成对性静默跳过（不报错）。
   - **待评估点**：① 是否为重复拼接残留；② 自建链接校验器是否需补「未成对 `](` / `)` 计数」检测（当前只匹配合规 `](`）。
   - **触发条件**：下次改动该文件时；或加固 check-docs 链接校验口径时。
@@ -114,29 +103,14 @@
 
 - **扫描偏好服务端跨设备默认（延后，保留待评估）** —— 设备级方案 C 混合（localStorage：上次选择 + 可选配置化默认 + 重置）已落地；服务端用户 / 组织级默认偏好（跨设备、可管理，需实体 / API / 设置页，预计触发 governance 文档）按用户 2026-10-06 决策延后。**现状锚点**：`apps/platform/app/composables/use-scan-preferences.ts`。触发条件：① 用户实测多设备切换痛点；② 组织级统一默认诉求。
 
-- **push 侧 `pre-push` 钩子隔离（待评估）** —— 现状仅隔离 commit 侧 hooks（`--no-verify` 不作用于 `git push`），被修复仓库若安装依赖 `npx` 的 `pre-push` 钩子，理论上可在 push 阶段复现同类失败（`packages/engine/src/github/pr-creator.ts` 的 `pushBranch` 与平台侧 `pushFixBranch` 均未加隔离）；push / PR 交付链当前显式排除隔离。
-  - **待评估点**：① 生产日志中是否存在 `pre-push` 导致的交付失败实例（当前已观测失败均为 `pre-commit` / `commit-msg`）；② 若存在，隔离选型（`git push --no-verify`）与 commit 侧是否共用常量。
-  - **触发条件**：生产日志出现 `pre-push` 失败，或用户要求 push 侧一并隔离。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
-
 - **tech-stack 平台依赖表与 `apps/platform/package.json` 行级不一致（待评估）** —— `docs/guide/tech-stack.md` 核心框架表按 `^X.x` 粗粒度声明平台依赖，但其中 `@lucide/vue` 行写 `^1.48`（声明为 `^1.49.0`，区间仍覆盖但口径不同步）；`pinia` / `@vueuse/core` / `@vueuse/nuxt` / `@sentry/nuxt` / `@vite-pwa/nuxt` 5 行在 `apps/platform/package.json` 与 `nuxt.config.ts` 模块列表中**均无对应声明与引用**（疑似模板期占位行）。
   - **待评估点**：① 逐行核对整表与 `package.json` / `nuxt.config` 的对应关系；② 删除无引用行 vs 补声明（若确为规划中的能力）；③ 是否统一为「不写具体版本号，指向 package.json」以减少同类漂移。
   - **触发条件**：依赖变更需要核对文档时；或用户要求清理文档依赖表。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
-- **`distill-wisdom` 对「日期+类型」格式活跃条目的计数假阴性（待评估）** —— `.session/wisdom.md` 活跃条目按 `- **[YYYY-MM-DD] [type] 标题**：正文` 书写时，`scripts/distill-wisdom.mjs` 的条目标题解析正则（`- **[type-id]** 标题`）不匹配 → `pnpm distill:wisdom --check` 输出 `0 active entries`（假阴性），会掩盖「已超 20 条阈值」的状态。
-  - **待评估点**：① 是否让脚本同时容忍 `**[日期] [类型] …**` 形态，或在蒸馏机制文档中统一规定条目格式；② `--check` 是否增加「解析到 0 条但文件存在条目样式」的显式告警（防假阴性再次静默通过）。
-  - **触发条件**：下次 session 写入活跃条目时（沿用日期+类型写法即复现）；或用户要求加固脚本。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
-
 - **队列 worker 进程按 role 跳过周期插件（待评估）** —— 独立 worker 进程形态的已知边界：worker 与 HTTP 进程共享同一 Nitro 产物，会重复启动 `stale-cleanup` / 启动期备份等周期插件（均幂等，代价为重复 DB 查询与日志）。
   - **待评估点**：引入 `DEPENDFIX_ROLE`（server / worker）让 worker 跳过 HTTP-only 插件；或按 `inProcessWorker` 条件跳过（注意单进程形态下该值为 true，不能跳过）。
   - **触发条件**：周期插件重复造成可观测噪声或资源浪费时；或用户要求。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
-
-- **代码门禁脚本未排除 Playwright 生成产物（待评估）** —— 现象：`scripts/check-orphan-ids.mjs` 的 `EXCLUDED_DIRS` 未包含 `playwright-report` / `test-results`，本地跑过 e2e 后 HTML 报告内的 minified 依赖 bundle（`playwright-report/trace/assets/codeMirrorModule-*.js`）被纳入扫描并误报规划编号形态；`scripts/check-docs.mjs` 同理把 `test-results/**/error-context.md`（Playwright 失败产物）计入 md 扫描面（本地实测 148 → 152）。CI 因门禁步骤先于 e2e 产物生成而不受影响，但本地验证会被产物污染（须先清理产物才能取得干净门禁）。
-  - **待评估点**：① 两个脚本的产物排除面是否统一补 `playwright-report` / `test-results`（与既有 `.output` / `coverage` / `dist` 同类）；② 是否改为统一「尊重 `.gitignore`」的排除策略以避免逐个补目录。
-  - **触发条件**：本地跑过 e2e 后执行门禁脚本出现产物误报；或用户要求加固脚本。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
 - **`repo-history-dialog` history 模式与 legacy `/repos/[id]/runs` 页疑似无入口死代码（待评估）** —— 现象：全仓仅 `scans.vue` 以 `:query-key="'run'"` 挂载 `repo-history-dialog`；`repos.vue` 的历史入口已改为跳 `/scans?repository=`，故组件的 history 模式（list 视图 / 「返回列表」分支 / `queryKey='history'` 默认值）当前**不可达**；legacy 页 `app/pages/repos/[id]/runs.vue` 亦无站内链接（其注释引用的 backlog 删除候选已不存在）。
@@ -159,11 +133,6 @@
   - **执行口径（照 [迁移评估 §15.14](../design/governance/caomei-ui-migration.md#1514-caomei-ui-050-升级实证m3422026-10-01)）**：package.json + lockfile → 迁移评估新增 §15.15 + `tech-stack.md` + `platform.md` 版本口径同步 → 重建 `apps/platform/.output` → 全量 lint / typecheck / test / e2e / 视觉基线 `--update-snapshots=all` 重建（预期 alerts / pr-checks 因排序序号变化）。
   - **触发条件**：用户要求升级；或平台需跟进 0.6.0 新能力（多列排序序号）。与下方延期项「caomei-ui 0.x → 1.0 升级回归」的恢复条件①（用户指定版本）同源，但本条为 `0.6.0` 增量升级，非 1.0 分支。
 
-- **扫描触发被去重合并时的前端感知（待评估）** —— 现象：`POST /api/repos/[id]/scan` 在「同仓库已有进行中任务 → 去重合并」时返回顶层 `merged` 提示（`{ code: 'SCAN_PENDING_MERGED', message }`），但前端 `use-fix-now.ts`（alerts 视图「立即修复此仓库」入口）不消费该字段——命中合并时仍弹「成功」toast 并跳转扫描页，用户无从感知本次触发未真正执行（复用路径的既有 run 记录保持不变，前端会看到其原终态）。
-  - **待评估点**：① 前端按 `merged` 字段显示提示（toast / 跳转后 banner）；② 或统一改为按后续轮询的 run 状态呈现；③ 是否同时覆盖 `repos.vue` 的单仓库扫描入口（该入口按 `code` 走 i18n，已能提示新建路径的合并）。
-  - **触发条件**：用户反馈「点了修复但没跑」；或扫描入口体验统一梳理时。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
-
 - **列表页筛选 / 分页能力的共享抽取（待评估）** —— 现象：`repos.vue` 与 `batch-runs.vue` 各自实现客户端筛选 + 重置 + 内建分页（形态相近但字段与语义不同），`scans.vue` 另有按仓库客户端分页实现；三处筛选 / 分页样板重复。展示口径统一批次（M42.5）判定两页形态尚未完全一致，故先页面内实现。
   - **待评估点**：① 抽取 `useClientTableFilter`（搜索关键字 + 筛选态 + 重置 + 过滤结果）的收益与形态约束；② 或仅抽「搜索 + 重置」最小面；③ 与组件内建分页的边界（分页本身不抽）。
   - **触发条件**：第四处列表页需要同类能力时；或筛选逻辑变更需多处同步时。
@@ -184,15 +153,6 @@
   - **触发条件**：再次出现强调渲染破损；或加固文档渲染校验时。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
-- **PR Check 监测列表缺少所属仓库标识（跨仓库 PR 编号重名不可辨）（待评估）** —— 现象（2026-10-12 用户反馈 + 截图实证）：PR Check 监测页表格首列只渲染 `#<prNumber>`，**整张表没有「仓库」列**，行内无从判断该 PR 属于哪个项目；PR 编号仅在单一仓库内递增唯一，跨仓库会重号，故「全部仓库」视图下用户只能靠逐个切换「仓库」筛选器辨认归属（实测同屏并存 `#390` / `#2367` / `#2408` / `#2411` / `#2412`，行内无任何区分依据）。
-  - **现状锚点**：列定义 `apps/platform/app/pages/pr-checks.vue:114-121`（6 列 `prNumber` / `authorLogin` / `conclusion` / `lastPolledAt` / `alertFiring` / `actions`，无仓库列）+ 首列插槽 `pr-checks.vue:311-322`（仅输出 `#` 拼接 PR 编号，无仓库前缀）；`GET /api/pr-checks` 视图层 `apps/platform/server/api/pr-checks/index.get.ts:31-47` 只返回 `repositoryId`，不含 owner/name。
-  - **旁证**：i18n 已存在**未被引用**的 `prChecks.colRepository`（「仓库」）与 `prChecks.repositoryUnknown`（「未知仓库」）键（`apps/platform/i18n/locales/zh-CN.json:524` / `:532`，en-US 同步；`pnpm i18n:audit:unused` 实证为闲置键），而同族键在 `alerts.vue:416` / `env-events.vue:191` 仍在用 —— 该列疑为计划项且未落地。
-  - **待评估点**：① 展示形态：独立「仓库」列（`owner/name`，与 alerts 页仓库列口径一致）置于 PR 列之前，还是与 PR 编号同格（`owner/name #390`）以省列宽；② 数据来源：前端用页面已拉取的 `/api/repos`（`pr-checks.vue:74-83`）做 `repositoryId → owner/name` 客户端映射（零 API 改动，但依赖该端点全量返回的仓库集合完整性，并需处理映射缺失时的回退文案）vs 服务端视图层 join 返回仓库标签（口径单一，改 API 契约 + 同步测试）；③ 长仓库名 / 窄屏截断与 tooltip 策略；④ 是否顺带启用或清理闲置的 `colRepository` / `repositoryUnknown` 键（两语言同步）；⑤ 仓库列排序与既有「仓库」筛选器的职责边界（避免同屏两处仓库信息语义重叠）。
-  - **触发条件**：用户要求补齐列表可辨识度（本次 2026-10-12 反馈）；或出现「跨仓库同号 PR 误判 / ack 关错告警」实例。
-  - **关联**：下方「待上收候选」的「PR 构建 / 部署错误多源采集」条目会扩展同一张表的列，仓库标识宜与其一并设计，避免两次改表。
-  - **不做什么**：不改 PRCheck 数据模型 / 状态机与 ack 语义。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
-
 ### 待上收候选（评估完成，等待用户决策）
 
 > 本节为「评估完成、等待用户决策」候选的暂存区；候选**不含 `M\d+` 阶段编号**（[规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement)）。
@@ -201,14 +161,6 @@
   - **决策点（待用户裁定）**：① 是否在 `docs/standards/git.md` §3.8 扩展 hooks 隔离子节（或新建独立锚点）；② 是否将 `git-signing.ts` 更名为 `git-isolation.ts` 并同步 §3.8 路径引用（含 engine `github/index.ts` re-export 与平台侧 import）。
   - **现状锚点**：`packages/engine/src/github/git-signing.ts:2`（JSDoc 双语义）+ `docs/standards/git.md:168`（§3.8 标题仅签名）。
   - **不做什么**：不改隔离参数取值与行为；不改 `--no-verify` 选型。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待用户明确决策启动。
-
-- **PR 构建 / 部署错误多源采集（扩展现有 PR Check）**（P2，🚀 能力）—— 现象：现有 `ActionStatusMonitor` 仅抓单个 `Test` check，目标仓库修复 PR 的**完整构建 / 部署信号**（GitHub Actions 其它 workflow、Cloudflare Workers Builds、Vercel 预览部署等）不可见；「代码已修但预览部署失败」无法第一时间发现。
-  - **评估结论（2026-10-10，设计先行稿已完成）**：方案 = 把 PR Check 扩展为「PR 构建 / 部署信号聚合层」——① 采集面 = GitHub 三源（Checks + Commit Statuses + Deployments），provider 无关、零新增凭据（`repo` scope PAT 即可读到 Cloudflare / Vercel 的落点）；② provider 原生 API（Vercel / Cloudflare）作为可选「日志富化」层；③ 检测先轮询（复用 `PRCheckSyncSource`）、预留 webhook。详见 [设计先行稿](../design/governance/pr-build-deploy-signals.md)。
-  - **决策点（设计先行稿 §5 待裁定）**：D1 数据模型（扩展 `PRCheck` / 规范化新表）；D2 provider 日志富化是否首批；D3「阻断关注集」配置形态；D4 provider 凭据承载。
-  - **现状锚点**：`apps/platform/server/services/monitor/action-status-monitor.ts`、`polling-source.ts`、`types.ts`；`apps/platform/server/entities/pr-check.ts`。
-  - **成本 / 价值**：成本中（采集 + 聚合 + UI 多源展示 + 迁移，预计 3 原子）；价值中高（补齐 PR Check 的部署盲区，第一时间发现部署错误）。
-  - **触发条件**：用户要求启动；或线上出现「修复 PR 部署 / 预览失败未被发现」实例。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待用户明确决策启动。
 
 ### 延期 / 暂缓项
@@ -344,7 +296,7 @@
 
 | 内容类型 | 位置 |
 |:--|:--|
-| 当前阶段活跃任务 | **暂无进行中阶段**——下一阶段按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 评估本文件候选池后由用户决策；最近闭环阶段 M42（修复交付正确性 + 平台能力与体验补强，2026-10-11 归档）见 [todo-archive.md §M42](todo-archive.md#m42-修复交付正确性--平台能力与体验补强m421m426-全部已闭环--2026-10-11-归档) |
+| 当前阶段活跃任务 | **M43 进行中**——PR Check 能力补强 + 运行时可靠性与工程治理（6 原子条目，2026-10-12 用户决策方案 A）见 [todo.md](todo.md)；上一闭环阶段 M42（修复交付正确性 + 平台能力与体验补强，2026-10-11 归档）见 [todo-archive.md §M42](todo-archive.md#m42-修复交付正确性--平台能力与体验补强m421m426-全部已闭环--2026-10-11-归档) |
 | 下一阶段（未授权） | 无——按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 评估本文件候选池后由用户决策 |
 | 已完成阶段归档 | [todo-archive.md](todo-archive.md)（主窗口 + [archive/](archive/) 分片） |
 | 里程碑与阶段交付 | [roadmap.md](roadmap.md) |

@@ -1,6 +1,6 @@
 # PR 构建与部署信号采集设计（设计先行稿）
 
-> **状态**：🔶 设计先行稿（backlog 候选，2026-10-10）——契约与数据模型落盘，供实现阶段参考；**未分配阶段编号**（按 [规划规范 §3.1](../../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 等待用户决策）。
+> **状态**：✅ 已上收 **M43.2**（2026-10-12 用户决策方案 A）——契约与数据模型作为实现依据；D 阶段须先裁定 §5 决策点 **D1**（数据模型 Option A / B）/ **D3**（阻断关注集形态）/ **D4**（provider 凭据承载，若不做日志富化则本批不涉及），并按 §7 拆分子任务（M43.2a 采集层 / M43.2b 聚合与告警）。
 > **范围**：`apps/platform`（PR Check 采集 / 聚合 / 展示）+ 可选 provider 日志富化；不改引擎修复与验证逻辑。
 > **目标**：把「修复 PR 的构建 / 部署错误」从单一 `Test` check 扩展为多源聚合，第一时间发现 CI 与预览部署失败。
 > **关联**：[定时扫描与批量处理设计](./platform-scheduled-batch.md)、[运行失败分类与筛选设计](./run-failure-taxonomy.md)、[平台规范](../../standards/platform.md)、`apps/platform/server/services/monitor/`
@@ -154,7 +154,7 @@ interface UnifiedBuildSignal {
 | 多源 check 噪音 | 「关注集」配置（D3），默认全量只报警不阻断 |
 | `stale` / fork / 权限 | 归一化显式映射，fail-open（单源失败不阻断其它源） |
 
-## 7. 落地拆分（草案，不含阶段编号）
+## 7. 落地拆分（已上收 M43.2：M43.2a 采集层 / M43.2b 聚合与告警）
 
 1. **采集层**：GitHub 三源聚合 SyncSource + 归一化 + `nock` 单测。
 2. **聚合与告警**：`PRCheck` 扩展 + 聚合状态机 + API / UI 多源展示 + 迁移。
