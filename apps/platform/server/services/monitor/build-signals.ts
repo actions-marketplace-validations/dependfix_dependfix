@@ -8,7 +8,7 @@ import { PR_CHECK_CONCLUSIONS, type PRCheckConclusion } from '#server/entities/p
  *
  * 三源与 GitHub 落点（provider 无关，零新增凭据）：
  * - `checks.listForRef` → check runs（GitHub Actions / Cloudflare Workers Builds 等）
- * - `repos.getCombinedStatusForRef` → commit statuses（Vercel 每 project 一个 context / 其它 CI）
+ * - `repos.listCommitStatusesForRef`（分页；设计稿列 combined status，实现取分页版以保证「全部」语义，见设计稿 §3.7）→ commit statuses（Vercel 每 project 一个 context / 其它 CI）
  * - `repos.listDeployments` + `listDeploymentStatuses` → deployments（Vercel 等）
  *
  * 本模块只做**纯函数**转换（无 IO），便于单测；HTTP 采集在 `polling-source.ts`。
@@ -40,7 +40,7 @@ const CHECK_CONCLUSION_STATE: Readonly<Record<string, UnifiedBuildSignalState>> 
     stale: 'skipped',
 }
 
-/** commit status state → 归一化状态（`repos.getCombinedStatusForRef` 的 statuses[].state） */
+/** commit status state → 归一化状态（`repos.listCommitStatusesForRef` 的 [].state） */
 const COMMIT_STATUS_STATE: Readonly<Record<string, UnifiedBuildSignalState>> = {
     success: 'success',
     failure: 'failure',
@@ -101,11 +101,14 @@ export const resolveStatusProvider = (context: string | null | undefined): strin
 }
 
 /**
- * provider 归因：deployment 取创建者 login（Vercel 的 deployment creator 即 `vercel[bot]`）。
+ * provider 归因：deployment 取创建者 login，并**归一化 `[bot]` 后缀**（`vercel[bot]` → `vercel`）。
+ *
+ * 归一化理由：同一 provider 在 commit status 侧归因为 `context` 前缀（如 `vercel`），若 deployment
+ * 侧保留 `vercel[bot]`，则按 provider 归组（`failureSources` / 展示）时同一 provider 会分裂成两项。
  * 缺失时回退 `unknown`。
  */
 export const resolveDeploymentProvider = (creatorLogin: string | null | undefined): string => {
-    const login = creatorLogin?.trim().toLowerCase()
+    const login = creatorLogin?.trim().toLowerCase().replace(/\[bot\]$/u, '')
     return login && login.length > 0 ? login : 'unknown'
 }
 
@@ -212,6 +215,8 @@ export const normalizeDeployment = (
  * - 否则 `success`（全 `neutral` / `skipped` 亦视为无失败）
  */
 export const aggregateOverallStatus = (signals: readonly UnifiedBuildSignal[]): OverallBuildStatus => {
+    // 注意：空集返回 `success` 属**真空真**——调用方须先判空（采集层对无信号 PR 不产出快照，
+    // 落库侧消费前同样需要判空，见设计稿 §3.7「节流落地分工」）。
     if (signals.some((s) => FAILING_SIGNAL_STATES.includes(s.state))) {
         return 'failure'
     }
