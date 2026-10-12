@@ -101,14 +101,17 @@ export const resolveStatusProvider = (context: string | null | undefined): strin
 }
 
 /**
- * provider 归因：deployment 取创建者 login，并**归一化 `[bot]` 后缀**（`vercel[bot]` → `vercel`）。
+ * provider 归因：deployment 取创建者 login，并**归一化机器人形态**——去掉 GitHub App 的
+ * `<installation-id>+` 前缀与 `[bot]` 后缀（`vercel[bot]` / `12345+vercel[bot]` → `vercel`）。
  *
  * 归一化理由：同一 provider 在 commit status 侧归因为 `context` 前缀（如 `vercel`），若 deployment
- * 侧保留 `vercel[bot]`，则按 provider 归组（`failureSources` / 展示）时同一 provider 会分裂成两项。
- * 缺失时回退 `unknown`。
+ * 侧保留 `vercel[bot]` / `12345+vercel[bot]`，则按 provider 归组（`failureSources` / 展示）时同一
+ * provider 会分裂成多项。缺失时回退 `unknown`。
  */
 export const resolveDeploymentProvider = (creatorLogin: string | null | undefined): string => {
-    const login = creatorLogin?.trim().toLowerCase().replace(/\[bot\]$/u, '')
+    const login = creatorLogin?.trim().toLowerCase()
+        .replace(/^\d+\+/u, '')
+        .replace(/\[bot\]$/u, '')
     return login && login.length > 0 ? login : 'unknown'
 }
 
@@ -216,7 +219,7 @@ export const normalizeDeployment = (
  */
 export const aggregateOverallStatus = (signals: readonly UnifiedBuildSignal[]): OverallBuildStatus => {
     // 注意：空集返回 `success` 属**真空真**——调用方须先判空（采集层对无信号 PR 不产出快照，
-    // 落库侧消费前同样需要判空，见设计稿 §3.7「节流落地分工」）。
+    // 落库侧消费前同样需要判空，见设计稿 §3.7「空集真空真」）。
     if (signals.some((s) => FAILING_SIGNAL_STATES.includes(s.state))) {
         return 'failure'
     }

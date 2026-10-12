@@ -50,10 +50,11 @@ describe('monitor/build-signals provider 归因', () => {
         expect(resolveStatusProvider(null)).toBe('unknown')
     })
 
-    it('deployment provider 取 creator.login 并归一化 [bot] 后缀（与 status 前缀口径一致）；缺失回退 unknown', () => {
+    it('deployment provider 取 creator.login 并归一化机器人形态（与 status 前缀口径一致）；缺失回退 unknown', () => {
         expect(resolveDeploymentProvider('vercel[bot]')).toBe('vercel')
         expect(resolveDeploymentProvider('Vercel[bot]')).toBe('vercel')
         expect(resolveDeploymentProvider('alice')).toBe('alice')
+        expect(resolveDeploymentProvider('12345+vercel[bot]')).toBe('vercel')
         expect(resolveDeploymentProvider(null)).toBe('unknown')
         expect(resolveDeploymentProvider('  ')).toBe('unknown')
     })
