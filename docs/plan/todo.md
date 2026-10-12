@@ -72,8 +72,10 @@
   - **D2 日志富化 = 不做**（留后续增量 / backlog）。
   - **`overallStatus` 判定口径**（设计稿 §3.3）：存在任一 `failure` / `error` / `timed_out` / `action_required` → `failed`；否则存在非终态 → `pending`；否则 `success`。
 - **交付物（拆 3 子任务，各自独立验收 / 审计 / 提交）**：
-  - **M43.2a 采集层**（预估 4-6 文件 / 250-400 行）：`types.ts` 增 `UnifiedBuildSignal` + `PRCheckSnapshot.signals`；新增归一化模块（三源映射 + provider 归因 + 状态映射 + 聚合判定 + 轮询节流纯函数）；`polling-source.ts` 三源采集（check runs + combined status + deployments/statuses）；nock 夹具单测覆盖 Actions / Vercel / Cloudflare 三类 + fail-open + 节流。**中间态声明**：a 落地后 `signals` 尚未落库（由 b 消费）。
-  - **M43.2b 持久化与 API**（预估 5-8 文件 / 250-400 行）：`pr-check.ts` 增 3 列 + migration（幂等 + 前缀感知）；`action-status-monitor.ts` 落库 signals / overallStatus / failureSources 并保持幂等与状态机；`GET /api/pr-checks` 视图暴露新字段；单测（幂等 / fail-open / 聚合态 → alertFiring）。
+  - **M43.2a 采集层**（预估 4-6 文件 / 250-400 行；**实测 7 文件 / 986 新增行——超预估约 2.5×、超 §1.1 单批 800 行审计阈值**，拆分依据仍成立（a 为采集层最小闭环，无法再切而不产生「已声明未落地」的悬空契约），已按 f3d9381 修复自检项、2ac44bc 补强测试）：`types.ts` 增 `UnifiedBuildSignal` + `PRCheckSnapshot.signals`；新增归一化模块（三源映射 + provider 归因 + 状态映射 + 聚合判定 + 轮询节流纯函数）；`polling-source.ts` 三源采集（check runs + commit statuses + deployments/statuses）；nock 夹具单测覆盖 Actions / Vercel / Cloudflare 三类 + fail-open + 节流 + 形态守卫。
+    - **中间态声明（含运行时影响）**：a 落地后 `signals` / `overallStatus` 尚未落库（由 b 消费），但**派生 `conclusion` 已在 a 阶段生效**（`ActionStatusMonitor` 据此推断 `alertFiring` 与自动 ack）→ 即 AC ② 的「任一时间源失败 → `alertFiring=true`」已提前生效，非纯中间态。
+    - **b 承接项（由 A 阶段审计登记）**：① 自动 ack 清空判定改按 `overallStatus === 'success'`（当前 `conclusion === 'success'` 在含 `neutral` 信号时不再清零 ack）；② `headSha` 未变且已终态 → 跳过（`isTerminalOverallStatus` 已导出）；③ 窗口外行的 `lastPolledAt` 语义与失败告警收敛路径；④ 落库前对空信号判空（`aggregateOverallStatus([])` 为真空真）。
+  - **M43.2b 持久化与 API**（预估 5-8 文件 / 250-400 行）：`pr-check.ts` 增 3 列 + migration（幂等 + 前缀感知）；`action-status-monitor.ts` 落库 signals / overallStatus / failureSources 并保持幂等与状态机（含上条 4 项承接）；`GET /api/pr-checks` 视图暴露新字段；单测（幂等 / fail-open / 聚合态 → alertFiring / coverage）。
   - **M43.2c UI 多源展示**（预估 4-6 文件 / 200-350 行）：`pr-checks.vue` 多源详情（失败源清单 + 各信号状态 / 链接）+ i18n ×2 + e2e + 视觉基线重建。
 - **风险与缓解**：**R1 限流**（每 PR 3+ API × N 轮）——增量轮询 + 终态跳过 + 沿用既有 429 / 限流退避；**R2 单行 JSON 膨胀**（Option A）——`signalsJson` 条目截断 + `summary` 限长；**R3 多源噪音**（非关注 check 也告警）——默认全量只报警不阻断（D3），后续按需引入关注集；**R4 变更面大触发未预期回归**——按 M43.2a / M43.2b / M43.2c 分批审计 / 分批提交。
 
