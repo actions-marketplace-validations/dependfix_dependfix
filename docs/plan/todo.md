@@ -33,21 +33,23 @@
 >
 > **条目容量**：6 原子符合 [规划规范 §1.1](../standards/planning.md#11-硬性约束) 的 5-6 项上限；**M43.2 预估 > 10 文件 / > 800 行，须按 M43.2a / M43.2b 拆分子任务**（拆分依据登记 M43.2 §交付物），其余条目均未超单条阈值。
 
-### M43.1 [P2 🎨] PR Check 监测列表补齐所属仓库标识
+### M43.1 [P2 🎨] PR Check 监测列表补齐所属仓库标识（**已闭环** `23ad252` + `9f9b4b2`）
 
 - **目标**：让 PR Check 监测列表在「全部仓库」视图下行内可辨识 PR 归属，消除跨仓库 PR 编号重号时「只能靠逐个切换筛选器辨认」的不可辨识问题。
 - **优先级**：P2
-- **范围**：`apps/platform/app/pages/pr-checks.vue:114-121`（列定义）+ `:311-322`（首列插槽）+ 数据来源（形态 D 阶段裁定：客户端用页面已拉取的 `/api/repos`（`pr-checks.vue:74-83`）做 `repositoryId → owner/name` 映射 vs 服务端视图层 join——后者改 `apps/platform/server/api/pr-checks/index.get.ts:31-47`）+ i18n ×2（启用或清理闲置 `prChecks.colRepository` / `prChecks.repositoryUnknown`）+ 单测 / e2e / 视觉基线。
+- **范围**：`apps/platform/app/pages/pr-checks.vue`（列定义 + 单元插槽 + 截断样式）+ `apps/platform/server/api/pr-checks/index.get.ts`（视图层 join，**D 阶段定稿：服务端 join**）+ i18n ×2（启用闲置 `prChecks.colRepository` / `prChecks.repositoryUnknown`）+ 单测 / e2e / 视觉基线。
 - **验收标准**：
-  - [ ] ① **可辨识**：「全部仓库」视图下每行可见所属仓库标识（形态 D 阶段定稿：独立「仓库」列 `owner/name` 置于 PR 列之前，或与 PR 编号同格 `owner/name #390`）。
-  - [ ] ② **回退**：映射缺失（仓库已删除 / 不在 `/api/repos` 返回集）时回退 `prChecks.repositoryUnknown`，不渲染 `undefined` / 空串。
-  - [ ] ③ **职责边界**：单仓库筛选态下行内标识与既有「仓库」筛选器语义一致、不产生同屏两处仓库信息冲突。
-  - [ ] ④ **e2e + 视觉**：跨仓库不同号 PR 并存时行内可区分（断言仓库标识文本）+ 长仓库名 / 窄屏截断策略（CSS 截断或 tooltip）生效 + 视觉基线重建后幂等。
-  - [ ] ⑤ **门禁**：`pnpm i18n:audit` 0（闲置键启用或被清理，双语同步）+ `pnpm run check:i18n` parity 0 + `pnpm typecheck` 0 error。
-- **不做什么**：不改 PRCheck 数据模型 / 状态机与 ack 语义；不改 `GET /api/pr-checks` 的筛选 / 分页参数语义（若选服务端 join 仅新增视图字段）；不引入新的仓库查询端点；不统一 `PR check` / `PR Check` 大小写口径（既有混用，另登记）。
+  - [x] ① **可辨识**：「全部仓库」视图下每行可见所属仓库标识（**D 阶段定稿：独立「仓库」列 `owner/name` 置于 PR 编号列之前**）。
+  - [x] ② **回退**：视图字段缺失时回退 `prChecks.repositoryUnknown`，不渲染 `undefined` / 空串（服务端 join 下 `PRCheck.repository` 为 FK 非空 + CASCADE → 该分支不可达，已按测试规范 §6.5 注释登记为防御分支）。
+  - [x] ③ **职责边界**：单仓库筛选态下行内标识与既有「仓库」筛选器语义一致、不产生同屏两处仓库信息冲突（列恒显数据、筛选器为控件）。
+  - [x] ④ **e2e + 视觉**：跨仓库**同号** PR 并存时行内可区分（逐行绑定仓库标签）+ 长仓库名截断策略生效（`title` 暴露完整值 + 超长值下 `scrollWidth > clientWidth`）+ 视觉基线重建后幂等（复跑零漂移）。
+  - [x] ⑤ **门禁**：`pnpm i18n:audit:unused` 中两键已消失（闲置键启用）+ `pnpm run check:i18n` parity 0 + `pnpm typecheck` 0 error。
+- **不做什么**：不改 PRCheck 数据模型 / 状态机与 ack 语义；不改 `GET /api/pr-checks` 的筛选 / 分页参数语义（仅新增视图字段）；不引入新的仓库查询端点；不统一 `PR check` / `PR Check` 大小写口径（既有混用，另登记）。
 - **依赖**：用户 2026-10-12 反馈（截图实证同屏并存 `#390` / `#2367` / `#2408` / `#2411` / `#2412`，行内无区分依据）；`prChecks.colRepository` / `repositoryUnknown` 为闲置键（`pnpm i18n:audit:unused` 实证，同族键在 `alerts.vue:416` / `env-events.vue:191` 仍在用）；**与 M43.2 同表，宜一并设计以避免两次改表**（本条目先落地仓库标识，M43.2 扩展列时沿用同列口径）。
 - **交付物**：预计 2 commits——① 前端列 / 插槽 + 数据映射 + i18n ×2；② e2e + 视觉基线重建。预计 4-6 文件 / 80-150 行。
-- **风险与缓解**：**R1 客户端映射依赖 `/api/repos` 全量完整性**——映射缺失回退文案 + AC ② 断言；**R2 与筛选器职责重叠**——AC ③ 显式约束；**R3 列宽挤压（PR 列 + 仓库列）**——窄屏截断 / tooltip 策略纳入 AC ④。
+- **风险与缓解**：**R1 映射缺失回退**——服务端 join 下不可达，登记为防御分支；**R2 与筛选器职责重叠**——AC ③ 显式约束；**R3 列宽挤压（PR 列 + 仓库列）**——截断策略纳入 AC ④（并实测发现列定义宽度不约束非冻结列，改由单元样式承担）。
+
+- **实际交付**：`23ad252` feat(platform)（`pr-checks.vue` 仓库列 + 单元截断样式 + `index.get.ts` 视图 join）+ `9f9b4b2` test(platform)（`index.get.test.ts` 视图字段断言 + `pr-checks.e2e.test.ts` 跨仓库同号 PR 用例 + `pr-checks-light.png` 基线重建）+ 本条登记 commit。**质量门**：lint 0 error（2 条既有 max-lines warning）；typecheck 全包 Done；定向单测 24 passed；定向 e2e 2 passed；视觉套件重建后连跑两遍 11 passed（仅本页基线变更，其余零 churn）；`check:orphan-ids` 0；新增行编号标记扫描 0 命中。**审计**：standard R1 **Pass**（0 blocker / 1 warning：AC ④ 截断策略无验证）→ 修复时**发现并纠正真实实现缺陷**（caomei DataTable 为 `table-layout: auto` 且 `column.width` 不约束非冻结列 → 原 `max-width: 100%` 随内容增长、截断形同虚设；改为单元内固定上限 + 移除死 prop）→ R2 quick **Pass**（0 blocker / 0 warning；RG-S4 注释精度已随手应用）。**残余**：`dialog-select-open-dark.png` 存在约 28px（ratio 0.002%）运行间非确定性差异，远低于 `maxDiffPixels` 预算、套件稳定通过，已还原为已提交基线并留观察（未纳入本批范围）；`prChecks.ack.confirm` / `colLink` / `errors.loadFailed` 仍为闲置键（既有范围外）。
 
 ### M43.2 [P2 🚀] PR 构建 / 部署错误多源采集（PR Check 扩展为信号聚合层）
 
