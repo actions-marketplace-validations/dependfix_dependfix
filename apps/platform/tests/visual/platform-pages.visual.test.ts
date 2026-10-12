@@ -43,7 +43,11 @@ async function openAlerts(page: Page): Promise<void> {
     await expect(occurrenceHeader).toHaveAttribute('aria-sort', 'ascending', { timeout: 5000 })
     await expect(severityHeader).toHaveAttribute('aria-sort', 'descending')
     // 两列均参与排序 → 表头渲染排序优先级角标（1 / 2）
-    await expect(page.locator('.caomei-data-table__sort-index')).toHaveCount(2)
+    // caomei-ui 0.6.0 起 `sort-mode="multiple"` 下所有可排序列都渲染 `__sort-index`（未参与排序的带
+    // `--reserved` 修饰符且文本为空，用于避免排序时列宽跳动）→ 只统计真正参与排序的角标
+    await expect(
+        page.locator('.caomei-data-table__sort-index:not(.caomei-data-table__sort-index--reserved)'),
+    ).toHaveCount(2)
 
     // 展开全部分组，让 5 个分组下的 9 行明细（severity / source / 状态 / 时间列）进入基线。
     // 逐次点击「尚未展开」的第一个分组开关：展开会插入行，固定下标会错位。

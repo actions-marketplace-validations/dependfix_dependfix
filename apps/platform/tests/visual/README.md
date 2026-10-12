@@ -41,6 +41,14 @@
   [§15.13 第 5 条](../../../../docs/design/governance/caomei-ui-migration.md#1513-b3-收尾实证m3152026-09-29)；
   `Message` soft 档无边框即上表第 4 项。
 
+**上游版本升级带来的基线刷新（caomei-ui 0.6.0，2026-10-12）**——依据见
+[§15.15](../../../../docs/design/governance/caomei-ui-migration.md#1515-caomei-ui-060-升级回归实证插队热修2026-10-12)：
+
+| 项 | 结论 |
+| :--- | :--- |
+| `DataTable` 在 `sort-mode="multiple"` 下**所有可排序列**均渲染 `__sort-index`（未参与排序者带 `--reserved` 且文本为空） | 接受（库侧 UX 改进：排序时列宽不再跳动）；视觉用例断言已限定 `:not(.caomei-data-table__sort-index--reserved)` |
+| `dialog` 内容底色 `bg → bg-elevated`（暗色 `#1e293b` = `rgb(30, 41, 59)`）；`Drawer` / `Popover` 同批改 `bg-elevated`、`Popover` 圆角 `radius-lg` | 接受（库侧设计口径）；`dark-mode` e2e 的背景断言已同步为新 token 取值 |
+
 ## 覆盖边界（现状）
 
 - `pr-checks`：行级渲染已由 M33.4 覆盖——fixtures 端点新增可选 `prChecks` 写入路径（5 行覆盖结论标签四档 danger / success / warning / primary 与 Alert 状态三态 firing / 已 ack / OK）；时间列由 fixtures 钉死 `lastPolledAt` + 视觉环境固定 `locale` / `timezoneId` 保证 `toLocaleString()` 确定性，无需 `data-visual-mask`。

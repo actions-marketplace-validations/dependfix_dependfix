@@ -125,10 +125,12 @@ test.describe('暗色模式（修复防护）', () => {
             }
         })
 
-        // 断言区分度（mutation 实测：切 light 后三项分别为 light / rgb(255,255,255) / rgb(51,65,85)）
+        // 断言区分度（mutation 实测：切 light 后三项分别为 light / rgb(248,250,252) / rgb(51,65,85)；背景取自
+        // caomeiUI theme 的 `bg-elevated` = #f8fafc，0.6.0 起弹窗内容容器改用该 token）
         expect(dialogStyles.colorScheme).toBe('dark')
-        // 弹窗内容容器背景 = 暗色 surface token rgb(15, 23, 42)（非 light 的白底）
-        expect(dialogStyles.contentBackground).toBe('rgb(15, 23, 42)')
+        // 弹窗内容容器背景 = 暗色 elevated surface token（caomei-ui 0.6.0 起 dialog content 由 `bg` 改 `bg-elevated`
+        // → #1e293b = rgb(30, 41, 59)），仍显著区别于 light 的近白底（#f8fafc）
+        expect(dialogStyles.contentBackground).toBe('rgb(30, 41, 59)')
         // 新增的「自定义验证命令」输入文本色跟随暗色 token rgb(241, 245, 249)（非 light 的 rgb(51, 65, 85)）
         expect(dialogStyles.textareaColor).toBe('rgb(241, 245, 249)')
 
