@@ -52,7 +52,12 @@ describe('迁移登记一致性', () => {
 
         const registered = new Set(registeredMigrationNames())
         const missing = files.map(classNameFromFile).filter((name) => !registered.has(name))
-        expect(missing, `未登记的迁移类：${missing.join(', ')}`).toEqual([])
+        // 约定（硬约束）：文件名 `<timestamp>-<ClassName>.ts` ⇔ 类名 `<ClassName><timestamp>`。
+        // 若报错项其实已登记，请先核对命名约定（测试按文件名推导期望类名）。
+        expect(
+            missing,
+            `未登记的迁移类：${missing.join(', ')}（命名约定：<timestamp>-<ClassName>.ts ⇔ <ClassName><timestamp>）`,
+        ).toEqual([])
     })
 
     it('注册数组内不含 migrations/ 目录之外的幽灵项', () => {

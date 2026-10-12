@@ -26,8 +26,19 @@ export const SIGNAL_SUMMARY_MAX_LENGTH = 300
  *
  * 理由：`environment_url` / `target_url` 由部署方提供、长度不受控；`MAX_SIGNALS_PER_PR` 只限条数，
  * 不限单条体积。上限取 500——与实体 `PRCheck.detailsUrl`（varchar(500)）同口径。
+ *
+ * 超限处置：**置 `null` 而非截断**——截断后的 URL 是无效链接（会指向错误资源），
+ * 丢弃比给出坏链接更安全（`capUrl`）。
  */
 export const SIGNAL_URL_MAX_LENGTH = 500
+
+/** URL 上限守卫：缺失回 null；超限亦回 null（截断会产出无效链接） */
+const capUrl = (url: string | null | undefined): string | null => {
+    if (!url) {
+        return null
+    }
+    return url.length > SIGNAL_URL_MAX_LENGTH ? null : url
+}
 
 /** 单 PR 信号条数上限（超出按严重度保留；避免异常仓库产生超大 JSON） */
 export const MAX_SIGNALS_PER_PR = 50
@@ -148,7 +159,7 @@ export const normalizeCheckRun = (
         state,
         rawState: rawConclusion,
         sourceId: checkRun.id !== undefined && checkRun.id !== null ? String(checkRun.id) : null,
-        targetUrl: truncate(checkRun.details_url ?? checkRun.html_url, SIGNAL_URL_MAX_LENGTH),
+        targetUrl: capUrl(checkRun.details_url ?? checkRun.html_url),
         logUrl: null,
         summary: truncate(checkRun.output?.text, SIGNAL_SUMMARY_MAX_LENGTH),
         observedAt,
@@ -174,7 +185,7 @@ export const normalizeCommitStatus = (
         state: COMMIT_STATUS_STATE[rawState ?? ''] ?? 'skipped',
         rawState,
         sourceId: status.id !== undefined && status.id !== null ? String(status.id) : null,
-        targetUrl: truncate(status.target_url, SIGNAL_URL_MAX_LENGTH),
+        targetUrl: capUrl(status.target_url),
         logUrl: null,
         summary: truncate(status.description, SIGNAL_SUMMARY_MAX_LENGTH),
         observedAt,
@@ -212,8 +223,8 @@ export const normalizeDeployment = (
         state: rawState ? (DEPLOYMENT_STATE[rawState] ?? 'skipped') : PENDING_SIGNAL_STATE,
         rawState,
         sourceId: deployment.id !== undefined && deployment.id !== null ? String(deployment.id) : null,
-        targetUrl: truncate(latestStatus?.environment_url ?? latestStatus?.target_url, SIGNAL_URL_MAX_LENGTH),
-        logUrl: truncate(latestStatus?.log_url, SIGNAL_URL_MAX_LENGTH),
+        targetUrl: capUrl(latestStatus?.environment_url ?? latestStatus?.target_url),
+        logUrl: capUrl(latestStatus?.log_url),
         summary: truncate(latestStatus?.description, SIGNAL_SUMMARY_MAX_LENGTH),
         observedAt,
     }

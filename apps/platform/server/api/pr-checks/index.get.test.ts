@@ -194,6 +194,34 @@ describe('GET /api/pr-checks', () => {
         expect(target.failureSources).toBeNull()
     })
 
+    it('JSON 列合法但非数组（如对象）时回退 null（运行时形态守卫）', async () => {
+        const ds = await ensureDatabaseInitialized()
+        const repo = ds.getRepository(PRCheck)
+        await repo.save(repo.create({
+            repositoryId,
+            prNumber: 11,
+            headSha: 'f'.repeat(40),
+            authorLogin: 'dependfix[bot]',
+            conclusion: 'success',
+            signalsJson: '{}',
+            overallStatus: 'success',
+            failureSourcesJson: '42',
+            alertFiring: false,
+            acknowledgedAt: null,
+            acknowledgedByUserId: null,
+            lastPolledAt: new Date('2026-09-06T00:00:00Z'),
+        }))
+
+        const list = await call(`/api/pr-checks?repositoryId=${repositoryId}`) as {
+            prNumber: number
+            signals: unknown[] | null
+            failureSources: unknown[] | null
+        }[]
+        const target = list.find((r) => r.prNumber === 11)!
+        expect(target.signals).toBeNull()
+        expect(target.failureSources).toBeNull()
+    })
+
     it('alertFiring=false 仅返回非 firing 的 PR', async () => {
         const list = await call('/api/pr-checks?alertFiring=false') as { alertFiring: boolean }[]
         expect(list.length).toBeGreaterThan(0)

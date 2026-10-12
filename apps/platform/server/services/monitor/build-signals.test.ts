@@ -18,6 +18,7 @@ import {
     resolveStatusProvider,
     shouldSkipTerminalPr,
     SIGNAL_SUMMARY_MAX_LENGTH,
+    SIGNAL_URL_MAX_LENGTH,
     summarizeFailureSources,
     TERMINAL_REPOLL_QUIET_MS,
 } from './build-signals'
@@ -85,6 +86,21 @@ describe('monitor/build-signals 归一化', () => {
         const skipped = normalizeCheckRun({ id: 3, name: 'Test', status: 'completed', conclusion: null }, observedAt)
         expect(skipped.state).toBe('skipped')
         expect(skipped.rawState).toBe(null)
+    })
+
+    it('check run：URL 超限置 null（截断会产出无效链接）', () => {
+        const longUrl = `https://example.com/${'x'.repeat(SIGNAL_URL_MAX_LENGTH)}`
+        const signal = normalizeCheckRun(
+            { id: 5, name: 'Test', status: 'completed', conclusion: 'failure', details_url: longUrl },
+            observedAt,
+        )
+        expect(signal.targetUrl).toBeNull()
+
+        const short = normalizeCheckRun(
+            { id: 6, name: 'Test', status: 'completed', conclusion: 'failure', details_url: 'https://example.com/ok' },
+            observedAt,
+        )
+        expect(short.targetUrl).toBe('https://example.com/ok')
     })
 
     it('check run：摘要按上限截断', () => {
