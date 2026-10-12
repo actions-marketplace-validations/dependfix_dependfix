@@ -18,7 +18,7 @@ import { PR_CHECK_CONCLUSIONS, type PRCheckConclusion } from '#server/entities/p
  * 等不被粗化为 `failure`），后者供落库（`checkRunId`）与前端链接使用。
  */
 
-/** 单条信号摘要限长（避免单行 JSON 膨胀；设计稿 R2 缓解项） */
+/** 单条信号摘要限长（避免单行 JSON 膨胀；见 docs/design/governance/pr-build-deploy-signals.md §6 风险表） */
 export const SIGNAL_SUMMARY_MAX_LENGTH = 300
 
 /** 单 PR 信号条数上限（超出按严重度保留；避免异常仓库产生超大 JSON） */

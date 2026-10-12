@@ -81,7 +81,7 @@ export interface UnifiedBuildSignal {
  * - authorLogin / prNumber / headSha / conclusion 与 PRCheck 实体一致
  * - observedAt 由 SyncSource 填充（GitHub API 调用时刻），用于 lastPolledAt 字段
  *
- * 多源字段（M43.2）：
+ * 多源字段（三源聚合；口径见 docs/design/governance/pr-build-deploy-signals.md §3.2）：
  * - `signals`：该 HEAD 的三源归一化信号（check runs + commit statuses + deployments）
  * - `overallStatus`：由 `signals` 聚合出的 PR 级状态（`failure` / `pending` / `success`）
  * - `conclusion`：由 `signals` 派生的既有枚举值（保留 `timed_out` / `action_required` 粒度）
@@ -101,9 +101,9 @@ export interface PRCheckSnapshot {
     authorLogin: string
     /** Check 结论（已映射为 PRCheckConclusion enum；status='in_progress' → 'pending'） */
     conclusion: PRCheckConclusion
-    /** 该 HEAD 的归一化三源信号（M43.2） */
+    /** 该 HEAD 的归一化三源信号（归一化规则见 ./build-signals.ts） */
     signals: UnifiedBuildSignal[]
-    /** 由 signals 聚合出的 PR 级状态（M43.2） */
+    /** 由 signals 聚合出的 PR 级状态（失败优先，判定见 ./build-signals.ts） */
     overallStatus: OverallBuildStatus
     /** 关联 check_run.id（GitHub numeric bigint 字符串化，便于跨库兼容） */
     checkRunId: string | null
