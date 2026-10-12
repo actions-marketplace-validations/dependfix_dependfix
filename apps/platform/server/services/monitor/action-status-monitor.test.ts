@@ -53,6 +53,8 @@ const makeSnapshot = (overrides: Partial<PRCheckSnapshot> = {}): PRCheckSnapshot
     headSha: 'a'.repeat(40),
     authorLogin: 'dependabot[bot]',
     conclusion: 'success',
+    signals: [],
+    overallStatus: 'success',
     checkRunId: '12345',
     detailsUrl: 'https://github.com/octocat/hello-world/pull/42',
     errorMessage: null,

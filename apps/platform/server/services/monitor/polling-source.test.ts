@@ -1,17 +1,58 @@
 import {
+    afterEach,
+    beforeEach,
     describe,
     expect,
     it,
 } from 'vitest'
-import {
-    isFailureConclusion,
-    TARGET_PR_AUTHOR_LOGINS,
-} from './types'
-import {
-    extractErrorMessage,
-    isTargetAuthor,
-    mapGitHubConclusion,
-} from './polling-source'
+import nock from 'nock'
+import { Octokit } from '@octokit/rest'
+import { PollingSource, isTargetAuthor } from './polling-source'
+import { isFailureConclusion, TARGET_PR_AUTHOR_LOGINS } from './types'
+
+const API = 'https://api.github.com'
+
+/** 构造测试用 Octokit（不真实发请求，由 nock 拦截） */
+const makeOctokit = (): Octokit => new Octokit({ auth: 'test-token' })
+
+const HEAD_SHA = 'a'.repeat(40)
+
+/** PR 夹具（author 可配置；updated_at 默认在窗口内） */
+const makePr = (overrides: Record<string, unknown> = {}) => ({
+    number: 101,
+    html_url: 'https://github.com/acme/web-app/pull/101',
+    updated_at: new Date().toISOString(),
+    user: { login: 'dependfix[bot]' },
+    head: { sha: HEAD_SHA },
+    ...overrides,
+})
+
+/** 注册三源的常规响应（各源可覆盖 / 传 null 表示不注册，用于 fail-open 用例） */
+const mockSources = (options: {
+    pulls?: unknown[]
+    checkRuns?: unknown[]
+    statuses?: unknown[]
+    deployments?: unknown[]
+    deploymentStatuses?: Record<number, unknown[]>
+} = {}) => {
+    const {
+        pulls = [makePr()],
+        checkRuns = [],
+        statuses = [],
+        deployments = [],
+        deploymentStatuses = {},
+    } = options
+
+    nock(API).get('/repos/acme/web-app/pulls').query(true).reply(200, pulls)
+    nock(API).get(`/repos/acme/web-app/commits/${HEAD_SHA}/check-runs`).query(true).reply(200, { total_count: checkRuns.length, check_runs: checkRuns })
+    nock(API).get(`/repos/acme/web-app/commits/${HEAD_SHA}/statuses`).query(true).reply(200, statuses)
+    nock(API).get('/repos/acme/web-app/deployments').query(true).reply(200, deployments)
+    for (const [id, list] of Object.entries(deploymentStatuses)) {
+        nock(API).get(`/repos/acme/web-app/deployments/${id}/statuses`).query(true).reply(200, list)
+    }
+}
+
+const source = () => new PollingSource(makeOctokit())
 
 describe('monitor/types', () => {
     describe('isFailureConclusion', () => {
@@ -61,48 +102,171 @@ describe('monitor/polling-source 工具函数', () => {
             expect(isTargetAuthor('')).toBe(false)
         })
     })
+})
 
-    describe('mapGitHubConclusion', () => {
-        it('status=completed + conclusion=success → success', () => {
-            expect(mapGitHubConclusion('success', 'completed')).toBe('success')
-        })
-
-        it('status=completed + conclusion=failure → failure', () => {
-            expect(mapGitHubConclusion('failure', 'completed')).toBe('failure')
-        })
-
-        it('status=completed + conclusion=null → skipped（check 完成无结论）', () => {
-            expect(mapGitHubConclusion(null, 'completed')).toBe('skipped')
-        })
-
-        it('status=in_progress / pending / queued → pending（未完成）', () => {
-            expect(mapGitHubConclusion(null, 'in_progress')).toBe('pending')
-            expect(mapGitHubConclusion(null, 'pending')).toBe('pending')
-            expect(mapGitHubConclusion(null, 'queued')).toBe('pending')
-            expect(mapGitHubConclusion(null, 'waiting')).toBe('pending')
-            expect(mapGitHubConclusion(null, 'requested')).toBe('pending')
-        })
-
-        it('stale 是合法完成态结论（GitHub commit status 聚合降级显示）', () => {
-            expect(mapGitHubConclusion('stale', 'completed')).toBe('stale')
-        })
+describe('monitor/polling-source 三源采集', () => {
+    beforeEach(() => {
+        nock.cleanAll()
     })
 
-    describe('extractErrorMessage', () => {
-        it('null / undefined 返回 null', () => {
-            expect(extractErrorMessage(null)).toBe(null)
-            expect(extractErrorMessage(undefined)).toBe(null)
+    afterEach(() => {
+        nock.cleanAll()
+    })
+
+    it('归一化三源信号并标注 provider（Actions check + Vercel status/deployment + Cloudflare check）', async () => {
+        mockSources({
+            checkRuns: [
+                {
+                    id: 9001,
+                    name: 'Test',
+                    status: 'completed',
+                    conclusion: 'success',
+                    app: { slug: 'github-actions' },
+                    output: { text: 'all good' },
+                },
+                {
+                    id: 9002,
+                    name: 'Workers Builds',
+                    status: 'completed',
+                    conclusion: 'failure',
+                    app: { slug: 'cloudflare-workers-and-pages' },
+                    output: { text: 'build failed: script size exceeded' },
+                    details_url: 'https://dash.cloudflare.com/build/9002',
+                },
+            ],
+            statuses: [
+                {
+                    id: 7001,
+                    context: 'Vercel – web-app',
+                    state: 'success',
+                    target_url: 'https://vercel.com/acme/web-app/abc',
+                },
+            ],
+            deployments: [
+                { id: 5001, environment: 'Preview', creator: { login: 'vercel[bot]' } },
+            ],
+            deploymentStatuses: {
+                '5001': [
+                    {
+                        state: 'failure',
+                        description: 'Deployment failed',
+                        environment_url: 'https://web-app-git-preview.vercel.app',
+                        log_url: 'https://vercel.com/acme/web-app/logs',
+                    },
+                ],
+            },
         })
 
-        it('短文本原样返回', () => {
-            expect(extractErrorMessage('error: foo')).toBe('error: foo')
+        const snapshots = await source().fetchSnapshots({
+            owner: 'acme',
+            repo: 'web-app',
+            repositoryId: 'repo-1',
         })
 
-        it('> 1000 字符截断 + 省略号', () => {
-            const long = 'x'.repeat(2000)
-            const result = extractErrorMessage(long)
-            expect(result?.length).toBe(1000 + 3)
-            expect(result?.endsWith('...')).toBe(true)
+        expect(snapshots).toHaveLength(1)
+        const snapshot = snapshots[0]!
+        expect(snapshot.signals).toHaveLength(4)
+
+        const providers = snapshot.signals.map((s) => `${s.kind}:${s.provider}`)
+        expect(providers).toContain('check:github-actions')
+        expect(providers).toContain('check:cloudflare-workers-and-pages')
+        expect(providers).toContain('status:vercel')
+        expect(providers).toContain('deployment:vercel[bot]')
+
+        const deployment = snapshot.signals.find((s) => s.kind === 'deployment')!
+        expect(deployment.state).toBe('failure')
+        expect(deployment.name).toBe('Preview')
+        expect(deployment.targetUrl).toBe('https://web-app-git-preview.vercel.app')
+        expect(deployment.logUrl).toBe('https://vercel.com/acme/web-app/logs')
+
+        // 聚合：Cloudflare check + Vercel deployment 失败 → overall=failure，conclusion 保留失败 check 粒度
+        expect(snapshot.overallStatus).toBe('failure')
+        expect(snapshot.conclusion).toBe('failure')
+        expect(snapshot.errorMessage).toBe('build failed: script size exceeded')
+    })
+
+    it('无任何信号（无 check / 无 status / 无 deployment）的 PR 不产出快照', async () => {
+        mockSources({ checkRuns: [], statuses: [], deployments: [] })
+        const snapshots = await source().fetchSnapshots({ owner: 'acme', repo: 'web-app', repositoryId: 'repo-1' })
+        expect(snapshots).toHaveLength(0)
+    })
+
+    it('fail-open：check runs 源失败不阻断 commit statuses / deployments 源', async () => {
+        nock(API).get('/repos/acme/web-app/pulls').query(true).reply(200, [makePr()])
+        nock(API).get(`/repos/acme/web-app/commits/${HEAD_SHA}/check-runs`).query(true).reply(500, { message: 'boom' })
+        nock(API).get(`/repos/acme/web-app/commits/${HEAD_SHA}/statuses`).query(true).reply(200, [
+            { id: 7001, context: 'Vercel – web-app', state: 'failure', target_url: null },
+        ])
+        nock(API).get('/repos/acme/web-app/deployments').query(true).reply(200, [])
+
+        const snapshots = await source().fetchSnapshots({ owner: 'acme', repo: 'web-app', repositoryId: 'repo-1' })
+        expect(snapshots).toHaveLength(1)
+        expect(snapshots[0]!.signals).toHaveLength(1)
+        expect(snapshots[0]!.signals[0]!.kind).toBe('status')
+        expect(snapshots[0]!.overallStatus).toBe('failure')
+    })
+
+    it('fail-open：deployments 源失败不阻断其余源', async () => {
+        nock(API).get('/repos/acme/web-app/pulls').query(true).reply(200, [makePr()])
+        nock(API).get(`/repos/acme/web-app/commits/${HEAD_SHA}/check-runs`).query(true).reply(200, {
+            total_count: 1,
+            check_runs: [{ id: 9001, name: 'Test', status: 'completed', conclusion: 'success', app: { slug: 'github-actions' } }],
         })
+        nock(API).get(`/repos/acme/web-app/commits/${HEAD_SHA}/statuses`).query(true).reply(200, [])
+        nock(API).get('/repos/acme/web-app/deployments').query(true).reply(500, { message: 'boom' })
+
+        const snapshots = await source().fetchSnapshots({ owner: 'acme', repo: 'web-app', repositoryId: 'repo-1' })
+        expect(snapshots).toHaveLength(1)
+        expect(snapshots[0]!.signals).toHaveLength(1)
+        expect(snapshots[0]!.overallStatus).toBe('success')
+    })
+
+    it('轮询节流：updated_at 早于窗口的 PR 不再打三源 API', async () => {
+        const stale = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+        mockSources({ pulls: [makePr({ updated_at: stale })] })
+
+        const snapshots = await source().fetchSnapshots({ owner: 'acme', repo: 'web-app', repositoryId: 'repo-1' })
+        expect(snapshots).toHaveLength(0)
+        // 仅 pulls 被消费（三源 API 未注册也未调用）
+        expect(nock.pendingMocks().length).toBeGreaterThan(0)
+    })
+
+    it('非目标作者 / 非 open PR 被忽略', async () => {
+        mockSources({
+            pulls: [
+                makePr({ number: 1, user: { login: 'alice' } }),
+                makePr({ number: 2, user: { login: 'renovate[bot]' } }),
+            ],
+        })
+        const snapshots = await source().fetchSnapshots({ owner: 'acme', repo: 'web-app', repositoryId: 'repo-1' })
+        expect(snapshots).toHaveLength(0)
+    })
+
+    it('形态守卫：check runs 响应缺少 total_count（非标准形态）不产出伪信号', async () => {
+        // Octokit paginate 对「无 total_count」的响应会把整个 body 当作单个元素返回
+        nock(API).get('/repos/acme/web-app/pulls').query(true).reply(200, [makePr()])
+        nock(API).get(`/repos/acme/web-app/commits/${HEAD_SHA}/check-runs`).query(true).reply(200, { check_runs: [] })
+        nock(API).get(`/repos/acme/web-app/commits/${HEAD_SHA}/statuses`).query(true).reply(200, [
+            { id: 7001, context: 'Vercel – web-app', state: 'success', target_url: null },
+        ])
+        nock(API).get('/repos/acme/web-app/deployments').query(true).reply(200, [])
+
+        const snapshots = await source().fetchSnapshots({ owner: 'acme', repo: 'web-app', repositoryId: 'repo-1' })
+        expect(snapshots).toHaveLength(1)
+        expect(snapshots[0]!.signals).toHaveLength(1)
+        expect(snapshots[0]!.signals[0]!.kind).toBe('status')
+    })
+
+    it('未完成的 check run → 信号 pending → 聚合 pending（非失败不 firing）', async () => {
+        mockSources({
+            checkRuns: [
+                { id: 9003, name: 'Test', status: 'in_progress', conclusion: null, app: { slug: 'github-actions' } },
+            ],
+        })
+        const snapshots = await source().fetchSnapshots({ owner: 'acme', repo: 'web-app', repositoryId: 'repo-1' })
+        expect(snapshots).toHaveLength(1)
+        expect(snapshots[0]!.overallStatus).toBe('pending')
+        expect(snapshots[0]!.conclusion).toBe('pending')
+        expect(isFailureConclusion(snapshots[0]!.conclusion)).toBe(false)
     })
 })
