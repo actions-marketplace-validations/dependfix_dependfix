@@ -106,11 +106,14 @@ describe('monitor/polling-source 工具函数', () => {
 
 describe('monitor/polling-source 三源采集', () => {
     beforeEach(() => {
+        // 禁用真实网络：mock 缺失时请求直接抛错（而非打真实 GitHub），避免 fail-open 掩盖 mock 缺口
+        nock.disableNetConnect()
         nock.cleanAll()
     })
 
     afterEach(() => {
         nock.cleanAll()
+        nock.enableNetConnect()
     })
 
     it('归一化三源信号并标注 provider（Actions check + Vercel status/deployment + Cloudflare check）', async () => {
@@ -227,8 +230,10 @@ describe('monitor/polling-source 三源采集', () => {
 
         const snapshots = await source().fetchSnapshots({ owner: 'acme', repo: 'web-app', repositoryId: 'repo-1' })
         expect(snapshots).toHaveLength(0)
-        // 仅 pulls 被消费（三源 API 未注册也未调用）
-        expect(nock.pendingMocks().length).toBeGreaterThan(0)
+        // 断言节流生效于「请求前」：三源拦截器全部未被消费（仍在 pending），而 pulls 已消费
+        const pending = nock.pendingMocks()
+        expect(pending.some((p) => p.includes(`/commits/${HEAD_SHA}/check-runs`))).toBe(true)
+        expect(pending.some((p) => p.includes('/deployments'))).toBe(true)
     })
 
     it('非目标作者 / 非 open PR 被忽略', async () => {
