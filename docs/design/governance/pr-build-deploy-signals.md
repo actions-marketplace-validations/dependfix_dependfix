@@ -1,6 +1,6 @@
 # PR 构建与部署信号采集设计（设计先行稿）
 
-> **状态**：✅ 已上收 **M43.2**（2026-10-12 用户决策方案 A）——契约与数据模型作为实现依据；D 阶段须先裁定 §5 决策点 **D1**（数据模型 Option A / B）/ **D3**（阻断关注集形态）/ **D4**（provider 凭据承载，若不做日志富化则本批不涉及），并按 §7 拆分子任务（M43.2a 采集层 / M43.2b 聚合与告警）。
+> **状态**：✅ 已上收 **M43.2**（2026-10-12 用户决策方案 A）——契约与数据模型作为实现依据；**§5 决策点已于 2026-10-12 裁定**（D1 = Option A 扩展 `PRCheck` / D2 = 不做日志富化 / D3 = 全量只报警不阻断 / D4 = 本批不涉及）；按 §7 拆分子任务推进：**M43.2a 采集层已闭环（2026-10-12，实现期细化见 [§3.7](#37-实现期细化m432a2026-10-12)）**，M43.2b / M43.2c 待推进。
 > **范围**：`apps/platform`（PR Check 采集 / 聚合 / 展示）+ 可选 provider 日志富化；不改引擎修复与验证逻辑。
 > **目标**：把「修复 PR 的构建 / 部署错误」从单一 `Test` check 扩展为多源聚合，第一时间发现 CI 与预览部署失败。
 > **关联**：[定时扫描与批量处理设计](./platform-scheduled-batch.md)、[运行失败分类与筛选设计](./run-failure-taxonomy.md)、[平台规范](../../standards/platform.md)、`apps/platform/server/services/monitor/`
@@ -122,6 +122,23 @@ interface UnifiedBuildSignal {
 - **状态采集**：仅需 `repo` scope PAT —— 现有 pr-check 路径已具备，**零新增凭据**。
 - **日志富化（可选）**：需为 provider 配 token（Vercel token ↔ project / Cloudflare account token）。涉及 `credential` 类型扩展或仓库级 extra config，属 §5 决策点。
 
+### 3.7 实现期细化（M43.2a，2026-10-12）
+
+实现采集层时相对 §3.2 / §3.3 的**两处偏离与两处扩展**（均已在代码注释与本处登记）：
+
+| 项 | 设计稿 | 实现 | 理由 |
+| :--- | :--- | :--- | :--- |
+| commit statuses 取数 | `repos.getCombinedStatusForRef` | **`repos.listCommitStatusesForRef`（分页）** | combined status 的 `statuses` 数组有上限；分页版才能满足「列出全部 commit statuses」的验收语义 |
+| 归一化模型字段 | §3.2 的 9 字段（`kind` / `provider` / `name` / `state` / `targetUrl` / `logUrl` / `summary` / `observedAt`） | 增 **`rawState`**（原始 GitHub 取值）与 **`sourceId`**（check run id / status id / deployment id） | `rawState` 用于**保留既有 `conclusion` 粒度**（`timed_out` / `action_required` 不被粗化为 `failure`，保持 PRCheck 既有枚举与 UI 标签向后兼容）；`sourceId` 供落库（`checkRunId` 列）与前端链接使用 |
+| 状态映射 | §3.3 聚合规则 | 明确定义三张映射表（check conclusion / commit status state / deployment status state → 归一化状态）：`timed_out`、`action_required` → `failure`；`cancelled`、`stale` → `skipped`；deployment `queued` / `in_progress` → `pending`、`inactive` → `skipped` | 使「聚合 failed 判据」与「非终态判据」有唯一落点 |
+| 形态守卫 | 未涉及 | check runs / commit statuses / deployments 三源均**过滤掉无 `id` 的条目** | Octokit `paginate` 在响应缺少 `total_count`（非标准形态）时会把**整个 body 当作单个元素**返回——实测可产出无 id 的伪信号（会误报 `pending`），故按「宁缺勿伪」守卫 |
+
+**节流落地分工**：`updated_at` 窗口过滤在采集层（`isWithinUpdatedWindow`，纯函数）；「`headSha` 未变且已终态 → 跳过」需读既有 `PRCheck` 行，判定函数 `isTerminalOverallStatus` 在采集层导出、接线落在 M43.2b 的监控器侧。
+
+**信号上限**：单 PR 信号按严重度（失败 → pending → neutral → skipped → success）排序后截断到 `MAX_SIGNALS_PER_PR`，摘要按 `SIGNAL_SUMMARY_MAX_LENGTH` 截断（§6 风险 R2 的缓解落点）。
+
+
+
 ## 4. 数据模型（两个选项）
 
 现有 `PRCheck` 是 `(repositoryId, prNumber, headSha)` 一行、单 `conclusion`。扩展有两种路径：
@@ -135,14 +152,16 @@ interface UnifiedBuildSignal {
 
 **建议 A 起步**（与现有 `summaryJson` / `logsJson` 的仓库惯例一致），B 留作需要「按 provider 维度统计」时再演化。
 
-## 5. 决策点（待用户裁定）
+**裁定（2026-10-12）**：取 **Option A**（`PRCheck` 增 `signalsJson` / `overallStatus` / `failureSourcesJson` 三列，`conclusion` 保留为最坏派生态），迁移按幂等 + 前缀感知 helper 落地（见 §3.7 与 M43.2b）。
 
-| 编号 | 决策点 | 选项 |
+## 5. 决策点（已裁定，2026-10-12）
+
+| 编号 | 决策点 | 裁定 |
 |:---|:---|:---|
-| D1 | 数据模型 | Option A（扩展 `PRCheck`，推荐） / Option B（规范化新表） |
-| D2 | 日志富化是否首批 | 首批含 Vercel adapter / 后续增量 / 不做 |
-| D3 | 「阻断关注集」配置形态 | 全量只报警不阻断（推荐起步） / 可配置关注 check 白名单 |
-| D4 | provider 凭据承载 | 扩展 `credential.type` / 仓库级 extra config / 仅环境变量 |
+| D1 | 数据模型 | **Option A**（扩展 `PRCheck` 三列；`conclusion` 保留为最坏派生态） |
+| D2 | 日志富化是否首批 | **不做**（留后续增量 / backlog；Layer 5 不在本批） |
+| D3 | 「阻断关注集」配置形态 | **全量只报警不阻断**（任一归一化信号失败即 firing，不引入配置面） |
+| D4 | provider 凭据承载 | **本批不涉及**（与 D2 联动） |
 
 ## 6. 风险与缓解
 
@@ -153,20 +172,22 @@ interface UnifiedBuildSignal {
 | check run 无原始日志 | Layer 5 provider adapter |
 | 多源 check 噪音 | 「关注集」配置（D3），默认全量只报警不阻断 |
 | `stale` / fork / 权限 | 归一化显式映射，fail-open（单源失败不阻断其它源） |
+| 非标准响应形态产出伪信号 | 三源均过滤无 `id` 条目（§3.7 实测失效模式） |
 
-## 7. 落地拆分（已上收 M43.2：M43.2a 采集层 / M43.2b 聚合与告警）
+## 7. 落地拆分（已上收 M43.2：M43.2a 采集层 / M43.2b 持久化与 API / M43.2c UI 展示）
 
-1. **采集层**：GitHub 三源聚合 SyncSource + 归一化 + `nock` 单测。
-2. **聚合与告警**：`PRCheck` 扩展 + 聚合状态机 + API / UI 多源展示 + 迁移。
-3. **日志富化（可选）**：provider adapter（Vercel 先行）。
+1. **M43.2a 采集层**：GitHub 三源聚合 SyncSource + 归一化 + `nock` 单测（✅ 2026-10-12）。
+2. **M43.2b 持久化与 API**：`PRCheck` 扩展三列 + migration + 监控器落库（含 `headSha` 未变且已终态跳过）+ `GET /api/pr-checks` 视图字段 + 单测。
+3. **M43.2c UI 展示**：`pr-checks` 多源详情（失败源清单 + 各信号状态 / 链接）+ i18n + e2e + 视觉基线。
+4. **日志富化（可选）**：provider adapter（Vercel 先行）—— 后续增量（D2 裁定本批不做）。
 
-## 8. 验收标准（草案）
+## 8. 验收标准
 
-- [ ] 给定一个 PR head，能列出其全部 check runs + statuses + deployments 的归一化条目，且能标注 provider。
-- [ ] 任一时间源失败 → 聚合状态 `failed` → `alertFiring=true` → UI 可见 + ack 可收敛。
-- [ ] Vercel / Cloudflare / 其它 provider 无需额外代码即可识别（`nock` 夹具覆盖三类 `app.slug` / `context`）。
-- [ ] 轮询幂等：同 `headSha` 重跑不重复入库。
-- [ ] 无 Deployments / 无 status 的仓库不报错（fail-open）。
+- [x] 给定一个 PR head，能列出其全部 check runs + statuses + deployments 的归一化条目，且能标注 provider（M43.2a）。
+- [ ] 任一时间源失败 → 聚合状态 `failed` → `alertFiring=true` → UI 可见 + ack 可收敛（M43.2b / M43.2c）。
+- [x] Vercel / Cloudflare / 其它 provider 无需额外代码即可识别（`nock` 夹具覆盖三类 `app.slug` / `context`）（M43.2a）。
+- [ ] 轮询幂等：同 `headSha` 重跑不重复入库（M43.2b）。
+- [x] 无 Deployments / 无 status 的仓库不报错（fail-open）（M43.2a）。
 
 ## 9. 关联文档
 
