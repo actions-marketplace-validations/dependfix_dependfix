@@ -89,6 +89,12 @@ describe('GET /api/pr-checks', () => {
         expect(new Set(list.map((r) => r.prNumber))).toEqual(new Set([1, 2, 3]))
     })
 
+    it('视图包含服务端解析的仓库标签 owner/name（列表行内辨识跨仓库同号 PR）', async () => {
+        const list = await call('/api/pr-checks') as { repository: string | null }[]
+        expect(list).toHaveLength(3)
+        expect(list.every((r) => r.repository === 'demo/app')).toBe(true)
+    })
+
     it('repositoryId 过滤：限定仓库', async () => {
         const ds = await ensureDatabaseInitialized()
         await ds.getRepository(Repository).save(ds.getRepository(Repository).create({
