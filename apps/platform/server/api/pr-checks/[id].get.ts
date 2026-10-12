@@ -3,6 +3,7 @@ import { PRCheck } from '#server/entities/pr-check'
 import { ensureDatabaseInitialized } from '#server/database'
 import { createLocalizedError } from '#server/utils/localized-error'
 import { requireAuth } from '#server/utils/guard'
+import { toPRCheckView } from '#server/utils/pr-check-view'
 
 /**
  * GET /api/pr-checks/[id]：单条 PRCheck 详情（详见 docs/plan/todo.md §M24.1）。
@@ -19,23 +20,6 @@ import { requireAuth } from '#server/utils/guard'
  * 鉴权：read 类端点用 requireAuth 即可（与 alerts 列表 / schedules GET 一致）；
  * 修改类（PATCH /api/pr-checks/[id]）必须 admin / org_admin。
  */
-const toView = (row: PRCheck) => ({
-    id: row.id,
-    repositoryId: row.repositoryId,
-    prNumber: row.prNumber,
-    headSha: row.headSha,
-    authorLogin: row.authorLogin,
-    conclusion: row.conclusion,
-    checkRunId: row.checkRunId,
-    detailsUrl: row.detailsUrl,
-    errorMessage: row.errorMessage,
-    alertFiring: row.alertFiring,
-    acknowledgedAt: row.acknowledgedAt?.toISOString() ?? null,
-    acknowledgedByUserId: row.acknowledgedByUserId,
-    lastPolledAt: row.lastPolledAt.toISOString(),
-    createdAt: row.createdAt.toISOString(),
-    updatedAt: row.updatedAt.toISOString(),
-})
 
 const getHandler = async (event: H3Event) => {
     await requireAuth(event)
@@ -45,11 +29,11 @@ const getHandler = async (event: H3Event) => {
     }
 
     const ds = await ensureDatabaseInitialized()
-    const row = await ds.getRepository(PRCheck).findOne({ where: { id } })
+    const row = await ds.getRepository(PRCheck).findOne({ where: { id }, relations: { repository: true } })
     if (!row) {
         throw createLocalizedError(event, { statusCode: 404, code: 'PR_CHECK_NOT_FOUND' })
     }
-    return toView(row)
+    return toPRCheckView(row)
 }
 
 export default defineEventHandler(getHandler)

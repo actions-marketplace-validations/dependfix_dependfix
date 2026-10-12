@@ -53,6 +53,19 @@ describe('GET /api/pr-checks/[id]', () => {
         expect(row.conclusion).toBe('failure')
     })
 
+    it('详情视图与列表视图契约对称：含仓库标签与三源聚合字段', async () => {
+        const row = await call(prCheckId) as {
+            repository: string | null
+            overallStatus: string | null
+            signals: unknown[] | null
+            failureSources: unknown[] | null
+        }
+        expect(row.repository).toBe('demo/app')
+        expect(row.overallStatus).toBeNull() // 本行未落三源字段（历史行）
+        expect(row.signals).toBeNull()
+        expect(row.failureSources).toBeNull()
+    })
+
     it('不存在的 id → 404 + PR_CHECK_NOT_FOUND', async () => {
         await expect(call('no-such-id')).rejects.toMatchObject({
             statusCode: 404,
