@@ -41,13 +41,13 @@
   "dependencies": {
     "@dependfix/core": "workspace:*",
     "@dependfix/engine": "workspace:*",
-    "@lucide/vue": "^1.49.0",
+    "@lucide/vue": "^1.53.0",
     "@nuxtjs/i18n": "^10.6.0",
     "@octokit/rest": "^22.0.1",
     "better-auth": "^1.7.7",
     "better-sqlite3": "^13.0.3",
     "bullmq": "^6.3.11",
-    "caomei-ui": "0.5.0",
+    "caomei-ui": "0.6.0",
     "chart.js": "^4.5.1",
     "cron-parser": "^5.10.1",
     "h3": "^1.15.11",
@@ -56,12 +56,12 @@
     "lru-cache": "^11.5.3",
     "mysql2": "^3.24.5",
     "node-cron": "^4.6.0",
-    "nodemailer": "^10.0.13",
+    "nodemailer": "^10.0.16",
     "nuxt": "^4.5.1",
     "pg": "^8.23.1",
     "reflect-metadata": "^0.2.2",
     "sass": "^1.105.1",
-    "typeorm": "^1.1.1",
+    "typeorm": "^1.1.2",
     "vue": "^3.5.43",
     "vue-router": "^5.3.1",
     "winston": "^3.19.0",
@@ -69,16 +69,16 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@playwright/test": "^1.63.0",
+    "@playwright/test": "^1.64.0",
     "@types/better-sqlite3": "^9.6.0",
     "@types/nodemailer": "^8.0.2",
     "@types/pg": "^8.23.1",
     "cross-env": "^10.0.0",
     "nock": "^14.0.17",
-    "postcss": "^8.5.28",
+    "postcss": "^8.5.29",
     "stylelint": "17.16.0",
     "stylelint-config-cmyr": "^1.0.0",
     "tsx": "^4.23.15",
-    "vue-tsc": "^3.3.11"
+    "vue-tsc": "^3.3.12"
   }
 }
