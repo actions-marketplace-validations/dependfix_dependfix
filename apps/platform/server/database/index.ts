@@ -19,6 +19,7 @@ import { AddAiConfigFields1900000000000 } from './migrations/1900000000000-AddAi
 import { AddCredentialOwnerLogin2000000000000 } from './migrations/2000000000000-AddCredentialOwnerLogin'
 import { AddRepositoryVerifyCommands2100000000000 } from './migrations/2100000000000-AddRepositoryVerifyCommands'
 import { AddScanRunFailureColumns2200000000000 } from './migrations/2200000000000-AddScanRunFailureColumns'
+import { AddPrCheckBuildSignals2300000000000 } from './migrations/2300000000000-AddPrCheckBuildSignals'
 import { runStartupBackup } from './backup'
 import { Account } from '#server/entities/account'
 import { Session } from '#server/entities/session'
@@ -90,6 +91,7 @@ export const createDataSourceOptions = (): DataSourceOptions => {
             AddCredentialOwnerLogin2000000000000,
             AddRepositoryVerifyCommands2100000000000,
             AddScanRunFailureColumns2200000000000,
+            AddPrCheckBuildSignals2300000000000,
         ],
         migrationsRun,
         synchronize,
