@@ -34,7 +34,7 @@ const parseJsonArrayColumn = <T>(value: string | null | undefined): T[] | null =
 export const toPRCheckView = (row: PRCheck) => ({
     id: row.id,
     repositoryId: row.repositoryId,
-    // 防御分支：`PRCheck.repository` 为 FK 非空 + CASCADE → 关系缺失不可达（调用方未加载关系时亦走此分支，见 [id].get.ts 的 relations 配置）
+    // 防御分支：正常路径下 FK 非空 + CASCADE 不可达；调用方漏加载关系（未配 relations / leftJoinAndSelect）时命中并回退 null
     repository: row.repository ? `${row.repository.owner}/${row.repository.name}` : null,
     prNumber: row.prNumber,
     headSha: row.headSha,
