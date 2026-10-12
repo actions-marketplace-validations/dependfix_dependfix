@@ -320,7 +320,72 @@ export const isWithinUpdatedWindow = (
 }
 
 /**
- * 终态判定：供监控器侧「`headSha` 未变且已终态 → 跳过」节流使用
- * （`headSha` 比对需读库，故判定函数在此导出、接线在 `action-status-monitor.ts`）。
+ * 终态判定：供监控器侧「终态且 HEAD 未变 → 跳过」节流使用。
+ * 取值域为库内字符串（含 NULL，历史行）——仅 `success` / `failure` 视为终态，
+ * `pending` / NULL / 未知值一律视为**非终态**（保守重采，避免漏掉状态推进）。
  */
-export const isTerminalOverallStatus = (status: OverallBuildStatus): boolean => status !== 'pending'
+export const isTerminalOverallStatus = (status: string | null | undefined): boolean =>
+    status === 'success' || status === 'failure'
+
+/**
+ * 终态静默窗口：终态且 HEAD 未变的 PR 在该窗口内不再重复采集（三源 API 降频）。
+ *
+ * 窗口外**重新采集**：GitHub 允许在同一 SHA 上重跑 workflow / 迟到写入部署状态，
+ * 永久跳过会漏掉「同一 SHA 上的重跑失败 / 迟到部署失败」——即本特性要捕获的核心场景。
+ * 取值理由：兼顾降频（默认 5min/仓轮询下，终态 PR 由「每轮」降为「每 30min」）与检出时效。
+ */
+export const TERMINAL_REPOLL_QUIET_MS = 30 * 60 * 1000
+
+/**
+ * 判定某既有行是否应在本轮跳过采集：终态 + `lastPolledAt` 落在静默窗口内。
+ * （HEAD 比对由调用方完成——跳过键为 `prNumber → headSha`，采集层按当前 HEAD 命中判定。）
+ */
+export const shouldSkipTerminalPr = (
+    row: { overallStatus: string | null, lastPolledAt: Date } | null | undefined,
+    now: Date,
+    quietMs: number = TERMINAL_REPOLL_QUIET_MS,
+): boolean => {
+    if (!row) {
+        return false
+    }
+    if (!isTerminalOverallStatus(row.overallStatus)) {
+        return false
+    }
+    return now.getTime() - row.lastPolledAt.getTime() < quietMs
+}
+
+/** 失败源清单上限（去重后截断；供 UI / 筛选直接消费） */
+export const MAX_FAILURE_SOURCES = 20
+
+/** 失败源条目（`failureSourcesJson` 的元素形态） */
+export interface BuildFailureSource {
+    provider: string
+    name: string
+    kind: UnifiedBuildSignal['kind']
+}
+
+/**
+ * 汇总失败源清单：仅取失败信号，按 `provider + name + kind` 去重（保持源侧顺序），截断到上限。
+ */
+export const summarizeFailureSources = (
+    signals: readonly UnifiedBuildSignal[],
+    max = MAX_FAILURE_SOURCES,
+): BuildFailureSource[] => {
+    const seen = new Set<string>()
+    const sources: BuildFailureSource[] = []
+    for (const signal of signals) {
+        if (!FAILING_SIGNAL_STATES.includes(signal.state)) {
+            continue
+        }
+        const key = `${signal.provider}\u0000${signal.name}\u0000${signal.kind}`
+        if (seen.has(key)) {
+            continue
+        }
+        seen.add(key)
+        sources.push({ provider: signal.provider, name: signal.name, kind: signal.kind })
+        if (sources.length >= max) {
+            break
+        }
+    }
+    return sources
+}

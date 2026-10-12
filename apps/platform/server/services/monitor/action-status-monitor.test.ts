@@ -8,14 +8,17 @@ import {
     vi,
 } from 'vitest'
 import { ActionStatusMonitor } from './action-status-monitor'
-import type { PRCheckSnapshot, PRCheckSyncSource } from './types'
+import { TERMINAL_REPOLL_QUIET_MS } from './build-signals'
+import type { PRCheckSnapshot, PRCheckSyncSource, UnifiedBuildSignal } from './types'
 
 // ---------- mock DataSource / Repository ----------
 const {
+    prCheckFind,
     prCheckFindOne,
     prCheckSave,
     repoFind,
 } = vi.hoisted(() => ({
+    prCheckFind: vi.fn(),
     prCheckFindOne: vi.fn(),
     prCheckSave: vi.fn(),
     repoFind: vi.fn(),
@@ -23,6 +26,7 @@ const {
 
 const makeMockDataSource = (): DataSource => {
     const prCheckRepo = {
+        find: prCheckFind,
         findOne: prCheckFindOne,
         save: prCheckSave,
     }
@@ -44,7 +48,21 @@ const makeMockDataSource = (): DataSource => {
     } as unknown as DataSource
 }
 
-// ---------- mock SyncSource ----------
+// ---------- 信号 / 快照夹具 ----------
+const makeSignal = (overrides: Partial<UnifiedBuildSignal> = {}): UnifiedBuildSignal => ({
+    kind: 'check',
+    provider: 'github-actions',
+    name: 'Test',
+    state: 'success',
+    rawState: 'success',
+    sourceId: '9001',
+    targetUrl: null,
+    logUrl: null,
+    summary: null,
+    observedAt: new Date('2026-09-03T00:00:00Z'),
+    ...overrides,
+})
+
 const makeSnapshot = (overrides: Partial<PRCheckSnapshot> = {}): PRCheckSnapshot => ({
     repositoryId: 'repo-1',
     owner: 'octocat',
@@ -53,7 +71,7 @@ const makeSnapshot = (overrides: Partial<PRCheckSnapshot> = {}): PRCheckSnapshot
     headSha: 'a'.repeat(40),
     authorLogin: 'dependabot[bot]',
     conclusion: 'success',
-    signals: [],
+    signals: [makeSignal()],
     overallStatus: 'success',
     checkRunId: '12345',
     detailsUrl: 'https://github.com/octocat/hello-world/pull/42',
@@ -72,6 +90,7 @@ describe('ActionStatusMonitor', () => {
             { id: 'repo-1', owner: 'octocat', name: 'hello-world', credentialId: null },
         ])
         prCheckSave.mockImplementation(async (row) => row)
+        prCheckFind.mockResolvedValue([]) // 默认无既有行（终态跳过集为空）
         prCheckFindOne.mockResolvedValue(null) // 默认无 existing
         const ds = makeMockDataSource()
         mockSource = { fetchSnapshots: vi.fn() }
@@ -90,7 +109,7 @@ describe('ActionStatusMonitor', () => {
             expect(prCheckSave).not.toHaveBeenCalled()
         })
 
-        it('1 个 success 快照 → INSERT 路径 + alertFiring=false', async () => {
+        it('1 个 success 快照 → INSERT 路径 + alertFiring=false + 三源字段落库', async () => {
             vi.mocked(mockSource.fetchSnapshots).mockResolvedValue([makeSnapshot()])
             const result = await monitor.pollOnce({ organizationId: 'org-1' })
             expect(result).toEqual({ processed: 1, errors: 0 })
@@ -102,24 +121,54 @@ describe('ActionStatusMonitor', () => {
                 headSha: 'a'.repeat(40),
                 authorLogin: 'dependabot[bot]',
                 conclusion: 'success',
+                overallStatus: 'success',
                 alertFiring: false,
                 acknowledgedAt: null,
                 lastPolledAt: new Date('2026-09-03T00:00:00Z'),
             })
+            expect(JSON.parse(saved.signalsJson)).toHaveLength(1)
+            expect(JSON.parse(saved.failureSourcesJson)).toEqual([])
         })
 
-        it('1 个 failure 快照 → INSERT 路径 + alertFiring=true（状态机 D3）', async () => {
+        it('1 个 failure 快照 → INSERT 路径 + alertFiring=true（状态机 D3）+ 失败源清单', async () => {
             vi.mocked(mockSource.fetchSnapshots).mockResolvedValue([
-                makeSnapshot({ conclusion: 'failure', errorMessage: 'TS2339: x missing' }),
+                makeSnapshot({
+                    conclusion: 'failure',
+                    overallStatus: 'failure',
+                    errorMessage: 'TS2339: x missing',
+                    signals: [
+                        makeSignal({ state: 'success' }),
+                        makeSignal({
+                            kind: 'deployment',
+                            provider: 'vercel',
+                            name: 'Preview',
+                            state: 'failure',
+                            rawState: 'failure',
+                            sourceId: '5001',
+                            summary: 'Deployment failed',
+                        }),
+                    ],
+                }),
             ])
             await monitor.pollOnce({ organizationId: 'org-1' })
             const saved = prCheckSave.mock.calls[0]?.[0]
             expect(saved.alertFiring).toBe(true)
             expect(saved.errorMessage).toBe('TS2339: x missing')
+            expect(saved.overallStatus).toBe('failure')
+            expect(JSON.parse(saved.failureSourcesJson)).toEqual([
+                { provider: 'vercel', name: 'Preview', kind: 'deployment' },
+            ])
+        })
+
+        it('空信号快照 → 守卫跳过（不落库、不计入 processed）', async () => {
+            vi.mocked(mockSource.fetchSnapshots).mockResolvedValue([makeSnapshot({ signals: [] })])
+            const result = await monitor.pollOnce({ organizationId: 'org-1' })
+            expect(result).toEqual({ processed: 0, errors: 0 })
+            expect(prCheckSave).not.toHaveBeenCalled()
         })
     })
 
-    describe('状态机（关键决策 D3）', () => {
+    describe('状态机（关键决策 D3 + M43.2b 承接）', () => {
         it('UPDATE 路径：failure 覆盖原 ack 状态为 firing=true', async () => {
             prCheckFindOne.mockResolvedValue({
                 id: 'existing-1',
@@ -132,7 +181,7 @@ describe('ActionStatusMonitor', () => {
                 conclusion: 'success',
             })
             vi.mocked(mockSource.fetchSnapshots).mockResolvedValue([
-                makeSnapshot({ conclusion: 'failure' }),
+                makeSnapshot({ conclusion: 'failure', overallStatus: 'failure' }),
             ])
             await monitor.pollOnce({ organizationId: 'org-1' })
             const saved = prCheckSave.mock.calls[0]?.[0]
@@ -140,7 +189,7 @@ describe('ActionStatusMonitor', () => {
             expect(saved.conclusion).toBe('failure')
         })
 
-        it('UPDATE 路径：success 回归 → 自动 ack（清空用户 ack 时间）', async () => {
+        it('UPDATE 路径：聚合 success 回归 → 自动 ack（清空用户 ack 时间）', async () => {
             // 真实回归场景：PR 失败 → 用户手动 ack → 再 polling success → 必须清空用户 ack 时间
             prCheckFindOne.mockResolvedValue({
                 id: 'existing-1',
@@ -153,7 +202,7 @@ describe('ActionStatusMonitor', () => {
                 conclusion: 'failure',
             })
             vi.mocked(mockSource.fetchSnapshots).mockResolvedValue([
-                makeSnapshot({ conclusion: 'success' }),
+                makeSnapshot({ conclusion: 'success', overallStatus: 'success' }),
             ])
             await monitor.pollOnce({ organizationId: 'org-1' })
             const saved = prCheckSave.mock.calls[0]?.[0]
@@ -163,14 +212,110 @@ describe('ActionStatusMonitor', () => {
             expect(saved.acknowledgedByUserId).toBeNull()
         })
 
+        it('UPDATE 路径：聚合 success 但结论为 neutral（存在 neutral 信号）→ 仍清空 ack', async () => {
+            // M43.2b 承接项：自动 ack 判定按 overallStatus（此前按 conclusion 时 neutral 永不清 ack）
+            prCheckFindOne.mockResolvedValue({
+                id: 'existing-1',
+                repositoryId: 'repo-1',
+                prNumber: 42,
+                headSha: 'a'.repeat(40),
+                alertFiring: true,
+                acknowledgedAt: new Date('2026-09-01T00:00:00Z'),
+                acknowledgedByUserId: 'user-1',
+                conclusion: 'failure',
+            })
+            vi.mocked(mockSource.fetchSnapshots).mockResolvedValue([
+                makeSnapshot({
+                    conclusion: 'neutral',
+                    overallStatus: 'success',
+                    signals: [
+                        makeSignal({ state: 'success' }),
+                        makeSignal({ provider: 'cloudflare-workers-and-pages', state: 'neutral', rawState: 'neutral' }),
+                    ],
+                }),
+            ])
+            await monitor.pollOnce({ organizationId: 'org-1' })
+            const saved = prCheckSave.mock.calls[0]?.[0]
+            expect(saved.conclusion).toBe('neutral')
+            expect(saved.alertFiring).toBe(false)
+            expect(saved.acknowledgedAt).toBeNull()
+        })
+
+        it('UPDATE 路径：聚合 pending → 不清 ack（非终态不视为回归成功）', async () => {
+            prCheckFindOne.mockResolvedValue({
+                id: 'existing-1',
+                repositoryId: 'repo-1',
+                prNumber: 42,
+                headSha: 'a'.repeat(40),
+                alertFiring: false,
+                acknowledgedAt: new Date('2026-09-01T00:00:00Z'),
+                acknowledgedByUserId: 'user-1',
+                conclusion: 'failure',
+            })
+            vi.mocked(mockSource.fetchSnapshots).mockResolvedValue([
+                makeSnapshot({
+                    conclusion: 'pending',
+                    overallStatus: 'pending',
+                    signals: [makeSignal({ state: 'pending', rawState: null })],
+                }),
+            ])
+            await monitor.pollOnce({ organizationId: 'org-1' })
+            const saved = prCheckSave.mock.calls[0]?.[0]
+            expect(saved.alertFiring).toBe(false)
+            expect(saved.acknowledgedAt).toEqual(new Date('2026-09-01T00:00:00Z'))
+        })
+
         it('UPDATE 路径：timed_out 触发 firing（与 failure 等价）', async () => {
             prCheckFindOne.mockResolvedValue(null)
             vi.mocked(mockSource.fetchSnapshots).mockResolvedValue([
-                makeSnapshot({ conclusion: 'timed_out' }),
+                makeSnapshot({ conclusion: 'timed_out', overallStatus: 'failure' }),
             ])
             await monitor.pollOnce({ organizationId: 'org-1' })
             const saved = prCheckSave.mock.calls[0]?.[0]
             expect(saved.alertFiring).toBe(true)
+        })
+    })
+
+    describe('终态节流（M43.2b 承接项）', () => {
+        it('终态 + 静默窗口内 → 传入 knownTerminalHeads（采集层据此跳过）', async () => {
+            prCheckFind.mockResolvedValue([
+                {
+                    prNumber: 42,
+                    headSha: 'a'.repeat(40),
+                    overallStatus: 'failure',
+                    lastPolledAt: new Date(Date.now() - 5 * 60 * 1000),
+                },
+            ])
+            vi.mocked(mockSource.fetchSnapshots).mockResolvedValue([])
+            await monitor.pollOnce({ organizationId: 'org-1' })
+            const input = vi.mocked(mockSource.fetchSnapshots).mock.calls[0]?.[0]
+            expect(input?.knownTerminalHeads?.get(42)).toBe('a'.repeat(40))
+        })
+
+        it('静默窗口外 → 不跳过（重新采集以捕获同 SHA 重跑 / 迟到部署失败）', async () => {
+            prCheckFind.mockResolvedValue([
+                {
+                    prNumber: 42,
+                    headSha: 'a'.repeat(40),
+                    overallStatus: 'success',
+                    lastPolledAt: new Date(Date.now() - TERMINAL_REPOLL_QUIET_MS - 60 * 1000),
+                },
+            ])
+            vi.mocked(mockSource.fetchSnapshots).mockResolvedValue([])
+            await monitor.pollOnce({ organizationId: 'org-1' })
+            const input = vi.mocked(mockSource.fetchSnapshots).mock.calls[0]?.[0]
+            expect(input?.knownTerminalHeads?.size).toBe(0)
+        })
+
+        it('非终态（pending / 历史 NULL）→ 不跳过', async () => {
+            prCheckFind.mockResolvedValue([
+                { prNumber: 1, headSha: 'b'.repeat(40), overallStatus: 'pending', lastPolledAt: new Date() },
+                { prNumber: 2, headSha: 'c'.repeat(40), overallStatus: null, lastPolledAt: new Date() },
+            ])
+            vi.mocked(mockSource.fetchSnapshots).mockResolvedValue([])
+            await monitor.pollOnce({ organizationId: 'org-1' })
+            const input = vi.mocked(mockSource.fetchSnapshots).mock.calls[0]?.[0]
+            expect(input?.knownTerminalHeads?.size).toBe(0)
         })
     })
 

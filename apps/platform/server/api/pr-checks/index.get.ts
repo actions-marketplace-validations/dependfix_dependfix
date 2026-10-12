@@ -4,6 +4,14 @@ import { PRCheck, PR_CHECK_CONCLUSIONS } from '#server/entities/pr-check'
 import { ensureDatabaseInitialized } from '#server/database'
 import { requireAuth } from '#server/utils/guard'
 import { parseOptional } from '#server/utils/zod-helpers'
+import type { UnifiedBuildSignal } from '#server/services/monitor/types'
+import type { BuildFailureSource } from '#server/services/monitor/build-signals'
+
+/** 信号视图：JSON 列往返后 `observedAt` 为 ISO 字符串（`Date` 经 `JSON.stringify` 序列化） */
+type PRCheckSignalView = Omit<UnifiedBuildSignal, 'observedAt'> & { observedAt: string }
+
+/** 失败源视图（`failureSourcesJson` 元素形态） */
+type PRCheckFailureSourceView = BuildFailureSource
 
 /**
  * GET /api/pr-checks：依赖更新 PR check 状态监测列表（详见 docs/plan/todo.md §M24.1）。
@@ -27,6 +35,18 @@ import { parseOptional } from '#server/utils/zod-helpers'
 const conclusionSchema = z.enum(PR_CHECK_CONCLUSIONS as unknown as [string, ...string[]]).optional()
 const alertFiringSchema = z.enum(['true', 'false']).optional()
 
+/** JSON 列安全解析（列值缺失 / 非 JSON 时回退 null，不抛错） */
+const parseJsonColumn = <T>(value: string | null | undefined): T | null => {
+    if (!value) {
+        return null
+    }
+    try {
+        return JSON.parse(value) as T
+    } catch {
+        return null
+    }
+}
+
 /**
  * PRCheck 视图（API 序列化层；与 entities/pr-check 字段一一对应）。
  *
@@ -34,6 +54,9 @@ const alertFiringSchema = z.enum(['true', 'false']).optional()
  * 同源口径（均在服务端把 Repository 关系解析成展示字符串，避免前端再维护一份
  * `repositoryId → owner/name` 映射）；列表页「全部仓库」视图据此行内辨识 PR 归属
  * （PR 编号仅在同一仓库内唯一，跨仓库会重号）。
+ *
+ * 三源信号字段（M43.2b）：`overallStatus` 为聚合状态；`signals` / `failureSources` 由 JSON 列
+ * 解析而来（`observedAt` 经 JSON 往返为 ISO 字符串），列值损坏时回退 `null`。
  */
 const toView = (row: PRCheck) => ({
     id: row.id,
@@ -43,6 +66,12 @@ const toView = (row: PRCheck) => ({
     headSha: row.headSha,
     authorLogin: row.authorLogin,
     conclusion: row.conclusion,
+    /** 聚合构建 / 部署状态（`failure` / `pending` / `success`；NULL = 本列上线前的历史行） */
+    overallStatus: row.overallStatus,
+    /** 归一化三源信号（JSON 列解析；`observedAt` 为 ISO 字符串；损坏 / 缺失时 null） */
+    signals: parseJsonColumn<PRCheckSignalView[]>(row.signalsJson),
+    /** 失败源清单（JSON 列解析；供 UI / 筛选直接消费；损坏 / 缺失时 null） */
+    failureSources: parseJsonColumn<PRCheckFailureSourceView[]>(row.failureSourcesJson),
     checkRunId: row.checkRunId,
     detailsUrl: row.detailsUrl,
     errorMessage: row.errorMessage,

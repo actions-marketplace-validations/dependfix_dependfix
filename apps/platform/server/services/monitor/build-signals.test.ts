@@ -5,6 +5,7 @@ import {
     deriveWorstConclusion,
     isTerminalOverallStatus,
     isWithinUpdatedWindow,
+    MAX_FAILURE_SOURCES,
     MAX_SIGNALS_PER_PR,
     normalizeCheckRun,
     normalizeCommitStatus,
@@ -15,7 +16,10 @@ import {
     resolveCheckProvider,
     resolveDeploymentProvider,
     resolveStatusProvider,
+    shouldSkipTerminalPr,
     SIGNAL_SUMMARY_MAX_LENGTH,
+    summarizeFailureSources,
+    TERMINAL_REPOLL_QUIET_MS,
 } from './build-signals'
 import type { UnifiedBuildSignal, UnifiedBuildSignalState } from './types'
 
@@ -205,10 +209,51 @@ describe('monitor/build-signals 节流', () => {
         expect(isWithinUpdatedWindow('not-a-date', now)).toBe(true)
     })
 
-    it('终态判定：pending 非终态，failure / success 为终态', () => {
-        expect(isTerminalOverallStatus('pending')).toBe(false)
+    it('终态判定：failure / success 为终态；pending / NULL / 未知值一律非终态（保守重采）', () => {
         expect(isTerminalOverallStatus('failure')).toBe(true)
         expect(isTerminalOverallStatus('success')).toBe(true)
+        expect(isTerminalOverallStatus('pending')).toBe(false)
+        expect(isTerminalOverallStatus(null)).toBe(false)
+        expect(isTerminalOverallStatus(undefined)).toBe(false)
+        expect(isTerminalOverallStatus('weird')).toBe(false)
+    })
+
+    it('终态跳过判定：终态 + 静默窗口内才跳过；窗口外 / 非终态 / 无既有行不跳过', () => {
+        const recent = { overallStatus: 'success', lastPolledAt: new Date(now.getTime() - 60 * 1000) }
+        const stale = {
+            overallStatus: 'success',
+            lastPolledAt: new Date(now.getTime() - TERMINAL_REPOLL_QUIET_MS - 1000),
+        }
+        expect(shouldSkipTerminalPr(recent, now)).toBe(true)
+        expect(shouldSkipTerminalPr(stale, now)).toBe(false)
+        expect(shouldSkipTerminalPr({ ...recent, overallStatus: 'pending' }, now)).toBe(false)
+        expect(shouldSkipTerminalPr({ ...recent, overallStatus: null }, now)).toBe(false)
+        expect(shouldSkipTerminalPr(null, now)).toBe(false)
+        expect(shouldSkipTerminalPr(undefined, now)).toBe(false)
+    })
+})
+
+describe('monitor/build-signals 失败源汇总', () => {
+    it('仅取失败信号并按 provider + name + kind 去重', () => {
+        const sources = summarizeFailureSources([
+            makeSignal({ provider: 'github-actions', name: 'Test', state: 'success' }),
+            makeSignal({ provider: 'vercel', name: 'Preview', kind: 'deployment', state: 'failure', rawState: 'failure' }),
+            makeSignal({ provider: 'vercel', name: 'Preview', kind: 'deployment', state: 'error', rawState: 'error' }),
+            makeSignal({ provider: 'vercel', name: 'Preview', kind: 'status', state: 'failure', rawState: 'failure' }),
+            makeSignal({ provider: 'cloudflare-workers-and-pages', name: 'Workers Builds', state: 'failure', rawState: 'failure' }),
+        ])
+        expect(sources).toEqual([
+            { provider: 'vercel', name: 'Preview', kind: 'deployment' },
+            { provider: 'vercel', name: 'Preview', kind: 'status' },
+            { provider: 'cloudflare-workers-and-pages', name: 'Workers Builds', kind: 'check' },
+        ])
+    })
+
+    it('无失败信号 → 空数组；超过上限时截断', () => {
+        expect(summarizeFailureSources([makeSignal({ state: 'success' })])).toEqual([])
+        const many = Array.from({ length: MAX_FAILURE_SOURCES + 5 }, (_, i) =>
+            makeSignal({ name: `fail-${i}`, state: 'failure', rawState: 'failure' }))
+        expect(summarizeFailureSources(many)).toHaveLength(MAX_FAILURE_SOURCES)
     })
 })
 

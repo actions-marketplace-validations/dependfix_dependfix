@@ -236,6 +236,35 @@ describe('monitor/polling-source 三源采集', () => {
         expect(pending.some((p) => p.includes('/deployments'))).toBe(true)
     })
 
+    it('终态跳过集命中（同 HEAD）→ 本轮不采集该 PR', async () => {
+        mockSources({
+            checkRuns: [{ id: 9001, name: 'Test', status: 'completed', conclusion: 'success', app: { slug: 'github-actions' } }],
+        })
+        const snapshots = await source().fetchSnapshots({
+            owner: 'acme',
+            repo: 'web-app',
+            repositoryId: 'repo-1',
+            knownTerminalHeads: new Map([[101, HEAD_SHA]]),
+        })
+        expect(snapshots).toHaveLength(0)
+        const pending = nock.pendingMocks()
+        expect(pending.some((p) => p.includes(`/commits/${HEAD_SHA}/check-runs`))).toBe(true)
+    })
+
+    it('终态跳过集命中但 HEAD 已变 → 仍采集', async () => {
+        mockSources({
+            checkRuns: [{ id: 9001, name: 'Test', status: 'completed', conclusion: 'success', app: { slug: 'github-actions' } }],
+        })
+        const snapshots = await source().fetchSnapshots({
+            owner: 'acme',
+            repo: 'web-app',
+            repositoryId: 'repo-1',
+            knownTerminalHeads: new Map([[101, 'b'.repeat(40)]]),
+        })
+        expect(snapshots).toHaveLength(1)
+        expect(snapshots[0]!.overallStatus).toBe('success')
+    })
+
     it('非目标作者 / 非 open PR 被忽略', async () => {
         mockSources({
             pulls: [

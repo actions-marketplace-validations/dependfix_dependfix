@@ -122,6 +122,78 @@ describe('GET /api/pr-checks', () => {
         expect(list[0]!.alertFiring).toBe(true)
     })
 
+    it('视图暴露三源聚合字段（overallStatus / signals / failureSources）', async () => {
+        const ds = await ensureDatabaseInitialized()
+        const repo = ds.getRepository(PRCheck)
+        await repo.save(repo.create({
+            repositoryId,
+            prNumber: 9,
+            headSha: 'd'.repeat(40),
+            authorLogin: 'dependfix[bot]',
+            conclusion: 'failure',
+            signalsJson: JSON.stringify([{
+                kind: 'deployment',
+                provider: 'vercel',
+                name: 'Preview',
+                state: 'failure',
+                rawState: 'failure',
+                sourceId: '5001',
+                targetUrl: null,
+                logUrl: 'https://vercel.com/logs',
+                summary: 'Deployment failed',
+                observedAt: '2026-09-04T00:00:00.000Z',
+            }]),
+            overallStatus: 'failure',
+            failureSourcesJson: JSON.stringify([{ provider: 'vercel', name: 'Preview', kind: 'deployment' }]),
+            alertFiring: true,
+            acknowledgedAt: null,
+            acknowledgedByUserId: null,
+            lastPolledAt: new Date('2026-09-04T00:00:00Z'),
+        }))
+
+        const list = await call(`/api/pr-checks?repositoryId=${repositoryId}`) as {
+            prNumber: number
+            overallStatus: string | null
+            signals: unknown[] | null
+            failureSources: unknown[] | null
+        }[]
+        const target = list.find((r) => r.prNumber === 9)!
+        expect(target.overallStatus).toBe('failure')
+        expect(target.signals).toHaveLength(1)
+        expect((target.signals?.[0] as { provider: string }).provider).toBe('vercel')
+        expect(target.failureSources).toEqual([{ provider: 'vercel', name: 'Preview', kind: 'deployment' }])
+    })
+
+    it('JSON 列损坏 / 缺失时回退 null（不抛错）', async () => {
+        const ds = await ensureDatabaseInitialized()
+        const repo = ds.getRepository(PRCheck)
+        await repo.save(repo.create({
+            repositoryId,
+            prNumber: 10,
+            headSha: 'e'.repeat(40),
+            authorLogin: 'dependfix[bot]',
+            conclusion: 'pending',
+            signalsJson: '{not-json',
+            overallStatus: null,
+            failureSourcesJson: null,
+            alertFiring: false,
+            acknowledgedAt: null,
+            acknowledgedByUserId: null,
+            lastPolledAt: new Date('2026-09-05T00:00:00Z'),
+        }))
+
+        const list = await call(`/api/pr-checks?repositoryId=${repositoryId}`) as {
+            prNumber: number
+            overallStatus: string | null
+            signals: unknown[] | null
+            failureSources: unknown[] | null
+        }[]
+        const target = list.find((r) => r.prNumber === 10)!
+        expect(target.overallStatus).toBeNull()
+        expect(target.signals).toBeNull()
+        expect(target.failureSources).toBeNull()
+    })
+
     it('alertFiring=false 仅返回非 firing 的 PR', async () => {
         const list = await call('/api/pr-checks?alertFiring=false') as { alertFiring: boolean }[]
         expect(list.length).toBeGreaterThan(0)

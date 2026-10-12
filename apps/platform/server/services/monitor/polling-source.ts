@@ -1,6 +1,7 @@
 import type { Octokit } from '@octokit/rest'
 import type {
     PRCheckSnapshot,
+    PRCheckSyncInput,
     PRCheckSyncSource,
     UnifiedBuildSignal,
 } from './types'
@@ -31,7 +32,8 @@ type DeploymentStatusInput = {
  * 数据流（详见 [pr-build-deploy-signals.md](../../../../docs/design/governance/pr-build-deploy-signals.md) §3.3）：
  * 1. `octokit.paginate(octokit.rest.pulls.list, { state: 'open', sort: 'updated' })` 拉取仓库 open PRs
  * 2. 过滤 author ∈ TARGET_PR_AUTHOR_LOGINS（`dependfix[bot]` / `dependabot[bot]`）
- * 3. 轮询节流：仅处理 `updated_at` 在窗口内的 PR（`isWithinUpdatedWindow`）
+ * 3. 轮询节流：仅处理 `updated_at` 在窗口内的 PR（`isWithinUpdatedWindow`）；另跳过调用方传入的
+ *    「终态 + HEAD 未变 + 静默窗口内」PR（`knownTerminalHeads`）
  * 4. 对每个目标 PR HEAD 调三组 API（各自 fail-open，单源失败不阻断其它源）：
  *    - `checks.listForRef` → check runs（GitHub Actions / Cloudflare Workers Builds 等）
  *    - `repos.listCommitStatusesForRef` → commit statuses（Vercel 每 project 一个 context / 其它 CI）
@@ -56,8 +58,8 @@ type DeploymentStatusInput = {
 export class PollingSource implements PRCheckSyncSource {
     constructor(private readonly octokit: Octokit) {}
 
-    async fetchSnapshots(input: { owner: string, repo: string, repositoryId: string }): Promise<PRCheckSnapshot[]> {
-        const { owner, repo, repositoryId } = input
+    async fetchSnapshots(input: PRCheckSyncInput): Promise<PRCheckSnapshot[]> {
+        const { owner, repo, repositoryId, knownTerminalHeads } = input
         const observedAt = new Date()
 
         // 1. 拉取所有 open PRs（按 updated_at 降序）
@@ -87,7 +89,12 @@ export class PollingSource implements PRCheckSyncSource {
                 continue
             }
 
-            // 3. 三源采集 + 归一化（各源 fail-open）
+            // 3. 终态节流：已确认「终态 + HEAD 未变 + 静默窗口内」的 PR 本轮跳过（省三源 API）
+            if (knownTerminalHeads?.get(pr.number) === headSha) {
+                continue
+            }
+
+            // 4. 三源采集 + 归一化（各源 fail-open）
             const signals = capSignals(await this.fetchSignals({ owner, repo, ref: headSha, observedAt }))
             if (signals.length === 0) {
                 continue

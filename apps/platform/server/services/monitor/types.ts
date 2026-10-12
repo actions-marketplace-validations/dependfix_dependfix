@@ -7,8 +7,8 @@ import type { PRCheckConclusion } from '#server/entities/pr-check'
  * （GitHub check_run webhook 实时推送）—— 通过统一接口互换，不影响上游 ActionStatusMonitor。
  *
  * 接口约束：
- * - 输入：单个仓库（owner + repo + 应用层 repositoryId）
- * - 输出：该仓库所有"目标 PR"的最新 check 快照数组
+ * - 输入：单个仓库（owner + repo + 应用层 repositoryId）+ 可选「已确认终态」跳过集
+ * - 输出：该仓库所有"目标 PR"的最新构建 / 部署信号快照数组
  * - 目标 PR 定义：author 在 [`dependfix[bot]`, `dependabot[bot]`] 集合内（详见 todo.md §M24.1）
  * - 快照包含足够信息支持 PRCheck 实体 INSERT/UPDATE 幂等
  * - 不暴露 Octokit / HTTP 细节给上游（监控器只关心快照语义）
@@ -17,15 +17,27 @@ import type { PRCheckConclusion } from '#server/entities/pr-check'
  * 细节（GitHub 官方 schema: status enum 不含 'stale'，conclusion enum 不含 'stale'/'pending'），
  * 由具体 SyncSource 实现做映射（PollingSource 内部落地）。
  */
+export interface PRCheckSyncInput {
+    /** GitHub 仓库 owner */
+    owner: string
+    /** GitHub 仓库名 */
+    repo: string
+    /** 应用层仓库 id（写入 PRCheck.repositoryId 用） */
+    repositoryId: string
+    /**
+     * 已确认「终态 + HEAD 未变 + 静默窗口内」的 PR（`prNumber → headSha`），采集层可跳过这些 PR
+     * 以省下三源 API 调用；由监控器读库计算后传入（判定见 `build-signals.ts` 的 `shouldSkipTerminalPr`）。
+     * 可选：不传表示不做该层节流（WebhookSource 等实现可忽略）。
+     */
+    knownTerminalHeads?: ReadonlyMap<number, string>
+}
+
 export interface PRCheckSyncSource {
     /**
-     * 拉取指定仓库所有目标 PR 的最新 check 快照。
-     * @param input.owner GitHub 仓库 owner
-     * @param input.repo GitHub 仓库名
-     * @param input.repositoryId 应用层仓库 id（写入 PRCheck.repositoryId 用）
-     * @returns 快照数组；空数组表示该仓库无目标 PR 或全部 PR 已 close
+     * 拉取指定仓库所有目标 PR 的最新构建 / 部署信号快照。
+     * @returns 快照数组；空数组表示该仓库无目标 PR / 全部 PR 已 close / 全部被节流跳过
      */
-    fetchSnapshots(input: { owner: string, repo: string, repositoryId: string }): Promise<PRCheckSnapshot[]>
+    fetchSnapshots(input: PRCheckSyncInput): Promise<PRCheckSnapshot[]>
 }
 
 /**
