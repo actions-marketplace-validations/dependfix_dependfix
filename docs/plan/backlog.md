@@ -128,11 +128,6 @@
   - **触发条件**：两页继续增长致 warning 逼近上限；或用户要求清理。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
-- **caomei-ui `0.5.0` → `0.6.0` 升级回归（待评估）** —— 现象：`apps/platform/package.json` 精确锁定 `caomei-ui` `0.5.0`，npm `latest` 已为 `0.6.0`（2026-10-08 发布）。
-  - **评估结论（2026-10-10，已完成语义级比对）**：**低风险 minor 升级，无破坏性契约** —— ① 公开组件集 `81 → 81`（`as Caomei*` 口径，零增删）；② 基础 token（`styles/index.css`）零变更（`_caomei-tokens.scss` 覆盖继续成立）；③ 实质变更：`DataTable` 多列排序新增**优先级序号 + 全列保留占位**（影响 `sort-mode="multiple"` 的 alerts / pr-checks 视觉基线，属 UX 改进）、`Drawer` 背景 `bg → bg-elevated`、`Popover` 圆角 `radius-md → radius-lg` + 背景 `bg → bg-elevated`、`Tabs` 列表 overflow / 分隔线重写（修 1px 纵向多余滚动条）、其余局部内部调整（未见使用面类名破坏性变更）。
-  - **执行口径（照 [迁移评估 §15.14](../design/governance/caomei-ui-migration.md#1514-caomei-ui-050-升级实证m3422026-10-01)）**：package.json + lockfile → 迁移评估新增 §15.15 + `tech-stack.md` + `platform.md` 版本口径同步 → 重建 `apps/platform/.output` → 全量 lint / typecheck / test / e2e / 视觉基线 `--update-snapshots=all` 重建（预期 alerts / pr-checks 因排序序号变化）。
-  - **触发条件**：用户要求升级；或平台需跟进 0.6.0 新能力（多列排序序号）。与下方延期项「caomei-ui 0.x → 1.0 升级回归」的恢复条件①（用户指定版本）同源，但本条为 `0.6.0` 增量升级，非 1.0 分支。
-
 - **列表页筛选 / 分页能力的共享抽取（待评估）** —— 现象：`repos.vue` 与 `batch-runs.vue` 各自实现客户端筛选 + 重置 + 内建分页（形态相近但字段与语义不同），`scans.vue` 另有按仓库客户端分页实现；三处筛选 / 分页样板重复。展示口径统一批次（M42.5）判定两页形态尚未完全一致，故先页面内实现。
   - **待评估点**：① 抽取 `useClientTableFilter`（搜索关键字 + 筛选态 + 重置 + 过滤结果）的收益与形态约束；② 或仅抽「搜索 + 重置」最小面；③ 与组件内建分页的边界（分页本身不抽）。
   - **触发条件**：第四处列表页需要同类能力时；或筛选逻辑变更需多处同步时。
@@ -153,6 +148,11 @@
   - **触发条件**：再次出现强调渲染破损；或加固文档渲染校验时。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
+- **浮层类组件视觉覆盖扩面（`Drawer` / `Tabs` / `Popover` / `Toast` 落点页）（待评估）** —— 现象：caomei-ui `0.6.0` 的浮层类语义变更（`drawer` / `popover-content` / `tabs-list` / `toast` / `color-picker` / `date-picker` / `multi-select` / `auto-complete` / `dropdown-menu-content` 背景改 `bg-elevated`、`popover` 圆角 `radius-lg`、`tabs` 列表 overflow 与分隔线重写）落在 `schedules.vue` / `scans.vue` / `alert-run-sidebar.vue` 等页面，而视觉回归最小集（M32.5 既定边界：alerts / repos / pr-checks / dialog-import-repos / login + `dialog-select-open-<theme>`）**不覆盖**这些落点页 → 该类变更当前只靠 e2e 行为断言兜底，无像素守卫。依据 [caomei-ui-migration.md §15.15](../design/governance/caomei-ui-migration.md#1515-caomei-ui-060-升级回归实证插队热修2026-10-12)。
+  - **待评估点**：① 是否把这些落点页纳入视觉基线（页面级 vs 元素级；门户面板须视口级截图，模式见 [迁移评估 §15.14](../design/governance/caomei-ui-migration.md#1514-caomei-ui-050-升级实证m3422026-10-01) + `tests/visual/dialog-select-layer.visual.test.ts`）；② 覆盖优先级（`schedules` 表单浮层 > `scans` 弹窗 > `alert-run-sidebar`）；③ 基线数量与 CI 时长预算。
+  - **触发条件**：再次出现组件库浮层类视觉变更未被门禁捕获；或用户要求扩面视觉覆盖。
+  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
+
 ### 待上收候选（评估完成，等待用户决策）
 
 > 本节为「评估完成、等待用户决策」候选的暂存区；候选**不含 `M\d+` 阶段编号**（[规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement)）。
@@ -168,7 +168,7 @@
 - **T705 生产级部署**（PostgreSQL + Helm + Sentry）—— 2026-08-12 用户指示暂缓排期
 - **T703 跨平台 Git**（GitLab + Bitbucket）—— 2026-08-12 用户指示暂缓排期
 - **C30 Publish Docker build job 失败排查** —— 2026-08-18 用户决策暂缓（双平台构建 23m 2s 成功证明当前 docker.yml 可稳定工作）；恢复条件：① master 分支 push 频率显著提升；② 镜像实际发布成为强需求（v1.0.0 正式发布前）；③ 用户明确恢复
-- **caomei-ui 0.x → 1.0 升级回归** —— 库处于 0.x。**剩余观察**：`1.0.0` 发布后的正式升级回归与「平台需跟进新组件能力」「用户明确恢复」两条触发条件。届时按 M31 迁移期实证索引（[caomei-ui-migration.md §15](../design/governance/caomei-ui-migration.md)）做回归；**升级回归的像素兜底已就位**（视觉回归基线 `apps/platform/tests/visual/`，覆盖 alerts / repos / pr-checks / dialog-import-repos / login，口径见 [测试规范 §6.7](../standards/testing.md)）
+- **caomei-ui 0.x → 1.0 升级回归** —— 库处于 0.x（平台当前 `0.6.0`，2026-10-11 由 dependabot 升级、2026-10-12 完成升级回归，见 [caomei-ui-migration.md §15.15](../design/governance/caomei-ui-migration.md#1515-caomei-ui-060-升级回归实证插队热修2026-10-12)）。**剩余观察**：`1.0.0` 发布后的正式升级回归与「平台需跟进新组件能力」「用户明确恢复」两条触发条件。届时按 M31 迁移期实证索引（[caomei-ui-migration.md §15](../design/governance/caomei-ui-migration.md)）做回归；**升级回归的像素兜底已就位**（视觉回归基线 `apps/platform/tests/visual/`，覆盖 alerts / repos / pr-checks / dialog-import-repos / login，口径见 [测试规范 §6.7](../standards/testing.md)）
 - **ScanResult 数据层去重（upsert 唯一索引）** —— 决策暂缓：应用层去重（fingerprint + occurrenceCount / firstSeenAt / lastSeenAt / affectedRunIds）已实施且满足当前业务需求；恢复条件：出现"fix 复用同一 `scan_run_id` 跨次刷新"或"历史 fixStatus 跨次保留"需求时迁移到数据层 upsert
 
 ### 远期登记 / 未排期增强候选
