@@ -25,6 +25,8 @@ definePageMeta({
 interface PRCheckView {
     id: string
     repositoryId: string
+    /** 仓库标签 `owner/name`（服务端解析；关系缺失时为 null，渲染回退「未知仓库」） */
+    repository: string | null
     prNumber: number
     headSha: string
     authorLogin: string
@@ -112,6 +114,12 @@ const sortMeta = ref<DataTableSortMeta[]>([
  * `key` 即排序字段；actions 列不可排序（原 `:exportable="false"` 非迁移前组件库/caomei 有效 prop，按评估 §5.3 删除）。
  */
 const columns = computed<DataTableColumn<PRCheckView>[]>(() => [
+    // 仓库列置于 PR 列之前：跨仓库 PR 编号会重号，行内先给出归属才能辨识
+    // （`owner/name` 的服务端解析口径与 alerts.vue / env-events.vue 一致）
+    // 注：caomei DataTable 的 `column.width` 仅在 frozen 场景参与 tableMinWidth 与吸边偏移计算；
+    // 非 frozen 列虽会写入表头内联 width，但在 `table-layout: auto` 下不约束列宽（实测被内容撑开），
+    // 故本列宽度与截断由单元内样式 `&__repository` 的固定 max-width 约束
+    { key: 'repository', header: t('prChecks.colRepository'), sortable: true },
     { key: 'prNumber', header: t('prChecks.colPrNumber'), sortable: true },
     { key: 'authorLogin', header: t('prChecks.colAuthor'), sortable: true },
     { key: 'conclusion', header: t('prChecks.colConclusion'), sortable: true },
@@ -308,6 +316,15 @@ const handleAck = async (row: PRCheckView) => {
                 class="pr-checks__table"
                 @update:multi-sort-meta="onUpdateMultiSortMeta"
             >
+                <!-- 防御分支：`PRCheck.repository` 为 nullable:false + CASCADE，正常路径恒有值（不可达分支，按测试规范 §6.5 不强制守护） -->
+                <template #cell-repository="{row}">
+                    <span
+                        class="pr-checks__repository"
+                        :title="row.repository ?? t('prChecks.repositoryUnknown')"
+                    >
+                        {{ row.repository ?? t('prChecks.repositoryUnknown') }}
+                    </span>
+                </template>
                 <template #cell-prNumber="{row}">
                     <a
                         v-if="row.detailsUrl"
@@ -467,6 +484,17 @@ const handleAck = async (row: PRCheckView) => {
 
     &__filter-dropdown {
         width: 100%;
+    }
+
+    // 仓库列：长 `owner/name` 单元内截断（完整值经 title tooltip 呈现）。
+    // 固定 max-width 而非 `100%`——表格为 auto 布局，`max-width: 100%` 会随单元格内容一起增长而不产生截断
+    &__repository {
+        display: inline-block;
+        max-width: 220px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        vertical-align: bottom;
     }
 
     // PR 链接：与 alerts.vue colRuleId 同款视觉（外部链接打开）

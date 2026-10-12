@@ -27,10 +27,18 @@ import { parseOptional } from '#server/utils/zod-helpers'
 const conclusionSchema = z.enum(PR_CHECK_CONCLUSIONS as unknown as [string, ...string[]]).optional()
 const alertFiringSchema = z.enum(['true', 'false']).optional()
 
-/** PRCheck 视图（API 序列化层；与 entities/pr-check 字段一一对应） */
+/**
+ * PRCheck 视图（API 序列化层；与 entities/pr-check 字段一一对应）。
+ *
+ * `repository` 为服务端解析的仓库标签 `owner/name`——与 alerts / env-events / dashboard
+ * 同源口径（均在服务端把 Repository 关系解析成展示字符串，避免前端再维护一份
+ * `repositoryId → owner/name` 映射）；列表页「全部仓库」视图据此行内辨识 PR 归属
+ * （PR 编号仅在同一仓库内唯一，跨仓库会重号）。
+ */
 const toView = (row: PRCheck) => ({
     id: row.id,
     repositoryId: row.repositoryId,
+    repository: row.repository ? `${row.repository.owner}/${row.repository.name}` : null,
     prNumber: row.prNumber,
     headSha: row.headSha,
     authorLogin: row.authorLogin,
@@ -65,7 +73,10 @@ const listHandler = async (event: H3Event) => {
         : undefined
 
     const ds = await ensureDatabaseInitialized()
+    // leftJoinAndSelect：查询内解析 repository 关系，供 toView 输出 `owner/name` 标签
+    // （ManyToOne 不产生行倍增，与 take(500) 上限语义兼容）
     const qb = ds.getRepository(PRCheck).createQueryBuilder('prCheck')
+        .leftJoinAndSelect('prCheck.repository', 'repository')
         .orderBy('prCheck.createdAt', 'DESC')
         .take(500)
 
