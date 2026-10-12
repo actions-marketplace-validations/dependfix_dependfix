@@ -42,7 +42,7 @@ export type OverallBuildStatus = 'pending' | 'success' | 'failure'
  * 来源与 provider 归因：
  * - `kind='check'`：`checks.listForRef`；provider = `check_run.app.slug`（如 `github-actions`）
  * - `kind='status'`：`repos.listCommitStatusesForRef`（分页，见设计稿 §3.7）；provider = `context` 前缀（如 `vercel`）
- * - `kind='deployment'`：`repos.listDeployments` + `listDeploymentStatuses`；provider = `creator.login`（归一化 `[bot]` 后缀，如 `vercel[bot]` → `vercel`）
+ * - `kind='deployment'`：`repos.listDeployments` + `listDeploymentStatuses`；provider = `creator.login`（归一化机器人形态：去 `<安装号>+` 前缀与 `[bot]` 后缀，如 `vercel[bot]` / `12345+vercel[bot]` → `vercel`）
  *
  * 相对设计稿 §3.2 的两处扩展（见 `build-signals.ts` 文件头）：`rawState` 保留原始 GitHub 取值
  * （用于保留既有 `conclusion` 粒度），`sourceId` 为源侧 id（落库与前端链接用）。

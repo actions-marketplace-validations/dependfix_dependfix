@@ -141,7 +141,7 @@ interface UnifiedBuildSignal {
 
 **`checkRunId` / `errorMessage` 派生语义变更**：两列原为「`Test` check 专属」，现改为**最坏信号派生**——`checkRunId` 取失败 check 的 run id（无失败 check 时取任一 check），`errorMessage` 取失败信号摘要（无失败时取首条带摘要者）。列名与既有 UI 消费方不变，但语义已从「单一 check」扩展为「聚合信号代表」。
 
-**provider 归因归一化**：deployment 侧 `creator.login` 归一化 `[bot]` 后缀（`vercel[bot]` → `vercel`），使同一 provider 在 status（`context` 前缀）与 deployment 两侧归因一致，避免按 provider 归组（`failureSources` / 展示）时分裂成两项。
+**provider 归因归一化**：deployment 侧 `creator.login` 归一化**机器人形态**——去 `<安装号>+` 前缀与 `[bot]` 后缀（`vercel[bot]` / `12345+vercel[bot]` → `vercel`），使同一 provider 在 status（`context` 前缀）与 deployment 两侧归因一致，避免按 provider 归组（`failureSources` / 展示）时分裂成多项。
 
 **空集真空真**：`aggregateOverallStatus([])` / `deriveWorstConclusion([])` 返回 `success` 属真空真——采集层对无信号 PR 不产出快照（`signals.length === 0 → continue`），落库侧消费前同样须判空。
 
