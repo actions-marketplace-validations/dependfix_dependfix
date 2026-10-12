@@ -61,7 +61,7 @@
   - [ ] ② **聚合与告警**：任一时间源失败 → 聚合 `failed` → `alertFiring=true` → UI 可见 + ack 可收敛；回归 success 自动清 ack。
   - [ ] ③ **幂等**：同 `headSha` 重跑不重复入库（`(repositoryId, prNumber, headSha)` 唯一约束保持）。
   - [ ] ④ **fail-open**：无 Deployments / 无 commit status 的仓库不报错；单源 API 失败不阻断其它源。
-  - [ ] ⑤ **轮询节流**：只取 `updated_at` 在窗口内的 open PR + `headSha` 未变且已终态 → 跳过（限流回归用例）。
+  - [x] ⑤ **轮询节流**：只取 `updated_at` 在窗口内的 open PR（a 已落地）+ **终态静默窗口**跳过（M43.2b：`headSha` 未变 + 聚合终态 + `lastPolledAt` 距今 < 30min 才跳过；窗口外重采以捕获同 SHA 重跑 / 迟到部署失败——口径见 [pr-build-deploy-signals.md §3.8](../design/governance/pr-build-deploy-signals.md#38-m432b-落地持久化与-api2026-10-13)）。
   - [ ] ⑥ **门禁**：`pnpm typecheck` 0 error + 定向 vitest 通过 + `pnpm run check:i18n` parity 0。
 - **不做什么**：不改 engine 本地构建 / 验证逻辑；不新建 GitHub App（沿用现有凭据模型）；不做 webhook（`PRCheckSyncSource` 已注释预留，后续增量）；不做部署失败自动重跑 / 自动修复；**首批不含 provider 原生 API 日志富化**（设计稿 Layer 5，按 D2 裁定为后续增量 / 留 backlog）；不追求「未装 GitHub 集成」的 provider 可见性（显式声明边界，不臆造信号）。
 - **依赖**：设计先行稿 [pr-build-deploy-signals.md](../design/governance/pr-build-deploy-signals.md) 已定稿（2026-10-10，含三源官方文档引文核对）；M39.5（`kind` 落库）+ M42.4（手动触发共享 polling 函数）为邻近链路，须保持同源。
@@ -75,8 +75,8 @@
   - **M43.2a 采集层**（预估 4-6 文件 / 250-400 行；**实测 7 文件 / 986 新增行——超预估约 2.5×、超 §1.1 单批 800 行审计阈值**，拆分依据仍成立（a 为采集层最小闭环，无法再切而不产生「已声明未落地」的悬空契约），已按 f3d9381 修复自检项、2ac44bc 补强测试）：`types.ts` 增 `UnifiedBuildSignal` + `PRCheckSnapshot.signals`；新增归一化模块（三源映射 + provider 归因 + 状态映射 + 聚合判定 + 轮询节流纯函数）；`polling-source.ts` 三源采集（check runs + commit statuses + deployments/statuses）；nock 夹具单测覆盖 Actions / Vercel / Cloudflare 三类 + fail-open + 节流 + 形态守卫。
     - **中间态声明（含运行时影响）**：a 落地后 `signals` / `overallStatus` 尚未落库（由 b 消费），但**派生 `conclusion` 已在 a 阶段生效**（`ActionStatusMonitor` 据此推断 `alertFiring` 与自动 ack）→ 即 AC ② 的「任一时间源失败 → `alertFiring=true`」已提前生效，非纯中间态。
     - **b 承接项（由 A 阶段审计登记）**：① 自动 ack 清空判定改按 `overallStatus === 'success'`（当前 `conclusion === 'success'` 在含 `neutral` 信号时不再清零 ack）；② `headSha` 未变且已终态 → 跳过（`isTerminalOverallStatus` 已导出）；③ 窗口外行的 `lastPolledAt` 语义与失败告警收敛路径；④ 落库前对空信号判空（`aggregateOverallStatus([])` 为真空真）。
-  - **M43.2b 持久化与 API**（预估 5-8 文件 / 250-400 行）：`pr-check.ts` 增 3 列 + migration（幂等 + 前缀感知）；`action-status-monitor.ts` 落库 signals / overallStatus / failureSources 并保持幂等与状态机（含上条 4 项承接）；`GET /api/pr-checks` 视图暴露新字段；单测（幂等 / fail-open / 聚合态 → alertFiring / coverage）。
-  - **M43.2c UI 多源展示**（预估 4-6 文件 / 200-350 行）：`pr-checks.vue` 多源详情（失败源清单 + 各信号状态 / 链接）+ i18n ×2 + e2e + 视觉基线重建。
+  - **M43.2b 持久化与 API**（预估 5-8 文件 / 250-400 行；**实测实现批 12 文件 / +695、整批 13 文件 / +713——超预估约 1.8×**，拆分依据仍成立：三列 + 迁移 + 落库 + 视图 + 契约对称属同一「持久化与 API」闭环，再切会产生「已登记未落库」的悬空契约）：`pr-check.ts` 增 3 列 + migration（幂等 + 前缀感知）；`action-status-monitor.ts` 落库 signals / overallStatus / failureSources 并保持幂等与状态机（含上条 4 项承接）；`GET /api/pr-checks` 视图暴露新字段；单测（幂等 / fail-open / 聚合态 → alertFiring / coverage）。
+  - **M43.2c UI 多源展示**（预估 4-6 文件 / 200-350 行）：`pr-checks.vue` 多源详情（失败源清单 + 各信号状态 / 链接）+ i18n ×2 + e2e + 视觉基线重建。**承接项（由 M43.2b 审计登记）**：① 「最近轮询」列语义已随 M43.2b 收窄（仅实际采集落库时推进），列头文案 / tooltip 需同步为「最近采集」以免被误读为轮询故障；② 多源展示需消费 `signals` / `failureSources` / `overallStatus`（列表与详情视图契约已对称）。
 - **风险与缓解**：**R1 限流**（每 PR 3+ API × N 轮）——增量轮询 + 终态跳过 + 沿用既有 429 / 限流退避；**R2 单行 JSON 膨胀**（Option A）——`signalsJson` 条目截断 + `summary` 限长；**R3 多源噪音**（非关注 check 也告警）——默认全量只报警不阻断（D3），后续按需引入关注集；**R4 变更面大触发未预期回归**——按 M43.2a / M43.2b / M43.2c 分批审计 / 分批提交。
 
 ### M43.3 [P2 🛡️] 容器内 `pnpm install` 环境性失败的可观测性与归因口径
