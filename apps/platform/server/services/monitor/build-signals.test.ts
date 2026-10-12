@@ -50,9 +50,12 @@ describe('monitor/build-signals provider 归因', () => {
         expect(resolveStatusProvider(null)).toBe('unknown')
     })
 
-    it('deployment provider 取 creator.login；缺失回退 unknown', () => {
-        expect(resolveDeploymentProvider('vercel[bot]')).toBe('vercel[bot]')
+    it('deployment provider 取 creator.login 并归一化 [bot] 后缀（与 status 前缀口径一致）；缺失回退 unknown', () => {
+        expect(resolveDeploymentProvider('vercel[bot]')).toBe('vercel')
+        expect(resolveDeploymentProvider('Vercel[bot]')).toBe('vercel')
+        expect(resolveDeploymentProvider('alice')).toBe('alice')
         expect(resolveDeploymentProvider(null)).toBe('unknown')
+        expect(resolveDeploymentProvider('  ')).toBe('unknown')
     })
 })
 
@@ -152,6 +155,15 @@ describe('monitor/build-signals 聚合与派生', () => {
         expect(deriveWorstConclusion([])).toBe('success')
     })
 
+    it('capSignals：同严重度保持源侧顺序（稳定排序）', () => {
+        const stable = [
+            makeSignal({ name: 'a', state: 'success' }),
+            makeSignal({ name: 'b', state: 'success' }),
+            makeSignal({ name: 'c', state: 'pending', rawState: null }),
+        ]
+        expect(capSignals(stable).map((s) => s.name)).toEqual(['c', 'a', 'b'])
+    })
+
     it('capSignals：按严重度保留失败信号并截断到上限', () => {
         const many: UnifiedBuildSignal[] = Array.from({ length: MAX_SIGNALS_PER_PR + 5 }, (_, i) =>
             makeSignal({ name: `ok-${i}`, state: 'success' }))
@@ -180,6 +192,10 @@ describe('monitor/build-signals 节流', () => {
     it('窗口内 / 窗口外判定', () => {
         expect(isWithinUpdatedWindow(new Date(now.getTime() - 1000).toISOString(), now)).toBe(true)
         expect(isWithinUpdatedWindow(new Date(now.getTime() - PR_UPDATED_WINDOW_MS - 1000).toISOString(), now)).toBe(false)
+    })
+
+    it('恰在窗口边界（差值 === windowMs）视为窗口内', () => {
+        expect(isWithinUpdatedWindow(new Date(now.getTime() - PR_UPDATED_WINDOW_MS).toISOString(), now)).toBe(true)
     })
 
     it('缺失 / 非法时间戳 fail-open（视为需处理）', () => {

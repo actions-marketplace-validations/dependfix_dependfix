@@ -174,7 +174,7 @@ describe('monitor/polling-source 三源采集', () => {
         expect(providers).toContain('check:github-actions')
         expect(providers).toContain('check:cloudflare-workers-and-pages')
         expect(providers).toContain('status:vercel')
-        expect(providers).toContain('deployment:vercel[bot]')
+        expect(providers).toContain('deployment:vercel')
 
         const deployment = snapshot.signals.find((s) => s.kind === 'deployment')!
         expect(deployment.state).toBe('failure')
