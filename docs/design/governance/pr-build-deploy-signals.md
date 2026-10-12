@@ -1,6 +1,6 @@
 # PR 构建与部署信号采集设计（设计先行稿）
 
-> **状态**：✅ 已上收 **M43.2**（2026-10-12 用户决策方案 A）——契约与数据模型作为实现依据；**§5 决策点已于 2026-10-12 裁定**（D1 = Option A 扩展 `PRCheck` / D2 = 不做日志富化 / D3 = 全量只报警不阻断 / D4 = 本批不涉及）；按 §7 拆分子任务推进：**M43.2a 采集层已闭环（2026-10-12，实现期细化见 [§3.7](#37-实现期细化m432a2026-10-12)）**，M43.2b / M43.2c 待推进。
+> **状态**：✅ 已上收 **M43.2**（2026-10-12 用户决策方案 A）——契约与数据模型作为实现依据；**§5 决策点已于 2026-10-12 裁定**（D1 = Option A 扩展 `PRCheck` / D2 = 不做日志富化 / D3 = 全量只报警不阻断 / D4 = 本批不涉及）；按 §7 拆分子任务推进：**M43.2a 采集层已闭环（2026-10-12，见 [§3.7](#37-实现期细化m432a2026-10-12)）**、**M43.2b 持久化与 API 已闭环（2026-10-13，见 [§3.8](#38-m432b-落地持久化与-api2026-10-13)）**，M43.2c 待推进。
 > **范围**：`apps/platform`（PR Check 采集 / 聚合 / 展示）+ 可选 provider 日志富化；不改引擎修复与验证逻辑。
 > **目标**：把「修复 PR 的构建 / 部署错误」从单一 `Test` check 扩展为多源聚合，第一时间发现 CI 与预览部署失败。
 > **关联**：[定时扫描与批量处理设计](./platform-scheduled-batch.md)、[运行失败分类与筛选设计](./run-failure-taxonomy.md)、[平台规范](../../standards/platform.md)、`apps/platform/server/services/monitor/`
@@ -149,6 +149,20 @@ interface UnifiedBuildSignal {
 
 
 
+### 3.8 M43.2b 落地（持久化与 API，2026-10-13）
+
+**数据模型（Option A 落地）**：`pr_check` 增三列——`signals_json`（text，归一化信号数组 JSON）/ `overall_status`（varchar(16)，聚合状态）/ `failure_sources_json`（text，失败源清单 JSON，去重 + 上限 `MAX_FAILURE_SOURCES`）；迁移 `AddPrCheckBuildSignals2300000000000` 按幂等 + 前缀感知 helper 加列（**不建索引**：三列均为展示 / 诊断载荷，无按列过滤查询；存量行不回填，语义为「本列上线前采集」，下次轮询自然回填）。
+
+**告警与自动 ack 判定改按聚合状态**：`overallStatus === 'failure'` ⟺ 既有 `isFailureConclusion(conclusion)`（等价性由 `deriveWorstConclusion` 保证）；**自动 ack 清空判定改为 `overallStatus === 'success'`**（M43.2a 审计承接项 ①）——此前按 `conclusion === 'success'` 时，含 `neutral` 信号的 PR 永不清 ack。
+
+**终态节流的实现细化（相对 §3.5 的偏离）**：§3.5 原文为「`headSha` 未变且已终态 → 跳过」（隐含永久跳过）。实现改为**静默窗口**版本——终态 + HEAD 未变 + `lastPolledAt` 距今 < `TERMINAL_REPOLL_QUIET_MS`（30 分钟）才跳过。理由：GitHub 允许在同一 SHA 上重跑 workflow / 迟到写入部署状态，**永久跳过会漏掉本特性要捕获的核心场景**（同一 SHA 上的重跑失败 / 迟到部署失败）；静默窗口把终态 PR 由「每轮」降为「每 30 分钟」重采，兼顾降频与检出时效。
+
+**`lastPolledAt` 语义（承接项 ③）**：仅在该 PR 本轮**实际采集并落库**时推进；被节流跳过的 PR 其 `lastPolledAt` 可能早于当前时间——**陈旧 `lastPolledAt` 不等于轮询故障**（实体 JSDoc 与本节同步登记）。
+
+**空信号守卫（承接项 ④）**：`applyOne` 对 `signals.length === 0` 直接跳过并返回「未落库」，`pollOnce` 的 `processed` 只统计实际落库数（避免把「无信号」误写为聚合 `success`，也避免计数虚高）。
+
+**API 视图**：`GET /api/pr-checks` 增 `overallStatus` / `signals` / `failureSources` 三字段（JSON 列解析，`observedAt` 经往返为 ISO 字符串；列值损坏或缺失时回退 `null`，不抛错）。
+
 ## 4. 数据模型（两个选项）
 
 现有 `PRCheck` 是 `(repositoryId, prNumber, headSha)` 一行、单 `conclusion`。扩展有两种路径：
@@ -187,16 +201,16 @@ interface UnifiedBuildSignal {
 ## 7. 落地拆分（已上收 M43.2：M43.2a 采集层 / M43.2b 持久化与 API / M43.2c UI 展示）
 
 1. **M43.2a 采集层**：GitHub 三源聚合 SyncSource + 归一化 + `nock` 单测（✅ 2026-10-12）。
-2. **M43.2b 持久化与 API**：`PRCheck` 扩展三列 + migration + 监控器落库（含 `headSha` 未变且已终态跳过）+ `GET /api/pr-checks` 视图字段 + 单测。
+2. **M43.2b 持久化与 API**：`PRCheck` 扩展三列 + migration + 监控器落库（含终态静默窗口跳过）+ `GET /api/pr-checks` 视图字段 + 单测（✅ 2026-10-13）。
 3. **M43.2c UI 展示**：`pr-checks` 多源详情（失败源清单 + 各信号状态 / 链接）+ i18n + e2e + 视觉基线。
 4. **日志富化（可选）**：provider adapter（Vercel 先行）—— 后续增量（D2 裁定本批不做）。
 
 ## 8. 验收标准
 
 - [x] 给定一个 PR head，能列出其全部 check runs + statuses + deployments 的归一化条目，且能标注 provider（M43.2a）。
-- [ ] 任一时间源失败 → 聚合状态 `failed` → `alertFiring=true` → UI 可见 + ack 可收敛（M43.2b / M43.2c）。
+- [~] 任一时间源失败 → 聚合状态 `failed` → `alertFiring=true`（M43.2b 已落地落库与状态机）；UI 可见 + ack 可收敛待 M43.2c 验证。
 - [x] Vercel / Cloudflare / 其它 provider 无需额外代码即可识别（`nock` 夹具覆盖三类 `app.slug` / `context`）（M43.2a）。
-- [ ] 轮询幂等：同 `headSha` 重跑不重复入库（M43.2b）。
+- [x] 轮询幂等：同 `headSha` 重跑不重复入库（M43.2b：`(repositoryId, prNumber, headSha)` 唯一索引 + 幂等 UPDATE 用例）。
 - [x] 无 Deployments / 无 status 的仓库不报错（fail-open）（M43.2a）。
 
 ## 9. 关联文档
