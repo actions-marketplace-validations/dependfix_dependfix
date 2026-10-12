@@ -29,6 +29,48 @@ export interface PRCheckSyncSource {
 }
 
 /**
+ * 归一化构建 / 部署信号状态（三源统一枚举，详见 [pr-build-deploy-signals.md §3.2](../../../../docs/design/governance/pr-build-deploy-signals.md)）。
+ */
+export type UnifiedBuildSignalState = 'pending' | 'success' | 'failure' | 'error' | 'neutral' | 'skipped'
+
+/** 聚合构建 / 部署状态（PR 级派生，供告警与展示使用） */
+export type OverallBuildStatus = 'pending' | 'success' | 'failure'
+
+/**
+ * 归一化构建 / 部署信号（三源统一模型）。
+ *
+ * 来源与 provider 归因：
+ * - `kind='check'`：`checks.listForRef`；provider = `check_run.app.slug`（如 `github-actions`）
+ * - `kind='status'`：`repos.getCombinedStatusForRef`；provider = `context` 前缀（如 `vercel`）
+ * - `kind='deployment'`：`repos.listDeployments` + `listDeploymentStatuses`；provider = `creator.login`
+ *
+ * 相对设计稿 §3.2 的两处扩展（见 `build-signals.ts` 文件头）：`rawState` 保留原始 GitHub 取值
+ * （用于保留既有 `conclusion` 粒度），`sourceId` 为源侧 id（落库与前端链接用）。
+ */
+export interface UnifiedBuildSignal {
+    /** 来源 GitHub API */
+    kind: 'check' | 'status' | 'deployment'
+    /** provider 归因（无法判定时为 `unknown`，不臆造） */
+    provider: string
+    /** 展示名（check 名 / commit status context / deployment environment） */
+    name: string
+    /** 归一化状态 */
+    state: UnifiedBuildSignalState
+    /** 原始 GitHub 取值（check conclusion / status state / deployment status state；未完成时为 null） */
+    rawState: string | null
+    /** 源侧 id（check run id / commit status id / deployment id） */
+    sourceId: string | null
+    /** 详情链接（`details_url` / `target_url` / `environment_url`） */
+    targetUrl: string | null
+    /** 原始日志链接（deployment status `log_url`，如有） */
+    logUrl: string | null
+    /** 摘要（`check_run.output.text` / status description / deployment description，已截断） */
+    summary: string | null
+    /** 观测时刻 */
+    observedAt: Date
+}
+
+/**
  * PR Check 快照：SyncSource 对外暴露的标准化数据结构。
  *
  * 与 PRCheck 实体的关系：
@@ -38,6 +80,11 @@ export interface PRCheckSyncSource {
  * 字段命名对齐：
  * - authorLogin / prNumber / headSha / conclusion 与 PRCheck 实体一致
  * - observedAt 由 SyncSource 填充（GitHub API 调用时刻），用于 lastPolledAt 字段
+ *
+ * 多源字段（M43.2）：
+ * - `signals`：该 HEAD 的三源归一化信号（check runs + commit statuses + deployments）
+ * - `overallStatus`：由 `signals` 聚合出的 PR 级状态（`failure` / `pending` / `success`）
+ * - `conclusion`：由 `signals` 派生的既有枚举值（保留 `timed_out` / `action_required` 粒度）
  */
 export interface PRCheckSnapshot {
     /** 应用层仓库 id（写入 PRCheck.repositoryId） */
@@ -54,6 +101,10 @@ export interface PRCheckSnapshot {
     authorLogin: string
     /** Check 结论（已映射为 PRCheckConclusion enum；status='in_progress' → 'pending'） */
     conclusion: PRCheckConclusion
+    /** 该 HEAD 的归一化三源信号（M43.2） */
+    signals: UnifiedBuildSignal[]
+    /** 由 signals 聚合出的 PR 级状态（M43.2） */
+    overallStatus: OverallBuildStatus
     /** 关联 check_run.id（GitHub numeric bigint 字符串化，便于跨库兼容） */
     checkRunId: string | null
     /** PR HTML 链接（`https://github.com/{owner}/{repo}/pull/{prNumber}`） */
