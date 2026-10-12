@@ -21,6 +21,14 @@ import { PR_CHECK_CONCLUSIONS, type PRCheckConclusion } from '#server/entities/p
 /** 单条信号摘要限长（避免单行 JSON 膨胀；见 docs/design/governance/pr-build-deploy-signals.md §6 风险表） */
 export const SIGNAL_SUMMARY_MAX_LENGTH = 300
 
+/**
+ * 信号 URL 字段限长（`targetUrl` / `logUrl`）。
+ *
+ * 理由：`environment_url` / `target_url` 由部署方提供、长度不受控；`MAX_SIGNALS_PER_PR` 只限条数，
+ * 不限单条体积。上限取 500——与实体 `PRCheck.detailsUrl`（varchar(500)）同口径。
+ */
+export const SIGNAL_URL_MAX_LENGTH = 500
+
 /** 单 PR 信号条数上限（超出按严重度保留；避免异常仓库产生超大 JSON） */
 export const MAX_SIGNALS_PER_PR = 50
 
@@ -140,7 +148,7 @@ export const normalizeCheckRun = (
         state,
         rawState: rawConclusion,
         sourceId: checkRun.id !== undefined && checkRun.id !== null ? String(checkRun.id) : null,
-        targetUrl: checkRun.details_url ?? checkRun.html_url ?? null,
+        targetUrl: truncate(checkRun.details_url ?? checkRun.html_url, SIGNAL_URL_MAX_LENGTH),
         logUrl: null,
         summary: truncate(checkRun.output?.text, SIGNAL_SUMMARY_MAX_LENGTH),
         observedAt,
@@ -166,7 +174,7 @@ export const normalizeCommitStatus = (
         state: COMMIT_STATUS_STATE[rawState ?? ''] ?? 'skipped',
         rawState,
         sourceId: status.id !== undefined && status.id !== null ? String(status.id) : null,
-        targetUrl: status.target_url ?? null,
+        targetUrl: truncate(status.target_url, SIGNAL_URL_MAX_LENGTH),
         logUrl: null,
         summary: truncate(status.description, SIGNAL_SUMMARY_MAX_LENGTH),
         observedAt,
@@ -204,8 +212,8 @@ export const normalizeDeployment = (
         state: rawState ? (DEPLOYMENT_STATE[rawState] ?? 'skipped') : PENDING_SIGNAL_STATE,
         rawState,
         sourceId: deployment.id !== undefined && deployment.id !== null ? String(deployment.id) : null,
-        targetUrl: latestStatus?.environment_url ?? latestStatus?.target_url ?? null,
-        logUrl: latestStatus?.log_url ?? null,
+        targetUrl: truncate(latestStatus?.environment_url ?? latestStatus?.target_url, SIGNAL_URL_MAX_LENGTH),
+        logUrl: truncate(latestStatus?.log_url, SIGNAL_URL_MAX_LENGTH),
         summary: truncate(latestStatus?.description, SIGNAL_SUMMARY_MAX_LENGTH),
         observedAt,
     }

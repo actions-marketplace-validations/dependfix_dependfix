@@ -275,7 +275,7 @@
             "created": "Schedule created",
             "deleted": "Schedule deleted",
             "triggered": "Batch scan triggered ({count} repositories), progress available on the batch runs page",
-            "prCheckTriggered": "PR Check monitoring triggered ({processed} processed, {errors} errors)",
+            "prCheckTriggered": "PR Check monitoring triggered ({processed} updated, {errors} errors)",
             "disabled": "Schedule disabled",
             "enabled": "Schedule enabled"
         },
@@ -532,7 +532,7 @@
         "repositoryUnknown": "Unknown repository",
         "poll": {
             "action": "Check now",
-            "success": "Checked {processed} PRs ({errors} errors)",
+            "success": "Updated {processed} PR statuses ({errors} errors)",
             "disabled": "PR Check monitoring is disabled (ACTION_STATUS_MONITOR_ENABLED=false); skipped",
             "truncated": "Candidate repositories ({candidateCount}) exceed the per-run limit; only the first batch was checked (the rest were not checked).",
             "failed": "Check failed: {message}"

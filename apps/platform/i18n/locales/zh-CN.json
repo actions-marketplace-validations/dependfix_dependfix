@@ -275,7 +275,7 @@
             "created": "定时计划已创建",
             "deleted": "定时计划已删除",
             "triggered": "已触发批量扫描（{count} 个仓库），可在批量运行页查看进度",
-            "prCheckTriggered": "已触发 PR Check 监测（处理 {processed} 个，错误 {errors} 个）",
+            "prCheckTriggered": "已触发 PR Check 监测（更新 {processed} 个，错误 {errors} 个）",
             "disabled": "定时计划已禁用",
             "enabled": "定时计划已启用"
         },
@@ -532,7 +532,7 @@
         "repositoryUnknown": "未知仓库",
         "poll": {
             "action": "立即检查",
-            "success": "已检查 {processed} 个 PR（错误 {errors} 个）",
+            "success": "已更新 {processed} 个 PR 状态（错误 {errors} 个）",
             "disabled": "PR Check 监测未启用（ACTION_STATUS_MONITOR_ENABLED=false），本次已跳过",
             "truncated": "候选仓库数（{candidateCount}）超出单次检查上限，本次仅处理前若干仓库（其余仓库未检查）",
             "failed": "立即检查失败：{message}"

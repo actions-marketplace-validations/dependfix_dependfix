@@ -19,10 +19,11 @@ import { PRCheck, type PRCheckConclusion } from '#server/entities/pr-check'
  * 1. 拉取目标仓库列表（schedule.selectorKind 解析；MVP 阶段 per-org scope，D6）
  * 2. 对每个仓库：syncSource.fetchSnapshots → 快照数组（PR + check run）
  * 3. 对每个快照：INSERT/UPDATE PRCheck 表（按 `(repositoryId, prNumber, headSha)` 复合唯一索引幂等）
- * 4. 状态机推断（关键决策 D3）：
- *    - 快照失败（failure / timed_out / action_required）→ alertFiring=true
- *    - 快照成功（success）→ alertFiring=false（自动 ack；acknowledgedAt 留原值）
- *    - 其他（pending / skipped / cancelled 等）→ alertFiring=false
+ * 4. 状态机推断（关键决策 D3 + M43.2b 承接）：
+ *    - 快照失败（conclusion ∈ failure / timed_out / action_required）→ alertFiring=true
+ *    - 快照聚合成功（`overallStatus === 'success'`）→ alertFiring=false 且**清空** acknowledgedAt /
+ *      acknowledgedByUserId（自动 ack；判定按聚合状态，含 neutral 信号的 PR 亦能清零）
+ *    - 其他（pending / skipped / cancelled 等）→ alertFiring=false（保留既有 ack 记录）
  * 5. lastPolledAt = observedAt
  *
  * 用户 ack 操作（PATCH /api/pr-checks/[id] { alertFiring: false }）由 Phase 3 API 层实现，
@@ -116,10 +117,18 @@ export class ActionStatusMonitor {
      * 永久跳过会漏掉本特性要捕获的失败场景（口径见 `build-signals.ts` 的 `TERMINAL_REPOLL_QUIET_MS`）。
      */
     private async loadTerminalHeadMap(repositoryId: string): Promise<Map<number, string>> {
-        const rows = await this.ds.getRepository(PRCheck).find({ where: { repositoryId } })
+        // 同一 PR 可能有多行（不同 HEAD）：按 lastPolledAt 降序取「最新行」作为跳过判定依据，
+        // 避免 find 无 ORDER BY 时的 last-write-wins 不确定（最坏只是漏节流，此处求稳定）
+        const rows = await this.ds.getRepository(PRCheck).find({
+            where: { repositoryId },
+            order: { lastPolledAt: 'DESC' },
+        })
         const now = new Date()
         const map = new Map<number, string>()
         for (const row of rows) {
+            if (map.has(row.prNumber)) {
+                continue
+            }
             if (shouldSkipTerminalPr(row, now)) {
                 map.set(row.prNumber, row.headSha)
             }
