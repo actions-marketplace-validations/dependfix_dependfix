@@ -12,7 +12,7 @@
 
 > 本文档为 **`apps/platform`（Nuxt 管理平台）PrimeVue → caomei-ui 的迁移评估与方案**，用于规避 PrimeUI 商业许可风险并与下游统一组件库。
 >
-> **状态**：评估先行稿，**2026-09-28 已上收 M31 正式迁移阶段**（用户决策方案 B；Backlog C88 上收后移除；实施批次映射 M31.1-M31.6 —— 见 [todo-archive.md §M31](../../plan/archive/todo-archive-phases-m31.md#m31-appsplatform-ui-组件库迁移primevue--caomei-ui-m311m316-全部已闭环--2026-09-29-归档)）；**2026-09-29 M31.5（B3）收尾完成，迁移主线（M31.1-M31.5）闭环**：5 个 PrimeVue 依赖已卸载、代码侧引用归零、e2e 全量通过、包体对比与 B4 视觉裁定落定 —— 见 [§15.13](#1513-b3-收尾实证m3152026-09-29)。库侧能力补齐（若采纳）属 caomei-ui 仓库自身阶段范围，须另行立项。**2026-09-28 B0 接线落地后本文进入实施期实证**：选择器映射以 [§15.8](#158-选择器映射表更正2026-09-28b0-接线实证) 为准、能力验证口径以 [§15.9](#159-b0-接线暴露的验证覆盖缺口m31-各批次须补齐) 为准。
+> **状态**：评估先行稿，**2026-09-28 已上收 M31 正式迁移阶段**（用户决策方案 B；Backlog C88 上收后移除；实施批次映射 M31.1-M31.6 —— 见 [todo-archive.md §M31](../../plan/archive/todo-archive-phases-m31.md#m31-appsplatform-ui-组件库迁移primevue--caomei-ui-m311m316-全部已闭环--2026-09-29-归档)）；**2026-09-29 M31.5（B3）收尾完成，迁移主线（M31.1-M31.5）闭环**：5 个 PrimeVue 依赖已卸载、代码侧引用归零、e2e 全量通过、包体对比与 B4 视觉裁定落定 —— 见 [§15.13](#1513-b3-收尾实证m3152026-09-29)。库侧能力补齐（若采纳）属 caomei-ui 仓库自身阶段范围，须另行立项。**2026-09-28 B0 接线落地后本文进入实施期实证**：选择器映射以 [§15.8](#158-选择器映射表更正2026-09-28b0-接线实证) 为准、能力验证口径以 [§15.9](#159-b0-接线暴露的验证覆盖缺口m31-各批次须补齐) 为准。**2026-10-12 插队热修闭环 caomei-ui 0.6.0 升级回归**（dependabot 只改版本号与 lockfile 致 CI 主链路红 → 断言适配 + 基线强制重建 + 防复发流程约束）—— 见 [§15.15](#1515-caomei-ui-060-升级回归实证插队热修2026-10-12)。
 
 ---
 
@@ -888,3 +888,53 @@ e2e 侧共改写 14 个 spec（`.p-dialog*` / `.p-select*` / `.p-drawer` / `.p-c
 - `_caomei-tokens.scss` 暗色档假设「库基础预设 `--caomei-color-primary-foreground` = `#0b0b0d`（实测 13.29:1）」经 0.5.0 复核**未变**，注释已同步为已复核状态。
 - **视觉阈值盲区**（可吞色值变更）不在本批范围 → **已由 M34.3 闭环**（`threshold` 0.2 → 0.1 / `maxDiffPixels` 200 → 100）；本批为其提供了第二条实证与量化基线差异。
 - `Select` 的 `#value` 槽可恢复 owner badge（M31.4 因 0.3.0 无该槽而放弃）——登记为后续 UX 候选（不在 M34 范围）。
+
+### 15.15 caomei-ui 0.6.0 升级回归实证（插队热修，2026-10-12）
+
+> **背景（反例记录）**：`a86ac42 build(deps): bump caomei-ui from 0.5.0 to 0.6.0`（dependabot，2026-10-11）**只改 `apps/platform/package.json` + `pnpm-lock.yaml`**，未按 §15.14 口径做迁移实证与门禁回归 → master 的 `Test` job 自该批次起持续失败（CI run `38249528660`：`E2E` 与 `Visual Regression` 两个 job 均失败）。本节的结论之一是**流程性**的：0.6.0 并非纯样式增量，含 2 处**断言级契约变化**。
+
+**1）变更清单（平台命中面 + 处置）**
+
+| 类别 | 变更（0.6.0 实测） | 平台命中点 | 处置 |
+| :--- | :--- | :--- | :--- |
+| **契约（断言级）** | `DataTable` 在 `sort-mode="multiple"` 下**所有可排序列**都渲染 `.caomei-data-table__sort-index`；未参与排序者带 `--reserved` 修饰符且文本为空（源码 `sortIndexLabel(key)`：`sortState(key) ? String(sortIndex(key)) : ""`）。目的：排序时列宽不再跳动 | `platform-pages.visual.test.ts` 的 `alerts 分组与多列排序` 断言 `toHaveCount(2)` 失败（保留占位使计数 > 2） | **已适配**：断言限定 `:not(.caomei-data-table__sort-index--reserved)` |
+| **视觉（占位，全表页）** | 同批 `DataTable` 的**排序图标**也改为全列渲染：未排序列表头渲染 `.caomei-data-table__sort-icon--reserved`（库内 `visibility: hidden` 占位），0.5.0 仅在排序列表头渲染图标 | 全部使用 `DataTable` 的页面（含**单列排序**的 `repos`，其不渲染 `sort-index`，故 `repos-*` 两张基线的唯一变更源就是本项） | **已接受**：库侧 UX 改进（表头不再因排序状态改变布局），不覆盖样式 |
+| **视觉（token）** | `dialog` 内容容器底色由 `--caomei-color-bg` 改为 `--caomei-color-bg-elevated`（dist CSS 实测 `background: var(--caomei-color-bg-elevated)`） | `dark-mode.e2e.test.ts` 断言 `contentBackground === rgb(15, 23, 42)`（旧 `bg` 暗色档）失败，实测 `rgb(30, 41, 59)` | **已适配**：期望值改 `rgb(30, 41, 59)`（暗色 elevated `#1e293b`），守卫意图（暗色 ≠ light 近白底 `#f8fafc`）不变；注释同步 |
+| **视觉（浮层 / 表体）** | 同批 `Drawer` / `Popover` 背景 `bg → bg-elevated`、`Popover` 圆角 `radius-md → radius-lg`、`Tabs` 列表 overflow / 分隔线重写 | 视觉基线 | **已重建**（10 张，见第 2 条） |
+
+**2）视觉门禁回归与基线处置**
+
+- `--update-snapshots=all` 强制重建 → 11 用例全绿；随后**不带 update 复跑 11 passed**（幂等确认）。
+- **变更基线 10 张**：`alerts-light` / `alerts-dark` / `alerts-right-light` / `alerts-right-dark`（表头排序图标与序号保留占位）/ `repos-light` / `repos-dark`（仅排序**图标**保留占位，见上表第 2 行）/ `pr-checks-light`（同 alerts）/ `dialog-import-repos-light`（弹窗内容底色 `bg → bg-elevated`）/ `dialog-select-open-light` / `dialog-select-open-dark`（面板底色 `bg-elevated` + 圆角 `radius-lg`）；`login-light` 未变（该页仅用 `Button` / `Card` / `Input` / `Message` / `Password`，0.6.0 对其只有 `.d.ts` 差异）。
+- **逐基线量化（内容核验口径，对应 [测试规范 §6.7](../../standards/testing.md#67-视觉回归截图识别层appsplatform) 的「重建 + 逐像素 diff」）**：
+
+| 基线 | 差异像素（门禁口径 / 严格口径） | 严格口径占比 | maxΔ | bbox | 归因 |
+| :--- | :--- | ---: | ---: | :--- | :--- |
+| alerts-light.png | 35713 / 77355 | 5.04% | 255 | (927,294)-(1392,1016) | 表头排序图标 + 序号保留占位 |
+| alerts-dark.png | 36144 / 77425 | 5.05% | 240 | (927,294)-(1392,1016) | 同上 |
+| alerts-right-light.png | 用例在整页截图断言处即中止 / 127897 | 14.88% | 255 | (0,7)-(1098,729) | 同上（元素级补拍，随 `=all` 一并重建） |
+| alerts-right-dark.png | 同上 / 128095 | 14.91% | 240 | (0,7)-(1098,729) | 同上 |
+| repos-light.png | 6201 / 16613 | 1.28% | 216 | (265,255)-(1040,419) | 排序**图标**保留占位（单列排序页，无 `sort-index`） |
+| repos-dark.png | 6755 / 16729 | 1.29% | 226 | (265,255)-(1040,419) | 同上 |
+| pr-checks-light.png | 11767 / 28707 | 2.22% | 224 | (255,357)-(1217,638) | 表头排序图标 + 序号保留占位 |
+| dialog-import-repos-light.png | 未超阈（用例判通过）/ 275248 | 84.23% | **7** | (0,0)-(759,429) | 弹窗内容底色 `bg → bg-elevated`（亮色 `#ffffff` → `#f8fafc`：每通道仅差 3-7 → **低色差大面积的典型阈值盲区**） |
+| dialog-select-open-light.png | 2752 / 238298 | 18.39% | 122 | (265,107)-(1040,792) | 面板底色 `bg-elevated` + 圆角 `radius-lg`（门户面板 + 遮罩叠色） |
+| dialog-select-open-dark.png | 3075 / 239352 | 18.47% | 124 | (265,107)-(1040,792) | 同上 |
+
+  - **口径说明**：**门禁口径** = Playwright 报出的差异像素数（pixelmatch，`threshold` 见 [测试规范 §6.7](../../standards/testing.md#67-视觉回归截图识别层appsplatform)）；**严格口径** = 本次一次性脚本按「任一通道绝对差 > 0」统计（含抗锯齿等亚阈值差异，故恒 ≥ 门禁口径），`maxΔ` / `bbox` 同取该口径。两列并列给出，既保留门禁判定值又给出完整差异面。
+  - **结论**：10 张基线与 0.6.0 语义变更面**一一对应**，无越界变更；`dialog-import-repos-light` 属「低色差 + 大面积」盲区实证（`maxΔ=7` 而覆盖 84% 面积，门禁仍判通过）——与 §15.14 第 4 条登记的盲区轴同源。
+- **门禁判定与处置**：9 张需 `=all` 重建追平（7 张经门禁判失败并取得差异值；`alerts-right-*` 2 张因用例在整页截图断言处即中止而未进入该断言，其严格口径 127,897 / 128,095 px、`maxΔ` 255 / 240 远超预算）；仅 `dialog-import-repos-light` 落在**颜色阈值内**（`maxΔ=7`）故门禁原判通过（但字节已变，`=all` 一并追平）→ **本批一律使用 `=all`**，不依赖「不匹配才重写」的默认行为（该默认行为在盲区内会产出「零差异」假证据，见 §15.14 第 4 条方法论教训）。
+
+**3）回归验证矩阵（本批收口）**
+
+| 检查 | 命令 | 结果 |
+| :--- | :--- | :--- |
+| 定向 e2e（适配前复现） | `playwright test tests/e2e/dark-mode.e2e.test.ts` | 修复前 1 failed（3 次重试全败）→ 修复后 2 passed |
+| 全量 e2e | `playwright test --workers=1` | **189 passed / 0 failed** |
+| 视觉回归 | `playwright test --config=playwright.visual.config.ts`（`=all` 重建 + 复跑） | 11 passed ×2，零漂移 |
+
+**4）防复发约束（流程结论）**
+
+- **依赖升级批次的合并门禁**：口径以 [development.md §5.1.34 ③](../../standards/development.md) 为准；本批为其实证反例：`a86ac42` 只改两文件 → CI run `38249528660` 的 `Test` job（`E2E` + `Visual Regression`）持续红，直至下一阶段规划期的环境核对才暴露。
+- 排序占位（`--reserved`）与浮层底色（`bg-elevated`）属**库侧契约与设计口径**，平台侧只适配**断言与基线**，不加样式覆盖（沿用 [platform.md §7.4](../../standards/platform.md#74-caomei-ui-接线约定) 接线约定与 §7.5 上游归因流程）。
+- **视觉覆盖边界（已知边界）**：视觉最小集（M32.5 边界）不覆盖 `Drawer` / `Tabs` / `Popover` / `Toast` 的落点页（`schedules` / `scans` / `alert-run-sidebar`），故 0.6.0 对这些组件的浮层类变更**不受像素守卫**（仅由 e2e 行为断言兜底）→ 已登记 [backlog 候选](../../plan/backlog.md)（浮层类组件视觉覆盖扩面）。
