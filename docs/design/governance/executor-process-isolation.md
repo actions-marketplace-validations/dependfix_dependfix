@@ -212,4 +212,4 @@ scan-queue.add(jobId = scan-<repositoryId>)   [scan-queue.ts]
 - [executor-sandbox.md](./executor-sandbox.md)：§3 接口契约 / §7.2 镜像策略（自包含入口缺口）/ §7.4 执行器并存路由 / §7.8 降级状态机契约
 - [platform.md](../../standards/platform.md)：§3.3 迁移与数据库口径 / §10 运行时与部署
 - 代码锚点：`apps/platform/server/services/queue/queue.service.ts`、`scan-worker.ts`、`scan-queue.ts`、`apps/platform/server/services/executor/container-executor.ts`、`apps/platform/server/plugins/stale-cleanup.ts`
-- 规划：`docs/plan/roadmap.md` §M38（2026-10-09 已闭环归档，见 [todo-archive.md §M38](../../plan/todo-archive.md#m38-平台执行模型隔离m381m386-全部已闭环--2026-10-09-归档)）+ [platform.md §10.5 / §10.6](../../standards/platform.md)
+- 规划：`docs/plan/roadmap.md` §M38（2026-10-09 已闭环归档，见 [todo-archive.md §M38](../../plan/archive/todo-archive-phases-m38.md#m38-平台执行模型隔离m381m386-全部已闭环--2026-10-09-归档)）+ [platform.md §10.5 / §10.6](../../standards/platform.md)
