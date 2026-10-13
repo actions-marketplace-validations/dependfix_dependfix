@@ -51,7 +51,7 @@
 
 - **实际交付**：`23ad252` feat(platform)（`pr-checks.vue` 仓库列 + 单元截断样式 + `index.get.ts` 视图 join）+ `9f9b4b2` test(platform)（`index.get.test.ts` 视图字段断言 + `pr-checks.e2e.test.ts` 跨仓库同号 PR 用例 + `pr-checks-light.png` 基线重建）+ 本条登记 commit。**质量门**：lint 0 error（2 条既有 max-lines warning）；typecheck 全包 Done；定向单测 24 passed；定向 e2e 2 passed；视觉套件重建后连跑两遍 11 passed（仅本页基线变更，其余零 churn）；`check:orphan-ids` 0；新增行编号标记扫描 0 命中。**审计**：standard R1 **Pass**（0 blocker / 1 warning：AC ④ 截断策略无验证）→ 修复时**发现并纠正真实实现缺陷**（caomei DataTable 为 `table-layout: auto` 且 `column.width` 不约束非冻结列 → 原 `max-width: 100%` 随内容增长、截断形同虚设；改为单元内固定上限 + 移除死 prop）→ R2 quick **Pass**（0 blocker / 0 warning；RG-S4 注释精度已随手应用）。**残余**：`dialog-select-open-dark.png` 存在约 28px（ratio 0.002%）运行间非确定性差异，远低于 `maxDiffPixels` 预算、套件稳定通过，已还原为已提交基线并留观察（未纳入本批范围）；`prChecks.ack.confirm` / `colLink` / `errors.loadFailed` 仍为闲置键（既有范围外）。
 
-### M43.2 [P2 🚀] PR 构建 / 部署错误多源采集（PR Check 扩展为信号聚合层）（**D 阶段定稿**：Option A 数据模型 + 全量只报警；拆 a/b/c 三子任务）
+### M43.2 [P2 🚀] PR 构建 / 部署错误多源采集（PR Check 扩展为信号聚合层）（**已闭环** a/b/c 三子任务；D 阶段定稿 = Option A 数据模型 + 全量只报警）
 
 - **目标**：把 PR Check 从单一 `Test` check 扩展为「GitHub 三源（Checks + Commit Statuses + Deployments）」聚合，使目标仓库修复 PR 的完整 CI / 预览部署失败第一时间可见。
 - **优先级**：P2
@@ -139,17 +139,20 @@
 - **交付物**：预计 2 commits——① engine `hasGitChanges` 语义 + `pr-creator` push 隔离 + 单测；② 平台 `pushFixBranch` 同口径 + 单测。预计 3-5 文件 / 60-120 行。
 - **风险与缓解**：**R1 `preExistingDirty` 保护语义受影响**——AC ① 显式约束 + 定向用例覆盖（既有 `preExistingDirty=true` 用例与新增非仓库用例并存）；**R2 两处 push 实现分叉**——抽共用常量（`git-signing.ts` 单一事实源）并同步规范锚点；**R3 `git push --no-verify` 语义边界**（不作用于签名等其它参数）——表内注明 `-c` 与 `--no-verify` 位置不可互换 + 4 处 argv/行为断言锁定。
 
-### M43.6 [P3 🛠️] 工程脚本加固：门禁产物排除 + 蒸馏计数假阴性
+### M43.6 [P3 🛠️] 工程脚本加固：门禁产物排除 + 蒸馏计数假阴性（**已闭环** `448ce7b` + `1f234d0` + `8373eba`）
 
 - **目标**：让本地跑过 e2e 后门禁脚本不被 Playwright 产物污染，并让 `distill-wisdom` 正确统计「日期+类型」格式的活跃条目（消除 `--check` 假阴性）。
 - **优先级**：P3
-- **范围**：`scripts/check-orphan-ids.mjs:50`（`EXCLUDED_DIRS` 缺 `playwright-report` / `test-results`）+ `scripts/shared/md-walk.mjs:42`（`MD_EXCLUDED_DIRS` 缺同名目录，`check-docs` 经此扫描）+ `scripts/distill-wisdom.mjs:145`（`newFormatMatch` 不容忍 `**[日期] [类型] 标题**` 形态）+ 脚本单测。
+- **范围**：`scripts/check-orphan-ids.mjs`（`EXCLUDED_DIRS` 补 Playwright 产物目录）+ `scripts/shared/md-walk.mjs`（`MD_EXCLUDED_DIRS` 同口径，`check-docs` 经此扫描）+ `scripts/distill-wisdom.mjs`（条目形态识别扩展 + 疑似条目告警 + 条目行正则收敛为单一事实源）+ 三个脚本单测 + `docs/design/governance/session-wisdom-distillation.md`（格式约定与告警口径）。
 - **验收标准**：
-  - [ ] ① **产物排除**：`pnpm run check:orphan-ids` 与 `pnpm run check:docs` 在存在 `playwright-report/` / `test-results/` 产物时结果与清理后一致（或统一改为尊重 `.gitignore` 的排除策略，D 阶段裁定）；单测覆盖排除面。
-  - [ ] ② **蒸馏计数**：`distill-wisdom` 容忍 `- **[YYYY-MM-DD] [type] 标题**：正文` 形态并正确计数；`pnpm distill:wisdom --check` 在存在该格式条目时输出真实条目数。
-  - [ ] ③ **假阴性告警**：`--check` 在「解析到 0 条但文件存在疑似条目」时显式告警（防静默假阴性再次通过）。
-  - [ ] ④ **门禁**：`pnpm lint` 0 error + 脚本单测通过。
-- **不做什么**：不改既有 lint / typecheck / test 门禁语义；不改 `check-orphan-ids` 的编号正则与真常量白名单（仅改扫描面排除）；不引入新依赖解析 `.gitignore` 语法（若采统一策略则复用既有 `isGitIgnored` helper）；不改 `wisdom.md` 既有条目格式约定（若定稿格式约定则写入蒸馏机制文档）。
-- **依赖**：本地 e2e 产物污染实测（`playwright-report/trace/assets/codeMirrorModule-*.js` 误报编号形态；`test-results/**/error-context.md` 计入 md 扫描面 148→152）；`distill-wisdom` 假阴性实测（`.session/wisdom.md` 按日期+类型书写 → `--check` 输出 `0 active entries`）。
+  - [x] ① **产物排除**（D 裁定 = **目录名精确排除**）：`EXCLUDED_DIRS` 与 `MD_EXCLUDED_DIRS` 各补 `playwright-report` / `test-results`（与既有 `coverage` / `.output` / `artifacts` 同类的按名排除惯例）；单测锁定「产物目录不进扫描面」；实测有产物在场时 `check:orphan-ids` 与 `check:docs` 结果与清理后**完全一致**。
+  - [x] ② **蒸馏计数**（D 裁定 = **两种形态都兼容**）：解析器同时容忍 `### [YYYY-MM-DD] [type] 标题`（本文件实际写法，后随 `-` 正文行）与 `- **[YYYY-MM-DD] [type] 标题**：正文`（AC 字面形态，兼容 `→ 详见/已迁移至`）；格式约定写入 [session-wisdom-distillation.md §6](../design/governance/session-wisdom-distillation.md)。实测 `pnpm distill:wisdom --check` 由 `0 active entries` → **`4 active entries`**（与文件实际条目数一致）。
+  - [x] ③ **假阴性告警**：`--check` 在「活跃条目 0 条且活跃区存在含 `[YYYY-MM-DD]` 的未识别行」时经 **stderr** 显式告警（列出前若干行 + 行号），stdout 契约（`WISDOM_OK` / `WISDOM_NEEDS_DISTILL`）与退出码语义（恒 0，供 hook 无脑调用）均不变。
+  - [x] ④ **门禁**：`pnpm lint` 0 error + 脚本单测（37 文件 / 640 用例）通过；全仓套件与文档门禁无回归。
+- **D 阶段定稿（2026-10-13 用户裁定）**：① **产物排除 = 目录名精确排除**（备选「统一尊重 `.gitignore`」/「名称排除 + md 面 gitignore 兜底」未采纳——前者需为纯 fs 遍历引入 git 依赖并重定基线，后者收益不抵回归面）；② **计数格式面 = 两种形态都兼容**（备选「仅 AC 字面形态」与「不改 `wisdom.md` 既有格式约定」相抵，「仅既有标题形态」不满足 AC 字面要求）。
+- **实际交付**：`448ce7b` fix(scripts)（两个门禁脚本的扫描面排除 Playwright 产物目录 + 单测）；`1f234d0` fix(scripts)（条目形态识别扩展 + 正文门槛 + 疑似条目告警 + 正则收敛 + 单测）；`8373eba` docs(governance)（蒸馏机制文档 §6 格式约定与告警口径）；本条登记 commit。**质量门**：`pnpm lint` 0 error（2 条存量 warning，无新增）；`pnpm typecheck` 全包 Done；脚本单测 37 文件 / 641 passed；全仓 `pnpm run test:coverage` 254 files / 3999 passed / 10 skipped（Statements 88.28 / Branches 82.99 / Functions 87.62 / Lines 88.43，阈值 80）；`check:docs` OK（151/87，**产物在场时同口径**）；`lint:md` Done；`check:doc-size` 62/13/1/0；`check:orphan-ids` 0（676，**产物在场时同口径**）；`check:standards-redundant:strict` 0；`docs:check:i18n` passed；`docs:build` OK；`distill:wisdom --check` 输出真实条目数（4）；mutation 标定 7 处全部击杀（去两个排除集合 / 去 `### [日期] [类型]` 与 `：正文` 两个识别分支 / 去 `--check` 告警 / 去裸 `→ target` 容忍 / 去产物排除）。**审计**：standard **2 分区并发** R1 **两分区均 Pass**（P1 scripts：0 blocker / 3 warning / 3 suggest；P2 docs：0 blocker / 4 warning / 5 suggest；两分区均独立复核并确认 depth 档位合适）→ 收口 13 项（含 `md-walk` 注释编号、JSDoc 与实现不一致、§6 形态表措辞与告警前置条件、`todo.md` §M43.2 标题口径、`archive/index.md` 段标题日期刷新；**并把 §6 与实现的裸 `→ target` 差异改在实现侧收敛**——正则容忍裸指针并补单测，顺带使历史区条目开始携带 target）→ R2 **Pass**（0 blocker / 0 warning / 1 非阻塞 suggest；13 个编号 12 关闭 + 3 按裁定接受）→ 应用 R2 suggest（§6 补「`→` 为保留分隔符」边界）。
+- **残余**：① 排除面按目录名精确匹配（`playwright-report` / `test-results` 为 Playwright 专用目录名，任意层级生效）——若未来出现同名但需扫描的源码目录需重新处置（已由单测与注释锁定语义）；② `distill-wisdom` 的**历史区**条目形态在裸 `→ <target>` 扩展后已能被识别并携带 target（实测「已蒸馏」由 0 → 5，原登记项已闭环）；③ 疑似条目探测按「活跃区 + 含日期 token」宽口径，正文行若在方括号内出现日期会被列为疑似（仅在活跃条目为 0 时告警，属诊断信息）；④ 为 AC ① 独立复核而在仓库内合成的验证产物（`apps/platform/playwright-report` / `test-results`，gitignored）已在两轮审计核验后移出（不随提交入库）；⑤ `→` 为保留分隔符（在首个 `→` 处切分摘要 / 指针），已写入蒸馏机制文档 §6 格式约定。
+- **不做什么**：不改既有 lint / typecheck / test 门禁语义；不改 `check-orphan-ids` 的编号正则与真常量白名单（仅改扫描面排除）；不引入新依赖解析 `.gitignore` 语法；不改 `wisdom.md` 既有条目格式约定（格式约定写入蒸馏机制文档）。
+- **依赖**：本地 e2e 产物污染实测（`playwright-report/trace/assets/codeMirrorModule-*.js` 误报编号形态；`test-results/**/error-context.md` 计入 md 扫描面）；`distill-wisdom` 假阴性实测（`.session/wisdom.md` 按日期+类型书写 → `--check` 输出 `0 active entries`）。
 - **交付物**：预计 2 commits——① 门禁脚本排除面（`check-orphan-ids.mjs` + `md-walk.mjs` + 单测）；② `distill-wisdom` 正则 + 告警 + 单测（如需同步蒸馏机制文档）。预计 3-5 文件 / 60-150 行。
-- **风险与缓解**：**R1 排除面过宽掩盖真实问题**——按目录名精确排除（与既有 `.output` / `coverage` 同类）+ 单测锁定；**R2 `.gitignore` 策略改动波及既有扫描面**——D 阶段裁定，若改用统一策略须回归既有门禁计数基线；**R3 正则放宽致误计数**——限定形态 + 单测覆盖「已蒸馏」与「活跃」两态。
+- **风险与缓解**：**R1 排除面过宽掩盖真实问题**——按目录名精确排除（与既有 `.output` / `coverage` 同类）+ 单测锁定；**R2 `.gitignore` 策略改动波及既有扫描面**——D 裁定不采用统一策略，既有门禁计数基线（676 文件 / 151 md）实测不变；**R3 正则放宽致误计数**——限定形态 + 单测覆盖「活跃 / 已蒸馏」两态 + 疑似条目告警兜底。
