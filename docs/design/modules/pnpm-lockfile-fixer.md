@@ -19,40 +19,60 @@
 ```
 pnpm i --frozen-lockfile
     ↓ 失败
-捕获 stderr → 按关键词匹配分类
+前置判定：信号终止 / 超时 / 无 stderr 诊断？ → 是 → ENVIRONMENT_ERROR（不归因，见 §2.4）
+    ↓ 否（有 stderr 诊断）
+按关键词匹配分类（顺序见 §2.3）
 ```
 
 ### 2.2 分类模型
 
-通过解析 pnpm 错误输出匹配以下分类：
+通过解析 pnpm 错误输出匹配以下分类（**行序 = 匹配优先级**，见 §2.3）：
 
 | FailureCategory | 触发特征 | 根因 |
 |---|---|---|
 | `LOCKFILE_NOT_FOUND` | `"no lockfile"` / `"Cannot find"` + `"pnpm-lock.yaml"` / ENOENT | lockfile 文件不存在 |
 | `MANIFEST_MISMATCH` | `"ERR_PNPM_OUTDATED_LOCKFILE"` / `"out of sync"` / `"needs update"` | package.json 已修改但 lockfile 未更新 |
-| `LOCKFILE_VERSION_MISMATCH` | `"lockfileVersion"` 不兼容 + pnpm 版本差异 | lockfile 由不同 pnpm 主版本生成 |
-| `CORRUPTED_LOCKFILE` | `"broken"` / `"corrupted"` / `"Cannot read"` + lockfile | lockfile 格式损坏或条目不完整 |
 | `CREDENTIAL_ERROR` | `"E401"` / `"authentication"` / `"403"` / `"Could not resolve"` + 私有源 | 无法访问 npm registry 或私有源 |
+| `CORRUPTED_LOCKFILE` | `"broken"` / `"corrupted"` / `"Cannot read"` + lockfile | lockfile 格式损坏或条目不完整 |
+| `LOCKFILE_VERSION_MISMATCH` | `"lockfileVersion"` 不兼容 + pnpm 版本差异 | lockfile 由不同 pnpm 主版本生成 |
+| `MINIMUM_RELEASE_AGE` | `"ERR_PNPM_NO_MATURE_MATCHING_VERSION"` / `"ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION"` / `"minimumReleaseAge"` | 目标仓库配置冷却期约束，锁定版本过新 |
 | `RESOLVE_ERROR` | `"ERR_PNPM_NO_MATCHING_VERSION"` / `"resolution"` / lockfile 与 manifest 引用不匹配 | 依赖版本约束无法解析 |
+| `ENVIRONMENT_ERROR` | **前置判定**（先于关键词匹配）：信号终止 / 超时 / 无 stderr 诊断 | 执行环境问题而非 lockfile 内容问题；**不归因目标仓库**（见 §2.4） |
 | `UNKNOWN` | 不匹配以上任何特征 | 未分类 |
+
+**进程级信号保留**：每次诊断 / 策略执行都从子进程错误中提取 `exitCode`（退出码）、`signal`（终止信号，如 `SIGKILL` / `SIGTERM`）、`timedOut`（`ETIMEDOUT`）与 `errno`（`ENOENT` 等 spawn 级错误）并随结果上抛——外部不再只看到 `Command failed: pnpm install --no-frozen-lockfile` 这类无定位信息的结果。`ENVIRONMENT_ERROR` 的失败详情形如 `environmental install failure (exit code 1): no stderr diagnostics`（有 stderr 证据时改为 `… (signal SIGKILL): stderr: <文本>`）。
 
 ### 2.3 分类优先级
 
-部分错误可能同时触发的关键词（如 manifest mismatch 可能同时出现 "out of sync" 和 "ERR_PNPM_OUTDATED_LOCKFILE"），此时**取第一个匹配**。匹配顺序同上表。
+部分错误可能同时触发的关键词（如 manifest mismatch 可能同时出现 "out of sync" 和 `ERR_PNPM_OUTDATED_LOCKFILE`），此时**取第一个匹配**，顺序同 §2.2 表（与实现 `FAILURE_PATTERNS` 同序）。**环境性判定前置**：一旦命中信号终止 / 超时 / 无 stderr 诊断，直接归 `ENVIRONMENT_ERROR`（进程可能在吐出部分 stderr 后被杀死，此时关键词分类不可信）。
+
+### 2.4 环境性失败与非归因口径
+
+`ENVIRONMENT_ERROR` 表示**执行环境**问题（OOM 杀死、超时、静默非零退出），此时锁文件内容是否合规无从判断：
+
+- 分类结果携带 `environmental: true`，并在 `RepairLockfileResult.environmental` 上透出；
+- 调用方 `tryLockfileRepair` 据此把该 action 标记为 `environmentalFailure`、并记 `ENVIRONMENT_ERROR` 审计条目（`stage: 'repair'`）；
+- 引擎 `computeExitCode` 将 `ENVIRONMENT_ERROR` 纳入 `SKIPPED_AUDIT_CATEGORIES`、且 `environmentalFailure` action 不计失败动作——与「既有失败基线」（`PRE_EXISTING_FAILURE`）同族的**不归因本次运行**口径；
+- 平台侧 `run-failure-classify` 防御性映射 `ENVIRONMENT_ERROR → install + transient`（可重试）——在当前编排路径上**不可达**（非归因故不驱动 `status=failed`），保留以防内部回退读 `result.errors` 的路径将来可达时落入 `runtime + engine_exit_2` 的笼统归因（详见 [run-failure-taxonomy.md §4.3](../governance/run-failure-taxonomy.md)）；
+- 调用方 `finalizeRepoFix` 对**零告警仓库跳过 lockfile repair**（无升级改动即无锁文件待修复），但保留修复后验证链（其 `verificationPassed` 是零告警仓库唯一的「处理成功」信号）——详见 [dependency-fixer.md](./dependency-fixer.md)。
 
 ---
 
 ## 3. 修复策略矩阵
 
-| FailureCategory | Strategy | Command | 说明 |
-|---|---|---|---|
-| `LOCKFILE_NOT_FOUND` | `REGENERATE` | `pnpm install --lockfile-only` | 新建 lockfile |
-| `MANIFEST_MISMATCH` | `REGENERATE` | `pnpm install --lockfile-only` | 根据 package.json 重新生成 |
-| `CORRUPTED_LOCKFILE` | `FIX_ENTRIES` | `pnpm install --fix-lockfile --lockfile-only` | 修复损坏条目后再验证 |
-| `LOCKFILE_VERSION_MISMATCH` | `PIN_TOOLCHAIN` | 固定 pnpm 版本后执行 `REGENERATE` | 对齐 pnpm 版本 |
-| `RESOLVE_ERROR` | `REINSTALL` | `pnpm install --no-frozen-lockfile` | 全量重解析 |
-| `CREDENTIAL_ERROR` | `SKIP` | (不执行修复) | 非代码问题，无法自动修复 |
-| `UNKNOWN` | `REINSTALL` | `pnpm install --no-frozen-lockfile` | 最后手段 |
+| FailureCategory | 策略链（按此顺序尝试） | 说明 |
+|---|---|---|
+| `LOCKFILE_NOT_FOUND` | `REGENERATE` → `REINSTALL` | 新建 lockfile |
+| `MANIFEST_MISMATCH` | `REGENERATE` → `REINSTALL` | 根据 package.json 重新生成 |
+| `CREDENTIAL_ERROR` | （空链） | 非代码问题，无法自动修复 |
+| `CORRUPTED_LOCKFILE` | `FIX_ENTRIES` → `REGENERATE` → `REINSTALL` | 修复损坏条目后再验证 |
+| `LOCKFILE_VERSION_MISMATCH` | `PIN_TOOLCHAIN` → `REGENERATE` → `REINSTALL` | 对齐 pnpm 版本后重新生成 |
+| `MINIMUM_RELEASE_AGE` | `REGENERATE` → `REINSTALL` | 重解析可能选中满足冷却期约束的旧版本 |
+| `RESOLVE_ERROR` | `REGENERATE` → `FIX_ENTRIES` → `REINSTALL` | 重解析 → 修条目 → 全量重解析 |
+| `ENVIRONMENT_ERROR` | `REGENERATE` → `REINSTALL` | 环境性失败；保留尝试以捕获「环境已恢复」的机会性修复（与 `UNKNOWN` 同链） |
+| `UNKNOWN` | `REGENERATE` → `REINSTALL` | 最后手段 |
+
+命令对照：`REGENERATE` = `pnpm install --lockfile-only`；`FIX_ENTRIES` = `pnpm install --fix-lockfile --lockfile-only`；`PIN_TOOLCHAIN` = `corepack pnpm@<version> install --lockfile-only`（无声明版本时回退裸 `pnpm install --lockfile-only`）；`REINSTALL` = `pnpm install --no-frozen-lockfile`。
 
 ### 3.1 策略执行顺序
 
@@ -104,8 +124,10 @@ interface LockfileRepairResult {
     strategy?: RepairStrategy
     /** lockfile 变更摘要 */
     diff?: LockfileDiff
-    /** 各策略的尝试历史 */
+    /** 各策略的尝试历史（含进程级退出码 / 信号） */
     attemptHistory: RepairAttempt[]
+    /** 环境性安装失败（诊断步无 stderr 诊断）→ 调用方不归因目标仓库（见 §2.4） */
+    environmental?: boolean
 }
 
 type LockfileFailureCategory =
@@ -115,6 +137,8 @@ type LockfileFailureCategory =
     | 'CORRUPTED_LOCKFILE'
     | 'CREDENTIAL_ERROR'
     | 'RESOLVE_ERROR'
+    | 'MINIMUM_RELEASE_AGE'
+    | 'ENVIRONMENT_ERROR'
     | 'UNKNOWN'
 
 type RepairStrategy =
@@ -130,6 +154,10 @@ interface RepairAttempt {
     success: boolean
     error?: string
     durationMs: number
+    /** 进程退出码（非零退出时；被信号杀死 / spawn 失败时为 null） */
+    exitCode?: number | null
+    /** 终止进程的信号（如 `SIGKILL` / `SIGTERM`）；非信号终止时为 null */
+    signal?: string | null
 }
 
 interface LockfileDiff {
@@ -152,10 +180,10 @@ export async function repairLockfile(params: RepairLockfileParams): Promise<Lock
 ### 4.3 内部辅助函数（导出供测试）
 
 ```typescript
-/** 执行 pnpm i --frozen-lockfile 并解析失败分类 */
+/** 执行 pnpm i --frozen-lockfile 并解析失败分类（含进程级信号） */
 export function classifyLockfileFailure(
     workDir: string
-): Promise<{ ok: boolean; category?: LockfileFailureCategory; stderr?: string }>
+): { ok: boolean; category?: LockfileFailureCategory; stderr?: string; exitCode: number | null; signal: string | null; timedOut: boolean; errno: string | null; noStderrDiagnostics: boolean; environmental: boolean }
 
 /** 计算 lockfile 变更摘要 */
 export function computeLockfileDiff(
@@ -301,6 +329,7 @@ diff: 行数差、包数量差
 | classifyLockfileFailure - CORRUPTED | mock stderr 返回 `"broken"` 关键词 |
 | classifyLockfileFailure - CREDENTIAL | mock stderr 返回 `"E401"` 关键词 |
 | classifyLockfileFailure - UNKNOWN | mock stderr 返回不匹配任何关键词的随机错误 |
+| classifyLockfileFailure - ENVIRONMENT_ERROR | mock 无 stderr（进程被信号杀死 / 超时 / 静默非零退出）→ 归环境性 + 保留 exitCode / signal / timedOut |
 | classifyLockfileFailure - ok | mock exitCode=0 |
 | repairLockfile - LOCKFILE_NOT_FOUND → REGENERATE | mock chain: 失败 → REGENERATE 成功 → 验证通过 |
 | repairLockfile - MANIFEST_MISMATCH → REGENERATE | mock chain: 失败 → REGENERATE 成功 → 验证通过 |

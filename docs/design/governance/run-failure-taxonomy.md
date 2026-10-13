@@ -43,10 +43,10 @@
 
 ### 2.4 已知错误码 / 类别清单
 
-- **`FixError.category`（进 `RunResult.errors[]`）**：`FETCH_FAILED`、`DISCOVERY_FAILED`、`EMPTY_REPO_LIST`、`PROCESS_FAILED`、`FATAL`、`COMMIT_FAILED`、`PR_CREATION_FAILED`、`VERIFICATION_FAILED`、`ROLLBACK_FAILED`、`OVERRIDE_PROTECTED`、`PRE_EXISTING_FAILURE`、`SCRIPT_NOT_FOUND`、`network_violation`、`BRANCH_DELETE_FAILED`、`PR_CLOSE_FAILED`、`CLEANUP_DETECT_FAILED`、`CLEANUP_FAILED`。
-- **`LockfileFailureCategory`（进 `FixAction.error` / lockfile 修复结果，非 `RunResult.errors[].category`）**：`LOCKFILE_NOT_FOUND`、`MANIFEST_MISMATCH`、`LOCKFILE_VERSION_MISMATCH`、`CORRUPTED_LOCKFILE`、`CREDENTIAL_ERROR`、`RESOLVE_ERROR`、`MINIMUM_RELEASE_AGE`、`UNKNOWN`。
+- **`FixError.category`（进 `RunResult.errors[]`）**：`FETCH_FAILED`、`DISCOVERY_FAILED`、`EMPTY_REPO_LIST`、`PROCESS_FAILED`、`FATAL`、`COMMIT_FAILED`、`PR_CREATION_FAILED`、`VERIFICATION_FAILED`、`ROLLBACK_FAILED`、`OVERRIDE_PROTECTED`、`PRE_EXISTING_FAILURE`、`SCRIPT_NOT_FOUND`、`network_violation`、`BRANCH_DELETE_FAILED`、`PR_CLOSE_FAILED`、`CLEANUP_DETECT_FAILED`、`CLEANUP_FAILED`、`ENVIRONMENT_ERROR`。
+- **`LockfileFailureCategory`（进 `FixAction.error` / lockfile 修复结果，非 `RunResult.errors[].category`；例外见下）**：`LOCKFILE_NOT_FOUND`、`MANIFEST_MISMATCH`、`LOCKFILE_VERSION_MISMATCH`、`CORRUPTED_LOCKFILE`、`CREDENTIAL_ERROR`、`RESOLVE_ERROR`、`MINIMUM_RELEASE_AGE`、`ENVIRONMENT_ERROR`、`UNKNOWN`。**例外**：`ENVIRONMENT_ERROR`（环境性安装失败，2026-10-13 M43.3）**同时**作为 `FixError.category` 发射（`stage: 'repair'`，进 `RunResult.errors[]`；非归因，见 §4.3），供平台侧细分归因为 `install` + `transient`。
 - `ARCHIVE_FAILED` 仅出现在测试夹具（生产无发射点），不纳入分类映射。
-- `FixError.stage` 类型含 `fetch | filter | fix | repair | verify | report`，但当前生产发射点仅见 `fetch` / `fix` / `verify` / `report`（`filter` / `repair` 无发射点）。
+- `FixError.stage` 类型含 `fetch | filter | fix | repair | verify | report`，但当前生产发射点仅见 `fetch` / `fix` / `repair` / `verify` / `report`（`repair` 为 2026-10-13 M43.3 新增的 `ENVIRONMENT_ERROR` 发射点；`filter` 无发射点）。
 - GitHub 错误码（`packages/core/src/errors/error-codes.ts`）：`AUTHENTICATION_FAILED`、`PERMISSION_DENIED`、`ALERTS_DISABLED`、`RATE_LIMITED`、`REPO_NOT_FOUND`、`GITHUB_API_ERROR`、`NETWORK_ERROR`。
 
 ### 2.5 API / UI 现状
@@ -89,7 +89,7 @@
 |:--|:--|:--|
 | `source` | 告警获取 / 仓库发现 | `FETCH_FAILED` / `DISCOVERY_FAILED` / `EMPTY_REPO_LIST` / GitHub `RATE_LIMITED` / `NETWORK_ERROR` / `AUTHENTICATION_FAILED` / `PERMISSION_DENIED` / `ALERTS_DISABLED` / `REPO_NOT_FOUND` |
 | `clone` | 仓库克隆 | `clone_timeout`（git clone 失败 / 超时） |
-| `install` | 依赖安装 / lockfile 修复 | 当前**无 `FixError` 发射点**：lockfile 失败落在 `FixAction`（`LockfileFailureCategory`）；需新增落库信号才能填充（见 §5.1） |
+| `install` | 依赖安装 / lockfile 修复 | `ENVIRONMENT_ERROR`（环境性安装失败，2026-10-13 M43.3 新增发射点；**非归因**——见 §4.3）；其余 lockfile 失败落在 `FixAction.error`（`LockfileFailureCategory`，**不**进 `result.errors`，经失败动作计入 exit code） |
 | `fix` | 修复应用 | `PROCESS_FAILED`、`OVERRIDE_PROTECTED` |
 | `verify` | 验证门禁 | `VERIFICATION_FAILED`、`PRE_EXISTING_FAILURE`、`SCRIPT_NOT_FOUND`、`network_violation`、验证命令超时 |
 | `deliver` | commit / push / PR 交付 | `COMMIT_FAILED`、`push_failed`、`PR_CREATION_FAILED`、`pr_creation_failed`、`ROLLBACK_FAILED` |
@@ -113,6 +113,7 @@
 - `PRE_EXISTING_FAILURE` → `verify` + `deterministic`：修复前基线即红，非本次引入（已有 `FixAction.preExisting` 信号可复用）。
 - `network_violation` → `verify` + `deterministic`：执行期外联审计命中黑名单（验证链外联违规），需研判；不提供一键重试。
 - `engine_exit_2` → `runtime` + `deterministic`（进程级全仓库失败 / 全量回滚）。
+- `ENVIRONMENT_ERROR` → `install` + `transient`（环境性安装失败：被信号杀死 / 超时 / 静默非零退出；可重试）。引擎侧已标记为**非归因**（`SKIPPED_AUDIT_CATEGORIES` + `FixAction.environmentalFailure`）→ 不驱动 `status=failed`、不参与 exit code，故该映射在当前编排路径上**不可达**（`failed` 分支的 `errorJson` 恒有值），保留为防御性映射（同表 `EMPTY_REPO_LIST` / `SCRIPT_NOT_FOUND` 同类）；保留目的是「内部回退读 `result.errors` 的路径一旦被改动而变得可达时，该信号仍应落 `install` + 可重试」而非 `runtime` + `engine_exit_2`。
 - `engine_delivery_failed` → 按 `errorJson.message` 中的 `（${category}）` 细分到具体 stage / kind；无法解析时 `unknown` + `deterministic`。
 - `clone_timeout` / `execution_timeout` / `sandbox_unavailable` / `NETWORK_ERROR` / `RATE_LIMITED` / `result_fetch_failed` / `run_url_not_resolved` → `transient`（`execution_timeout` 置信度较低，可标 `unknown` 或 `transient`，见开放问题）。
 - `push_failed` → `deliver` + `unknown`（可能是网络，也可能是权限；细分需看 message，见开放问题）。
