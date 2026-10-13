@@ -179,6 +179,14 @@ run_platform() {
 
     # 双进程形态：worker 由后台看护循环托管（崩溃自动重启），主进程前台托管
     rm -f "$WORKER_SOCKET" "$WORKER_PID_FILE"
+
+    # 容器停止：PID 1 为本 shell，需把信号转发给主进程与看护循环（看护收到 TERM 即终止，不再重启 worker）。
+    # 顺序硬约束：本 trap 必须先于「启动子进程」与「输出就绪行」安装——默认处置下的 TERM / INT 会直接终止 PID 1，
+    # 使看护循环与 worker 失去父进程（孤儿化），且外部观测方（容器编排 / 健康检查 / 行为测试）读到 signal 终止
+    # 而非约定的 143 退出码。主进程尚未启动（MAIN_PID 未赋值）时无主进程可转发，直接退出（看护进程仍由
+    # stop_queue_worker 兜底），避免停止信号被吞后照旧启动。
+    trap 'kill -TERM "$MAIN_PID" 2>/dev/null || true; stop_queue_worker; if [ -z "$MAIN_PID" ]; then exit 0; fi' TERM INT
+
     supervise_queue_worker "$prefix" "$@" &
     SUPERVISOR_PID=$!
 
@@ -188,8 +196,6 @@ run_platform() {
 
     echo "[entrypoint] HTTP 进程 pid=${MAIN_PID} 不消费队列；队列 worker 看护进程 pid=${SUPERVISOR_PID}（socket=${WORKER_SOCKET}）"
 
-    # 容器停止：PID 1 为本 shell，需把信号转发给主进程与看护循环（看护收到 TERM 即终止，不再重启 worker）
-    trap 'kill -TERM "$MAIN_PID" 2>/dev/null || true; stop_queue_worker' TERM INT
     # set -e 下 wait 非零会中断脚本，须用 || 捕获退出码——否则下方 worker 清理成为不可达死代码
     STATUS=0
     wait "$MAIN_PID" || STATUS=$?
