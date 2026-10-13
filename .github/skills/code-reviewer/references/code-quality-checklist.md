@@ -313,7 +313,7 @@ if (value) { ... }  // 对 0, "", false 失效
 | [testing.md §6.5](../../../../docs/standards/testing.md) | 交互断言（点击 / 提交）区分度 | 点击目标是否确认为**事件绑定元素**？断言是否只能由该行为产生的状态（如排序属性）满足？三态控件是否逐次操作并等待属性回写（避免过冲）？ |
 | [testing.md §6.6](../../../../docs/standards/testing.md) | ESM 接线断言 | 是否用 `vi.mock` + `importOriginal` **部分 mock**（记录实参后委托真实实现），而非整体 mock 破坏依赖真实行为的既有用例？ |
 | [testing.md §6.7](../../../../docs/standards/testing.md) | 页面可见改动 → 视觉基线 | 改动页面的整页基线是否重建？**以该页为背景的视口基线**是否连带重建？是否连跑两遍验证幂等？无视觉守卫的页面是否显式登记？ |
-| [testing.md §6.10](../../../../docs/standards/testing.md) | 脚本级测试 / 被测服务同进程验证 | 入口脚本是否用真实 shell + PATH 桩测试？被测服务与测试同进程时是否**避免** `spawnSync`（阻塞事件循环导致观察为空）？ |
+| [testing.md §6.10](../../../../docs/standards/testing.md) | 脚本级测试 / 被测服务同进程验证 | 入口脚本是否用真实 shell + PATH 桩测试？被测服务与测试同进程时是否**避免** `spawnSync`（阻塞事件循环导致观察为空）？以脚本输出行为同步点发信号的用例是否同时断言 `{ code, signal }`，并在竞态无法稳定复现时补**源码顺序断言**？ |
 | [development.md §5.1.39](../../../../docs/standards/development.md) | 删除公共导出 | 是否全仓（**含全部测试目录**）grep 引用？是否区分代码引用与文档 / 归档描述性文本？ |
 | [development.md §5.1.40](../../../../docs/standards/development.md) | 与外部工具语义对齐的判定 | 是否用该工具权威实现逐形态（**含反例**）实测比对？等价类扩展方向是否倾向保守（宁可多报不可漏判）？ |
 | [documentation.md §6](../../../../docs/standards/documentation.md) | 阶段状态口径翻转 | 「暂无进行中阶段」↔「Mxx 进行中」翻转时，是否同步**全部承载位置**（待办速查表 + 路线图指针 + 各文档速查表 + 首页里程碑）？ |
@@ -322,6 +322,7 @@ if (value) { ... }  // 对 0, "", false 失效
 | [development.md §5.1.41](../../../../docs/standards/development.md) | 「收窄 / 跳过」类改动（省成本、消除假失败、提前返回、降级） | 被跳过步骤的产物是否有**别的消费者**（字段级穷举）？跳过后面临的判据空洞是否显式补上（新增信号 / 跨用例不变量）？ |
 | [development.md §5.1.42](../../../../docs/standards/development.md) | 给 composable 引入依赖注入（`useXxx(deps)`） | 缺省实现是否在 **setup 期**求值（`deps.x ?? resolveXxx()`）而非事件期延迟调用 setup-only composable（`useI18n` / `useRoute` / `useState`）？事件期是否只用 event-safe 全局？ |
 | [testing.md §6.11](../../../../docs/standards/testing.md) | 门禁 / 脚本类单测（`scripts/**`） | CLI 早返回分支是否 `process.exit` **兼** `return`（mock 下不终止会 fall-through，使 mutation 存活）？夹具字面量是否会被被测门禁脚本自身扫到（改运行时拼接）？ |
+| [platform.md §10.6](../../../../docs/standards/platform.md#106-队列执行进程隔离独立-worker-进程) | `apps/platform/docker/entrypoint.sh` 双进程编排 / 信号处置改动 | 容器停止（TERM / INT）的转发 trap 是否**先于**「启动子进程」与「输出就绪行」安装（就绪行是外部观测方唯一同步点，晚装则落在窗口的信号按默认处置终止 PID 1 → 观测方读到 signal 终止而非 143、看护循环与 worker 失去父进程）？子进程尚未启动时是否直接退出而非吞掉停止信号后照旧启动？源码顺序断言（`entrypoint.test.mjs`）是否同步更新？ |
 
 > **维护纪律**：本矩阵为严格约束检查点的**单点落点**，其他文档 / skill / agent 只做一行链接引用（见上方「规范单点声明」）。矩阵行与条款对应（**同一条款可对应多行**，见上方说明）；条款废弃 / 合并时同步删行。
 
