@@ -121,20 +121,23 @@
 - **交付物**：预计 1-2 commits——① composable + `repos.vue` + i18n ×2 + 单测；②（如需）e2e。预计 3-5 文件 / 60-120 行。
 - **风险与缓解**：**R1 跳转语义变更影响既有 e2e / 用户预期**——D 阶段裁定跳转行为并与 M16.2 既有入口语义对齐；**R2 两入口提示文案分叉**——AC ② 强制口径一致 + i18n 键共用。
 
-### M43.5 [P3 🛡️] git 边界收口：非仓库目录语义 + push 侧钩子隔离
+### M43.5 [P3 🛡️] git 边界收口：非仓库目录语义 + push 侧钩子隔离（**已闭环** `8a6c84e` + `cae76b8` + `c436a77`）
 
-- **目标**：消除 `hasGitChanges` 在非仓库目录 fail-open 误判（恒 `true`）的潜在 landmine，并补齐 push 侧 `pre-push` 钩子隔离（当前仅 commit 侧隔离）。
+- **目标**：消除 `hasGitChanges` 在非仓库目录 fail-open 误判（恒 `true`）的潜在 landmine，并补齐 push 侧 `pre-push` 钩子隔离（此前仅 commit 侧隔离）。
 - **优先级**：P3
-- **范围**：`packages/engine/src/app/helpers.ts:669`（`hasGitChanges` 语义）+ 调用点 `packages/engine/src/app/index.ts:273`（`preExistingDirty` 采样）/ `:547`（fix-and-pr PR 判定）+ `packages/engine/src/github/pr-creator.ts:244`（`pushBranch` 当前仅 `GIT_PUSH_SIGNING_ISOLATION_ARGS`，无 hooks 隔离）+ `apps/platform/server/services/executor/container-executor.ts`（`pushFixBranch` 同口径）+ `packages/engine/src/github/git-signing.ts`（如需新增 push hooks 隔离常量）+ 单测。
+- **范围**：`packages/engine/src/app/helpers.ts`（`hasGitChanges` 语义 + `commitLocalChanges` / `isGitRepository` JSDoc）+ `packages/engine/src/app/index.ts`（`preExistingDirty` 采样显式前置）+ `packages/engine/src/runners/verification-gate.ts`（非仓库跳过回滚）+ `packages/engine/src/github/git-signing.ts`（新增 push hooks 隔离常量）+ 4 个 push 调用点（`pr-creator.pushBranch` / `container-executor.pushFixBranch` / `container-executor.cleanupRemoteBranch` / `platform-delivery.pushFixBranchWithCredential`）+ `docs/standards/git.md §3.8`（扩展为签名 + hooks 双语义）+ `code-quality-checklist` 矩阵行 + 单测。
 - **验收标准**：
-  - [ ] ① **非仓库语义**：`hasGitChanges` 在非仓库目录返回 `false`，或统一前置 `isGitRepository` 判定（D 阶段裁定口径）；`preExistingDirty=true` 的保护语义（验证门禁回滚时不误伤用户改动）不回归。
-  - [ ] ② **push 侧隔离**：`pushBranch` / `pushFixBranch` 显式跳过被修复仓库的 `pre-push` 钩子（与 commit 侧共用隔离常量口径，单一事实源），单测断言参数拼接。
-  - [ ] ③ **JSDoc 同步**：`commitLocalChanges` / `hasGitChanges` JSDoc 所述 fail-open 语义与实现一致（语义变更则同步；若保留则注明结构化信号缺失）。
-  - [ ] ④ **门禁**：`pnpm lint` 0 error + `pnpm typecheck` 0 error + 定向 vitest 通过。
-- **不做什么**：不改 `--no-verify` 选型与 commit 侧既有隔离参数取值；不改签名隔离常量取值；不做「workDir 非仓库统一 fail-fast 前置校验」的大重构（若 D 阶段判定收益不足，则仅改语义 + 留注记，并把统一校验登记候选）；不改 push / PR 交付链整体流程。
-- **依赖**：2026-10-11 hotfix（`commitLocalChanges` 前置 `isGitRepository` 守卫，`53b6ffb`）为同族；生产日志中当前已观测交付失败均为 `pre-commit` / `commit-msg`（`pre-push` 无实例，属预防性收口）；可一并处置 backlog §待上收候选「hooks 隔离的规范锚点与单一事实源命名收敛」。
+  - [x] ① **非仓库语义**（D 裁定 = **源头收口 + 门禁守卫**）：`hasGitChanges` 内前置 `isGitRepository`，非仓库返回 `false`（不再把「git 命令失败」当「有变更」）；`enforceVerificationGate` 在非仓库时跳过回滚（warn 说明「无可回滚工作树」），避免以 `ROLLBACK_FAILED` 掩盖真实失败原因；`preExistingDirty` 采样改为 `isGitRepository(...) && hasGitChanges(...)` 显式表达（纵深防御）——真实仓库中的「已有未提交改动则不自动回滚」保护语义不回归（既有 `preExistingDirty=true` 用例仍绿）。
+  - [x] ② **push 侧隔离**（D 裁定 = **全量 4 处**）：新增 `GIT_PUSH_HOOKS_ISOLATION_ARGS = ['--no-verify']`（单一事实源），4 个 push 调用点全部携带且置于 `push` 子命令**之后**（含 `push --delete`）；commit 侧常量取值与 `--no-verify` 选型未变。
+  - [x] ③ **JSDoc 同步**：`hasGitChanges` JSDoc 改为「非 git 仓库返回 `false`」并说明旧 fail-open 的 landmine；`commitLocalChanges` / `isGitRepository` 的交叉引用与 `enforceVerificationGate` 的 JSDoc 分支说明同步。
+  - [x] ④ **门禁**：`pnpm lint` 0 error + `pnpm typecheck` 0 error + 定向 vitest 通过。
+- **D 阶段定稿（2026-10-13 用户裁定）**：① **非仓库语义 = 源头收口 + 门禁守卫**（备选「仅调用点前置守卫」/「仅修 `:547`」未采纳）；② **push 隔离覆盖面 = 全量 4 处**；③ **backlog「hooks 隔离的规范锚点与单一事实源命名收敛」处置 = 扩展 `git.md §3.8`、不做改名**——决策点「扩展 §3.8」随本批闭环，改名 `git-signing.ts` → `git-isolation.ts` 单独登记为新候选（触及公开 API re-export 与平台侧 import 面，宜单独批次）。
+- **实际交付**：`8a6c84e` fix(engine)（`hasGitChanges` 非仓库语义 + 门禁非仓库守卫 + `preExistingDirty` 显式前置 + `GIT_PUSH_HOOKS_ISOLATION_ARGS` + `pushBranch` 参数 + 单测）；`cae76b8` fix(platform)（`pushFixBranch` / `cleanupRemoteBranch` / `pushFixBranchWithCredential` 三处同口径 + argv 断言）；`c436a77` docs(standards)（`git.md §3.8` 扩为签名 + hooks 双口径 + 检查点矩阵行同步）；本条登记 commit。**拆分依据（聚合 diff 18 文件 > §1.1 的 10 文件阈值）**：本条目为**单一原子 AC**、天然跨 `packages/engine`（语义 + 隔离常量 + JSDoc）与 `apps/platform`（三处 push argv 同口径）两个模块，无法在不产生「已登记未落地」悬空契约的前提下进一步切分；按模块 + 文档面拆 4 个 commit（engine / platform / standards / plan），各 commit ≤ 8 文件。**质量门**：`pnpm lint` 0 error（2 条存量 warning，无新增）；`pnpm typecheck` 全包 Done（含 `nuxt typecheck`，engine dist 已随源码变更重建）；定向单测（4 + 3 文件）连续 5 轮 136 passed 稳定；全仓 `pnpm run test:coverage` 254 files / 3988 passed / 10 skipped（Statements 88.25 / Branches 82.99 / Functions 87.61 / Lines 88.39，阈值 80）；`check:docs` OK（151/87）；`lint:md` Done；`check:doc-size` 62/13/1/0（`git.md` 经压缩后仍在健康窗口内，未新增超标）；`check:orphan-ids` 0（676）；`check:standards-redundant:strict` 0；`docs:check:i18n` passed；mutation 标定 4 处全部击杀（去 `hasGitChanges` 非仓库守卫 / 去 `pushBranch` hooks 隔离 / 去门禁非仓库守卫 / 去 `pushFixBranch` hooks 隔离）。**审计**：standard **2 分区并发** R1 **两分区均 Pass**（P1 0 blocker / 1 warning / 3 suggest；P2 0 blocker / 2 warning / 3 suggest；两分区均独立复核并确认无需升 `deep`；实测用时 R1 发起 14:44:19Z → 返回 ≈14:51:47Z，≈7m28s）→ 收口（`verification-gate` JSDoc 中「回滚失败（如非 git 仓库）」自相矛盾表述订正；`git.md` 覆盖面加「作用对象 = 被修复仓库」限定并显式排除 dependfix 自有仓库的 CI 发布脚本；`container-executor` 与门禁测试的分支映射注释去行号改符号引用；todo 补拆分依据）→ R2 **Pass**（0 blocker / 0 warning / 3 suggest；上轮 6 个编号全部关闭；3 条 suggest 已应用：发布脚本排除理由改按作用对象表述、`git.md` 与矩阵行限定同步、测试分支注释去行号）。
+- **残余**：① `git-signing.ts` 文件命名仍只表达「签名」（已单独登记 backlog 候选）；② push 侧 hooks 隔离属**预防性收口**（生产日志无 `pre-push` 实例），真实目标仓库带 `pre-push` 的场景未在真实环境验证（脚本级真实 git 回归已覆盖）；③ `hasGitChanges` 的 fail-open 语义变更后，`commitLocalChanges` 与 `preExistingDirty` 采样内的 `isGitRepository` 守卫成为**纵深防御**（保留并在注释说明，审计判定「可接受 + 保留」）；④ 存量 `verification-gate` 单测的 `ROLLBACK_FAILED` 覆盖改用「空仓库（HEAD 不可解析）」触发（原以非 git 目录触发，已被新守卫前置拦截）；⑤ `docs/standards/git.md` 压缩后为 199 行（健康窗口上沿 200），后续该节细节增长宜迁往 `docs/design/governance/` 并以一行引用收敛；⑥ 全量套件在本批曾出现 1 次未复现的偶发失败（本批新增测试连跑 5 轮稳定、其后再跑 4 次全量均绿），未定位到具体用例，留观察（若 CI 复发建议 `--workers=1` 定界）。
+- **不做什么**：不改 `--no-verify` 选型与 commit 侧既有隔离参数取值；不改签名隔离常量取值；不做「workDir 非仓库统一 fail-fast 前置校验」的大重构；不改 push / PR 交付链整体流程。
+- **依赖**：2026-10-11 hotfix（`commitLocalChanges` 前置 `isGitRepository` 守卫，`53b6ffb`）为同族；生产日志中当前已观测交付失败均为 `pre-commit` / `commit-msg`（`pre-push` 无实例，属预防性收口）；`docs/standards/git.md §3.8` 原仅声明签名常量，本批扩展为双语义并同步 `code-quality-checklist` 矩阵行。
 - **交付物**：预计 2 commits——① engine `hasGitChanges` 语义 + `pr-creator` push 隔离 + 单测；② 平台 `pushFixBranch` 同口径 + 单测。预计 3-5 文件 / 60-120 行。
-- **风险与缓解**：**R1 `preExistingDirty` 保护语义受影响**——AC ① 显式约束 + 定向用例覆盖；**R2 两处 push 实现分叉**——抽共用常量（`git-signing.ts` 单一事实源）并同步规范锚点；**R3 `git push --no-verify` 语义边界**（不作用于签名等其它参数）——注记 + 单测锁定参数顺序。
+- **风险与缓解**：**R1 `preExistingDirty` 保护语义受影响**——AC ① 显式约束 + 定向用例覆盖（既有 `preExistingDirty=true` 用例与新增非仓库用例并存）；**R2 两处 push 实现分叉**——抽共用常量（`git-signing.ts` 单一事实源）并同步规范锚点；**R3 `git push --no-verify` 语义边界**（不作用于签名等其它参数）——表内注明 `-c` 与 `--no-verify` 位置不可互换 + 4 处 argv/行为断言锁定。
 
 ### M43.6 [P3 🛠️] 工程脚本加固：门禁产物排除 + 蒸馏计数假阴性
 
