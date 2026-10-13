@@ -537,10 +537,10 @@ const DEFAULT_CS_BATCH_SIZE = 10
 
 /** 尝试修复 pnpm-lock.yaml（dry-run 仅记录）。 */
 export function tryLockfileRepair(
-    ctx: Pick<AppContext, 'config' | 'logger' | 'workDir'>,
+    ctx: Pick<AppContext, 'config' | 'logger' | 'workDir' | 'allErrors'>,
     repo: string,
 ): FixAction {
-    const { config, logger, workDir } = ctx
+    const { config, logger, workDir, allErrors } = ctx
     const startMs = Date.now()
 
     if (config.dryRun) {
@@ -573,6 +573,20 @@ export function tryLockfileRepair(
             diffSummary = `${diffSummary} (lockfileVersion changed)`
         }
 
+        // 环境性安装失败（诊断步无 stderr 诊断）：无法归因目标仓库——记非归因审计条目
+        // （`ENVIRONMENT_ERROR` 进 SKIPPED_AUDIT_CATEGORIES），并在 action 上标记，
+        // 使 computeExitCode 不计入失败动作（与既有失败基线同族口径）。
+        const environmentalFailure = !result.success && result.environmental === true
+        if (environmentalFailure) {
+            allErrors.push({
+                repository: repo,
+                target: 'pnpm-lock.yaml',
+                stage: 'repair',
+                category: 'ENVIRONMENT_ERROR',
+                message: result.failureDetail ?? 'environmental install failure',
+            })
+        }
+
         return {
             type: 'lockfile-repair',
             repository: repo,
@@ -582,6 +596,7 @@ export function tryLockfileRepair(
             strategy: result.strategy,
             durationMs: Date.now() - startMs,
             diff: diffSummary,
+            ...(environmentalFailure ? { environmentalFailure: true } : {}),
         }
     } catch (error: unknown) {
         const message = toErrorMessage(error)

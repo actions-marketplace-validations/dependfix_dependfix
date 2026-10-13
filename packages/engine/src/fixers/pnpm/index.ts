@@ -14,6 +14,9 @@ export type LockfileFailureCategory =
     | 'CREDENTIAL_ERROR'
     | 'RESOLVE_ERROR'
     | 'MINIMUM_RELEASE_AGE'
+    // 环境性安装失败：进程被信号杀死 / 超时 / 静默非零退出且**无 stderr 诊断**。
+    // 无锁文件证据可归类，按「不归因目标仓库」处理（与既有失败基线同族口径）。
+    | 'ENVIRONMENT_ERROR'
     | 'UNKNOWN'
 
 export type RepairStrategy =
@@ -47,6 +50,10 @@ export interface RepairAttempt {
     success: boolean
     error?: string
     durationMs: number
+    /** 进程退出码（非零退出时；被信号杀死 / spawn 失败时为 null） */
+    exitCode?: number | null
+    /** 终止进程的信号（如 `SIGKILL` / `SIGTERM`）；非信号终止时为 null */
+    signal?: string | null
 }
 
 export interface LockfileRepairResult {
@@ -60,12 +67,29 @@ export interface LockfileRepairResult {
     lockfileVersion?: string
     /** 修复前后 lockfileVersion 是否变化（格式漂移检测，wisdom: pnpm v11 overrides 迁移教训） */
     lockfileVersionChanged?: boolean
+    /**
+     * 环境性安装失败（诊断步 `pnpm install --frozen-lockfile` 无 stderr 诊断 / 被信号杀死 / 超时）。
+     * 调用方据此**不归因目标仓库**（不计入「本次改动引入的失败」，与既有失败基线同族口径）。
+     */
+    environmental?: boolean
 }
 
 interface ClassificationResult {
     ok: boolean
     category?: LockfileFailureCategory
     stderr?: string
+    /** 进程退出码（非零退出时；被信号杀死 / spawn 失败时为 null） */
+    exitCode: number | null
+    /** 终止进程的信号；非信号终止时为 null */
+    signal: string | null
+    /** 是否因超时被终止（execFileSync timeout） */
+    timedOut: boolean
+    /** spawn 级 errno（如 `ENOENT`——工具链缺失）；无时为 null */
+    errno: string | null
+    /** 原始 stderr 是否为空（无诊断信息） */
+    noStderrDiagnostics: boolean
+    /** 是否环境性失败（信号 / 超时 / 无 stderr 诊断） */
+    environmental: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -74,7 +98,11 @@ interface ClassificationResult {
 
 /**
  * 执行 `pnpm i --frozen-lockfile` 并解析失败分类。
- * 成功时返回 { ok: true }。
+ * 成功时返回 `{ ok: true }`。
+ *
+ * 失败时保留进程级信号（退出码 / 信号 / 超时 / spawn errno）：无 stderr 诊断（被信号杀死 /
+ * 超时 / 静默非零退出）时归 `ENVIRONMENT_ERROR` + `environmental: true`——外部不再只看到
+ * `Command failed: pnpm install --no-frozen-lockfile` 这类无定位信息的结果。
  */
 export function classifyLockfileFailure(workDir: string): ClassificationResult {
     try {
@@ -83,15 +111,26 @@ export function classifyLockfileFailure(workDir: string): ClassificationResult {
             stdio: 'pipe',
             timeout: 120_000,
         })
-        return { ok: true }
+        return { ok: true, exitCode: 0, signal: null, timedOut: false, errno: null, noStderrDiagnostics: false, environmental: false }
     } catch (err) {
         const execError = err as ExecError
-        const stderr = getStderrText(execError)
-        if (!stderr) {
-            return { ok: false, category: 'UNKNOWN', stderr: '' }
+        const signals = extractProcessSignals(execError)
+        // 原始 stderr（不含 err.message 回退）：无内容即视为「无诊断信息」
+        const rawStderr = getRawStderrText(execError)
+        // 环境性判定：信号终止 / 超时 / 无 stderr 诊断。带 stderr 的分类失败仍走原分类链
+        const environmental = signals.signal !== null || signals.timedOut || rawStderr.trim().length === 0
+        return {
+            ok: false,
+            category: environmental ? 'ENVIRONMENT_ERROR' : parseFailureCategory(rawStderr),
+            // stderr 保留原始文本（无 stderr 诊断时为空串，由 noStderrDiagnostics 标注；证据文本另取 err.message）
+            stderr: rawStderr,
+            exitCode: signals.exitCode,
+            signal: signals.signal,
+            timedOut: signals.timedOut,
+            errno: signals.errno,
+            noStderrDiagnostics: rawStderr.trim().length === 0,
+            environmental,
         }
-        const category = parseFailureCategory(stderr)
-        return { ok: false, category, stderr }
     }
 }
 
@@ -128,16 +167,54 @@ interface ExecError extends Error {
     stderr?: Buffer | string
     stdout?: Buffer | string
     status?: number
+    /** 终止进程的信号（execFileSync 被 kill / 超时终止时设置） */
+    signal?: string
+    /** Node 错误码（超时时为 `ETIMEDOUT`；spawn 失败时为 `ENOENT` 等） */
+    code?: string
 }
 
-function getStderrText(err: ExecError): string {
+/** 读取原始 stderr 文本（不含 `err.message` 回退）；无 stderr 时返回空串。 */
+function getRawStderrText(err: ExecError): string {
     if (!err.stderr) {
-        return (err as Error).message ?? ''
+        return ''
     }
-    if (typeof err.stderr === 'string') {
-        return err.stderr
+    return typeof err.stderr === 'string' ? err.stderr : err.stderr.toString('utf-8')
+}
+
+/** 读取 stderr 文本（无 stderr 时回退 `err.message`，保持既有展示口径）。 */
+function getStderrText(err: ExecError): string {
+    return getRawStderrText(err) || ((err as Error).message ?? '')
+}
+
+/** 从 execFileSync 抛出的错误中提取进程级信号（退出码 / 信号 / 超时标记 / spawn errno）。 */
+function extractProcessSignals(err: ExecError): { exitCode: number | null, signal: string | null, timedOut: boolean, errno: string | null } {
+    return {
+        exitCode: typeof err.status === 'number' ? err.status : null,
+        signal: typeof err.signal === 'string' ? err.signal : null,
+        // execFileSync 超时：以 killSignal（默认 SIGTERM）终止进程并置 code='ETIMEDOUT'
+        timedOut: err.code === 'ETIMEDOUT',
+        // spawn 级 errno（ENOENT 等；超时的 ETIMEDOUT 已由 timedOut 表达，此处避免重复）
+        errno: typeof err.code === 'string' && err.code !== 'ETIMEDOUT' ? err.code : null,
     }
-    return err.stderr.toString('utf-8')
+}
+
+/** 渲染进程级信号的简短描述（用于失败详情）；无可用信号时返回空串。 */
+function describeProcessSignals(
+    signals: { exitCode: number | null, signal: string | null, timedOut: boolean, errno: string | null },
+): string {
+    const parts: string[] = []
+    if (signals.signal !== null) {
+        parts.push(`signal ${signals.signal}`)
+    } else if (signals.exitCode !== null) {
+        parts.push(`exit code ${signals.exitCode}`)
+    } else if (signals.errno !== null) {
+        // spawn 失败（如工具链缺失）：无退出码 / 信号，errno 是唯一定位信息
+        parts.push(`spawn error ${signals.errno}`)
+    }
+    if (signals.timedOut) {
+        parts.push('timed out')
+    }
+    return parts.join(', ')
 }
 
 function execRepair(binary: string, args: string[], workDir: string, timeoutMs = 180_000): void {
@@ -164,6 +241,10 @@ function getStrategyChain(category: LockfileFailureCategory): RepairStrategy[] {
         case 'MINIMUM_RELEASE_AGE':
             return ['REGENERATE', 'REINSTALL']
         case 'UNKNOWN':
+            return ['REGENERATE', 'REINSTALL']
+        // 环境性安装失败：策略链与 UNKNOWN 同源（保留尝试以免遗漏「环境已恢复」的机会性修复）；
+        // 失败时由 `environmental` 标记驱动「不归因目标仓库」口径（见 LockfileRepairResult.environmental）
+        case 'ENVIRONMENT_ERROR':
             return ['REGENERATE', 'REINSTALL']
         case 'CREDENTIAL_ERROR':
             return []
@@ -451,16 +532,30 @@ export function repairLockfile(params: RepairLockfileParams): LockfileRepairResu
 
         let strategySuccess = false
         let strategyError: string | undefined
+        let strategyExitCode: number | null = null
+        let strategySignal: string | null = null
 
         try {
             execRepair(cmd.binary, cmd.args, workDir_)
             strategySuccess = true
         } catch (err) {
-            strategyError = getStderrText(err as ExecError) || (err as Error).message
+            const execError = err as ExecError
+            strategyError = getStderrText(execError) || (err as Error).message
+            const signals = extractProcessSignals(execError)
+            strategyExitCode = signals.exitCode
+            strategySignal = signals.signal
         }
 
         const durationMs = Date.now() - t0
-        attempts.push({ strategy, command, success: strategySuccess, error: strategyError, durationMs })
+        attempts.push({
+            strategy,
+            command,
+            success: strategySuccess,
+            error: strategyError,
+            durationMs,
+            exitCode: strategyExitCode,
+            signal: strategySignal,
+        })
 
         if (!strategySuccess) {
             lastError = strategyError ?? lastError
@@ -508,6 +603,29 @@ export function repairLockfile(params: RepairLockfileParams): LockfileRepairResu
     const categoryNote = category === 'MINIMUM_RELEASE_AGE'
         ? 'target repo has a minimumReleaseAge policy; locked versions are too fresh. Retry after the cooldown period, or relax the policy: '
         : ''
+
+    // 环境性失败：诊断步无 stderr 诊断（被信号杀死 / 超时 / 静默非零退出）。
+    // 失败详情显式带上进程级信号 + 可用诊断证据（保留的 stderr，缺失时回退 err.message），
+    // 外部不再只看到 `Command failed: pnpm install …` 这类无定位信息的结果。
+    if (classification.environmental) {
+        const signals = describeProcessSignals({
+            exitCode: classification.exitCode,
+            signal: classification.signal,
+            timedOut: classification.timedOut,
+            errno: classification.errno,
+        })
+        const rawStderr = (classification.stderr ?? '').trim()
+        const evidence = classification.noStderrDiagnostics
+            ? 'no stderr diagnostics'
+            : `stderr: ${truncate(rawStderr, 200)}`
+        return {
+            success: false,
+            failureCategory: category,
+            failureDetail: `environmental install failure (${signals || 'no process signal'}): ${evidence}`,
+            attemptHistory: attempts,
+            environmental: true,
+        }
+    }
 
     return {
         success: false,

@@ -807,17 +807,22 @@ async function applyGroupUpgrades(
 }
 
 /**
- * 步骤 5：收尾——lockfile repair + 完整验证（dry-run 跳过验证）。
+ * 步骤 5：收尾——lockfile repair + 完整验证（dry-run 跳过验证）。零告警仓库跳过 lockfile repair
+ * （无升级改动即无锁文件待修复），但保留修复后验证链——其 `verificationPassed` 是零告警仓库唯一的「处理成功」信号。
  */
 async function finalizeRepoFix(
     ctx: RepoFixCtx,
     repo: string,
     progress: RepoFixProgress,
 ): Promise<void> {
-    const repairAction = tryLockfileRepair(ctx, repo)
-    ctx.allActions.push(repairAction)
-    if (repairAction.success) {
-        progress.lockfileRepaired = true
+    if (progress.alertsCount > 0) {
+        const repairAction = tryLockfileRepair(ctx, repo)
+        ctx.allActions.push(repairAction)
+        if (repairAction.success) {
+            progress.lockfileRepaired = true
+        }
+    } else {
+        ctx.logger.info(`[skip] No alerts for ${repo} — skipping lockfile repair`)
     }
 
     if (!ctx.config.dryRun) {

@@ -146,11 +146,14 @@ export function mergeAiUsage(
  * - `PRE_EXISTING_FAILURE`：修复前即红的既有基线失败（`verificationBlocking === false`），
  *   目标仓库本就如此，不归因本次改动（口径见 [isRepoVerificationBlocked] 与
  *   [docs/design/modules/dependency-fixer.md 既有失败基线]）
+ * - `ENVIRONMENT_ERROR`：环境性安装失败（诊断步无 stderr 诊断：被信号杀死 / 超时 / 静默非零退出），
+ *   无法归因目标仓库（与既有失败基线同族口径；对应 action 的 `environmentalFailure` 标记）
  */
 const SKIPPED_AUDIT_CATEGORIES = new Set<string>([
     'OVERRIDE_PROTECTED', // 保护名单命中，主动跳过 override 写入
     'SCRIPT_NOT_FOUND', // 无 test 脚本，跳过 pnpm test 验证
     'PRE_EXISTING_FAILURE', // 既有基线失败（本次改动前即为红），不归因本次运行
+    'ENVIRONMENT_ERROR', // 环境性安装失败（无 lockfile 诊断），不归因本次运行
 ])
 
 /**
@@ -172,9 +175,10 @@ export function computeExitCode(
     const { config, allErrors, allActions, repoResults } = ctx
     const nonSkippedErrors = allErrors.filter((e) => !SKIPPED_AUDIT_CATEGORIES.has(e.category ?? ''))
     const hasErrors = nonSkippedErrors.length > 0
-    // 既有失败（`preExisting`，仅验证 action 携带）不归因本次运行，不计入失败动作——
-    // 否则「仅既有失败且无告警/修复产出」的单仓库运行仍会被判 exit 2
-    const hasFailures = allActions.some((a) => !a.success && !a.preExisting)
+    // 既有失败（`preExisting`，仅验证 action 携带）与环境性安装失败（`environmentalFailure`，仅
+    // lockfile-repair action 携带）均不归因本次运行，不计入失败动作——否则「仅既有失败 / 环境性失败
+    // 且无告警/修复产出」的运行仍会被判 exit 2（平台 `engine_exit_2` 误标 failed）
+    const hasFailures = allActions.some((a) => !a.success && !a.preExisting && !a.environmentalFailure)
     // 保守判定：dry-run 下成功仓库的 verificationPassed 为 undefined、alertsCount 可能为 0，
     // 与失败仓库并存时会被判为"无成功"（返回 2 而非 1）——fail-safe 方向可接受
     //

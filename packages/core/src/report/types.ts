@@ -99,6 +99,12 @@ export interface FixAction {
      * （目标仓库本就为红，如长期失败的测试套件）→ 不归因本次改动，交付门禁不据此回滚。
      */
     preExisting?: boolean
+    /**
+     * 仅 `type === 'lockfile-repair'` 时有意义：该失败为**环境性安装失败**
+     * （诊断步无 stderr 诊断：被信号杀死 / 超时 / 静默非零退出）→ 无法归因目标仓库，
+     * 不计入「本次改动引入的失败」（与 `preExisting` 验证失败同族的非归因口径）。
+     */
+    environmentalFailure?: boolean
     strategy?: string
     durationMs?: number
     diff?: string
