@@ -318,7 +318,7 @@ describe('computeExitCode', () => {
         expect(exitCode).toBe(2)
     })
 
-    // 回归：仅有既有失败、且失败动作全部为既有失败验证 → 无真实失败 → 返回 0
+    // 回归：既有失败、且失败动作全部为既有失败验证 → 无真实失败 → 返回 0
     // （无告警/修复产出时，失败验证 action 也不得把运行判为失败）
     it('returns 0 when the only failed actions are pre-existing verification failures', () => {
         const exitCode = computeExitCode(makeCtx({
@@ -346,5 +346,82 @@ describe('computeExitCode', () => {
             } as never],
         }))
         expect(exitCode).toBe(0)
+    })
+
+    // 回归：环境性安装失败（无 stderr 诊断）不归因本次运行
+    // 复现链：lockfile-repair action 失败（environmentalFailure）+ 零告警 + 既有基线失败 →
+    // 旧口径 hasFailures 命中 → 无仓库成功 → exit 2 → 平台 engine_exit_2 误标 failed。
+    // 注：修复后零告警仓库不再执行 lockfile repair，故该输入在生产不可达；本用例锁定的是
+    // computeExitCode 的**非归因谓词**本身（防御性锁定，防谓词被回退）
+    it('returns 0 when the only failure is an environmental install failure (零告警 + 既有基线)', () => {
+        const exitCode = computeExitCode(makeCtx({
+            config: { mode: 'fix' } as AppContext['config'],
+            allErrors: [{
+                repository: 'CaoMeiYouRen/rss-impact-server',
+                target: 'pnpm-lock.yaml',
+                stage: 'repair',
+                category: 'ENVIRONMENT_ERROR',
+                message: 'environmental install failure (exit code 1): no stderr diagnostics',
+            } as never],
+            allActions: [{
+                type: 'lockfile-repair',
+                repository: 'CaoMeiYouRen/rss-impact-server',
+                target: 'pnpm-lock.yaml',
+                success: false,
+                environmentalFailure: true,
+                error: 'environmental install failure',
+            } as never],
+            repoResults: [{
+                alertsCount: 0,
+                fixed: 0,
+                verificationPassed: false,
+                verificationBlocking: false,
+            } as never],
+        }))
+        expect(exitCode).toBe(0)
+    })
+
+    // 反例防护：环境性失败标记不掩盖真实失败——与真实失败动作并存时仍非零
+    it('still counts real failures alongside an environmental failure', () => {
+        const exitCode = computeExitCode(makeCtx({
+            config: { mode: 'fix' } as AppContext['config'],
+            allActions: [
+                {
+                    type: 'lockfile-repair',
+                    repository: 'foo/bar',
+                    target: 'pnpm-lock.yaml',
+                    success: false,
+                    environmentalFailure: true,
+                } as never,
+                {
+                    type: 'dependency-upgrade',
+                    repository: 'foo/bar',
+                    target: 'lodash',
+                    success: false,
+                } as never,
+            ],
+            repoResults: [{ alertsCount: 3, fixed: 1, verificationPassed: true } as never],
+        }))
+        expect(exitCode).toBe(1)
+    })
+
+    // 不变量锁定：零告警仓库的 verificationPassed 是「处理成功」信号（多仓运行出口码判定依赖它）
+    // ——若零告警仓库的验证被跳过（verificationPassed undefined），「健康零告警仓库 + 真实失败仓库」
+    // 会从 exit 1 退化为 exit 2（engine_exit_2 误归因）
+    it('counts a healthy zero-alert repo as success (multi-repo exit 1, not 2)', () => {
+        const exitCode = computeExitCode(makeCtx({
+            config: { mode: 'fix' } as AppContext['config'],
+            allErrors: [{
+                repository: 'foo/bad',
+                stage: 'fetch',
+                category: 'FETCH_FAILED',
+                message: '403',
+            } as never],
+            repoResults: [
+                { alertsCount: 0, fixed: 0, verificationPassed: true, verificationBlocking: false } as never,
+                { alertsCount: 0, fixed: 0 } as never,
+            ],
+        }))
+        expect(exitCode).toBe(1)
     })
 })

@@ -9,7 +9,8 @@ const { mockExecFileSync } = vi.hoisted(() => ({
 }))
 
 vi.mock('node:child_process', () => ({
-    // mock execSync + execFileSync 共两个函数（前者用于 classifyLockfileFailure + verifyFrozenLockfile；后者用于 execRepair 修复命令调用）
+    // 单桩挂到 execSync / execFileSync 两个导出：分类诊断（classifyLockfileFailure）、frozen 校验
+    // （verifyFrozenLockfile）与策略执行（execRepair）均经 node:child_process，避免测试环境依赖真实 pnpm
     execSync: mockExecFileSync,
     execFileSync: mockExecFileSync,
 }))
@@ -90,7 +91,15 @@ describe('classifyLockfileFailure', () => {
     it('ok when frozen-lockfile passes', () => {
         mockExecFileSync.mockReturnValue(undefined)
         const result = classifyLockfileFailure('/tmp/test')
-        expect(result).toEqual({ ok: true })
+        expect(result).toEqual({
+            ok: true,
+            exitCode: 0,
+            signal: null,
+            timedOut: false,
+            errno: null,
+            noStderrDiagnostics: false,
+            environmental: false,
+        })
     })
 
     it('LOCKFILE_NOT_FOUND', () => {
@@ -98,7 +107,17 @@ describe('classifyLockfileFailure', () => {
             throw makeExecError('Cannot find pnpm-lock.yaml')
         })
         const result = classifyLockfileFailure('/tmp/test')
-        expect(result).toEqual({ ok: false, category: 'LOCKFILE_NOT_FOUND', stderr: expect.stringContaining('Cannot find') as unknown })
+        expect(result).toEqual({
+            ok: false,
+            category: 'LOCKFILE_NOT_FOUND',
+            stderr: expect.stringContaining('Cannot find') as unknown,
+            exitCode: null,
+            signal: null,
+            timedOut: false,
+            errno: null,
+            noStderrDiagnostics: false,
+            environmental: false,
+        })
     })
 
     it('MANIFEST_MISMATCH via ERR_PNPM_OUTDATED_LOCKFILE', () => {
@@ -174,22 +193,111 @@ describe('classifyLockfileFailure', () => {
         expect(result.category).toBe('MINIMUM_RELEASE_AGE')
     })
 
-    it('UNKNOWN for unrecognized error', () => {
+    it('UNKNOWN for recognized-prefix-free stderr', () => {
         mockExecFileSync.mockImplementation(() => {
             throw makeExecError('something unexpected happened')
         })
         const result = classifyLockfileFailure('/tmp/test')
         expect(result.category).toBe('UNKNOWN')
+        expect(result.environmental).toBe(false)
     })
 
-    it('UNKNOWN for empty stderr', () => {
+    // 环境性失败：无 stderr 诊断（进程被信号杀死 / 静默非零退出）→ ENVIRONMENT_ERROR + 保留信号
+    it('ENVIRONMENT_ERROR when stderr is empty (no diagnostics) and records exit code', () => {
         mockExecFileSync.mockImplementation(() => {
-            const err = new Error('failed') as Error & { stderr?: Buffer }
+            const err = new Error('Command failed: pnpm install --frozen-lockfile') as Error & {
+                stderr?: Buffer
+                status?: number
+            }
             err.stderr = undefined
+            err.status = 1
             throw err
         })
         const result = classifyLockfileFailure('/tmp/test')
-        expect(result.category).toBe('UNKNOWN')
+        expect(result.ok).toBe(false)
+        expect(result.category).toBe('ENVIRONMENT_ERROR')
+        expect(result.environmental).toBe(true)
+        expect(result.exitCode).toBe(1)
+        expect(result.signal).toBeNull()
+        expect(result.stderr).toBe('')
+    })
+
+    it('ENVIRONMENT_ERROR with signal name when the process is killed', () => {
+        mockExecFileSync.mockImplementation(() => {
+            const err = new Error('Command failed: pnpm install --frozen-lockfile') as Error & {
+                stderr?: Buffer
+                signal?: string
+            }
+            err.stderr = undefined
+            err.signal = 'SIGKILL'
+            throw err
+        })
+        const result = classifyLockfileFailure('/tmp/test')
+        expect(result.category).toBe('ENVIRONMENT_ERROR')
+        expect(result.environmental).toBe(true)
+        expect(result.signal).toBe('SIGKILL')
+        expect(result.exitCode).toBeNull()
+    })
+
+    it('ENVIRONMENT_ERROR + timedOut when the process is killed by timeout', () => {
+        mockExecFileSync.mockImplementation(() => {
+            const err = new Error('Command failed: pnpm install --frozen-lockfile') as Error & {
+                stderr?: Buffer
+                signal?: string
+                code?: string
+            }
+            err.stderr = undefined
+            err.signal = 'SIGTERM'
+            err.code = 'ETIMEDOUT'
+            throw err
+        })
+        const result = classifyLockfileFailure('/tmp/test')
+        expect(result.environmental).toBe(true)
+        expect(result.timedOut).toBe(true)
+        expect(result.signal).toBe('SIGTERM')
+    })
+
+    // 信号优先于 stderr 分类（进程被杀过程中可能已吐出部分 stderr）
+    it('ENVIRONMENT_ERROR (signal wins) when killed but stderr is present', () => {
+        mockExecFileSync.mockImplementation(() => {
+            const err = makeExecError('ERR_PNPM_OUTDATED_LOCKFILE') as Error & { stderr: Buffer, signal?: string }
+            err.signal = 'SIGKILL'
+            throw err
+        })
+        const result = classifyLockfileFailure('/tmp/test')
+        expect(result.category).toBe('ENVIRONMENT_ERROR')
+        expect(result.environmental).toBe(true)
+        // stderr 仍保留为证据（信号杀死前可能已输出部分诊断）
+        expect(result.stderr).toContain('ERR_PNPM_OUTDATED_LOCKFILE')
+        expect(result.noStderrDiagnostics).toBe(false)
+    })
+
+    // spawn 级失败（工具链缺失）：无退出码 / 信号 / stderr，errno 是唯一定位信息
+    it('ENVIRONMENT_ERROR with errno when the binary cannot be spawned', () => {
+        mockExecFileSync.mockImplementation(() => {
+            const err = new Error('spawn pnpm ENOENT') as Error & { code?: string }
+            err.code = 'ENOENT'
+            throw err
+        })
+        const result = classifyLockfileFailure('/tmp/test')
+        expect(result.category).toBe('ENVIRONMENT_ERROR')
+        expect(result.environmental).toBe(true)
+        expect(result.errno).toBe('ENOENT')
+        expect(result.exitCode).toBeNull()
+        expect(result.signal).toBeNull()
+        expect(result.noStderrDiagnostics).toBe(true)
+    })
+
+    it('preserves exit code for a categorized (non-environmental) failure', () => {
+        mockExecFileSync.mockImplementation(() => {
+            const err = makeExecError('ERR_PNPM_OUTDATED_LOCKFILE') as Error & { stderr: Buffer, status?: number }
+            err.status = 1
+            throw err
+        })
+        const result = classifyLockfileFailure('/tmp/test')
+        expect(result.category).toBe('MANIFEST_MISMATCH')
+        expect(result.environmental).toBe(false)
+        expect(result.exitCode).toBe(1)
     })
 })
 
@@ -663,6 +771,88 @@ describe('repairLockfile', () => {
         // failureDetail should be ≤ prefix + truncate(500) + "…"
         expect(result.failureDetail!.length).toBeLessThanOrEqual(550)
         expect(result.failureDetail).toContain('\u2026')
+    })
+
+    // -----------------------------------------------------------------------
+    // 环境性安装失败（无 stderr 诊断）——可观测性 + 非归因标记
+    // -----------------------------------------------------------------------
+
+    it('marks environmental when the diagnosis dies without stderr', () => {
+        commandSequence = [
+            Object.assign(new Error('Command failed: pnpm install --frozen-lockfile'), { status: 1 }), // 诊断：无 stderr
+            new Error('Command failed: pnpm install --lockfile-only'), // REGENERATE 失败
+            new Error('Command failed: pnpm install --no-frozen-lockfile'), // REINSTALL 失败
+        ]
+        setupExecSequence()
+        const result = repairLockfile({ workDir: proj.dir })
+
+        expect(result.success).toBe(false)
+        expect(result.environmental).toBe(true)
+        expect(result.failureCategory).toBe('ENVIRONMENT_ERROR')
+        // 不再只看到裸 `Command failed: …` —— 失败详情显式说明无诊断 + 进程信号
+        expect(result.failureDetail).toContain('environmental install failure')
+        expect(result.failureDetail).toContain('exit code 1')
+        expect(result.failureDetail).toContain('no stderr diagnostics')
+    })
+
+    it('reports signal + timeout in the environmental failure detail', () => {
+        const killedWithTimeout = Object.assign(new Error('Command failed: pnpm install --frozen-lockfile'), {
+            signal: 'SIGTERM',
+            code: 'ETIMEDOUT',
+        })
+        commandSequence = [killedWithTimeout, killedWithTimeout, killedWithTimeout]
+        setupExecSequence()
+        const result = repairLockfile({ workDir: proj.dir })
+
+        expect(result.environmental).toBe(true)
+        expect(result.failureDetail).toContain('signal SIGTERM')
+        expect(result.failureDetail).toContain('timed out')
+    })
+
+    it('keeps stderr as evidence when the process is killed mid-way', () => {
+        const killedWithStderr = Object.assign(
+            makeExecError('ERR_PNPM_BROKEN_LOCKFILE: partial output'),
+            { signal: 'SIGKILL' },
+        )
+        commandSequence = [killedWithStderr, killedWithStderr, killedWithStderr]
+        setupExecSequence()
+        const result = repairLockfile({ workDir: proj.dir })
+
+        expect(result.environmental).toBe(true)
+        expect(result.failureDetail).toContain('signal SIGKILL')
+        // stderr 作为证据保留（不再无条件声称「无诊断」）
+        expect(result.failureDetail).toContain('stderr: ERR_PNPM_BROKEN_LOCKFILE')
+        expect(result.failureDetail).not.toContain('no stderr diagnostics')
+    })
+
+    it('reports spawn errno when the binary is missing and no stderr is produced', () => {
+        const spawnError = Object.assign(new Error('spawn pnpm ENOENT'), { code: 'ENOENT' })
+        commandSequence = [spawnError, spawnError, spawnError]
+        setupExecSequence()
+        const result = repairLockfile({ workDir: proj.dir })
+
+        expect(result.environmental).toBe(true)
+        expect(result.failureDetail).toContain('spawn error ENOENT')
+        expect(result.failureDetail).toContain('no stderr diagnostics')
+    })
+
+    it('records exit code / signal on failed strategy attempts', () => {
+        const diagError = makeExecError('ERR_PNPM_OUTDATED_LOCKFILE')
+        const killed = Object.assign(new Error('Command failed: pnpm install --lockfile-only'), {
+            signal: 'SIGKILL',
+            status: undefined,
+        })
+        commandSequence = [diagError, killed, killed]
+        setupExecSequence()
+        const result = repairLockfile({ workDir: proj.dir })
+
+        expect(result.success).toBe(false)
+        // 非环境性（诊断有可分类 stderr）→ 不带 environmental 标记
+        expect(result.environmental).toBeUndefined()
+        // 策略尝试仍保留进程级信号（AC ① 可观测性）
+        expect(result.attemptHistory[0].strategy).toBe('REGENERATE')
+        expect(result.attemptHistory[0].signal).toBe('SIGKILL')
+        expect(result.attemptHistory[0].exitCode).toBeNull()
     })
 })
 
