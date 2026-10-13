@@ -51,6 +51,7 @@
 | M41: 规范与经验管理体系重构 | standards 去实现化瘦身 + 经验体系三层收敛与精简 + 规范/经验门禁落地（CI 阻断）+ 文档站导航分层 + 阈值与事实源唯一化 | P2-P3 | 已完成（2026-10-10 用户决策方案 B / 2026-10-10 已闭环归档，见 [todo-archive.md §M41](todo-archive.md#m41-规范与经验管理体系重构m411m415-全部已闭环--2026-10-10-归档)） |
 | M42: 修复交付正确性 + 平台能力与体验补强 | network-audit 出站白名单镜像源扩充与动态发现 + `.gitignore` 幂等判定归一化 + 扫描复用路径误置既有 run 为 failed 修复 + PR Check 手动触发 + 平台列表页表格基础能力补强 + 严重级别展示策略统一 | P2-P3 | 已完成（2026-10-10 用户决策方案 A+B 混合 / 2026-10-11 已闭环归档，见 [todo-archive.md §M42](todo-archive.md#m42-修复交付正确性--平台能力与体验补强m421m426-全部已闭环--2026-10-11-归档)） |
 | M43: PR Check 能力补强 + 运行时可靠性与工程治理 | PR Check 列表仓库标识 + PR 构建/部署错误多源采集（GitHub 三源聚合）+ 容器内 `pnpm install` 环境性失败可观测性与归因口径 + 扫描触发去重合并前端感知 + git 非仓库 / push 钩子边界收口 + 工程脚本加固（门禁产物排除 + 蒸馏计数假阴性） | P2-P3 | 已完成（2026-10-12 用户决策方案 A / 2026-10-14 已闭环归档，见 [todo-archive.md §M43](todo-archive.md#m43-pr-check-能力补强--运行时可靠性与工程治理2026-10-12-用户决策方案-a--2026-10-14-归档)） |
+| M44: 验证链治本 + 文档门禁可信度收口 | 验证命令链纳入 `typecheck`（治本）+ 文档门禁机检缺口收敛（四类静默缺陷）+ 文档口径与命名一致性收口 + 设计文档存量超健康窗口分批拆分 + 站点语言切换器未翻译页 404 兜底 + `tech-stack` 平台依赖表行级一致性 | P2-P3 | **进行中**（2026-10-14 用户决策方案 A；详细任务与 8 要素见 [todo.md §M44](todo.md#m44-验证链治本--文档门禁可信度收口2026-10-14-用户决策方案-a)） |
 
 > **本路线图定位**：按 [规划规范 §2.1](../standards/planning.md) 仅维护阶段概览（目标 / 优先级 / 状态）。详细实施记录 / commit 引用 / 关键决策 / 经验教训见对应归档段（详见下方"## 详细任务"索引）。
 
@@ -855,11 +856,38 @@ per-alert 模型 + reconcile + API 简化 + UI 调整 + backfill 脚本。5 子�
 
 ---
 
+## M44: 验证链治本 + 文档门禁可信度收口（2026-10-14 用户决策方案 A）
+
+承接 M43 归档后的「**对质量的承诺与实际执行之间的落差**」主线，同一根因在两条线各暴露一次——**交付侧**：验证链 `DEFAULT_VERIFY_COMMANDS`（`verification-runner.ts:84-89`）四条命令互不重叠地都不做类型检查（lint 只跑规则 / tsdown `dts` 只发射声明 / vitest 走 esbuild 转译）→ 类型面破坏被判 `verificationPassed = true` 并交付成 PR（用户实证：nodemailer 10.x 升级后 `nodemailer.Transporter` 报 TS2503；M30.3 C84 `21bf8bb` 当年改文档而非补链路，使缺口在文档层被抹平）；**文档侧**：`check-docs.mjs:131-169` 只校验锚点存在性、`.vitepress/config.ts:147` `ignoreDeadLinks: true`，四类「合法文本但语义漂移」缺陷长期无门禁。经 2026-10-14 用户决策（方案 A）从 [backlog.md](backlog.md) §待上收候选（C95）+ §候选评估中上收 10 项候选，收敛为 6 原子条目。
+
+**6 原子条目**（🛡️ 1 + 🛠️ 1 + 📚 3 + 🎨 1；🚀 与 🧪 独立条目缺口显式标注——候选池内两项能力候选同域且与 M43.2 强耦合，宜独立批次串行推进）：
+
+- **M44.1** [P2 🛡️ 治本] 验证命令链纳入 `typecheck`（同级直接阻断；顺序 `install → lint → build → typecheck → test`——typecheck 依赖 workspace `dist`，实测移出 dist 后平台 typecheck exit 2 + 大量 TS2307，故必须在 build 之后、test 之前）
+- **M44.2** [P3 🛠️ devEx] 文档门禁机检缺口收敛（链接文本 §N ↔ 锚点一致性 / VitePress 站点绝对链接 / 未成对 `](` / 强调标记配对，四类各带负例标定）
+- **M44.3** [P3 📚 治理] 文档口径与命名一致性收口（`design/packages` 残留 3 处 + `ai-collaboration.md` 跨段重复编号 + 经验归档 `§49-§57` 分片文件名与内容范围不符）
+- **M44.4** [P3 📚 治理] 设计文档存量超健康窗口分批拆分（warning 带 13 文件 + 强制分片线豁免 1 文件，分 3 批独立验收）
+- **M44.5** [P3 🎨 体验] 站点语言切换器未翻译页 404 兜底（M41.4 导航分层后剩余唯一非导航面死链来源）
+- **M44.6** [P3 📚 治理] `tech-stack` 平台依赖表行级一致性（版本口径不一致 + 无引用占位行）
+
+**建议顺序**：M44.1（治本主线）→ M44.2（门禁就位，防后续文档批次回归）→ M44.3（命名 / 编号收口，牵动锚点面先于拆分）→ M44.4（存量拆分，在门禁就位后分批）→ M44.5（可并行）∥ M44.6。**条目容量**：6 原子（5-6 项上限内）；M44.1 与 M44.3 均触及 > 10 文件面——M44.1 命中[设计文档硬阈值](../design/governance/spec-and-doc-governance.md#24-设计文档硬阈值hard-requirement)，承载面经用户裁定为 [dependency-fixer.md](../design/modules/dependency-fixer.md) 验证链章节；M44.3 的承载面为该文件自身编号结构与分片命名。
+
+**范围边界（不做什么）**：不改 `quickVerifyProject` 的 lint-only 定位、不做脚本名探测 / 非阻断观察期 / 从目标仓库 CI 反推验证链（M44.1）；不做外链存活检查与文档全文渲染校验（M44.2）；不改 standards 规则语义（M44.3）；不缩小计量面、不新增豁免表条目（M44.4）；不做全量 en 翻译、不改 `ignoreDeadLinks`（M44.5）；不做依赖实际升降级（M44.6）。
+
+**§3.4 交叉核验**：**0 项重复评估**——归档表格扫描零命中已闭环项（唯一同族命中为 M41 归档段自身的「未完成项」清单，即本批候选来源）+ git log 无对应实现 commit（`scripts/check-docs.mjs` 最近为 `d315840`）+ 代码 anchor 逐项实证未闭环（`verification-runner.ts:84-89` 4 条命令无 typecheck / `check-docs.mjs:131-169` 仅校验锚点存在 / `config.ts:147` `ignoreDeadLinks: true` / `distill-wisdom.mjs:61` + `docs-and-readme-i18n.md:123` + `modules/index.md:1` 旧目录名 / `ai-collaboration.md` L82/91/99/109 跨段编号 / `experience-archive-§49-§57-…md` H1 为「§四十九 - §六十八」/ `apps/platform/package.json:44` 版本口径与无声明行）。
+
+**审计 depth 预告**：M44.1 → `deep`（建议 2 分区并发：P1 引擎与默认链 + 测试 / P2 文案口径与平台同步）；M44.2 / M44.3 / M44.4 → `standard`；M44.5 / M44.6 → `quick`。
+
+**commits 状态**：阶段启动规划 commit 落地后按 [规划规范 §4.4 第 5 条](../standards/planning.md#44-大批量归档批次操作规范) 用 `git rev-list HEAD ^origin/master --count` 双向核验并动态描述，不写死数字。**本批实测登记的已知边界**：`roadmap.md` 因本段新增一度达 906 行 → 超「强制分片阈值（>900）」触发 `check-doc-size` error；本批以**压缩本段回落到 warning 带**处置，完整拆分（M0–M38 段迁出至 `archive/roadmap-phases-m0-m38.md` + 全仓锚点重指，实测落点约 57 处 / 15 文件）待用户决策后立项（拆分为「早期间段迁出 + 主文档保留最近 5 段 + 当前阶段」策略，依据 [archive/index.md §2](archive/index.md)）。
+
+> 详细任务与 8 要素见 [todo.md §M44](todo.md#m44-验证链治本--文档门禁可信度收口2026-10-14-用户决策方案-a)；上一阶段（M43）见 [todo-archive.md §M43](todo-archive.md#m43-pr-check-能力补强--运行时可靠性与工程治理2026-10-12-用户决策方案-a--2026-10-14-归档)。
+
+---
+
 ## 详细任务
 
-- 当前阶段任务：**暂无进行中阶段**——M43（PR Check 能力补强 + 运行时可靠性与工程治理，6 原子条目）已于 2026-10-14 闭环归档，见 [todo-archive.md §M43](todo-archive.md#m43-pr-check-能力补强--运行时可靠性与工程治理2026-10-12-用户决策方案-a--2026-10-14-归档)
+- 当前阶段任务：**M44 进行中**——验证链治本 + 文档门禁可信度收口（6 原子条目，2026-10-14 用户决策方案 A），见 [todo.md §M44](todo.md#m44-验证链治本--文档门禁可信度收口2026-10-14-用户决策方案-a)
 - 已归档阶段：[todo-archive.md](todo-archive.md)（主窗口保留最近阶段完整段 + 指针段；M0-M43 全部已归档；早期阶段见 [archive/index.md](archive/index.md) 分片索引）
-- 下一阶段（未授权）：无——按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 评估 backlog 候选池后由用户决策
+- 下一阶段（未授权）：无——本阶段闭环后按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 评估 backlog 候选池后由用户决策
 - 后续阶段任务（延期项 + 未排期增强候选）：[backlog.md](backlog.md)
 
 ## 交付原则

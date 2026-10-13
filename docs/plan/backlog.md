@@ -35,7 +35,7 @@
 | 阶段收口前 | `pnpm check:docs` + `pnpm run test:coverage` + `pnpm lint` + `pnpm typecheck` + `pnpm --filter @dependfix/platform exec playwright test` | 检查归档批次合入未引入回归 | 每次阶段归档前 |
 | CI 端到端 | 上述 5 项 + `pnpm build` | 裁决合并 | PR 合并前 / commit 推送后 |
 
-> **扩面候选**（待评估）：周级 `pnpm regression:weekly` 与发版前 `pnpm regression:pre-release` 入口未建立；当前依赖 CI 端到端裁决。
+> **扩面状态（2026-10-14 订正）**：周级入口**已建立并接线**——三个 profile 脚本（`scripts/regression/run-periodic-regression.mjs`，`package.json` 的 `regression:weekly` / `regression:pre-release` / `regression:phase-close`）+ [`.github/workflows/regression-weekly.yml`](../../.github/workflows/regression-weekly.yml)（每周五定时 + 手动触发，不阻断合并）；报告落点 `docs/reports/regression/current.md`（窗口注释自动维护）。**剩余待评估**：① 发版前入口与实际发布流程（[`.github/workflows/release.yml`](../../.github/workflows/release.yml)）的接线口径（当前仅本地手动可跑）；② 阶段收口入口（`regression:phase-close`）是否替换上方「阶段收口前」一行的手写 5 项组合（当前为并行两套口径）。
 
 ### 覆盖矩阵（每条长期主线的回归覆盖状态）
 
@@ -74,53 +74,9 @@
   - **触发条件**：下次改动 `alerts.vue` 时（该文件已处 max-lines warning 带，顺带减法更划算）。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
-- **`architecture.md` 存在畸形 markdown 链接（未成对 `](`）（待评估）** —— 现象：`docs/design/governance/architecture.md` 的「监测系统 vs 自动合并解耦」表行末残留一处未成对的链接片段（`…experience-archive-§49-§57-recent-investigation.md#五十六) + …`），`check:docs` 因无法识别 `](` 而成对性静默跳过（不报错）。
-  - **待评估点**：① 是否为重复拼接残留；② 自建链接校验器是否需补「未成对 `](` / `)` 计数」检测（当前只匹配合规 `](`）。
-  - **触发条件**：下次改动该文件时；或加固 check-docs 链接校验口径时。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
-
-- **锚点回填的「链接文本 §N ↔ 锚点 §N」一致性缺少机检（待评估）** —— 现象：`check:docs` 只校验锚点**存在**，不校验链接文本声明的章节号与锚点所属章节是否一致；故「链接文本写 §五十六、锚点却指向 §五十」这类漂移在 `check:docs` 下**静默通过**（本次门禁落地批次的锚点回填实测命中 2 处，由审查阶段判 blocker 后发现）。
-  - **待评估点**：① 是否在 `check-docs.mjs` 增补「`[x §N](target#anchor)` 形式的链接文本章节号须与锚点首段编号一致」断言（需处理中文数字 → 阿拉伯数字、`§5.1.x` 等复合形态与误报面）；② 或独立脚本 `check-anchor-text-consistency.mjs`；③ 误报面收敛策略。
-  - **同族盲区（并入评估）**：VitePress 的**站点绝对链接**（`config.ts` 的 nav / sidebar `link:` 与 index frontmatter `link:`）`check:docs` 不校验，且 `ignoreDeadLinks: true` 下构建也不报错——该类死链只能靠人工 / 脚本核对（导航分层批次已用脚本逐条核对 0 死链）；建议同批评估是否一并纳入机检口径。
-  - **触发条件**：再次出现锚点回填 / 批量链接改写批次时；或加固 `check-docs` 校验口径时。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
-
-- **`design/packages/` → `design/modules/` 重命名的非导航面残留（待评估）** —— 背景：`docs/design/packages/` 已重命名为 `docs/design/modules/`，导航面（站点配置 + 首页卡片）已在门禁批次同步，但仍有非导航面残留未同步：
-  - `scripts/distill-wisdom.mjs` 的迁移目标推荐串仍写 `docs/design/packages/`（蒸馏输出会把落点指向已不存在的目录）；
-  - `docs/design/governance/docs-and-readme-i18n.md` 的现行陈述用旧目录名；
-  - `docs/design/modules/index.md` 的 H1 仍为「模块设计（packages）」。
-  - **待评估点**：① 三处一并订正（含脚本串 + 可能的单测断言）；② 是否与 [spec-and-doc-governance.md §1.2 问题 C](../design/governance/spec-and-doc-governance.md) 的既有记录合并处置。
-  - **触发条件**：下次改动蒸馏脚本 / 设计文档索引时；或用户要求清理重命名残留。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
-
-- **站点语言切换器对未翻译页指向不存在的 en 页（待评估）** —— 现象：VitePress 内建语言菜单按「当前路径 → 目标 locale 同路径」映射；对无 en 译文的页面（如 `plan/roadmap.md` / `plan/todo.md` / `standards/*` / `design/modules/*`）会生成 `/en-US/<同路径>` 链接，该页不存在 → 点「English」落 404（`ignoreDeadLinks: true` 下不报错，构建产物实测 `dist/plan/roadmap.html` 含该链接）。导航面（nav / 侧栏 / 首页卡片）已在门禁批次收敛为仅指向真实页面，本项为**剩余唯一非导航面死链来源**。
-  - **待评估点**：① 是否为未翻译页提供 locale 兜底页（如指向 `/en-US/` 或 `/en-US/design/governance/architecture`）；② 还是接受现状（部分翻译站点常见行为）并在 i18n 规范中显式声明；③ 若需修，选型 = 主题层覆写 locale 菜单 vs 生成占位译文页。
-  - **触发条件**：用户反馈语言切换落 404；或推进 en 翻译覆盖时。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
-
-- **设计文档存量超健康窗口（阈值表入表后暴露）（待评估）** —— 现象：文档行数阈值表统一（[文档规范 §3](../standards/documentation.md#3-文档行数阈值)）并接入计量脚本后，**存量**暴露为 warning 带 13 个文件 + 强制分片线豁免 1 个文件（`docs/design/governance/caomei-ui-migration.md`；清单以 `pnpm run check:doc-size` 输出为准，量级：warning 带 11 个设计文档 + `plan/roadmap.md` + `plan/todo-archive.md`）。
-  - **待评估点**：① 是否按内容逻辑分批拆分至健康窗口（设计模块 / 治理设计 / 规划三类可分批）；② `caomei-ui-migration.md` 拆分方案（入链面广且 §15 迁移实证需保序）；③ 拆到 `archive/` 分片的命名与索引口径。
-  - **触发条件**：用户要求清理文档体量；或某文件继续增长触发「强制分片」线时。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
-
-- **`ai-collaboration.md` 跨段重复编号结构（历史遗留）（待评估）** —— 现象：该规范文件的 `## 1.4 P 阶段规划暂停协议` / `## 1.5 阶段归档检查…` / `## 1.6 …` / `## 1.7 …` 位于 `## 2. PDTFC+ 工作流` **之后**，且与 `### 1.4 单次提交审计阈值` 编号重复。经 `git show HEAD` 核对为历史遗留（非门禁批次引入）。
-  - **待评估点**：① 是否重排为连续编号（牵动 7 处锚点引用，需按 [规划规范 §4.4](../standards/planning.md#44-大批量归档批次操作规范) 全仓更新）；② 或保留现状并在文件内加一行说明。
-  - **触发条件**：再次改动该文件章节结构时；或用户要求清理编号。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
-
-- **经验归档 `§49-§57` 分片文件名与内容范围不符（历史遗留）（待评估）** —— 现象：`docs/design/governance/experience-archive-§49-§57-recent-investigation.md` 实际内容覆盖 `§四十九 - §六十九`（文件名仍为 `§49-§57`）。H1 范围已在经验体系收敛批次订正，文件名未动。
-  - **待评估点**：① 是否重命名为 `-§49-§69-`（牵动全仓引用，需按 §4.4 全仓更新）；② 或保留现状（文件名仅为分片标识）。
-  - **触发条件**：再次改动该分片时；或用户要求清理命名。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
-
 - **运行失败「受约束重试入口」（延后，保留待评估）** —— 「分类 + 筛选 + 展示」（`failure_code` / `failure_stage` / `failure_kind` 三列 + 三维筛选 + 阶段展示）已落地；设计稿 §5.5 的「仅 `transient` 可一键重试」入口（含非终态守卫 / 同仓库去重 / `retriedFromRunId` 审计来源）按用户 2026-10-06 决策延后。**现状锚点**：[run-failure-taxonomy.md §5.5](../design/governance/run-failure-taxonomy.md)。触发条件：① 分类 + 筛选上线后确认重试诉求；② 用户明确要求受约束重试。
 
 - **扫描偏好服务端跨设备默认（延后，保留待评估）** —— 设备级方案 C 混合（localStorage：上次选择 + 可选配置化默认 + 重置）已落地；服务端用户 / 组织级默认偏好（跨设备、可管理，需实体 / API / 设置页，预计触发 governance 文档）按用户 2026-10-06 决策延后。**现状锚点**：`apps/platform/app/composables/use-scan-preferences.ts`。触发条件：① 用户实测多设备切换痛点；② 组织级统一默认诉求。
-
-- **tech-stack 平台依赖表与 `apps/platform/package.json` 行级不一致（待评估）** —— `docs/guide/tech-stack.md` 核心框架表按 `^X.x` 粗粒度声明平台依赖，但其中 `@lucide/vue` 行写 `^1.48`（声明为 `^1.49.0`，区间仍覆盖但口径不同步）；`pinia` / `@vueuse/core` / `@vueuse/nuxt` / `@sentry/nuxt` / `@vite-pwa/nuxt` 5 行在 `apps/platform/package.json` 与 `nuxt.config.ts` 模块列表中**均无对应声明与引用**（疑似模板期占位行）。
-  - **待评估点**：① 逐行核对整表与 `package.json` / `nuxt.config` 的对应关系；② 删除无引用行 vs 补声明（若确为规划中的能力）；③ 是否统一为「不写具体版本号，指向 package.json」以减少同类漂移。
-  - **触发条件**：依赖变更需要核对文档时；或用户要求清理文档依赖表。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
 - **队列 worker 进程按 role 跳过周期插件（待评估）** —— 独立 worker 进程形态的已知边界：worker 与 HTTP 进程共享同一 Nitro 产物，会重复启动 `stale-cleanup` / 启动期备份等周期插件（均幂等，代价为重复 DB 查询与日志）。
   - **待评估点**：引入 `DEPENDFIX_ROLE`（server / worker）让 worker 跳过 HTTP-only 插件；或按 `inProcessWorker` 条件跳过（注意单进程形态下该值为 true，不能跳过）。
@@ -157,11 +113,6 @@
   - **触发条件**：出现企业私服 CDN 域被拦的实例；或用户要求自动化。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
-- **文档中的「字面强调标记」存量破损（待评估）** —— 现象：部分历史文档存在未闭合 / 错位的强调标记（渲染后外露字面 `**`），`lint:md` / `check:docs` / `docs:build` 均不报错（属「合法 HTML、错误强调」类盲区）；归档批次实测 `archive/index.md` 七处 + `roadmap.md` 一处为存量（非该批引入）。
-  - **待评估点**：① 是否引入「强调标记配对」机检（渲染级校验，覆盖 `archive/**` 等既有豁免面）；② 或一次性清理存量（需逐个判断是否为「本意字面」如代码示例内）。
-  - **触发条件**：再次出现强调渲染破损；或加固文档渲染校验时。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
-
 - **浮层类组件视觉覆盖扩面（`Drawer` / `Tabs` / `Popover` / `Toast` 落点页）（待评估）** —— 现象：caomei-ui `0.6.0` 的浮层类语义变更（`drawer` / `popover-content` / `tabs-list` / `toast` / `color-picker` / `date-picker` / `multi-select` / `auto-complete` / `dropdown-menu-content` 背景改 `bg-elevated`、`popover` 圆角 `radius-lg`、`tabs` 列表 overflow 与分隔线重写）落在 `schedules.vue` / `scans.vue` / `alert-run-sidebar.vue` 等页面，而视觉回归最小集（M32.5 既定边界：alerts / repos / pr-checks / dialog-import-repos / login + `dialog-select-open-<theme>`）**不覆盖**这些落点页 → 该类变更当前只靠 e2e 行为断言兜底，无像素守卫。依据 [caomei-ui-migration.md §15.15](../design/governance/caomei-ui-migration.md#1515-caomei-ui-060-升级回归实证插队热修2026-10-12)。
   - **待评估点**：① 是否把这些落点页纳入视觉基线（页面级 vs 元素级；门户面板须视口级截图，模式见 [迁移评估 §15.14](../design/governance/caomei-ui-migration.md#1514-caomei-ui-050-升级实证m3422026-10-01) + `tests/visual/dialog-select-layer.visual.test.ts`）；② 覆盖优先级（`schedules` 表单浮层 > `scans` 弹窗 > `alert-run-sidebar`）；③ 基线数量与 CI 时长预算。
   - **触发条件**：再次出现组件库浮层类视觉变更未被门禁捕获；或用户要求扩面视觉覆盖。
@@ -180,18 +131,6 @@
 ### 待上收候选（评估完成，等待用户决策）
 
 > 本节为「评估完成、等待用户决策」候选的暂存区；候选**不含 `M\d+` 阶段编号**（[规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement)）。
-
-- **C95 验证命令链纳入 `typecheck`（评估完成待上收）**（P2，🛡️ 治本）—— 现象：验证链唯一事实源 `DEFAULT_VERIFY_COMMANDS`（`packages/engine/src/runners/verification-runner.ts:84-89`）为 4 条 `install --frozen-lockfile → lint → build → test`，四条命令**互不重叠地都不做类型检查**（lint 只跑规则 / tsdown 的 `dts` 只发射声明 / vitest 走 esbuild 转译）→ 依赖升级引入的**类型面破坏**被判 `verificationPassed = true` 并交付成 PR，直到目标仓库 CI 的 `typecheck` 才红。用户实证（2026-10-14 反馈）：nodemailer 10.x 升级后消费方 `nodemailer.Transporter` 报 TS2503（10.x 改名为 `Mail<T, D>`）而 dependfix 报「验证通过」。M30.3 C84（`21bf8bb`）当年选择「把文档改成实际链」而非补链路，使缺口在文档层被抹平。
-  - **目标**：默认验证链纳入 `pnpm typecheck`，与 lint / build / test **同级直接阻断**（用户 2026-10-14 裁定），消除「类型面破坏被假绿交付」的结构性盲区。
-  - **顺序（已定）**：`install → lint → build → typecheck → test`。① **typecheck 必须在 build 之后**（硬约束，实测：移出 `packages/{core,engine,cli}/dist` 后 `pnpm --filter @dependfix/platform typecheck` exit 2 + 大量 `TS2307 Cannot find module '@dependfix/core'`；可复现：移出 dist → 跑该命令 → 移回）；② test 保持最后（最慢 + 先短路）；③ typecheck 置于 test 之前可最大化修复前基线（`sampleVerificationBaseline` 首失败即停、前缀覆盖，`packages/engine/src/app/verify-project.ts:87-119`）的采样率，避免 test 既有红遮蔽 typecheck 归因。
-  - **范围**：核心 = `packages/engine/src/runners/verification-runner.ts:84-89`（唯一事实源）+ 同文件 `:73-83`（补「为何纳入 typecheck」实证论证）；测试 = `src/runners/verification-runner.test.ts:782-790` / `src/app/verify-project.test.ts:64-71,120,231-232,285-309,311+` / `src/app/major-upgrade.test.ts:276`；文案与口径同步（**22-28 文件量级**，测量方：审计方实测复跑；可复现：`rg -l "install/lint/build/test|lint \+ build \+ test" --glob '!docs/plan/archive/**' --glob '!docs/plan/backlog.md'` → 22 个，放宽形态 `rg -l "install\s*/\s*lint|install( \S+)* \+ (pnpm )?lint \+ (pnpm )?build" --glob '!docs/plan/archive/**' --glob '!docs/plan/backlog.md'` → 28 个，后者含注释层引用 `DEFAULT_VERIFY_COMMANDS` 的平台文件）= `packages/engine/src/{helpers/index.ts:84,ai/safety-gate.ts:3,57,ai/app-integration.ts:184,config/index.ts:124,runners/verification-gate.ts:3}` + `packages/cli/src/cli/index.ts:167` + `packages/cli/README.md:63,92` + `packages/cli/README.en-US.md:63,92` + `action.yml:116` + `.github/workflows/security-auto-fix.yml:46,90` + `apps/platform/{i18n/locales/{zh-CN,en-US}.json:138-139,server/entities/repository.ts:121,server/schemas/repository.ts:41}` + `skills/dependfix-remediator/{SKILL.md:75,REFERENCES.md:51}` 与 `packages/skills/**` 镜像 + `docs/{design/modules/dependency-fixer.md:394,454,461,design/modules/dependency-grouping.md:106,design/governance/architecture.md:179,399,481,design/governance/platform-ai-integration.md:227,384,design/governance/github-action-workflow.md:54,design/governance/sandbox-security-governance.md:97,guide/quick-start.md:201,329,333,334}` + `docs/i18n/en-US/**` 4 处（C84 反向恢复）。
-  - **验收标准**：① 定向单测全绿且断言默认链为 5 条（`pnpm --filter @dependfix/engine exec vitest run src/runners/verification-runner.test.ts src/app/verify-project.test.ts`）；② 真实端到端复现（对齐 M29.3 范式）：临时目录构造「`lint` / `build` / `test` 全绿、`typecheck` 红」的仓库 → verification action 失败 + `enforceVerificationGate` 真实 git 回滚；③ 无 `typecheck` 脚本的仓库 → 跳过并记 `SCRIPT_NOT_FOUND` 审计（不误伤）；④ 修复前即红的 `typecheck` → `PRE_EXISTING_FAILURE`，不归因本次、不据此回滚；⑤ 门禁：`pnpm lint` / `pnpm typecheck` / `pnpm test:coverage` / `pnpm run check:docs` / `pnpm run lint:md:check` 全绿。
-  - **不做什么**：不改 `quickVerifyProject`（保留 lint-only 快速信号）；不做脚本名探测（`typecheck` / `type-check` / `tsc` 自动识别）；不做「非阻断观察期」机制（已裁定直接阻断）；不从目标仓库 CI workflow 反推验证链；不在默认链注入 `nuxt prepare`（沿用 `--commands` / 平台 `verifyCommands` / action `commands` 逃生舱，见 [经验归档 §三十六](../design/governance/experience-archive-§36-§40-toolchain.md)）。
-  - **依赖**：先例 M29.3（验证链纳入 test，7 commits，同一唯一事实源口径）；C84 反向恢复（`docs/design/governance/{architecture,platform-ai-integration}.md` + en-US 共 4 文件 8 处）；self-scan 决策点已实测——`security-auto-fix.yml` 现行链（`install → nuxt prepare → lint → build`）可在 `pnpm build` **之后**追加 `pnpm typecheck`（workspace `dist` 已产出、`.nuxt` 已在链内），**不得**置于 build 之前。
-  - **交付物**：预估 4-6 commits（feat(engine) 默认链 + test(engine) 断言与端到端复现 + docs 文案 sweep + docs(plan) 闭环登记）；文件清单见「范围」；同步 `docs/design/modules/dependency-fixer.md` 验证链章节。
-  - **风险与缓解**：① 目标仓库 `typecheck` 脚本长期红 → 既有命令级基线豁免覆盖，但**基线前缀覆盖限制**（lint / build 先红会遮蔽 typecheck 采样 → 保守归因本次 → 误回滚）需随本批登记；② `typecheck` 脚本语义不实（如 `tsc --noEmit || true`）无法机检 → 登记已知边界；③ 需 `nuxt prepare` 的仓库默认链不成立面扩大 → 逃生舱 + 文档显式登记；④ 逐包验证耗时上升 → 单命令超时 10 min（`verification-runner.ts:97`）与平台总超时 30 min（`EXECUTION_TIMEOUT_MS`）不变，列入观察项；⑤ 改动 > 10 文件命中[设计文档硬阈值](../design/governance/spec-and-doc-governance.md#24-设计文档硬阈值hard-requirement)（需专项设计文档 + A 阶段 `deep` 审计）→ P 阶段须定死承载面（沿用 M29.3 先例的 `docs/design/modules/dependency-fixer.md`，或新增 `docs/design/governance/<slug>.md`）。
-  - **触发条件**：用户授权上收（2026-10-14 已裁定阻断语义与落地路径 = backlog 候选待上收）；或再次出现「验证通过但目标仓库 CI 类型检查失败」实例。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
 - **`git-signing.ts` 更名为 `git-isolation.ts`（待评估）**（P3，🛡️ 治理）—— 背景：该模块已承载「签名 + hooks」双语义（4 个隔离常量），但文件名仍只表达「签名」。
   - **本批已闭环的部分**：决策点「是否在 `docs/standards/git.md §3.8` 扩展 hooks 隔离子节」已于 2026-10-13 M43.5 落地——§3.8 改为「签名 + hooks，commit / push 双向隔离」单表 + 4 常量清单 + push 侧 `--no-verify` 口径；`code-quality-checklist` 对应矩阵行同步扩展。
@@ -332,9 +271,9 @@
 
 | 内容类型 | 位置 |
 |:--|:--|
-| 当前阶段活跃任务 | **暂无进行中阶段**——上一闭环阶段 M43（PR Check 能力补强 + 运行时可靠性与工程治理，6 原子条目，2026-10-14 归档）见 [todo-archive.md §M43](todo-archive.md#m43-pr-check-能力补强--运行时可靠性与工程治理2026-10-12-用户决策方案-a--2026-10-14-归档) |
-| 下一阶段（未授权） | 无——按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 评估本文件候选池后由用户决策 |
+| 当前阶段活跃任务 | **M44 进行中**——验证链治本 + 文档门禁可信度收口（6 原子条目，2026-10-14 用户决策方案 A），见 [todo.md §M44](todo.md#m44-验证链治本--文档门禁可信度收口2026-10-14-用户决策方案-a) + [roadmap.md §M44](roadmap.md#m44-验证链治本--文档门禁可信度收口2026-10-14-用户决策方案-a) |
+| 下一阶段（未授权） | 无——M44 闭环后按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 评估本文件候选池后由用户决策 |
 | 已完成阶段归档 | [todo-archive.md](todo-archive.md)（主窗口 + [archive/](archive/) 分片） |
-| 里程碑与阶段交付 | [roadmap.md](roadmap.md) |
+| 里程碑与阶段交付 | [roadmap.md](roadmap.md)（M0-M43 已归档 + M44 进行中） |
 | 长期主线 / 候选 / 待人工验收 / 已知边界 | 本文档（按四象限结构） |
 | 历史归档索引 | [archive/index.md](archive/index.md) |
