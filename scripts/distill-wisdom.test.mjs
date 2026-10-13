@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
-import { classifySection, inferType, main, parseWisdom } from './distill-wisdom.mjs'
+import { classifySection, findSuspectedEntries, inferType, main, parseWisdom } from './distill-wisdom.mjs'
 
 vi.mock('node:fs/promises', () => ({
     readFile: vi.fn(),
@@ -72,9 +72,79 @@ describe('classifySection', () => {
 })
 
 describe('parseWisdom', () => {
+    it('识别 `### [YYYY-MM-DD] [type] 标题` 活跃条目形态（含后续正文行）', () => {
+        const content = [
+            '## 当前条目 (Active)',
+            '',
+            '### [2026-10-13] [pattern] 收窄改动须先核验被跳过步骤',
+            '- 场景：跳过某步骤前先反查其产物的消费者',
+            '- 实证：多仓出口码退化',
+            '',
+            '### [2026-10-13] [pattern] setup-only composable 不得延迟求值',
+            '- 要点：缺省实现须在 setup 期解析',
+            '',
+        ].join('\n')
+        const entries = parseWisdom(content)
+        expect(entries).toHaveLength(2)
+        expect(entries[0]).toMatchObject({
+            date: '2026-10-13',
+            type: 'pattern',
+            title: '收窄改动须先核验被跳过步骤',
+            isDistilled: false,
+        })
+        expect(entries[0].lines).toHaveLength(2)
+        expect(entries[1].title).toContain('setup-only composable')
+    })
+
+    it('识别 `- **[YYYY-MM-DD] [type] 标题**：正文` 列表形态（含 `→ 详见` 变体）', () => {
+        const content = [
+            '## 当前条目 (Active)',
+            '',
+            '- **[2026-10-13] [test] 断言要锁定失败来源**：反例对照必须能击破断言',
+            '- **[2026-10-13] [env] 环境差异** → 详见 [docs/guide/tech-stack.md](x.md)',
+        ].join('\n')
+        const entries = parseWisdom(content)
+        expect(entries).toHaveLength(2)
+        expect(entries[0]).toMatchObject({
+            date: '2026-10-13',
+            type: 'test',
+            title: '断言要锁定失败来源',
+            isDistilled: false,
+        })
+        expect(entries[0].lines[0]).toContain('反例对照')
+        expect(entries[1].target).toContain('docs/guide/tech-stack.md')
+    })
+
+    it('蒸馏摘要行支持裸 `→ <target>`（与 §4.2 文档形态一致）', () => {
+        const content = [
+            '## 已蒸馏条目 (Historical)',
+            '',
+            '- [2026-08-10] [bug] 单行摘要 → docs/standards/x.md',
+            '- [2026-08-11] [test] 另一条 → 详见 docs/standards/y.md',
+        ].join('\n')
+        const entries = parseWisdom(content)
+        expect(entries).toHaveLength(2)
+        expect(entries[0]).toMatchObject({ date: '2026-08-10', type: 'bug', title: '单行摘要', target: 'docs/standards/x.md' })
+        expect(entries[1].target).toBe('docs/standards/y.md')
+    })
+
+    it('历史区的两种日期+类型形态均计为已蒸馏', () => {
+        const content = [
+            '## 已蒸馏条目 (Historical)',
+            '',
+            '### [2026-10-01] [pattern] 历史标题形态',
+            '- 正文',
+            '',
+            '- **[2026-10-02] [bug] 历史列表形态**：已收敛',
+        ].join('\n')
+        const entries = parseWisdom(content)
+        expect(entries).toHaveLength(2)
+        expect(entries.every((entry) => entry.isDistilled)).toBe(true)
+    })
+
     it('parses the current format with entries, content lines and flush', () => {
-        // 内容行（- **字段**）仅在存在 ## YYYY-MM-DD 日期分组时可收集
-        // （parseWisdom 无日期分组时有意过滤非 ### / 非摘要行，见脚本注释）
+        // 内容行（- **字段**）在「已进入条目」后即被收集（`!currentEntry` 门槛）；
+        // 本用例仍走 ## YYYY-MM-DD 日期分组 + ### N. 的既有形态
         const content = [
             '## 当前条目 (Active)',
             '',
@@ -119,11 +189,11 @@ describe('parseWisdom', () => {
         ].join('\n')
         const entries = parseWisdom(content)
         expect(entries).toHaveLength(2)
-        // Active 区的摘要行仍属活跃（已摘要化）；title 含尾随空格（正则非贪婪停在 → 前空格，真实行为）
+        // Active 区的摘要行仍属活跃（已摘要化）；标题两侧空白归一（正则吸收 `→` 前空格）
         expect(entries[0]).toMatchObject({
             date: '2026-08-10',
             type: 'bug',
-            title: '修复 jobId 冒号限制 ',
+            title: '修复 jobId 冒号限制',
             target: 'docs/design/governance/experience-archive.md',
             isDistilled: false,
         })
@@ -131,7 +201,7 @@ describe('parseWisdom', () => {
         expect(entries[1]).toMatchObject({
             date: '2026-08-09',
             type: 'pattern',
-            title: '任务粒度分批提交 ',
+            title: '任务粒度分批提交',
             target: 'docs/standards/planning.md',
             isDistilled: true,
         })
@@ -181,7 +251,7 @@ describe('parseWisdom', () => {
     })
 
     it('parses raw lines of a distilling entry before heading', () => {
-        // 内容行收集需要日期分组上下文（同 current format 用例）
+        // 内容行收集需先进入某个条目（本用例含日期分组上下文）
         const content = [
             '## 当前条目 (Active)',
             '',
@@ -223,6 +293,38 @@ describe('parseWisdom', () => {
  * 测试用 vi.resetModules + 动态 import 在每个测试体内设置 argv 后重新加载，
  * 避免顶层 main() 用上一次 argv 提前运行污染测试。
  */
+describe('findSuspectedEntries（假阴性防护）', () => {
+    it('活跃区未被识别的日期形态 → 命中（含行号）', () => {
+        const content = [
+            '## 当前条目 (Active)',
+            '',
+            '### [2026-10-13] pattern 丢了类型括号',
+        ].join('\n')
+        expect(findSuspectedEntries(content)).toEqual([
+            { line: 3, text: '### [2026-10-13] pattern 丢了类型括号' },
+        ])
+    })
+
+    it('已识别的两种活跃形态不计为疑似', () => {
+        const content = [
+            '## 当前条目 (Active)',
+            '',
+            '### [2026-10-13] [pattern] 标题形态',
+            '- **[2026-10-13] [test] 列表形态**：正文',
+        ].join('\n')
+        expect(findSuspectedEntries(content)).toEqual([])
+    })
+
+    it('历史区的日期行不计入（活跃计数告警面）', () => {
+        const content = [
+            '## 已蒸馏条目 (Historical)',
+            '',
+            '### [2026-10-13] pattern 历史区漂移形态',
+        ].join('\n')
+        expect(findSuspectedEntries(content)).toEqual([])
+    })
+})
+
 describe('main()', () => {
     const originalArgv = process.argv
 
@@ -265,6 +367,28 @@ describe('main()', () => {
         await main()
         expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('WISDOM_OK'))
         expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('1 active entries'))
+    })
+
+    it('--check：解析到 0 条但活跃区存在疑似条目 → stderr 告警且 stdout 契约不变', async () => {
+        setupCall(['--check'], {
+            ok: true,
+            value: '## 当前条目 (Active)\n\n### [2026-10-13] pattern 格式漂移形态\n',
+        })
+        await main()
+        // stdout 契约（WISDOM_OK / WISDOM_NEEDS_DISTILL）不被告警污染
+        expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('WISDOM_OK: 0 active entries'))
+        expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('疑似条目行'))
+        expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('L3:'))
+    })
+
+    it('--check：活跃区为已识别形态 → 不告警', async () => {
+        setupCall(['--check'], {
+            ok: true,
+            value: '## 当前条目 (Active)\n\n### [2026-10-13] [pattern] 正常形态\n',
+        })
+        await main()
+        expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('1 active entries'))
+        expect(errorSpy).not.toHaveBeenCalled()
     })
 
     it('--check mode: at/over threshold → WISDOM_NEEDS_DISTILL', async () => {
