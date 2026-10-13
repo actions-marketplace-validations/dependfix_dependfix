@@ -60,6 +60,11 @@
 
 ### 候选评估中（待评估 / 本阶段延后项）
 
+- **`alerts.vue` 存在一处闲置的 `useFixNow()` 解构（待评估）** —— 现象：`apps/platform/app/pages/alerts.vue` 顶部解构 `{ fixingRunId, fixError, fixSuccess, triggerFix }` 但全文件未使用（真正的「立即修复此仓库」入口在子组件 `alert-run-sidebar.vue`），伴随的注释也仍在描述已抽走的流程；该孤立实例同样不消费后加的 `fixMerged`。
+  - **待评估点**：① 直接删除该解构 + 收敛注释（零行为风险）；② 或反向确认是否存在未接线的预期入口（若存在则补齐而非删除）。
+  - **触发条件**：下次改动 `alerts.vue` 时（该文件已处 max-lines warning 带，顺带减法更划算）。
+  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
+
 - **`architecture.md` 存在畸形 markdown 链接（未成对 `](`）（待评估）** —— 现象：`docs/design/governance/architecture.md` 的「监测系统 vs 自动合并解耦」表行末残留一处未成对的链接片段（`…experience-archive-§49-§57-recent-investigation.md#五十六) + …`），`check:docs` 因无法识别 `](` 而成对性静默跳过（不报错）。
   - **待评估点**：① 是否为重复拼接残留；② 自建链接校验器是否需补「未成对 `](` / `)` 计数」检测（当前只匹配合规 `](`）。
   - **触发条件**：下次改动该文件时；或加固 check-docs 链接校验口径时。

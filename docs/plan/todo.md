@@ -103,16 +103,19 @@
 - **交付物**：预计 2-3 commits——① engine 可观测性 + 归因（`fixers/pnpm/index.ts` + `result-assembly.ts` + `repo-fix.ts` + 单测）；② 平台映射 / i18n（`run-view.ts` + `scan-run-state.ts` + i18n ×2）；③（可选）规范 / 经验登记。预计 5-8 文件 / 150-300 行。
 - **风险与缓解**：**R1 归因口径变更影响既有失败分类展示**——AC ③ 以映射分层收敛 + 定向回归（实测无 `run-view` / i18n 改动）；**R2 扩展信号可能外泄敏感 stderr**——沿用既有日志脱敏口径（`getStderrText` 现路径，`failureDetail` 截断 200）；**R3 零告警仓库跳过验证链可能漏掉真实基线问题**——审计拦截后修正为仅跳过 lockfile repair，验证链对所有仓库保留。
 
-### M43.4 [P2 🎨] 扫描触发被去重合并时的前端感知
+### M43.4 [P2 🎨] 扫描触发被去重合并时的前端感知（**已闭环** `11d7404` + `b7d2256`）
 
 - **目标**：让「立即修复 / 扫描」入口在服务端返回去重合并（`merged`）时明确告知用户本次触发未真正执行，消除「点了修复但没跑」的困惑。
 - **优先级**：P2
-- **范围**：`apps/platform/app/composables/use-fix-now.ts:65-84`（当前不消费 `merged`，恒弹成功 toast 并跳转）+ 服务端响应 `apps/platform/server/api/repos/[id]/scan.post.ts:89-116`（顶层 `merged: { code: 'SCAN_PENDING_MERGED', message }`）+ `apps/platform/app/pages/repos.vue` 单仓库扫描入口（对齐语义）+ i18n ×2 + 单测 / e2e。
+- **范围**：`apps/platform/app/composables/use-fix-now.ts`（新增 `fixMerged` 状态 + 可注入依赖 + 合并早返回）+ `apps/platform/app/components/alert-run-sidebar.vue`（warning 消息）+ `apps/platform/app/pages/repos.vue`（`scanMerged` 状态 + 立即响应 `merged` 分支 + `pollRun` 合并口径）+ i18n ×2（新增共享键、清理失去引用的旧键）+ 单测 / e2e。
 - **验收标准**：
-  - [ ] ① **use-fix-now 命中合并**：响应含 `merged` 时不弹「成功」toast（改为「已合并 / 未真正执行」提示），跳转行为定稿（D 阶段裁定：不跳转 vs 跳转后 banner）。
-  - [ ] ② **repos.vue 入口对齐**：单仓库扫描入口对 `merged` 的提示口径与 use-fix-now 一致（新建路径的既有合并提示不回归）。
-  - [ ] ③ **单测**：`merged` 存在 / 不存在两分支断言（toast 内容 + 跳转行为）。
-  - [ ] ④ **门禁**：`pnpm run check:i18n` parity 0 + `pnpm typecheck` 0 error + 定向 vitest / e2e 通过。
+  - [x] ① **use-fix-now 命中合并**（D 裁定 = **不跳转**）：响应含顶层 `merged` → 走 `fixMerged`（warning）提示「已合并、本次未执行」，不弹成功 toast、**不跳转**（避免把用户带到未执行的既有 run）；请求体契约（`mode: fix` + `reuseScanRunId`）不变。
+  - [x] ② **repos.vue 入口对齐**：`triggerScan` 的 `runData.merged` 分支**前置**于 `status` 判断（新建路径合并时响应 `status` 为 `failed`，不前置会落「扫描失败」danger 文案）→ 走同一 warning 提示；`pollRun` 的 `SCAN_PENDING_MERGED` 由 danger 改同口径 warning（**防御分支**：异步合并在立即响应已短路，生产不可达，已按测试规范 §6.5 注释登记）；合并时清掉异步预置的 success，避免同屏 `warning + success` 语义冲突。
+  - [x] ③ **单测**：新增 `apps/platform/tests/unit/use-fix-now.test.ts` —— 合并（提示为 `fixMerged`、`navigate` 未被调用、无成功/错误）/ 无合并（成功提示含 runId 前缀 + 跳转目标 URL）/ 失败（错误提示 + 不跳转）/ `resetMessages` 三态清空；另补 2 条 e2e 合并用例（alerts 入口 + 单仓库扫描入口）。
+  - [x] ④ **门禁**：i18n parity（实际入口 `pnpm run i18n:audit:missing`，原条目写的 `check:i18n` 脚本不存在——本条按实际脚本取证）+ `pnpm typecheck` 0 error + 定向 vitest / e2e 通过。
+- **D 阶段定稿（2026-10-13 用户裁定）**：① **跳转行为 = 不跳转**（备选「跳转 + banner」未采纳——合并复用路径下既有 run 记录保持不变，跳转只会看到未执行的 run）；② **提示通道 = 新增 warning 状态**（新增 `fixMerged` / `scanMerged` + `CaomeiMessage tone="warning"`；备选「复用现有 error 通道」未采纳），两入口共用同一 i18n 键 `common.scanTriggerMerged`（满足「口径一致 + 键共用」）。
+- **实际交付**：`11d7404` fix(platform)（两入口消费顶层 `merged`：`use-fix-now` 合并提示 + 不跳转 + 可注入依赖，`repos.vue` 前置合并分支 + 清预置 success，`alert-run-sidebar` warning 通道，i18n 共享键新增与旧键清理）；`b7d2256` test(platform)（新增合并分支单测 4 用例 + 两入口 e2e 合并用例，单仓库侧改用 `github-action` 执行器以真正断言预置 success 清除）；本条登记 commit。**质量门**：`pnpm lint` 0 error（2 条存量 warning，无新增）；`pnpm typecheck` 全包 Done；定向单测 17 files / 237 passed（含新增 4 用例）；全仓 `pnpm run test:coverage` 254 files / 3981 passed / 10 skipped（Statements 88.24 / Branches 82.98 / Functions 87.61 / Lines 88.39，阈值 80）；定向 e2e（真实构建产物 + workers=1 + 独立库）9 passed（含 2 条新增合并用例，既有 7 条未回归）；`pnpm run build` exit 0；`check:docs` OK（151/87）；`lint:md` Done；`check:doc-size` 62/13/1/0；`check:orphan-ids` 0（676）；`check:standards-redundant:strict` 0；`docs:check:i18n` passed；mutation 标定 3 处全部击杀（去合并早返回 / 合并写 error 通道 / 去 `repos.vue` 合并分支重建后跑 e2e）。**审计**：standard **单分区** R1 **Pass**（0 blocker / 2 warning / 5 suggest）→ 收口（`pollRun` 合并防御分支按测试规范 §6.5 登记；合并 e2e 改用 `github-action` 执行器以真正断言「清掉预置 success」；`alerts.vue` 闲置解构登记 backlog 候选）→ R2 **Pass**（0 blocker / 1 warning / 2 suggest；R2 的 warning 为「声称入 wisdom 但未写入」，已随本轮补写两条会话 wisdom 条目关闭）。**D 阶段过程缺陷（自检/复跑拦截）**：初版把缺省 i18n 实现写成延迟求值（`useI18n()` 在事件处理期调用）→ 三条分支静默失效；既有 e2e 复跑时暴露（单测 0 覆盖、typecheck / lint 0 报错），改为 setup 期解析后全绿。
+- **残余**：① `alerts.vue` 存在一处**闲置**的 `useFixNow()` 解构（真正入口在子组件 `alert-run-sidebar.vue`，该孤立实例也与功能无关；批前存量，已登记 backlog 候选）；② server 端 `merged.message` 仍为硬编码中文（前端两个入口均已不消费其文案、改用共享 i18n 键，双语文案已正；影响面仅剩 API 直接消费方，暂不单列候选）；③ `repos.vue` `pollRun` 合并分支生产不可达（防御性保留，已按测试规范 §6.5 注释登记）；④ 单仓库扫描入口的 `github-action` 分支已由 e2e 覆盖，但 `sandbox` 执行器走同一前端分支、未单独覆盖（无独立可见差异）；⑤ D 阶段实测的「setup-only composable 不得在缺省实现里延迟求值」陷阱已入会话 wisdom 活跃条目，按 [AI 协作规范 §1.5 ② 阶段闭环后沉淀工作流](../standards/ai-collaboration.md#15-阶段归档检查--沉淀工作流pdtfc-闭环后必经) 留待 M43 阶段闭环蒸馏时提升到 `docs/standards/platform.md §7` + 检查点矩阵行（治理定义改动不在本批审计面内）。
 - **不做什么**：不改 `POST /api/repos/[id]/scan` 的去重合并语义与响应结构（仅前端消费）；不改服务端 `merged` 文案（如需服务端 i18n 化另登记）；不做「已有进行中任务 → 409 前置拒绝」新方案。
 - **依赖**：服务端已返回顶层 `merged`（`scan.post.ts:116`）；`use-fix-now.ts` 为 alerts 视图「立即修复此仓库」入口；M42.3 已收敛服务端 reuse 分支的既有 run 状态处置（本条目仅补前端感知）。
 - **交付物**：预计 1-2 commits——① composable + `repos.vue` + i18n ×2 + 单测；②（如需）e2e。预计 3-5 文件 / 60-120 行。
