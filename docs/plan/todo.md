@@ -82,21 +82,26 @@
     - **实际交付（M43.2c）**：见上列 4 commits（行展开面板 + 双语文案 + fixtures 写入路径 + e2e / 视觉覆盖 + 审计收口）。**质量门**：lint 0 error（2 条存量 warning）；typecheck 全包 Done；platform 全量 1770 passed / 9 skipped；全量 e2e **191 passed**；视觉套件 `=all` 重建后 11 passed（仅本页基线变更）；`i18n:check:anchor` OK / `i18n:audit:missing` parity none；check:docs OK（151/87）；lint:md Done；doc-size 62/13/1/0；orphan-ids 0（674）。**审计**：standard R1 **Pass**（0B / 1W（`signals === null` 分支无覆盖，属真实存量行路径）+ 5S）→ 收口（补存量行展开用例 + 空数组分支登记为防御 + fixtures 上限对齐生产 + 注释口径）→ R2 quick **Pass**（1 新 W：新用例未自包含 → `-g` 定向运行失败）→ 收口（用例内幂等自播种）→ R3 quick **Pass**（0B/0W/0S）。**残余**：`signals === []` 分支为防御（生产不可达：监控器空信号不落库、fixtures 空数组写 null）；fixtures 的 `summary` 上限 300 略严于生产落库上限 303（信息性）；页面本地视图类型与服务端各一份（前后端边界惯例）。
 - **风险与缓解**：**R1 限流**（每 PR 3+ API × N 轮）——增量轮询 + 终态跳过 + 沿用既有 429 / 限流退避；**R2 单行 JSON 膨胀**（Option A）——`signalsJson` 条目截断 + `summary` 限长；**R3 多源噪音**（非关注 check 也告警）——默认全量只报警不阻断（D3），后续按需引入关注集；**R4 变更面大触发未预期回归**——按 M43.2a / M43.2b / M43.2c 分批审计 / 分批提交。
 
-### M43.3 [P2 🛡️] 容器内 `pnpm install` 环境性失败的可观测性与归因口径
+### M43.3 [P2 🛡️] 容器内 `pnpm install` 环境性失败的可观测性与归因口径（**已闭环** `4fee403` + `66b7966` + `602f5bd` + `cbadeaa`）
 
 - **目标**：让「容器内 `pnpm install` 无 stderr 死亡」这类环境性失败可被定位（保留 stderr / exit code / signal），并把归因口径与 UI 文案对齐，消除「环境问题被呈现为 `engine_exit_2`『所有仓库失败或全量回滚』」的误归因。
 - **优先级**：P2
-- **范围**：`packages/engine/src/fixers/pnpm/index.ts:79-96`（`classifyLockfileFailure` 保留更多信号）+ `:143-145`（`execRepair` 当前用 `execFileSync` 丢弃 signal / 退出码）+ `:515`（`failureDetail` 取 `getStderrText(err) || err.message`）+ `packages/engine/src/app/repo-fix.ts:817`（`finalizeRepoFix` 对零告警仓库仍无条件跑 lockfile repair 与验证链）+ `packages/engine/src/app/result-assembly.ts`（`computeExitCode` 归因口径）+ `apps/platform/server/services/scan-run-state.ts:141-142`（`engine_exit_2` 定义）+ `apps/platform/app/utils/run-view.ts`（失败 stage / kind → i18n 标签映射；`engine_exit_2` message 由 `apps/platform/app/components/repo-history-dialog.vue` 直接渲染）+ 相关单测。
+- **范围**：`packages/engine/src/fixers/pnpm/index.ts`（分类结果与策略尝试保留进程级信号 + `ENVIRONMENT_ERROR` 判定与失败详情）+ `packages/engine/src/app/helpers.ts`（`tryLockfileRepair` 非归因标记 + 审计条目）+ `packages/engine/src/app/result-assembly.ts`（`computeExitCode` 归因口径）+ `packages/engine/src/app/repo-fix.ts`（`finalizeRepoFix` 零告警守卫）+ `packages/core/src/report/types.ts`（`FixAction.environmentalFailure`）+ `apps/platform/server/services/run-failure-classify.ts`（防御性映射）+ 相关单测。
 - **验收标准**：
-  - [ ] ① **可观测性**：`execRepair` / 分类结果保留并上报 `stderr` / exit code / signal（外部不再只看到 `Command failed: pnpm install --no-frozen-lockfile`）；单测覆盖「非零退出无 stderr」「信号杀死（含 signal 名）」两类。
-  - [ ] ② **归因口径**：唯一失败为「环境性安装失败 + 既有基线失败」且零告警时整次运行的归因定稿（D 阶段裁定：仍判 `failed` vs 归环境事件 / `failure_kind=transient`）且与 `computeExitCode` 一致；单测锁定。
-  - [ ] ③ **UI 文案**：失败 stage / kind → i18n 映射不再把环境性失败笼统呈现为 `engine_exit_2` 通用文案（新增 / 细化映射键，双语同步）。
-  - [ ] ④ **成本口径**：零告警仓库是否仍需跑 lockfile repair + 完整验证链定稿并落地（D 阶段裁定；若保留则显式注记理由）。
-  - [ ] ⑤ **门禁**：`pnpm lint` 0 error + `pnpm typecheck` 0 error + 定向 vitest 通过。
-- **不做什么**：不改 `pnpm install` 执行方式（`--no-frozen-lockfile` 保持）；不引入容器内安装失败自动重试 / 换源；不改锁文件修复策略链（`REGENERATE` / `REINSTALL`）语义；不改 `PRE_EXISTING_FAILURE` 基线判定的判定逻辑（仅可能调整归因汇总层）。
+  - [x] ① **可观测性**：分类结果与策略尝试保留 `exitCode` / `signal` / `timedOut` / `errno`，失败详情显式渲染（形如 `environmental install failure (exit code 1): no stderr diagnostics`；有 stderr 证据时为 `(signal SIGKILL): stderr: <文本>`；spawn 级失败为 `spawn error ENOENT`），外部不再只看到 `Command failed: pnpm install --no-frozen-lockfile`。
+  - [x] ② **归因口径**（D 裁定 = **不归因本次运行**）：环境性失败归 `ENVIRONMENT_ERROR` → `tryLockfileRepair` 标记 `FixAction.environmentalFailure` + 记审计条目，`computeExitCode` 将其纳入 `SKIPPED_AUDIT_CATEGORIES` 且该 action 不计失败动作——与既有失败基线（`PRE_EXISTING_FAILURE`）同族口径；单测锁定（含反例：环境性失败与真实失败并存时仍非零）。
+  - [x] ③ **UI 文案**（D 裁定 = **最小实现**）：环境性失败经 ② 后不再驱动 `status=failed` → 不再呈现为 `engine_exit_2`；平台侧补防御性映射 `install` + `transient`（不新增环境事件类型 / 不新增 i18n 键——`runs.failureStage.install` / `runs.failureKind.transient` 双语已存在并经 `i18n:audit:missing` 实证）。
+  - [x] ④ **成本口径**（D 裁定 = **仅跳过 lockfile repair**）：零告警仓库无升级改动即无锁文件待修复 → 跳过 lockfile repair；**保留修复后验证链**（其 `verificationPassed` 是零告警仓库唯一的「处理成功」信号，审计拦截了「整段跳过」方案导致的多仓出口码退化）。
+  - [x] ⑤ **门禁**：`pnpm lint` 0 error（2 条存量 warning）；`pnpm typecheck` 全包 Done；定向 vitest + 全仓 `test:coverage` 通过。
+- **D 阶段定稿（2026-10-13 用户裁定）**：
+  - **D1 归因口径 = A（不归因本次运行）**：环境性安装失败不计入失败动作 → 运行 exit 0/1（平台 `completed`）；备选（仍判 `failed` 但改可区分码 / 仅富化文案）未采纳。
+  - **D2 成本口径 = A（零告警仓库跳过收尾）**；**审计 R1 blocker 回流后修正为「仅跳过 lockfile repair」**——「整段跳过（含验证链）」会使健康零告警仓库丧失成功信号 → 多仓库运行由 exit 1 退化为 exit 2（重新触发本任务要消除的误归因），故按审计建议收窄为最小跳过面。
+  - **D3 可见性 = B（最小实现）**：仅执行日志 + 报告；不新增平台环境事件类型、不新增 i18n 键。
+- **实际交付**：`4fee403` fix(engine)（引擎信号保留 + 非归因口径 + 零告警守卫 + core 字段）+ `66b7966` test(engine)（信号 / 非归因 / 多仓不变量 / 守卫用例）+ `602f5bd` fix(platform)（防御性映射 + 镜像用例）+ `cbadeaa` docs(design)（设计文档同步）+ 本条登记 commit。**质量门**：`pnpm lint` 0 error（2 条存量 warning，无新增）；`pnpm typecheck` 全包 Done；`pnpm exec vitest run packages/engine` 65 files / 1283 passed / 1 skipped；全仓 `pnpm run test:coverage` 253 files / 3977 passed / 10 skipped（Statements 88.08 / Branches 82.96 / Functions 87.5 / Lines 88.2，阈值 80）；`pnpm run build` 全包 exit 0；`check:docs` OK（151/87）；`lint:md` Done；`check:doc-size` 62/13/1/0（未新增超标）；`check:orphan-ids` 0（675）；`check:standards-redundant:strict` 0；`docs:check:i18n` passed；`i18n:audit:missing` parity none；mutation 标定 6 处全部击杀（含「复现被否决的整段跳过设计」）。**审计**：standard **2 分区并发** R1 = P1（engine）**Reject**（1 blocker：零告警整段跳过致多仓出口码回归，附独立 `tsx` 复现）+ P2（platform/docs）**Pass**（6 warning / 3 suggest）→ 修复（守卫下移为仅跳 lockfile repair + 不变量用例；信号证据保留 + spawn errno；文档措辞 / 表格 / 单点声明收敛）→ R2 **两分区均 Pass**（apps 侧各 0 blocker；平台分区 0 warning）→ 应用 R2 suggest（用例注明生产不可达防御性锁定 + 基线采样成本边界注记）→ R3 **Pass**（0 blocker / 0 warning / 0 suggest）。**残余**：修复前基线采样（`sampleVerificationBaseline`）仍对零告警仓库执行（其时机须早于修复动作写盘、无法后移）→ 属成本项非正确性项，已在 `dependency-fixer.md` 登记为已知边界；平台侧防御性映射在当前编排路径不可达（已在代码注释与 taxonomy 显式登记）；`engine_exit_2` 映射本身未改（仅不再由环境性失败触发）。
+- **不做什么**：不改 `pnpm install` 执行方式（`--no-frozen-lockfile` 保持）；不引入容器内安装失败自动重试 / 换源；不改锁文件修复策略链（`REGENERATE` / `REINSTALL`）语义（新增分类沿用同链）；不改 `PRE_EXISTING_FAILURE` 基线判定的判定逻辑（仅调整归因汇总层）。
 - **依赖**：2026-10-11 生产实证（fix 扫描下容器内 `pnpm install` 反复非零退出且无 stderr → `classifyLockfileFailure` 归 `UNKNOWN` → 修复链全失败 + 基线验证同失败被判 `PRE_EXISTING_FAILURE` → `computeExitCode` 返回 2 → 平台呈现 `engine_exit_2`）；hotfix `1c7d8ff` / `53b6ffb`（report-only commit + 非 git 仓库守卫）为邻近链路但非本缺陷。
 - **交付物**：预计 2-3 commits——① engine 可观测性 + 归因（`fixers/pnpm/index.ts` + `result-assembly.ts` + `repo-fix.ts` + 单测）；② 平台映射 / i18n（`run-view.ts` + `scan-run-state.ts` + i18n ×2）；③（可选）规范 / 经验登记。预计 5-8 文件 / 150-300 行。
-- **风险与缓解**：**R1 归因口径变更影响既有失败分类展示**——AC ③ 以 i18n 映射分层收敛 + 定向回归；**R2 扩展信号可能外泄敏感 stderr**——沿用既有日志脱敏口径（`getStderrText` 现路径）；**R3 零告警仓库跳过验证链可能漏掉真实基线问题**——D 阶段裁定并在 AC ④ 显式记录取舍理由。
+- **风险与缓解**：**R1 归因口径变更影响既有失败分类展示**——AC ③ 以映射分层收敛 + 定向回归（实测无 `run-view` / i18n 改动）；**R2 扩展信号可能外泄敏感 stderr**——沿用既有日志脱敏口径（`getStderrText` 现路径，`failureDetail` 截断 200）；**R3 零告警仓库跳过验证链可能漏掉真实基线问题**——审计拦截后修正为仅跳过 lockfile repair，验证链对所有仓库保留。
 
 ### M43.4 [P2 🎨] 扫描触发被去重合并时的前端感知
 
