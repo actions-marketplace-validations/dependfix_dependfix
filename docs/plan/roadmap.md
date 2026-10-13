@@ -879,6 +879,8 @@ per-alert 模型 + reconcile + API 简化 + UI 调整 + backfill 脚本。5 子�
 
 **commits 状态**：阶段启动规划 commit 落地后按 [规划规范 §4.4 第 5 条](../standards/planning.md#44-大批量归档批次操作规范) 用 `git rev-list HEAD ^origin/master --count` 双向核验并动态描述，不写死数字。**本批实测登记的已知边界**：`roadmap.md` 因本段新增一度达 906 行 → 超「强制分片阈值（>900）」触发 `check-doc-size` error；本批以**压缩本段回落到 warning 带**处置，完整拆分（M0–M38 段迁出至 `archive/roadmap-phases-m0-m38.md` + 全仓锚点重指，实测落点约 57 处 / 15 文件）待用户决策后立项（拆分为「早期间段迁出 + 主文档保留最近 5 段 + 当前阶段」策略，依据 [archive/index.md §2](archive/index.md)）。
 
+**阶段期间插队热修（不占阶段编号）**：entrypoint 双进程信号处置顺序竞态（CI 偶发红；[规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 插队例外清单第 3 类「CI 主链路阻塞」+ 用户 2026-10-14 授权）—— 规则与检查点落 [platform.md §10.6](../standards/platform.md#106-队列执行进程隔离独立-worker-进程)，批次记录见 [archive/index.md §4](archive/index.md)。
+
 > 详细任务与 8 要素见 [todo.md §M44](todo.md#m44-验证链治本--文档门禁可信度收口2026-10-14-用户决策方案-a)；上一阶段（M43）见 [todo-archive.md §M43](todo-archive.md#m43-pr-check-能力补强--运行时可靠性与工程治理2026-10-12-用户决策方案-a--2026-10-14-归档)。
 
 ---
