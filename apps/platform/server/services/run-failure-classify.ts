@@ -100,7 +100,7 @@ const FAILURE_CODE_MAP: Readonly<Record<string, FailureCodeMapping>> = {
     // clone — 仓库克隆
     clone_timeout: { stage: 'clone', kind: 'transient' },
 
-    // install — 依赖安装 / lockfile（当前平台无 FixError 发射点，防御性映射，见设计稿 §4.1）
+    // install — 依赖安装 / lockfile
     LOCKFILE_NOT_FOUND: { stage: 'install', kind: 'deterministic' },
     MANIFEST_MISMATCH: { stage: 'install', kind: 'deterministic' },
     LOCKFILE_VERSION_MISMATCH: { stage: 'install', kind: 'deterministic' },
@@ -108,6 +108,16 @@ const FAILURE_CODE_MAP: Readonly<Record<string, FailureCodeMapping>> = {
     CREDENTIAL_ERROR: { stage: 'install', kind: 'deterministic' },
     RESOLVE_ERROR: { stage: 'install', kind: 'unknown' },
     MINIMUM_RELEASE_AGE: { stage: 'install', kind: 'deterministic' },
+    // 环境性安装失败（诊断步无 stderr 诊断：被信号杀死 / 超时 / 静默非零退出）。
+    // 引擎侧记 `ENVIRONMENT_ERROR` 并标记为**非归因**（`SKIPPED_AUDIT_CATEGORIES` +
+    // `FixAction.environmentalFailure`）→ 不驱动 status=failed、不参与 exit code；
+    // 故本项在当前编排路径上**不可达**（`failed` 分支的 `errorJson` 恒有值，见
+    // `scan-orchestrator.service.ts` 落库段；其余失败写路径均传显式 error）。
+    // 保留为**防御性映射**（同表内 `EMPTY_REPO_LIST` / `SCRIPT_NOT_FOUND` 等同类）：
+    // 一旦内部回退读 `result.errors` 的路径被改动而变得可达，该信号应落 `install` + 可重试，
+    // 而非笼统归入 `runtime` + `engine_exit_2`。注意 `resolveFailureCode` 取「首个可映射类别」，
+    // 若该回退路径可达需同时核验优先级，避免把真实失败误标为 install/transient。
+    ENVIRONMENT_ERROR: { stage: 'install', kind: 'transient' },
 
     // fix — 修复应用
     PROCESS_FAILED: { stage: 'fix', kind: 'unknown' },
