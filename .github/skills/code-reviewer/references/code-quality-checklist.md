@@ -317,7 +317,8 @@ if (value) { ... }  // 对 0, "", false 失效
 | [development.md §5.1.39](../../../../docs/standards/development.md) | 删除公共导出 | 是否全仓（**含全部测试目录**）grep 引用？是否区分代码引用与文档 / 归档描述性文本？ |
 | [development.md §5.1.40](../../../../docs/standards/development.md) | 与外部工具语义对齐的判定 | 是否用该工具权威实现逐形态（**含反例**）实测比对？等价类扩展方向是否倾向保守（宁可多报不可漏判）？ |
 | [documentation.md §6](../../../../docs/standards/documentation.md) | 阶段状态口径翻转 | 「暂无进行中阶段」↔「Mxx 进行中」翻转时，是否同步**全部承载位置**（待办速查表 + 路线图指针 + 各文档速查表 + 首页里程碑）？ |
-| [documentation.md §6](../../../../docs/standards/documentation.md) | 规范 / 文档声明「覆盖面」（如「全部 N 处调用点」） | 是否限定**作用对象**并显式列出**不适用面**（防 repo-wide 读成零遗漏）？文档示例与实现不一致时，是否优先补实现侧容忍而非把文档改窄？ |
+| [documentation.md §6](../../../../docs/standards/documentation.md) | 规范 / 文档声明「覆盖面」（如「全部 N 处调用点」） | 是否限定**作用对象**并显式列出**不适用面**（防 repo-wide 读成零遗漏）？ |
+| [documentation.md §6](../../../../docs/standards/documentation.md) | 文档示例形态（如指针写法）与实现不一致 | 该形态是否属**既有文档已声明的约定**（是 → 在实现侧扩展容忍并补测，而非把文档改窄）？ |
 | [development.md §5.1.41](../../../../docs/standards/development.md) | 「收窄 / 跳过」类改动（省成本、消除假失败、提前返回、降级） | 被跳过步骤的产物是否有**别的消费者**（字段级穷举）？跳过后面临的判据空洞是否显式补上（新增信号 / 跨用例不变量）？ |
 | [development.md §5.1.42](../../../../docs/standards/development.md) | 给 composable 引入依赖注入（`useXxx(deps)`） | 缺省实现是否在 **setup 期**求值（`deps.x ?? resolveXxx()`）而非事件期延迟调用 setup-only composable（`useI18n` / `useRoute` / `useState`）？事件期是否只用 event-safe 全局？ |
 | [testing.md §6.11](../../../../docs/standards/testing.md) | 门禁 / 脚本类单测（`scripts/**`） | CLI 早返回分支是否 `process.exit` **兼** `return`（mock 下不终止会 fall-through，使 mutation 存活）？夹具字面量是否会被被测门禁脚本自身扫到（改运行时拼接）？ |

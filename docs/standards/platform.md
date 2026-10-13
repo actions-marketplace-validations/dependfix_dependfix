@@ -103,6 +103,8 @@ Nuxt 4（全栈 SSR + API Routes，`app/` + `server/`）/ TypeScript strict / UI
 - 一旦抽到 `utils/<feature>.ts`，所有 SFC（含 dialog）一律 import 复用，禁止在第二处复制定义（即使仅微调）。
 - **有状态 composable 的 SSR 与可测性**：localStorage 偏好**不得**在构造期读存储（SSR 首帧错配），由 `onMounted` 或打开弹窗时填充；存储以可选参数注入，读写与解析全路径 try/catch（访问 `localStorage` 本身可能抛错）；单测用内存实现 + 抛错 getter 覆盖读写 / 脏数据 / 抛错分支。实例见 `app/composables/use-scan-preferences.ts`。
 
+- 依赖注入型 composable 的**缺省实现求值时机**（setup 期 vs 事件期）见 [development.md §5.1.42](./development.md)（条目为列表项无独立锚点，按 §2「本地文件链接默认不带锚点」引用）。
+
 ### 7.4 caomei-ui 接线约定
 
 > 迁移缘由、分批计划与逐批结论见 [UI 组件库迁移评估](../design/governance/caomei-ui-migration.md)（PrimeVue 迁移已于 M31 闭环、依赖已卸载）；本节只登记**接线约定**。

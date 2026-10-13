@@ -849,9 +849,9 @@ per-alert 模型 + reconcile + API 简化 + UI 调整 + backfill 脚本。5 子�
 
 **审计 depth 预告**：M43.2（数据模型 / migration / 公开 API / 外部调用）→ `standard`（建议 2 分区并发）；M43.3（归因口径 + 展示映射）→ `standard`；M43.5（engine git 行为 + 平台 push 路径）→ `standard`；M43.1 / M43.4（前端）→ `quick`；M43.6（脚本 + 单测）→ `quick`。
 
-**commits 状态**：阶段启动规划 1 + 前置插队热修 3 + M43.1 3 + M43.2 26 + M43.3 5 + M43.4 3 + M43.5 4 + M43.6 4 = **49 commits**（`git log master --first-parent --oneline 68ad47f^..HEAD` 去重统计）；归档时 `git rev-list HEAD ^origin/master --count` 实测 = 11（`origin/master ^HEAD` = 0 双向核验；M43.1 / M43.2 / M43.3 及其前已推送），待用户推送确认。
+**commits 状态**：阶段启动规划 1 + 前置插队热修 3 + M43.1 3 + M43.2 27 + M43.3 5 + M43.4 3 + M43.5 4 + M43.6 4 = **50 commits**（`git log master --first-parent --oneline 68ad47f^..HEAD` 去重统计）；归档前 `git rev-list HEAD ^origin/master --count` 实测 = 11（`origin/master ^HEAD` = 0 双向核验；M43.1 / M43.2 / M43.3 及其前已推送），待用户推送确认。
 
-> 详细任务与 8 要素见 [todo-archive.md §M43](todo-archive.md#m43-pr-check-能力补强--运行时可靠性与工程治理2026-10-12-用户决策方案-a--2026-10-14-归档)（2026-10-14 已闭环归档；**6 原子 49 commits** + 阶段期间 caomei-ui `0.6.0` 升级回归插队热修 3 commits）；上一阶段（M42）见 [todo-archive.md §M42](todo-archive.md#m42-修复交付正确性--平台能力与体验补强m421m426-全部已闭环--2026-10-11-归档)。
+> 详细任务与 8 要素见 [todo-archive.md §M43](todo-archive.md#m43-pr-check-能力补强--运行时可靠性与工程治理2026-10-12-用户决策方案-a--2026-10-14-归档)（2026-10-14 已闭环归档；**6 原子 50 commits** + 阶段期间 caomei-ui `0.6.0` 升级回归插队热修 3 commits）；上一阶段（M42）见 [todo-archive.md §M42](todo-archive.md#m42-修复交付正确性--平台能力与体验补强m421m426-全部已闭环--2026-10-11-归档)。
 
 ---
 
