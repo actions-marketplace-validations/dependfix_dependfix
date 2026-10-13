@@ -163,6 +163,7 @@ commit message 应聚焦于"当次提交的改动"+"可供事后复查的信息"
 **做法**：① 提交前 `git stash push -- <其它文件>` 隔离（或先提交再改）；② 每次提交后 `git show --stat HEAD` 逐条核对文件清单；③ 误入时用 `git reset --soft HEAD~1` + `git restore --staged .` 重做（重做前重新隔离工作区）。
 
 **多 commit 隔离用 complement-stash（补集非空判断 + 补集数组）**：多 atomic commit 场景需隔离其它改动时——① **stash 前必须判断补集数组非空**：若目标是当前全部改动（补集为空），`git stash push -m x --`（无路径）会**暂存全部改动**，随后 `git add` 落空、commit 报 `nothing to commit`（`git stash pop` 后无数据丢失）；补集为空时直接 `git add` 目标并提交。② 求补集：`git status --porcelain` 取全量路径 → `comm -23` 求补集 → `git stash push -u -- <补集>` 隔离，提交后 `git stash pop`（目标与补集不相交，pop 无冲突），再 `git show --stat HEAD` 核对文件数。
+- **配套操作陷阱（2026-10-14 M43.5 实测）**：① `git add -N`（intent-to-add）的新文件会让 `git stash push` 报 `Entry … not uptodate. Cannot merge` → 先 `git reset -- <新文件>` 退回未跟踪状态再 stash；② 多 commit 隔离脚本必须带 **EXIT trap 恢复补集**——commit 被 commitlint / hook 拒绝时 `set -e` 会在 `git stash pop` 之前退出，补集改动滞留 stash。
 
 ### 3.7.2 未提交工作区做变更 / 还原：禁用 `git checkout --` / `git restore`
 

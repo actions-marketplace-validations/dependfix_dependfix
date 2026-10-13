@@ -303,12 +303,13 @@ if (value) { ... }  // 对 0, "", false 失效
 | [development.md §5.1.36](../../../../docs/standards/development.md) | 并发终态写 / 聚合状态写回 / 条件更新 | 是否用条件 `update({ id, status: <读取时状态> }, payload)` 而非整行 `save`；乐观锁条件是否取读取时状态（非固定 `'running'`）；`affected === 0` 是否跳过；payload 是否显式写 `updatedAt` |
 | [development.md §5.1.37](../../../../docs/standards/development.md) | 多源 / 多分支「全部失败」判定 | 存在第三态（如 `ALERTS_DISABLED`）时判据是否为「失败数 > 0 且成功数 === 0」（非 `失败数 === 总数`）；抛错前 per-source 状态是否完整写入；仓库级 catch 追加同 `category` 信号前是否先判「该仓库已有带 `source` 的同类信号」（避免重复信号与日志汇总 `unknown` 归组） |
 | [testing.md §6.4](../../../../docs/standards/testing.md) | e2e 控制服务端 locale / 操作请求 cookie header | 是否用显式 `cookie` header 剥离 / 附加（而非操作浏览器上下文 cookie，避免客户端框架异步回写竞态）；未认证 API 是否显式空 `storageState` |
-| [git.md §3.7.1](../../../../docs/standards/git.md) | 多 atomic commit 隔离 / complement-stash | stash 补集前是否判断补集非空（为空直接 `git add` 目标，防 `git stash push --` 无路径暂存全部）；提交后 `git show --stat HEAD` 是否核对文件数 |
+| [git.md §3.7.1](../../../../docs/standards/git.md) | 多 atomic commit 隔离 / complement-stash | stash 补集前是否判断补集非空（为空直接 `git add` 目标，防 `git stash push --` 无路径暂存全部）；提交后 `git show --stat HEAD` 是否核对文件数；`git add -N` 的 intent-to-add 新文件是否先 `git reset --` 退回未跟踪再 stash；隔离脚本是否带 **EXIT trap 恢复补集**（commit 被拒时不得滞留 stash） |
 | [planning.md §3.4](../../../../docs/standards/planning.md) | 规划条目标注历史 commit 的 C 编号 / M 阶段 | 是否 `git show --stat <hash>` + 归档分片核实归属（非凭同域描述推断） |
 | [platform.md §6.2 运行失败分类口径](../../../../docs/standards/platform.md#62-运行失败分类口径) | 失败分类三列（`failure_code` / `failure_stage` / `failure_kind`）落库 / 回填 / 筛选改动 | 分类是否集中映射表 + `unknown` 兜底（未映射码保留 `code`）；落库是否覆盖**全部**失败写路径（含复用 run 时清空三列）；回填是否 dry-run 默认 + 幂等 + 无法判定写 `unknown` |
 | [platform.md §7.4 caomei-ui 接线约定](../../../../docs/standards/platform.md#74-caomei-ui-接线约定) | 筛选 / 偏好类下拉的「全部 / 未设置」项 | `SelectItem` 的 `value` 是否非空串（空串触发 SSR 500）；哨兵值是否在对外提交前映射为「不传参」或 `null`，且**不落盘 / 不参与枚举校验** |
 | [platform.md §7.4 caomei-ui 接线约定](../../../../docs/standards/platform.md#74-caomei-ui-接线约定) | `CaomeiDialog` 响应式宽度 / 弹窗宽度写法 | 需要响应式宽度时是否用设计钩子 `--caomei-dialog-width`（非 inline `:style="{width}"`——inline 恒胜 `:breakpoints`，会使其成为死代码，窄视口失效） |
 | [platform.md §7.6 运行时 env 开关的 UI 状态暴露](../../../../docs/standards/platform.md#76-运行时-env-开关的-ui-状态暴露用只读端点) | UI 反映服务端运行时 env 开关（如 `ACTION_STATUS_MONITOR_ENABLED`） | 是否用服务端**只读端点**按请求读 `process.env`（非 `runtimeConfig.public`——构建期烘焙会漂移）；UI 文案是否说明「设置后需重启」 |
+| [documentation.md §2](../../../../docs/standards/documentation.md) | 规范 / 设计文档的条款标题 | 标题内是否嵌套了强调标记（`**`）导致渲染破损（门禁全绿但渲染错乱）？边界说明 / 交叉引用是否放在正文？ |
 | [testing.md §6.5](../../../../docs/standards/testing.md) | 交互断言（点击 / 提交）区分度 | 点击目标是否确认为**事件绑定元素**？断言是否只能由该行为产生的状态（如排序属性）满足？三态控件是否逐次操作并等待属性回写（避免过冲）？ |
 | [testing.md §6.6](../../../../docs/standards/testing.md) | ESM 接线断言 | 是否用 `vi.mock` + `importOriginal` **部分 mock**（记录实参后委托真实实现），而非整体 mock 破坏依赖真实行为的既有用例？ |
 | [testing.md §6.7](../../../../docs/standards/testing.md) | 页面可见改动 → 视觉基线 | 改动页面的整页基线是否重建？**以该页为背景的视口基线**是否连带重建？是否连跑两遍验证幂等？无视觉守卫的页面是否显式登记？ |
@@ -316,6 +317,10 @@ if (value) { ... }  // 对 0, "", false 失效
 | [development.md §5.1.39](../../../../docs/standards/development.md) | 删除公共导出 | 是否全仓（**含全部测试目录**）grep 引用？是否区分代码引用与文档 / 归档描述性文本？ |
 | [development.md §5.1.40](../../../../docs/standards/development.md) | 与外部工具语义对齐的判定 | 是否用该工具权威实现逐形态（**含反例**）实测比对？等价类扩展方向是否倾向保守（宁可多报不可漏判）？ |
 | [documentation.md §6](../../../../docs/standards/documentation.md) | 阶段状态口径翻转 | 「暂无进行中阶段」↔「Mxx 进行中」翻转时，是否同步**全部承载位置**（待办速查表 + 路线图指针 + 各文档速查表 + 首页里程碑）？ |
+| [documentation.md §6](../../../../docs/standards/documentation.md) | 规范 / 文档声明「覆盖面」（如「全部 N 处调用点」） | 是否限定**作用对象**并显式列出**不适用面**（防 repo-wide 读成零遗漏）？文档示例与实现不一致时，是否优先补实现侧容忍而非把文档改窄？ |
+| [development.md §5.1.41](../../../../docs/standards/development.md) | 「收窄 / 跳过」类改动（省成本、消除假失败、提前返回、降级） | 被跳过步骤的产物是否有**别的消费者**（字段级穷举）？跳过后面临的判据空洞是否显式补上（新增信号 / 跨用例不变量）？ |
+| [development.md §5.1.42](../../../../docs/standards/development.md) | 给 composable 引入依赖注入（`useXxx(deps)`） | 缺省实现是否在 **setup 期**求值（`deps.x ?? resolveXxx()`）而非事件期延迟调用 setup-only composable（`useI18n` / `useRoute` / `useState`）？事件期是否只用 event-safe 全局？ |
+| [testing.md §6.11](../../../../docs/standards/testing.md) | 门禁 / 脚本类单测（`scripts/**`） | CLI 早返回分支是否 `process.exit` **兼** `return`（mock 下不终止会 fall-through，使 mutation 存活）？夹具字面量是否会被被测门禁脚本自身扫到（改运行时拼接）？ |
 
 > **维护纪律**：本矩阵为严格约束检查点的**单点落点**，其他文档 / skill / agent 只做一行链接引用（见上方「规范单点声明」）。矩阵行与条款对应（**同一条款可对应多行**，见上方说明）；条款废弃 / 合并时同步删行。
 
