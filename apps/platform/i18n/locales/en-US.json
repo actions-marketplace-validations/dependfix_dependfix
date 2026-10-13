@@ -45,6 +45,7 @@
         "errors": {
             "unknown": "Unknown error"
         },
+        "scanTriggerMerged": "This repository already has a scan in progress; this trigger was merged and did not run. Check the scan history for progress.",
         "yes": "Yes",
         "no": "No",
         "fixStatus": {
@@ -179,7 +180,6 @@
         "importFreshRefreshed": "Forced refresh",
         "scanStatusQueryFailed": "Failed to query scan status, check the scan history",
         "scanCompleted": "Scan completed, see results in the scan history",
-        "scanDuplicate": "This repository already has a scan in progress",
         "scanFailed": "Scan failed: {message}",
         "scanDispatched": "GitHub Action scan triggered (progress available in scan history)",
         "scanDispatchedWithUrl": "GitHub Action scan triggered, click the link below to view the run",

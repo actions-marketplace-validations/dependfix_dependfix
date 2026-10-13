@@ -81,6 +81,7 @@ const repoDisplay = (repo: RepoView) => `${repo.owner}/${repo.name}`
 // 扫描触发（异步队列：入队立即返回 + 轮询状态；同步降级：请求内完成）
 const scanningId = ref<string | null>(null)
 const scanError = ref('')
+const scanMerged = ref('')
 const scanSuccess = ref('')
 const lastRunUrl = ref<string | null>(null)
 
@@ -108,10 +109,16 @@ const pollRun = async (runId: string, executorKind: string) => {
             return
         }
         if (run.status === 'failed') {
-            // SCAN_PENDING_MERGED（去重合并，与 ServerErrorCode 口径对齐）：非执行失败，提示合并语义而非"扫描失败"
-            scanError.value = run.error?.code === 'SCAN_PENDING_MERGED'
-                ? (run.error.message ?? t('repos.scanDuplicate'))
-                : t('repos.scanFailed', { message: run.error?.message ?? t('common.errors.unknown') })
+            // SCAN_PENDING_MERGED（去重合并，与 ServerErrorCode 口径对齐）：非执行失败，走 warning 提示合并语义。
+            // 防御分支（按测试规范 §6.5 登记）：异步合并已在**立即响应**阶段（triggerScan 的 `runData.merged`）
+            // 短路，本分支在生产不可达；同步路径不产出 merged。保留以防后续轮询观测到被合并 run 的终态。
+            // 文案用共享 i18n 键（与 alerts「立即修复此仓库」入口口径一致；服务端 message 不参与渲染以保证双语文案）
+            if (run.error?.code === 'SCAN_PENDING_MERGED') {
+                scanSuccess.value = ''
+                scanMerged.value = t('common.scanTriggerMerged')
+            } else {
+                scanError.value = t('repos.scanFailed', { message: run.error?.message ?? t('common.errors.unknown') })
+            }
             return
         }
         if (run.status === 'dispatched') {
@@ -139,6 +146,7 @@ const triggerScan = async (
 ) => {
     pollCancelled = false
     scanError.value = ''
+    scanMerged.value = ''
     scanSuccess.value = ''
     lastRunUrl.value = null
     scanningId.value = repo.id
@@ -157,8 +165,14 @@ const triggerScan = async (
                 aiTrigger,
             },
         })
-        const runData = run as unknown as { id: string, status: string, runUrl: string | null }
-        if (runData.status === 'pending') {
+        const runData = run as unknown as { id: string, status: string, runUrl: string | null, merged?: { code: string, message: string } }
+        if (runData.merged) {
+            // 去重合并：本次触发未真正执行（新建路径的 pending run 已被置 failed + SCAN_PENDING_MERGED）
+            // → 只提示合并语义，不轮询、不按失败呈现（与 alerts 入口口径一致）；
+            // 清掉异步预置的「正在触发…」success，避免同屏 warning + success 语义冲突
+            scanSuccess.value = ''
+            scanMerged.value = t('common.scanTriggerMerged')
+        } else if (runData.status === 'pending') {
             // 队列模式：已入队，轮询状态
             scanSuccess.value = t('repos.scanQueued')
             await pollRun(runData.id, repo.executorKind ?? 'container')
@@ -495,6 +509,13 @@ const columns = computed<DataTableColumn<RepoView>[]>(() => [
             :closable="false"
         >
             {{ scanError }}
+        </CaomeiMessage>
+        <CaomeiMessage
+            v-if="scanMerged"
+            tone="warning"
+            :closable="false"
+        >
+            {{ scanMerged }}
         </CaomeiMessage>
         <CaomeiMessage
             v-if="scanSuccess"

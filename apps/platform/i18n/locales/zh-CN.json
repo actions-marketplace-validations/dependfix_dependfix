@@ -45,6 +45,7 @@
         "errors": {
             "unknown": "未知错误"
         },
+        "scanTriggerMerged": "该仓库已有进行中的扫描任务，本次触发已合并（未执行）；可在扫描历史查看进度",
         "yes": "是",
         "no": "否",
         "fixStatus": {
@@ -179,7 +180,6 @@
         "importFreshRefreshed": "已强制刷新",
         "scanStatusQueryFailed": "扫描状态查询失败，可在扫描历史中查看",
         "scanCompleted": "扫描完成，可在扫描历史中查看结果",
-        "scanDuplicate": "该仓库已有进行中的扫描任务",
         "scanFailed": "扫描失败：{message}",
         "scanDispatched": "已触发 GitHub Action 扫描（可在扫描历史中查看）",
         "scanDispatchedWithUrl": "已触发 GitHub Action 扫描，点击下方链接查看运行",

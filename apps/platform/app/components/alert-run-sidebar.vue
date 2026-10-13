@@ -63,7 +63,7 @@ watch(() => props.visible, (value, previous) => {
     }
 })
 
-const { fixingRunId, fixError, fixSuccess, triggerFix } = useFixNow()
+const { fixingRunId, fixError, fixMerged, fixSuccess, triggerFix } = useFixNow()
 
 const modeLabel = (mode: string) => runModeLabel(mode, t)
 const executorLabel = (executorKind: string) => runExecutorLabel(executorKind, t)
@@ -100,6 +100,13 @@ const columns = computed<DataTableColumn<AlertSidebarRun>[]>(() => [
                 :closable="false"
             >
                 {{ fixError }}
+            </CaomeiMessage>
+            <CaomeiMessage
+                v-if="fixMerged"
+                tone="warning"
+                :closable="false"
+            >
+                {{ fixMerged }}
             </CaomeiMessage>
             <CaomeiMessage
                 v-if="fixSuccess"
