@@ -128,6 +128,25 @@ test.describe('PR Check 构建 / 部署信号详情', () => {
     })
 
     test('存量行（无信号数据）展开时给出显式说明', async ({ page }) => {
+        // 自包含：本用例独立补种存量行（幂等；避免依赖前一个用例的种子，保证 -g 定向运行可用）
+        await seedCustomFixtures(page.request, {
+            repos: [{ owner: 'foo', name: 'bar' }],
+            scanRuns: [],
+            scanResults: [],
+            prChecks: [
+                {
+                    repositoryOwner: 'foo',
+                    repositoryName: 'bar',
+                    prNumber: 392,
+                    headSha: 'd'.repeat(40),
+                    authorLogin: 'dependabot[bot]',
+                    conclusion: 'success',
+                    alertFiring: false,
+                    lastPolledAt: '2026-08-27T02:00:00.000Z',
+                },
+            ],
+        })
+
         await page.goto('/pr-checks')
         await waitForHydration(page)
 
