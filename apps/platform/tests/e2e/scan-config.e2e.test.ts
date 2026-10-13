@@ -317,4 +317,74 @@ test.describe('单仓库扫描配置 Dialog', () => {
         await openScanConfig()
         await expect(page.locator('#scanConfigMode')).toContainText('仅报告')
     })
+
+    /**
+     * 去重合并（顶层 merged）：新建路径的 pending run 已被置 failed + SCAN_PENDING_MERGED，
+     * 但 UI 应按「已合并（未执行）」warning 呈现——而非笼统的「扫描失败：…」danger 文案。
+     *
+     * 用 `github-action` 执行器构造：该路径会在请求前预置「正在触发 GitHub Action 扫描…」success，
+     * 从而真正断言「合并分支清掉预置 success」的子效果（container 路径不会预置，断言会弱化）。
+     */
+    test('单仓库扫描命中去重合并 → 显示 warning 合并提示而非扫描失败', async ({ page }) => {
+        const stamp = Date.now()
+        const owner = `e2e-scan-merged-${stamp}`
+        const name = `repo-${stamp}`
+
+        const cookieHeader = (await page.context().cookies())
+            .map((c) => `${c.name}=${c.value}`)
+            .join('; ')
+        const createRes = await page.request.post('/api/repos', {
+            headers: { cookie: cookieHeader },
+            data: {
+                owner,
+                name,
+                defaultBranch: 'main',
+                packageManager: 'pnpm',
+                executorKind: 'github-action',
+                actionWorkflowFile: 'dependfix.yml',
+            },
+        })
+        expect(createRes.status()).toBe(200)
+
+        // mock POST scan：返回顶层 merged（新建路径合并 → 响应 status 为 failed + error.code = SCAN_PENDING_MERGED）
+        await page.route('**/api/repos/*/scan', async (route) => {
+            if (route.request().method() !== 'POST') {
+                return route.fallback()
+            }
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    id: `mock-run-${stamp}`,
+                    repositoryId: 'mock',
+                    mode: 'fix',
+                    severityThreshold: 'high',
+                    executorKind: 'container',
+                    status: 'failed',
+                    startedAt: new Date().toISOString(),
+                    finishedAt: new Date().toISOString(),
+                    runUrl: null,
+                    summary: null,
+                    error: { code: 'SCAN_PENDING_MERGED', message: '该仓库已有进行中的扫描任务，本次触发已合并' },
+                    merged: { code: 'SCAN_PENDING_MERGED', message: '该仓库已有进行中的扫描任务，本次触发已合并' },
+                }),
+            })
+        })
+
+        await page.goto(`/repos?_=${stamp}`)
+        await waitForHydration(page)
+        await expect(page.locator('.caomei-data-table')).toBeVisible({ timeout: 15000 })
+        const row = page.locator('.caomei-data-table__row').filter({ hasText: owner })
+        await expect(row).toBeVisible({ timeout: 15000 })
+
+        await row.locator('button[title="触发扫描"]').click()
+        await expect(page.locator('.caomei-dialog__header')).toBeVisible({ timeout: 15000 })
+        await page.locator('.scan-config-form button:has-text("开始扫描")').click()
+        await expect(page.locator('.caomei-dialog__header')).not.toBeVisible({ timeout: 15000 })
+
+        // warning 合并提示（共享 i18n 文案）；不出现「扫描失败：」danger 文案，也不出现 success（避免同屏语义冲突）
+        await expect(page.locator('.caomei-message--warning')).toContainText('本次触发已合并（未执行）', { timeout: 15000 })
+        await expect(page.locator('.caomei-message--danger')).toHaveCount(0)
+        await expect(page.locator('.caomei-message--success')).toHaveCount(0)
+    })
 })
