@@ -49,6 +49,10 @@ export const MD_EXCLUDED_DIRS = new Set([
     '.claude',
     '.session',
     'artifacts',
+    // Playwright 产物（gitignored）：`test-results/**/error-context.md` 会污染 md 扫描面
+    // 与「links: N md files」口径（2026-10-13 e2e 产物实测）
+    'playwright-report',
+    'test-results',
 ])
 
 /**

@@ -49,6 +49,9 @@ const HASH_COMMENT_EXTENSIONS = new Set(['.yml', '.yaml', '.sh', '.bash', '.zsh'
 /** 跳过的目录名（按目录名在任意层级匹配）。 */
 export const EXCLUDED_DIRS = new Set([
     'node_modules', 'dist', '.nuxt', '.output', 'coverage',
+    // Playwright 产物（本地跑过 e2e / 视觉用例后生成，gitignored）：其 minified JS 含形似规划编号的
+    // 短 token，若不排除会以伪编号误报（2026-10-13 e2e 产物实测）
+    'playwright-report', 'test-results',
     '.git', '.session', '.opencode', 'docs', 'artifacts', 'temp',
 ])
 

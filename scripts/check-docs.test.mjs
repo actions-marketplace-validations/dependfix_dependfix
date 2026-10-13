@@ -173,6 +173,21 @@ describe('checkLinks', () => {
         expect(errors.some((e) => e.includes('docs/real.md'))).toBe(true)
     })
 
+    it('excludes Playwright artifacts (playwright-report / test-results) from walk', () => {
+        write('apps/platform/playwright-report/trace/index.html', 'x')
+        write('apps/platform/test-results/case/error-context.md', '[死链](missing.md)')
+        write('playwright-report/report.md', '[死链](missing.md)')
+        write('test-results/run/notes.md', '[死链](missing.md)')
+        write('docs/real.md', '正常内容')
+        const { files, errors } = checkLinks(root)
+        // 本地跑过 e2e / 视觉用例后生成的产物目录整体剪枝：既不收集其 .md，也不产生误报
+        expect(files.some((f) => f.includes('playwright-report'))).toBe(false)
+        expect(files.some((f) => f.includes('test-results'))).toBe(false)
+        expect(errors.some((e) => e.includes('playwright-report') || e.includes('test-results'))).toBe(false)
+        // 未过度排除：普通目录仍被扫描
+        expect(files).toContain(join(root, 'docs', 'real.md'))
+    })
+
     it('treats the runtime data exclusion as a path prefix, not a name prefix', () => {
         // `apps/platform/database` 与 `apps/platform/data` 前缀相邻：朴素的 startsWith(prefix) 会误伤
         write('apps/platform/database/notes.md', '[死链](missing.md)')
@@ -342,9 +357,9 @@ describe('checkVueInterp - docs/ 扫描', () => {
         expect(errors[0]).toContain('b/bad.md')
     })
 
-    it('排除 node_modules / .vitepress / dist / archive / artifacts', () => {
+    it('排除 node_modules / .vitepress / dist / archive / artifacts / playwright-report / test-results', () => {
         write('docs/a.md', '合规 `code`')
-        for (const dir of ['node_modules', '.vitepress', 'dist', 'archive', 'artifacts']) {
+        for (const dir of ['node_modules', '.vitepress', 'dist', 'archive', 'artifacts', 'playwright-report', 'test-results']) {
             mkdirSync(join(root, 'docs', dir), { recursive: true })
             writeFileSync(join(root, 'docs', dir, 'x.md'), '违规 `{{.Y}}`')
         }

@@ -152,6 +152,24 @@ describe('collectFiles / findOrphanIds', () => {
         expect(files).not.toContain('src/d.md')
     })
 
+    it('跳过 Playwright 产物目录（playwright-report / test-results）', () => {
+        write('src/a.ts', 'ok\n')
+        // 夹具用**真实误报形态**（minified JS 里的短 token）；token 在源码中以拼接构造，
+        // 避免门禁脚本扫到本测试源码自身（`extractTrailingComment` 虽跳过字符串字面量，
+        // 但 `it(...)` 行整体作为 test-name 单元时不做引号感知）
+        const artifactJs = `var a = 1;// ${['S', '1'].join('-')}\n`
+        // 前置对照：该内容形态确实会被识别为「孤立编号」（证明排除面是唯一防线）
+        expect(analyzeContent(artifactJs, '.js').hits).toHaveLength(1)
+        write('apps/platform/playwright-report/trace/assets/codeMirrorModule-x.js', artifactJs)
+        write('apps/platform/test-results/case/error-context.md', 'error context\n')
+        const files = collectFiles(root).map((file) => file.slice(root.length + 1).split('\\').join('/'))
+        expect(files).toContain('src/a.ts')
+        expect(files).not.toContain('apps/platform/playwright-report/trace/assets/codeMirrorModule-x.js')
+        expect(files).not.toContain('apps/platform/test-results/case/error-context.md')
+        // 与「清理产物后」结果一致：产物目录不产生任何命中
+        expect(findOrphanIds(root).findings).toEqual([])
+    })
+
     it('findOrphanIds 汇总并按文件与行排序', () => {
         write('a.ts', '// M20\n')
         write('b.ts', '// ok\n// M23.3\n')
