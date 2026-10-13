@@ -525,7 +525,7 @@
         "colPrNumber": "PR",
         "colAuthor": "作者",
         "colConclusion": "结论",
-        "colLastPolledAt": "最近轮询",
+        "colLastPolledAt": "最近采集",
         "colStatus": "Alert",
         "colLink": "链接",
         "colActions": "操作",
@@ -550,6 +550,27 @@
         },
         "errors": {
             "loadFailed": "加载失败：{message}"
+        },
+        "colLastPolledAtHint": "仅在该 PR 本轮实际采集并落库时更新；终态且 HEAD 未变的 PR 会在静默窗口内跳过采集——陈旧时间不等于轮询故障",
+        "signalsTitle": "构建 / 部署信号",
+        "signalsAggregate": "聚合状态",
+        "signalsFailureSources": "失败源",
+        "signalsNone": "无信号数据（本字段上线前采集的行）",
+        "signalsEmpty": "该 HEAD 暂无构建 / 部署信号",
+        "signalsDetailLink": "详情",
+        "signalsLogLink": "日志",
+        "signalsKind": {
+            "check": "Check",
+            "status": "Status",
+            "deployment": "部署"
+        },
+        "signalsState": {
+            "pending": "进行中",
+            "success": "成功",
+            "failure": "失败",
+            "error": "错误",
+            "neutral": "中性",
+            "skipped": "已跳过"
         }
     },
     "envEvents": {

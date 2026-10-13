@@ -525,7 +525,7 @@
         "colPrNumber": "PR",
         "colAuthor": "Author",
         "colConclusion": "Conclusion",
-        "colLastPolledAt": "Last polled",
+        "colLastPolledAt": "Last collected",
         "colStatus": "Alert",
         "colLink": "Link",
         "colActions": "Actions",
@@ -550,6 +550,27 @@
         },
         "errors": {
             "loadFailed": "Failed to load: {message}"
+        },
+        "colLastPolledAtHint": "Updated only when this PR is actually collected and persisted; terminal PRs with an unchanged HEAD are skipped within a quiet window — a stale timestamp does not mean polling is broken",
+        "signalsTitle": "Build / deploy signals",
+        "signalsAggregate": "Aggregate",
+        "signalsFailureSources": "Failing sources",
+        "signalsNone": "No signal data (row collected before this field existed)",
+        "signalsEmpty": "No build / deploy signals for this HEAD",
+        "signalsDetailLink": "Details",
+        "signalsLogLink": "Logs",
+        "signalsKind": {
+            "check": "Check",
+            "status": "Status",
+            "deployment": "Deployment"
+        },
+        "signalsState": {
+            "pending": "Pending",
+            "success": "Success",
+            "failure": "Failure",
+            "error": "Error",
+            "neutral": "Neutral",
+            "skipped": "Skipped"
         }
     },
     "envEvents": {

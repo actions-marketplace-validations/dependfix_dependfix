@@ -22,6 +22,27 @@ definePageMeta({
     middleware: 'auth',
 })
 
+/** 归一化构建 / 部署信号（服务端 JSON 列解析；`observedAt` 为 ISO 字符串） */
+interface PRCheckSignalView {
+    kind: 'check' | 'status' | 'deployment'
+    provider: string
+    name: string
+    state: string
+    rawState: string | null
+    sourceId: string | null
+    targetUrl: string | null
+    logUrl: string | null
+    summary: string | null
+    observedAt: string
+}
+
+/** 失败源条目（服务端 JSON 列解析） */
+interface PRCheckFailureSourceView {
+    provider: string
+    name: string
+    kind: string
+}
+
 interface PRCheckView {
     id: string
     repositoryId: string
@@ -31,6 +52,12 @@ interface PRCheckView {
     headSha: string
     authorLogin: string
     conclusion: string
+    /** 聚合构建 / 部署状态（`failure` / `pending` / `success`；null = 本字段上线前的历史行） */
+    overallStatus: string | null
+    /** 归一化三源信号（null = 本字段上线前的历史行） */
+    signals: PRCheckSignalView[] | null
+    /** 失败源清单（null = 未采集 / 无失败源） */
+    failureSources: PRCheckFailureSourceView[] | null
     checkRunId: string | null
     detailsUrl: string | null
     errorMessage: string | null
@@ -110,10 +137,68 @@ const sortMeta = ref<DataTableSortMeta[]>([
 ])
 
 /**
+ * 行展开状态（受控）：caomei DataTable 的 `expanded-rows` 为行 key 数组，
+ * 不回写则内建展开按钮点击无效（与 batch-runs.vue 同模式）。
+ */
+const expandedRows = ref<string[]>([])
+const onUpdateExpandedRows = (rows: string[]) => {
+    expandedRows.value = rows
+}
+
+/** 信号状态 → 标签色调（聚合状态与单条信号共用取值域） */
+const signalStateTone = (state: string): 'danger' | 'success' | 'warning' | 'neutral' => {
+    switch (state) {
+        case 'failure':
+        case 'error':
+            return 'danger'
+        case 'pending':
+            return 'warning'
+        case 'success':
+            return 'success'
+        default:
+            return 'neutral'
+    }
+}
+
+/** 信号来源 → 文案（显式键，避免动态键） */
+const signalKindLabel = (kind: string): string => {
+    switch (kind) {
+        case 'check':
+            return t('prChecks.signalsKind.check')
+        case 'status':
+            return t('prChecks.signalsKind.status')
+        case 'deployment':
+            return t('prChecks.signalsKind.deployment')
+        default:
+            return kind
+    }
+}
+
+/** 信号 / 聚合状态 → 文案（显式键，避免动态键） */
+const signalStateLabel = (state: string): string => {
+    switch (state) {
+        case 'pending':
+            return t('prChecks.signalsState.pending')
+        case 'success':
+            return t('prChecks.signalsState.success')
+        case 'failure':
+            return t('prChecks.signalsState.failure')
+        case 'error':
+            return t('prChecks.signalsState.error')
+        case 'skipped':
+            return t('prChecks.signalsState.skipped')
+        default:
+            return t('prChecks.signalsState.neutral')
+    }
+}
+
+/**
  * 列定义（caomei DataTable 用 `columns` 数组 + `#cell-{key}` 插槽替代迁移前的 `<Column>`）。
  * `key` 即排序字段；actions 列不可排序（原 `:exportable="false"` 非迁移前组件库/caomei 有效 prop，按评估 §5.3 删除）。
  */
 const columns = computed<DataTableColumn<PRCheckView>[]>(() => [
+    // 展开列：展开后展示该 HEAD 的构建 / 部署信号详情（不设 width——caomei 列宽仅对冻结列生效）
+    { key: 'expander', expander: true },
     // 仓库列置于 PR 列之前：跨仓库 PR 编号会重号，行内先给出归属才能辨识
     // （`owner/name` 的服务端解析口径与 alerts.vue / env-events.vue 一致）
     // 注：caomei DataTable 的 `column.width` 仅在 frozen 场景参与 tableMinWidth 与吸边偏移计算；
@@ -313,8 +398,10 @@ const handleAck = async (row: PRCheckView) => {
                 :rows="20"
                 :rows-per-page-options="[20, 50, 100]"
                 :empty-text="t('prChecks.empty')"
+                :expanded-rows="expandedRows"
                 class="pr-checks__table"
                 @update:multi-sort-meta="onUpdateMultiSortMeta"
+                @update:expanded-rows="onUpdateExpandedRows"
             >
                 <!-- 防御分支：`PRCheck.repository` 为 nullable:false + CASCADE，正常路径恒有值（不可达分支，按测试规范 §6.5 不强制守护） -->
                 <template #cell-repository="{row}">
@@ -347,7 +434,9 @@ const handleAck = async (row: PRCheckView) => {
                     </CaomeiTag>
                 </template>
                 <template #cell-lastPolledAt="{row}">
-                    {{ new Date(row.lastPolledAt).toLocaleString() }}
+                    <span :title="t('prChecks.colLastPolledAtHint')">
+                        {{ new Date(row.lastPolledAt).toLocaleString() }}
+                    </span>
                 </template>
                 <template #cell-alertFiring="{row}">
                     <CaomeiTag
@@ -368,6 +457,81 @@ const handleAck = async (row: PRCheckView) => {
                     >
                         OK
                     </CaomeiTag>
+                </template>
+                <template #expansion="{data: row}">
+                    <div class="pr-checks__signals">
+                        <div class="pr-checks__signals-head">
+                            <span class="pr-checks__signals-title">{{ t('prChecks.signalsTitle') }}</span>
+                            <template v-if="row.signals">
+                                <span class="pr-checks__signals-label">{{ t('prChecks.signalsAggregate') }}</span>
+                                <CaomeiTag :tone="signalStateTone(row.overallStatus ?? 'neutral')">
+                                    {{ signalStateLabel(row.overallStatus ?? 'neutral') }}
+                                </CaomeiTag>
+                                <template v-if="row.failureSources?.length">
+                                    <span class="pr-checks__signals-label">{{ t('prChecks.signalsFailureSources') }}</span>
+                                    <span class="pr-checks__signals-sources">
+                                        {{ row.failureSources.map((source) => `${source.provider} / ${source.name}`).join(' · ') }}
+                                    </span>
+                                </template>
+                            </template>
+                        </div>
+                        <p
+                            v-if="!row.signals"
+                            class="pr-checks__signals-empty"
+                        >
+                            {{ t('prChecks.signalsNone') }}
+                        </p>
+                        <p
+                            v-else-if="row.signals.length === 0"
+                            class="pr-checks__signals-empty"
+                        >
+                            {{ t('prChecks.signalsEmpty') }}
+                        </p>
+                        <ul
+                            v-else
+                            class="pr-checks__signal-list"
+                        >
+                            <li
+                                v-for="(signal, index) in row.signals"
+                                :key="`${signal.kind}-${signal.provider}-${signal.name}-${index}`"
+                                class="pr-checks__signal"
+                            >
+                                <CaomeiTag tone="neutral">
+                                    {{ signalKindLabel(signal.kind) }}
+                                </CaomeiTag>
+                                <CaomeiTag :tone="signalStateTone(signal.state)">
+                                    {{ signalStateLabel(signal.state) }}
+                                </CaomeiTag>
+                                <span class="pr-checks__signal-provider">{{ signal.provider }}</span>
+                                <span class="pr-checks__signal-name">{{ signal.name }}</span>
+                                <span
+                                    v-if="signal.summary"
+                                    class="pr-checks__signal-summary"
+                                    :title="signal.summary"
+                                >
+                                    {{ signal.summary }}
+                                </span>
+                                <a
+                                    v-if="signal.targetUrl"
+                                    :href="signal.targetUrl"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    class="pr-checks__signal-link"
+                                >
+                                    {{ t('prChecks.signalsDetailLink') }}
+                                </a>
+                                <a
+                                    v-if="signal.logUrl"
+                                    :href="signal.logUrl"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    class="pr-checks__signal-link"
+                                >
+                                    {{ t('prChecks.signalsLogLink') }}
+                                </a>
+                            </li>
+                        </ul>
+                    </div>
                 </template>
                 <template #cell-actions="{row}">
                     <CaomeiButton
@@ -484,6 +648,80 @@ const handleAck = async (row: PRCheckView) => {
 
     &__filter-dropdown {
         width: 100%;
+    }
+
+    // 展开面板：构建 / 部署信号详情
+    &__signals {
+        padding: $space-2 $space-3;
+    }
+
+    &__signals-head {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: $space-2;
+        margin-bottom: $space-2;
+    }
+
+    &__signals-title {
+        font-weight: 600;
+    }
+
+    &__signals-label {
+        font-size: $font-size-sm;
+        color: $color-text-muted;
+    }
+
+    &__signals-sources {
+        font-size: $font-size-sm;
+    }
+
+    &__signals-empty {
+        margin: 0;
+        font-size: $font-size-sm;
+        color: $color-text-muted;
+    }
+
+    &__signal-list {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        display: flex;
+        flex-direction: column;
+        gap: $space-1;
+    }
+
+    &__signal {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: $space-2;
+        font-size: $font-size-sm;
+    }
+
+    &__signal-provider {
+        font-family: monospace;
+    }
+
+    &__signal-name {
+        font-weight: 500;
+    }
+
+    &__signal-summary {
+        max-width: 360px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: $color-text-muted;
+    }
+
+    &__signal-link {
+        color: $color-primary;
+        text-decoration: none;
+    }
+
+    &__signal-link:hover {
+        text-decoration: underline;
     }
 
     // 仓库列：长 `owner/name` 单元内截断（完整值经 title tooltip 呈现）。
