@@ -4,7 +4,7 @@
 // 的坏改动提交给用户（曾导致坏 PR 被创建）。
 import { execSync } from 'node:child_process'
 import { toErrorMessage, type RepositoryResult } from '@dependfix/core'
-import type { AppContext } from '../app/helpers'
+import { isGitRepository, type AppContext } from '../app/helpers'
 
 /**
  * 单仓库是否被「本次改动引入的验证失败」阻断。
@@ -46,9 +46,11 @@ export function rollbackChanges(workDir: string): void {
  * 执行验证门禁：任一仓库验证失败时记录审计、回滚修复改动，返回 true 表示应中止交付。
  *
  * - 先记录 `VERIFICATION_FAILED`（审计优先），再尝试回滚
- * - 回滚失败（如非 git 仓库）追加 `ROLLBACK_FAILED`，不掩盖审计记录
+ * - 回滚失败（如仓库 HEAD 不可解析 / 工作树只读）追加 `ROLLBACK_FAILED`，不掩盖审计记录
  * - 运行前已存在用户未提交改动时**不自动回滚**（避免静默销毁本地工作），
  *   仅 warn 提示手动处理
+ * - **非 git 仓库不回滚**（无工作树，`git reset --hard` 必然失败）→ 仅 warn，避免以
+ *   `ROLLBACK_FAILED` 掩盖真实失败原因（结论仍为「应中止交付」）
  * - 判定用 `verificationBlocking`（本次改动引入的失败）；修复前即红的既有失败
  *   （`PRE_EXISTING_FAILURE`）不阻断交付
  * - 注意：验证的是"修复后工作区"而非"修复增量"；多仓库共享 workDir 时，
@@ -80,6 +82,13 @@ export function enforceVerificationGate(
         logger.warn(
             'Detected pre-existing uncommitted changes before this run — skipped auto rollback to avoid destroying user work; please resolve the worktree manually',
         )
+        return true
+    }
+
+    if (!isGitRepository(workDir)) {
+        // 非 git 仓库：没有可回滚的工作树（`git reset --hard` 必然失败）→ 跳过回滚并说明，
+        // 避免以 ROLLBACK_FAILED 掩盖真实失败原因（门禁结论仍为「应中止交付」）
+        logger.warn('工作目录不是 git 仓库 — 跳过验证失败回滚（无可回滚工作树）')
         return true
     }
 

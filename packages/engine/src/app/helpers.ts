@@ -635,11 +635,10 @@ export function commitLocalChanges(
 ): void {
     const { logger, workDir, allActions, authProvider } = ctx
 
-    // 纵深防御：非 git 仓库时不能提交（`git config` / `git add` 均会失败）。
-    // 必须显式探测——`hasGitChanges` 在非仓库目录下把「git 命令失败」当作「有变更」，
-    // 会让流程继续走到 stageAndCommit 并以 `git config user.name` 抛
-    // `fatal: not in a git directory` → 记 COMMIT_FAILED → 平台误标整次运行为失败
-    // （2026-10-11 生产实证：report-only 扫描被降级为 fix+commit 且未 clone）。
+    // 纵深防御（不依赖 `hasGitChanges` 的内部非仓库守卫）：非 git 仓库时不能提交
+    // （`git config` / `git add` 均会失败），且需要与「仓库但无变更」区分日志级别。
+    // 2026-10-11 生产实证：report-only 扫描被降级为 fix+commit 且未 clone → 走到 stageAndCommit
+    // 并以 `git config user.name` 抛 `fatal: not in a git directory` → COMMIT_FAILED → 平台误标失败。
     if (!isGitRepository(workDir)) {
         logger.warn(`工作目录不是 git 仓库 — 跳过本地提交（${workDir}）`)
         return
@@ -664,7 +663,7 @@ export function commitLocalChanges(
  *
  * 必须显式探测：git 在非仓库目录下的错误文案随子命令而异（`fatal: not in a git directory`
  * vs `fatal: not a git repository`），且 `--local` / 写入类命令与只读类命令的行为并不统一，
- * 因此**不能**用「某条 git 命令是否失败」反推仓库存在（`hasGitChanges` 的 catch-all 即此盲区）。
+ * 因此**不能**用「某条 git 命令是否失败」反推仓库存在。
  */
 export function isGitRepository(workDir: string): boolean {
     try {
@@ -678,10 +677,15 @@ export function isGitRepository(workDir: string): boolean {
 /**
  * 检查工作目录是否有未提交的变更（含未暂存与已暂存）。
  *
- * ⚠️ 调用前需保证 workDir 是 git 仓库（见 [isGitRepository]）：非仓库目录下两条 git 命令
- * 都会失败，本函数会把「命令失败」当作「有变更」返回 true。
+ * **非 git 仓库返回 `false`**（`isGitRepository` 前置判定）：不存在可判定的工作树 ⇒ 不存在变更。
+ * 若把「git 命令失败」当作「有变更」（旧行为），调用方会被推进 branch / commit / push 链路，
+ * 并以 `fatal: not in a git directory` 收尾 → `COMMIT_FAILED` → 平台把整次运行误标失败
+ * （2026-10-11 生产实证的同类盲区）。
  */
 export function hasGitChanges(workDir: string): boolean {
+    if (!isGitRepository(workDir)) {
+        return false
+    }
     try {
         execSync('git diff --quiet', { cwd: workDir, stdio: 'pipe' })
         execSync('git diff --cached --quiet', { cwd: workDir, stdio: 'pipe' })

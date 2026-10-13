@@ -7,7 +7,7 @@ import {
     collectCodeScanningSuggestions,
     isAlertFixedByActions,
 } from '@dependfix/core'
-import { GIT_COMMIT_HOOKS_ISOLATION_ARGS, GIT_COMMIT_SIGNING_ISOLATION_ARGS, GIT_PUSH_SIGNING_ISOLATION_ARGS } from './git-signing'
+import { GIT_COMMIT_HOOKS_ISOLATION_ARGS, GIT_COMMIT_SIGNING_ISOLATION_ARGS, GIT_PUSH_HOOKS_ISOLATION_ARGS, GIT_PUSH_SIGNING_ISOLATION_ARGS } from './git-signing'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -237,12 +237,20 @@ export function stageAndCommit(message: string, workDir: string, author?: { name
 /**
  * 推送分支到 origin。
  *
- * 签名隔离：显式传 `-c push.gpgSign=false`，避免宿主 `push.gpgSign=true` 让 push 带上
- * `--signed`（服务端不支持时直接 `the receiving end does not support --signed push` 失败）。
- * 参数取自 `GIT_PUSH_SIGNING_ISOLATION_ARGS`（单一事实源，见 ./git-signing.ts）。
+ * 隔离（单一事实源见 ./git-signing.ts）：
+ * - **签名**：显式传 `-c push.gpgSign=false`，避免宿主 `push.gpgSign=true` 让 push 带上
+ *   `--signed`（服务端不支持时直接 `the receiving end does not support --signed push` 失败）
+ * - **hooks**：`push --no-verify` 跳过被修复仓库的 `pre-push`（隔离环境无 `npx` / 目标仓库
+ *   `node_modules` 不完整时该 hook 会以非 0 退出，把交付链打断为 `push_failed`）
  */
 export function pushBranch(branchName: string, workDir: string): void {
-    execFileSync('git', [...GIT_PUSH_SIGNING_ISOLATION_ARGS, 'push', 'origin', branchName], { cwd: workDir, stdio: 'pipe' })
+    execFileSync('git', [
+        ...GIT_PUSH_SIGNING_ISOLATION_ARGS,
+        'push',
+        ...GIT_PUSH_HOOKS_ISOLATION_ARGS,
+        'origin',
+        branchName,
+    ], { cwd: workDir, stdio: 'pipe' })
 }
 
 // ---------------------------------------------------------------------------

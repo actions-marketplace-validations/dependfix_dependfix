@@ -8,10 +8,10 @@
  *    即可隔离，且不写回任何配置文件；`-c` 的优先级高于 repo local / worktree / host global / system。
  *    背景与取证口径见 docs/standards/git.md §3.8。
  * 2. **hooks 语义**：被修复仓库若安装 husky / lint-staged（或自定义 `core.hooksPath`），其 `pre-commit` /
- *    `commit-msg` 钩子会在 dependfix 的自动 commit 时执行。这类钩子依赖 `npx` 与目标仓库完整
- *    `node_modules`，在隔离执行环境下通常不可用——生产实证会以 `npx: not found`（exit 127）中断 commit，
- *    进而触发 `COMMIT_FAILED` 与修复回滚。自动提交不应受目标仓库本地开发钩子约束，故在本次 commit
- *    调用内跳过 `pre-commit` / `commit-msg`。
+ *    `commit-msg` 钩子会在 dependfix 的自动 commit 时执行，`pre-push` 会在推送修复分支时执行。这类钩子依赖
+ *    `npx` 与目标仓库完整 `node_modules`，在隔离执行环境下通常不可用——生产实证会以 `npx: not found`（exit 127）
+ *    中断 commit，进而触发 `COMMIT_FAILED` 与修复回滚（push 侧同类失效会触发 `push_failed`）。自动提交 / 推送
+ *    不应受目标仓库本地开发钩子约束，故在本次 commit / push 调用内分别跳过 commit 侧与 push 侧钩子。
  *
  * 策略：**不提供签名 / hooks opt-in**。
  */
@@ -34,3 +34,18 @@ export const GIT_COMMIT_HOOKS_ISOLATION_ARGS = ['--no-verify'] as const
 
 /** push 侧签名隔离参数——覆盖 push / push --delete 等全部推送调用点。 */
 export const GIT_PUSH_SIGNING_ISOLATION_ARGS = ['-c', 'push.gpgSign=false'] as const
+
+/**
+ * push 侧 hooks 隔离参数——须置于 `push` 子命令**之后**（`--no-verify` 是 push 的子命令选项，
+ * 而 `-c` 是 git 全局选项，二者位置不可互换）。
+ *
+ * 覆盖 `pre-push`：被修复仓库的 `pre-push`（husky / 自定义 `core.hooksPath`）会在 dependfix 推送
+ * 修复分支时执行；隔离环境无 `npx` / 目标仓库 `node_modules` 不完整 → hook 非 0 退出 → `push_failed`
+ * → 交付链中断（与 commit 侧 `pre-commit` / `commit-msg` 同一类失效）。生产日志当前无 `pre-push`
+ * 实例，属预防性收口（口径见 docs/standards/git.md §3.8）。
+ *
+ * 边界：仅跳过 `pre-push`；同时适用于 `push --delete`（`cleanupRemoteBranch`）。
+ * 选型 `--no-verify` 与 commit 侧一致——无需构造/保证空 `core.hooksPath` 目录，且对
+ * `core.hooksPath` 重定向场景等效。
+ */
+export const GIT_PUSH_HOOKS_ISOLATION_ARGS = ['--no-verify'] as const

@@ -48,7 +48,7 @@ vi.mock('../helpers', async (importOriginal) => {
     }
 })
 
-import { commitLocalChanges, ensureGitignore, isGitRepository, normalizeGitignoreEntry, runCodeScanningFixes } from './helpers'
+import { commitLocalChanges, ensureGitignore, hasGitChanges, isGitRepository, normalizeGitignoreEntry, runCodeScanningFixes } from './helpers'
 
 // ---------------------------------------------------------------------------
 // 测试辅助
@@ -403,6 +403,58 @@ describe('ensureGitignore', () => {
 // ---------------------------------------------------------------------------
 // isGitRepository / commitLocalChanges（非 git 工作目录防御）
 // ---------------------------------------------------------------------------
+
+describe('hasGitChanges', () => {
+    let dir: string
+
+    beforeEach(() => {
+        dir = mkdtempSync(join(tmpdir(), 'dependfix-haschanges-'))
+    })
+
+    afterEach(() => {
+        rmSync(dir, { recursive: true, force: true })
+    })
+
+    /** 建一个干净的 git 仓库（含一次提交） */
+    const initRepo = () => {
+        execSync('git init -q', { cwd: dir })
+        execSync('git config user.name test', { cwd: dir })
+        execSync('git config user.email test@test', { cwd: dir })
+        writeFileSync(join(dir, 'tracked.txt'), 'v1\n', 'utf-8')
+        execSync('git add . && git commit -qm init', { cwd: dir })
+    }
+
+    it('非 git 仓库返回 false（不再把「git 命令失败」当「有变更」）', () => {
+        writeFileSync(join(dir, 'package.json'), '{}', 'utf-8')
+
+        expect(hasGitChanges(dir)).toBe(false)
+    })
+
+    it('不存在的路径返回 false', () => {
+        expect(hasGitChanges(join(dir, 'missing'))).toBe(false)
+    })
+
+    it('干净的 git 仓库返回 false', () => {
+        initRepo()
+
+        expect(hasGitChanges(dir)).toBe(false)
+    })
+
+    it('有未暂存变更时返回 true', () => {
+        initRepo()
+        writeFileSync(join(dir, 'tracked.txt'), 'v2\n', 'utf-8')
+
+        expect(hasGitChanges(dir)).toBe(true)
+    })
+
+    it('仅暂存变更（无未暂存变更）时返回 true', () => {
+        initRepo()
+        writeFileSync(join(dir, 'tracked.txt'), 'v2\n', 'utf-8')
+        execSync('git add .', { cwd: dir })
+
+        expect(hasGitChanges(dir)).toBe(true)
+    })
+})
 
 describe('isGitRepository', () => {
     let dir: string

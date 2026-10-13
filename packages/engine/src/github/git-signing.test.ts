@@ -1,9 +1,9 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { GIT_COMMIT_HOOKS_ISOLATION_ARGS, GIT_COMMIT_SIGNING_ISOLATION_ARGS, GIT_PUSH_SIGNING_ISOLATION_ARGS } from './git-signing'
+import { GIT_COMMIT_HOOKS_ISOLATION_ARGS, GIT_COMMIT_SIGNING_ISOLATION_ARGS, GIT_PUSH_HOOKS_ISOLATION_ARGS, GIT_PUSH_SIGNING_ISOLATION_ARGS } from './git-signing'
 import { pushBranch } from './pr-creator'
 
 /**
@@ -70,7 +70,48 @@ describe('git 签名隔离常量', () => {
         expect([...GIT_COMMIT_SIGNING_ISOLATION_ARGS]).toEqual(['-c', 'commit.gpgsign=false'])
         expect([...GIT_COMMIT_HOOKS_ISOLATION_ARGS]).toEqual(['--no-verify'])
         expect([...GIT_PUSH_SIGNING_ISOLATION_ARGS]).toEqual(['-c', 'push.gpgSign=false'])
+        expect([...GIT_PUSH_HOOKS_ISOLATION_ARGS]).toEqual(['--no-verify'])
     })
+})
+
+describe('pushBranch hooks 隔离回归', () => {
+    /**
+     * 回归：`pushBranch` 显式传 `push --no-verify`，跳过被修复仓库的 `pre-push`。
+     *
+     * 根因：目标仓库常安装 husky / 自定义 `core.hooksPath`，其 `pre-push` 在 dependfix 推送修复
+     * 分支时执行；隔离执行环境无 `npx`、目标仓库 `node_modules` 也未必完整 → hook 非 0 退出
+     * → `push_failed` → 交付链中断（与 commit 侧 `pre-commit` 同一类失效）。
+     *
+     * 本用例植入「写标记文件 + exit 1」的 husky 风格 pre-push：
+     * - 反例：同环境裸 `git push` 必被拦截（证明 hook 真实生效，避免正例退化为恒真）
+     * - 正例：`pushBranch` 成功，且标记文件不存在（证明 hook 未执行）
+     */
+    it('目标仓库 pre-push hook 非 0 退出 → pushBranch 仍成功且 hook 未执行', () => {
+        const hooksGlobalDir = makeTempDir('dependfix-pushhooks-global-')
+        const hooksGlobalConfig = join(hooksGlobalDir, 'gitconfig')
+        writeFileSync(hooksGlobalConfig, '')
+        // 隔离 host 全局配置（避免 host `core.hooksPath` 干扰本用例的 hook 安装点）
+        vi.stubEnv('GIT_CONFIG_GLOBAL', hooksGlobalConfig)
+        vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1')
+
+        const { workDir } = setupRepoWithOrigin()
+        const hookPath = join(workDir, '.git', 'hooks', 'pre-push')
+        writeFileSync(hookPath, '#!/bin/sh\ntouch .pre-push-ran\nexit 1\n')
+        chmodSync(hookPath, 0o755)
+
+        // 反例对照：同环境裸 push 被 pre-push 拦截
+        expect(() => git(['push', 'origin', 'main'], workDir)).toThrow()
+        expect(existsSync(join(workDir, '.pre-push-ran'))).toBe(true)
+
+        // 清理反例副作用，正例须为「分支尚未推送」的初始状态
+        rmSync(join(workDir, '.pre-push-ran'), { force: true })
+
+        // 被测实现：`--no-verify` 隔离后 push 成功且 hook 未执行
+        pushBranch('main', workDir)
+
+        expect(existsSync(join(workDir, '.pre-push-ran'))).toBe(false)
+        expect(git(['ls-remote', '--heads', 'origin', 'main'], workDir)).toContain('refs/heads/main')
+    }, 20_000)
 })
 
 describe('pushBranch 签名隔离回归', () => {

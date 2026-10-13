@@ -58,6 +58,7 @@ import {
     computeSummary,
     ensureGitignore,
     hasGitChanges,
+    isGitRepository,
     reportCleanupCandidates,
     autoCleanupMergedBranches,
     resolveAlertRepositories,
@@ -269,8 +270,10 @@ export class DependfixApp {
         this.startedAt = new Date().toISOString()
         // 启动安全自检（best-effort，失败不阻断运行）
         await this.runStartupSecurityChecks()
-        // 记录运行前工作区状态（验证门禁回滚时保护用户已有未提交改动）
-        this.preExistingDirty = hasGitChanges(this.workDir)
+        // 记录运行前工作区状态（验证门禁回滚时保护用户已有未提交改动）。
+        // 显式前置 `isGitRepository`（纵深防御，不依赖 `hasGitChanges` 的内部守卫）：非仓库目录
+        // ⇒ 视为「无既有改动」；门禁在非仓库下另跳过回滚（无可回滚工作树），故两处语义自洽。
+        this.preExistingDirty = isGitRepository(this.workDir) && hasGitChanges(this.workDir)
         this.logger.info(`Starting dependfix run ${this.runId}`, {
             mode: this.config.mode,
             repositories: this.config.repositories,

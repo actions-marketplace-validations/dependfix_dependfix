@@ -104,11 +104,12 @@ describe('rollbackChanges', () => {
 
 // ---------------------------------------------------------------------------
 // enforceVerificationGate（验证门禁主流程：审计 + 回滚决策）
-// 补充覆盖以下未触达分支：
-// - 行 47 if (failedRepos.length === 0) return false（所有 repo 通过 → 不阻断交付）
-// - 行 52/61 options.action === 'pr' 三元两个分支（PR creation vs local commit 文案）
-// - 行 64 if (options.preExistingDirty) 两个分支（已有未提交改动 → 不自动回滚）
-// - 行 71-83 try/catch：rollbackChanges 成功 vs 失败（追加 ROLLBACK_FAILED 审计）
+// 覆盖以下分支（分支名以符号描述，避免行号漂移）：
+// - `failedRepos.length === 0` 早返回 false（所有 repo 通过 → 不阻断交付）
+// - `options.action === 'pr'` 三元两个分支（PR creation vs local commit 文案）
+// - `options.preExistingDirty` 两个分支（已有未提交改动 → 不自动回滚）
+// - 非 git 仓库守卫（无工作树可回滚 → 跳过回滚且不产生 ROLLBACK_FAILED）
+// - `try/catch` 的 rollbackChanges 成功 vs 失败（追加 ROLLBACK_FAILED 审计）
 // ---------------------------------------------------------------------------
 
 describe('enforceVerificationGate', () => {
@@ -182,10 +183,27 @@ describe('enforceVerificationGate', () => {
         expect(ctx.allErrors.map((e) => e.category)).toEqual(['VERIFICATION_FAILED'])
     })
 
-    it('rollbackChanges 失败（非 git 仓库）→ 追加 ROLLBACK_FAILED 审计，不掩盖 VERIFICATION_FAILED（行 74 catch 分支）', () => {
+    it('非 git 仓库 → 跳过回滚（warn，不追加 ROLLBACK_FAILED；结论仍为中止交付）', () => {
         const nonGitDir = mkdtempSync(join(tmpdir(), 'dependfix-nongit-'))
         try {
             const ctx = baseCtx(nonGitDir)
+            const blocked = enforceVerificationGate(ctx as never, { preExistingDirty: false, action: 'pr' })
+            expect(blocked).toBe(true)
+            expect(ctx.logger.warn).toHaveBeenCalledWith(expect.stringContaining('不是 git 仓库'))
+            // 审计优先：VERIFICATION_FAILED 仍记录；无工作树可回滚 → 不产生 ROLLBACK_FAILED
+            expect(ctx.allErrors.map((e) => e.category)).toEqual(['VERIFICATION_FAILED'])
+        } finally {
+            rmSync(nonGitDir, { recursive: true, force: true })
+        }
+    })
+
+    it('rollbackChanges 失败（git 仓库但 HEAD 不可解析，如尚无提交）→ 追加 ROLLBACK_FAILED 审计，不掩盖 VERIFICATION_FAILED', () => {
+        const emptyRepo = mkdtempSync(join(tmpdir(), 'dependfix-emptyrepo-'))
+        try {
+            // 空仓库（无任何提交）：isGitRepository 为 true（rev-parse --git-dir 成功），
+            // 但 `git reset --hard HEAD` 无法解析 HEAD → 回滚抛错 → ROLLBACK_FAILED 分支
+            execSync('git init -q', { cwd: emptyRepo })
+            const ctx = baseCtx(emptyRepo)
             const blocked = enforceVerificationGate(ctx as never, { preExistingDirty: false, action: 'pr' })
             expect(blocked).toBe(true)
             expect(ctx.logger.error).toHaveBeenCalledWith(expect.stringContaining('Rollback failed'))
@@ -194,7 +212,7 @@ describe('enforceVerificationGate', () => {
             expect(categories).toContain('VERIFICATION_FAILED')
             expect(categories).toContain('ROLLBACK_FAILED')
         } finally {
-            rmSync(nonGitDir, { recursive: true, force: true })
+            rmSync(emptyRepo, { recursive: true, force: true })
         }
     })
 })
