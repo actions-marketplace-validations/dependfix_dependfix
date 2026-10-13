@@ -106,7 +106,7 @@ export interface PRCheckFixture {
     /** 用户 ack 时间（ISO 串）；设置后「Alert 状态」列渲染为已确认态 */
     acknowledgedAt?: string | null
     acknowledgedByUserId?: string | null
-    /** 最近轮询时间（ISO 串，必填）：视觉基线依赖确定性取值 */
+    /** 最近采集时间（ISO 串，必填）：视觉基线依赖确定性取值（语义见「最近采集」列提示） */
     lastPolledAt: string
     /** 聚合构建 / 部署状态（缺省 null = 本列上线前的历史行） */
     overallStatus?: 'pending' | 'success' | 'failure' | null

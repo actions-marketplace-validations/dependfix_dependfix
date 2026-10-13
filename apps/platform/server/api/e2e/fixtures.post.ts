@@ -130,8 +130,8 @@ const prCheckSignalSchema = z.object({
     /** 详情 / 日志链接（可选） */
     targetUrl: z.string().max(500).nullable().optional(),
     logUrl: z.string().max(500).nullable().optional(),
-    /** 摘要（可选） */
-    summary: z.string().nullable().optional(),
+    /** 摘要（可选；上限与生产 `SIGNAL_SUMMARY_MAX_LENGTH` 对齐） */
+    summary: z.string().max(300).nullable().optional(),
 })
 
 const prCheckFailureSourceSchema = z.object({
@@ -163,8 +163,8 @@ const prCheckSchema = z.object({
     lastPolledAt: z.string().min(1),
     /** 聚合构建 / 部署状态（缺省 null = 本列上线前的历史行） */
     overallStatus: z.enum(['pending', 'success', 'failure']).nullable().optional(),
-    /** 归一化三源信号（写入 `signals_json`；`observedAt` 由写入时刻填充） */
-    signals: z.array(prCheckSignalSchema).optional(),
+    /** 归一化三源信号（写入 `signals_json`；`observedAt` 由写入时刻填充；条数上限与生产 `MAX_SIGNALS_PER_PR` 对齐） */
+    signals: z.array(prCheckSignalSchema).max(50).optional(),
     /** 失败源清单（写入 `failure_sources_json`；缺省时按 `signals` 派生，与生产同源） */
     failureSources: z.array(prCheckFailureSourceSchema).optional(),
 })

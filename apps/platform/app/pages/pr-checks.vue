@@ -433,6 +433,7 @@ const handleAck = async (row: PRCheckView) => {
                         {{ row.conclusion }}
                     </CaomeiTag>
                 </template>
+                <!-- 提示挂在取值上（而非表头槽）：语义解释的是「这一格为什么可能很旧」 -->
                 <template #cell-lastPolledAt="{row}">
                     <span :title="t('prChecks.colLastPolledAtHint')">
                         {{ new Date(row.lastPolledAt).toLocaleString() }}
@@ -481,6 +482,7 @@ const handleAck = async (row: PRCheckView) => {
                         >
                             {{ t('prChecks.signalsNone') }}
                         </p>
+                        <!-- 防御分支：`[]` 生产不可达（监控器对空信号不落库、fixtures 空数组写 null），按测试规范 §6.5 不强制守护 -->
                         <p
                             v-else-if="row.signals.length === 0"
                             class="pr-checks__signals-empty"

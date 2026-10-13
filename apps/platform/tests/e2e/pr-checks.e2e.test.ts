@@ -85,6 +85,17 @@ test.describe('PR Check 构建 / 部署信号详情', () => {
                     alertFiring: true,
                     lastPolledAt: '2026-08-28T02:00:00.000Z',
                 },
+                {
+                    // 存量行（本字段上线前采集）：signals 缺省 → signals_json 为 null
+                    repositoryOwner: 'foo',
+                    repositoryName: 'bar',
+                    prNumber: 392,
+                    headSha: 'd'.repeat(40),
+                    authorLogin: 'dependabot[bot]',
+                    conclusion: 'success',
+                    alertFiring: false,
+                    lastPolledAt: '2026-08-27T02:00:00.000Z',
+                },
             ],
         })
 
@@ -114,6 +125,23 @@ test.describe('PR Check 构建 / 部署信号详情', () => {
         const logLink = panel.locator('a[href="https://logs.example.com/deploy"]')
         await expect(logLink).toHaveAttribute('target', '_blank')
         await expect(panel.locator('a[href="https://dash.cloudflare.com/build/9002"]')).toHaveCount(1)
+    })
+
+    test('存量行（无信号数据）展开时给出显式说明', async ({ page }) => {
+        await page.goto('/pr-checks')
+        await waitForHydration(page)
+
+        const table = page.locator('.caomei-data-table')
+        await expect(table).toBeVisible({ timeout: 15000 })
+        const legacyRow = table.locator('tbody .caomei-data-table__row').filter({ hasText: '#392' }).first()
+        await expect(legacyRow).toBeVisible()
+
+        await legacyRow.locator('button.caomei-data-table__row-expander').click()
+
+        const panel = table.locator('.pr-checks__signals')
+        await expect(panel).toBeVisible()
+        await expect(panel).toContainText('无信号数据')
+        await expect(panel.locator('.pr-checks__signal')).toHaveCount(0)
     })
 })
 
