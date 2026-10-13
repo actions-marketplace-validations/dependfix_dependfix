@@ -34,6 +34,89 @@ test.describe('PR Check 手动触发', () => {
     })
 })
 
+test.describe('PR Check 构建 / 部署信号详情', () => {
+    test('展开行展示聚合状态、失败源与各信号链接', async ({ page }) => {
+        // 复用 global-setup 已注入的仓库（foo/bar），构造「三源信号 + 聚合失败」的 PR
+        await seedCustomFixtures(page.request, {
+            repos: [{ owner: 'foo', name: 'bar' }],
+            scanRuns: [],
+            scanResults: [],
+            prChecks: [
+                {
+                    repositoryOwner: 'foo',
+                    repositoryName: 'bar',
+                    prNumber: 391,
+                    headSha: 'c'.repeat(40),
+                    authorLogin: 'dependfix[bot]',
+                    conclusion: 'failure',
+                    overallStatus: 'failure',
+                    signals: [
+                        {
+                            kind: 'check',
+                            provider: 'github-actions',
+                            name: 'Test',
+                            state: 'success',
+                            rawState: 'success',
+                            sourceId: '9001',
+                            targetUrl: 'https://github.com/foo/bar/runs/9001',
+                        },
+                        {
+                            kind: 'check',
+                            provider: 'cloudflare-workers-and-pages',
+                            name: 'Workers Builds',
+                            state: 'failure',
+                            rawState: 'failure',
+                            sourceId: '9002',
+                            summary: 'script size exceeded',
+                            targetUrl: 'https://dash.cloudflare.com/build/9002',
+                        },
+                        {
+                            kind: 'deployment',
+                            provider: 'vercel',
+                            name: 'Preview',
+                            state: 'failure',
+                            rawState: 'failure',
+                            sourceId: '5001',
+                            summary: 'Deployment failed',
+                            targetUrl: 'https://preview.example.com',
+                            logUrl: 'https://logs.example.com/deploy',
+                        },
+                    ],
+                    alertFiring: true,
+                    lastPolledAt: '2026-08-28T02:00:00.000Z',
+                },
+            ],
+        })
+
+        await page.goto('/pr-checks')
+        await waitForHydration(page)
+
+        const table = page.locator('.caomei-data-table')
+        await expect(table).toBeVisible({ timeout: 15000 })
+        const row = table.locator('tbody .caomei-data-table__row').filter({ hasText: '#391' }).first()
+        await expect(row).toBeVisible()
+
+        await row.locator('button.caomei-data-table__row-expander').click()
+
+        const panel = table.locator('.pr-checks__signals')
+        await expect(panel).toBeVisible()
+        await expect(panel).toContainText('构建 / 部署信号')
+        // 聚合状态 + 失败源清单（失败源由 fixtures 端点按 signals 派生）
+        await expect(panel).toContainText('聚合状态')
+        await expect(panel).toContainText('失败源')
+        await expect(panel).toContainText('cloudflare-workers-and-pages / Workers Builds')
+        await expect(panel).toContainText('vercel / Preview')
+        // 各信号条目（来源 + provider + 名称）
+        await expect(panel.locator('.pr-checks__signal')).toHaveCount(3)
+        await expect(panel).toContainText('github-actions')
+        await expect(panel).toContainText('Workers Builds')
+        // 链接：详情 + 日志（新窗口打开）
+        const logLink = panel.locator('a[href="https://logs.example.com/deploy"]')
+        await expect(logLink).toHaveAttribute('target', '_blank')
+        await expect(panel.locator('a[href="https://dash.cloudflare.com/build/9002"]')).toHaveCount(1)
+    })
+})
+
 test.describe('PR Check 列表行内仓库辨识度', () => {
     test('仓库列：跨仓库同号 PR 并存时行内可区分归属', async ({ page }) => {
         // 复用 global-setup 已注入的仓库（foo/bar + foo/baz，幂等），构造「跨仓库同号 PR（#390）」

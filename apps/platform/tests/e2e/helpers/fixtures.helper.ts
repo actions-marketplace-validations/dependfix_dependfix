@@ -71,6 +71,26 @@ export interface ScanResultFixture {
     occurrenceCount?: number
 }
 
+/** 归一化构建 / 部署信号（写入 `signals_json`；`observedAt` 由 fixtures 端点写入时刻填充） */
+export interface PRCheckSignalFixture {
+    kind: 'check' | 'status' | 'deployment'
+    provider: string
+    name: string
+    state: 'pending' | 'success' | 'failure' | 'error' | 'neutral' | 'skipped'
+    rawState?: string | null
+    sourceId?: string | null
+    targetUrl?: string | null
+    logUrl?: string | null
+    summary?: string | null
+}
+
+/** 失败源条目（写入 `failure_sources_json`；缺省时按 `signals` 派生） */
+export interface PRCheckFailureSourceFixture {
+    provider: string
+    name: string
+    kind: 'check' | 'status' | 'deployment'
+}
+
 export interface PRCheckFixture {
     /** 引用 repos 中已存在的仓库 */
     repositoryOwner: string
@@ -88,6 +108,12 @@ export interface PRCheckFixture {
     acknowledgedByUserId?: string | null
     /** 最近轮询时间（ISO 串，必填）：视觉基线依赖确定性取值 */
     lastPolledAt: string
+    /** 聚合构建 / 部署状态（缺省 null = 本列上线前的历史行） */
+    overallStatus?: 'pending' | 'success' | 'failure' | null
+    /** 归一化三源信号（缺省不写 `signals_json`） */
+    signals?: PRCheckSignalFixture[]
+    /** 失败源清单（缺省按 `signals` 派生） */
+    failureSources?: PRCheckFailureSourceFixture[]
 }
 
 /**

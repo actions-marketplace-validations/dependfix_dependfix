@@ -7,6 +7,7 @@ import { RUN_FAILURE_KINDS, RUN_FAILURE_STAGES } from '#server/services/run-fail
 import { ScanResult } from '#server/entities/scan-result'
 import { PRCheck, PR_CHECK_CONCLUSIONS } from '#server/entities/pr-check'
 import { resolveOrganizationId } from '#server/utils/organization'
+import { summarizeFailureSources } from '#server/services/monitor/build-signals'
 
 // useRuntimeConfig 由 Nuxt/Nitro auto-import 提供（vitest 环境由 tests/setup-nuxt-server.ts stub）
 // 不在 h3 中显式 import，避免被 h3 解析为 undefined（h3 不导出 useRuntimeConfig）
@@ -113,6 +114,32 @@ const scanResultSchema = z.object({
  * 幂等：按实体复合唯一索引 `(repositoryId, prNumber, headSha)` 查重复用，已存在不更新字段
  * （与 repo 的幂等语义一致；视觉套件每次先 DELETE 再 seed，不依赖更新语义）。
  */
+const prCheckSignalSchema = z.object({
+    /** 信号来源（check run / commit status / deployment） */
+    kind: z.enum(['check', 'status', 'deployment']),
+    /** provider 归因（如 `github-actions` / `vercel`） */
+    provider: z.string().min(1).max(100),
+    /** 展示名（check 名 / status context / deployment environment） */
+    name: z.string().min(1).max(200),
+    /** 归一化状态 */
+    state: z.enum(['pending', 'success', 'failure', 'error', 'neutral', 'skipped']),
+    /** 原始 GitHub 取值（可选） */
+    rawState: z.string().max(64).nullable().optional(),
+    /** 源侧 id（可选） */
+    sourceId: z.string().max(64).nullable().optional(),
+    /** 详情 / 日志链接（可选） */
+    targetUrl: z.string().max(500).nullable().optional(),
+    logUrl: z.string().max(500).nullable().optional(),
+    /** 摘要（可选） */
+    summary: z.string().nullable().optional(),
+})
+
+const prCheckFailureSourceSchema = z.object({
+    provider: z.string().min(1).max(100),
+    name: z.string().min(1).max(200),
+    kind: z.enum(['check', 'status', 'deployment']),
+})
+
 const prCheckSchema = z.object({
     /** 引用 repos 中已存在的仓库（owner/name 组合在 repos 中唯一） */
     repositoryOwner: z.string().min(1),
@@ -134,6 +161,12 @@ const prCheckSchema = z.object({
     acknowledgedByUserId: z.string().max(36).nullable().optional(),
     /** 最近轮询时间（实体列 NOT NULL）：**必填**，视觉基线需要确定性的时间列取值 */
     lastPolledAt: z.string().min(1),
+    /** 聚合构建 / 部署状态（缺省 null = 本列上线前的历史行） */
+    overallStatus: z.enum(['pending', 'success', 'failure']).nullable().optional(),
+    /** 归一化三源信号（写入 `signals_json`；`observedAt` 由写入时刻填充） */
+    signals: z.array(prCheckSignalSchema).optional(),
+    /** 失败源清单（写入 `failure_sources_json`；缺省时按 `signals` 派生，与生产同源） */
+    failureSources: z.array(prCheckFailureSourceSchema).optional(),
 })
 
 const fixturesBodySchema = z.object({
@@ -314,12 +347,31 @@ export default defineEventHandler(async (event) => {
                 prCheckResults.push({ repositoryId: repo.id, id: existing.id, created: false })
                 continue
             }
+            // 三源字段：信号补 observedAt（写入时刻）；失败源清单缺省时按 signals 派生（复用生产纯函数）
+            const signals = (pc.signals ?? []).map((signal) => ({
+                kind: signal.kind,
+                provider: signal.provider,
+                name: signal.name,
+                state: signal.state,
+                rawState: signal.rawState ?? null,
+                sourceId: signal.sourceId ?? null,
+                targetUrl: signal.targetUrl ?? null,
+                logUrl: signal.logUrl ?? null,
+                summary: signal.summary ?? null,
+                observedAt: new Date(),
+            }))
+            const failureSources = pc.failureSources
+                ?? (signals.length > 0 ? summarizeFailureSources(signals) : null)
+
             const saved = await prCheckRepo.save(prCheckRepo.create({
                 repositoryId: repo.id,
                 prNumber: pc.prNumber,
                 headSha: pc.headSha,
                 authorLogin: pc.authorLogin,
                 conclusion: pc.conclusion,
+                signalsJson: signals.length > 0 ? JSON.stringify(signals) : null,
+                overallStatus: pc.overallStatus ?? null,
+                failureSourcesJson: failureSources ? JSON.stringify(failureSources) : null,
                 checkRunId: pc.checkRunId ?? null,
                 detailsUrl: pc.detailsUrl ?? null,
                 errorMessage: pc.errorMessage ?? null,

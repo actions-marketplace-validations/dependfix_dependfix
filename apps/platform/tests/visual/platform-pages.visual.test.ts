@@ -136,6 +136,15 @@ test.describe('平台页面视觉基线', () => {
         for (const label of ['仅 firing', '仅已 ack', 'OK']) {
             await expect(table).toContainText(label)
         }
+        /* 展开首行（默认按「最近采集」降序 → #101 失败行）覆盖三源信号面板：
+           先断言语义再截图，避免面板未挂载时基线被落成缺面板形态。 */
+        const firstRow = table.locator('tbody .caomei-data-table__row').first()
+        await firstRow.locator('button.caomei-data-table__row-expander').click()
+        const panel = table.locator('.pr-checks__signals')
+        await expect(panel).toBeVisible()
+        await expect(panel).toContainText('构建 / 部署信号')
+        await expect(panel.locator('.pr-checks__signal')).toHaveCount(2)
+        await expect(panel).toContainText('vercel')
         await waitForVisualStable(page)
         await expectThemeApplied(page, 'light')
         await expectPageScreenshot(page, 'pr-checks-light.png')
