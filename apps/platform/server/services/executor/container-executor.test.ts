@@ -673,7 +673,7 @@ describe('pushFixBranch', () => {
 
         const callArgs = childProcessMock.execFile.mock.calls[0] as unknown as [string, string[]]
         const [, args] = callArgs
-        expect(args).toEqual(['-c', 'push.gpgSign=false', 'push', 'origin', 'main'])
+        expect(args).toEqual(['-c', 'push.gpgSign=false', 'push', '--no-verify', 'origin', 'main'])
     })
 
     it('throws when stderr does not match /^To / pattern', async () => {

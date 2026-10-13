@@ -8,6 +8,7 @@ import {
     type RuntimeConfig,
     computeFixFingerprint,
     createFixBranch,
+    GIT_PUSH_HOOKS_ISOLATION_ARGS,
     GIT_PUSH_SIGNING_ISOLATION_ARGS,
 } from '@dependfix/engine'
 import type { AuthProvider } from '@dependfix/engine/auth'
@@ -105,8 +106,10 @@ export async function extractBranchName(workDir: string): Promise<string> {
  * - 凭据走 http.extraheader（base64 basic auth），不进 argv/URL（防 execFile 错误回显泄露）
  * - 签名隔离：显式传 `-c push.gpgSign=false`（`GIT_PUSH_SIGNING_ISOLATION_ARGS`），避免宿主
  *   `push.gpgSign=true` 让 push 带 `--signed` 而在服务端不支持时失败（口径见 docs/standards/git.md §3.8）
+ * - hooks 隔离：`push --no-verify`（`GIT_PUSH_HOOKS_ISOLATION_ARGS`）跳过被修复仓库的 `pre-push`，
+ *   避免隔离环境下 hook 非 0 退出把交付链打断为 `push_failed`（同 §3.8）
  * - git push 成功时 stderr 含 "To https://..." 行；任何其他 stderr 视为失败
- * - 与 pushBranch（packages/engine/src/github/pr-creator.ts:200）的语义差异：
+ * - 与 pushBranch（`packages/engine/src/github/pr-creator.ts` 的 `pushBranch`）的语义差异：
  *   本函数为 async + 走 http.extraheader 凭据注入（平台 A 模式需要把 token 重新注入到
  *   平台工作目录的 git config，而 engine 端 pushBranch 依赖该 workDir 已有 origin 凭据）
  *
@@ -143,7 +146,9 @@ export async function pushFixBranch(
     const args = [
         ...GIT_PUSH_SIGNING_ISOLATION_ARGS,
         ...(token ? ['-c', `http.extraheader=Authorization: basic ${Buffer.from(`${username}:${token}`).toString('base64')}`] : []),
-        'push', 'origin', branchName,
+        'push',
+        ...GIT_PUSH_HOOKS_ISOLATION_ARGS,
+        'origin', branchName,
     ]
     const { stderr } = await execFileAsync('git', args, { cwd: workDir, timeout: 60_000 })
     if (stderr && !/^To /m.test(stderr)) {
@@ -163,7 +168,9 @@ export async function cleanupRemoteBranch(branchName: string, workDir: string, t
     const args = [
         ...GIT_PUSH_SIGNING_ISOLATION_ARGS,
         ...(token ? ['-c', `http.extraheader=Authorization: basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`] : []),
-        'push', 'origin', '--delete', branchName,
+        'push',
+        ...GIT_PUSH_HOOKS_ISOLATION_ARGS,
+        'origin', '--delete', branchName,
     ]
     try {
         await execFileAsync('git', args, { cwd: workDir, timeout: 30_000 })

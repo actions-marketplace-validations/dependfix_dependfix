@@ -11,6 +11,7 @@ import {
     fetchDefaultBranch,
     findDependfixOpenPR,
     generatePRBody,
+    GIT_PUSH_HOOKS_ISOLATION_ARGS,
     GIT_PUSH_SIGNING_ISOLATION_ARGS,
     type DependfixOpenPR,
 } from '@dependfix/engine'
@@ -118,6 +119,8 @@ export class PlatformDeliveryError extends Error {
  * 凭据走 `http.extraheader`（base64 basic auth），不进 argv/URL（防 execFile 错误回显泄露 token）。
  * 签名隔离：同 push 侧策略（`GIT_PUSH_SIGNING_ISOLATION_ARGS`，见 engine 的 git-signing.ts）——
  * 避免宿主 `push.gpgSign=true` 让 push 带 `--signed` 而在服务端不支持时失败。
+ * hooks 隔离：同 push 侧策略（`GIT_PUSH_HOOKS_ISOLATION_ARGS`）——`push --no-verify` 跳过被修复
+ * 仓库的 `pre-push`（口径见 docs/standards/git.md §3.8）。
  * 失败原样抛 PlatformDeliveryError(code='push_failed')。
  */
 export async function pushFixBranchWithCredential(
@@ -129,7 +132,9 @@ export async function pushFixBranchWithCredential(
     const args = [
         ...GIT_PUSH_SIGNING_ISOLATION_ARGS,
         '-c', `http.extraheader=Authorization: basic ${basic}`,
-        'push', 'origin', branchName,
+        'push',
+        ...GIT_PUSH_HOOKS_ISOLATION_ARGS,
+        'origin', branchName,
     ]
     try {
         const { stderr } = await execFileAsync('git', args, { cwd: workDir, timeout: 60_000 })

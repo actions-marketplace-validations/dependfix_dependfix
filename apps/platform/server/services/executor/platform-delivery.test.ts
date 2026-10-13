@@ -184,6 +184,8 @@ describe('pushFixBranchWithCredential', () => {
         expect(bin).toBe('git')
         // 签名隔离：push 前置 `-c push.gpgSign=false`，避免宿主 push.gpgSign 污染
         expect(args.slice(0, 2)).toEqual(['-c', 'push.gpgSign=false'])
+        // hooks 隔离：`push --no-verify` 须紧邻 push 子命令（commit 侧同一事实源口径）
+        expect(args.slice(args.indexOf('push'), args.indexOf('push') + 2)).toEqual(['push', '--no-verify'])
         // 关键断言：token 走 http.extraheader（base64 basic auth），不进 argv
         expect(args).toContain('http.extraheader=Authorization: basic eC1hY2Nlc3MtdG9rZW46Z2hwX1NVUEVSU0VDUkVUVE9LRU4=')
         // 关键反断言：明文 token 不能出现在 argv 中（-c 形式是 base64，不算泄露）
