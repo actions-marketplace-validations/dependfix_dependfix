@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -190,8 +190,9 @@ describe.skipIf(skipOnWindows)('entrypoint.sh 队列 worker 看护', () => {
         expect(Number.isFinite(supervisorPid)).toBe(true)
         expect(Number.isFinite(workerPid)).toBe(true)
 
-        const { code } = await terminate(handle)
-        expect(code).toBe(143)
+        const { code, signal } = await terminate(handle)
+        // signal 非 null 说明 TERM 落在 trap 安装之前（默认处置下 PID 1 直接被终止）；安装顺序约束见 entrypoint.sh
+        expect({ code, signal }, '容器停止须由 entrypoint 转发 TERM 并以 143 退出').toEqual({ code: 143, signal: null })
         // 容器停止后 worker 与看护循环均被终止（不再留驻），且不再触发重启
         await waitFor(() => !alive(supervisorPid))
         await waitFor(() => !alive(workerPid))
@@ -236,5 +237,21 @@ describe.skipIf(skipOnWindows)('entrypoint.sh 队列 worker 看护', () => {
         expect(output).not.toContain('停止自动重启')
         expect(output).not.toContain('第 2 次重启')
         await terminate(handle)
+    })
+
+    // 竞态守卫（静态）：上面「双进程形态」用例以「看护进程 pid」公告行为同步点发信号，若 trap 晚于该公告行安装，
+    // 信号即落在默认处置窗口内（PID 1 直接被终止 → 退出码为 null 而非 143）。该窗口只在特定调度下出现，
+    // 运行期用例无法稳定复现（CI 曾偶发红），故把「安装先于启动子进程与就绪输出」固化为源码顺序断言。
+    // entrypoint 内的 fail-safe 分支（MAIN_PID 未赋值即退出）同样不可确定性触发，登记为已知边界（见 platform.md §10.6）。
+    it('信号处置顺序：TERM / INT trap 先于子进程启动与「看护进程 pid」公告行', () => {
+        const source = readFileSync(entrypointPath, 'utf8')
+        const trapIndex = source.search(/^[ \t]*trap '[^']*stop_queue_worker[^']*' TERM INT$/m)
+        const spawnIndex = source.indexOf('supervise_queue_worker "$prefix" "$@" &')
+        const announceIndex = source.indexOf('看护进程 pid=${SUPERVISOR_PID}')
+        expect(trapIndex).toBeGreaterThan(-1)
+        expect(spawnIndex).toBeGreaterThan(-1)
+        expect(announceIndex).toBeGreaterThan(-1)
+        expect(trapIndex).toBeLessThan(spawnIndex)
+        expect(spawnIndex).toBeLessThan(announceIndex)
     })
 })
