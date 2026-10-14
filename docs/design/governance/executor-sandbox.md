@@ -494,7 +494,7 @@ C53 引入 A 模式 `dispatched` 三分支（`scan-run-state.ts`），M25 新增
 错误码 `pr_creation_failed` 命名与 B 模式已有的 `result_fetch_failed` / `run_url_not_resolved` 对齐——表达"副作用已落库（分支已推）+ 最终操作未完成"。
 错误码 `engine_delivery_failed` 是 M25 新增的进程内识别——引擎在 `fix` / `fix-and-pr` 流程走到交付阶段失败（commit / PR / verify / rollback / FATAL），result 仍可能存在（部分仓库成功 + 部分失败）但**远程未完整落地**。原行为 result 存在即 `completed` 会让"已修复 8 但无 PR"误报（见 2026-09-04 03:28 AM 事故）。
 
-**环境性安装失败不归因（2026-10-13）**：容器内 `pnpm install` 环境性失败（无 stderr 诊断：被信号杀死 / 超时 / 静默非零退出）由引擎标记为 `FixAction.environmentalFailure` + `ENVIRONMENT_ERROR`（不归因本次运行），`computeExitCode` 不计入失败动作——故「零告警 + 环境性安装失败 + 既有基线失败」不再被误判 exit 2 → `engine_exit_2`（"所有仓库失败或全量回滚"）。口径见 [dependency-fixer.md](../modules/dependency-fixer.md) 与 [pnpm-lockfile-fixer.md §2.4](../modules/pnpm-lockfile-fixer.md)。
+**环境性安装失败不归因（2026-10-13）**：容器内 `pnpm install` 环境性失败（无 stderr 诊断：被信号杀死 / 超时 / 静默非零退出）由引擎标记为 `FixAction.environmentalFailure` + `ENVIRONMENT_ERROR`（不归因本次运行），`computeExitCode` 不计入失败动作——故「零告警 + 环境性安装失败 + 既有基线失败」不再被误判 exit 2 → `engine_exit_2`（"所有仓库失败或全量回滚"）。口径见 [dependency-fixer.md](../modules/dependency-fixer-records.md) 与 [pnpm-lockfile-fixer.md §2.4](../modules/pnpm-lockfile-fixer.md)。
 
 ### 8.3 关键代码点
 
