@@ -79,43 +79,6 @@ P 阶段在 `todo.md` 顶部 banner / 阶段 banner 写 ahead 状态时，**必�
 
 **F (Finish) — 任务完结与分批提交**：更新 `todo.md` 状态为 `已完成` 并同步相关文档；每个原子条目独立提交（长任务先回 P 阶段拆分，规模约束见 [规划规范 §1.1](./planning.md#11-硬性约束)），每批提交前加载 `conventional-committer` skill；commit 后不得自动 `git push`，仅限用户明确要求时执行。
 
-## 1.4 P 阶段规划暂停协议（user-driven）
-
-- **P 阶段仅文档改动**：只允许改动 `docs/plan/*` + `docs/index.md` + 相关规范 / 技能 / 智能体文件；**不**写实现代码，不改 `apps/platform/` / `packages/` 等运行时代码。
-- **提交后暂停**：P 阶段规划 commit 后必须立即暂停，等待用户指令进入 D 阶段，不得自行提前启动实现。
-- **用户驱动工作流**：用户在「确认方案」/「提交本次改动」/「开始规划」等明确指令出现前，执行角色只交付 P 阶段产出 + 收口摘要 + 下一步建议；任何后续动作（commit / push / D 阶段实现）须用户显式触发。
-- **会话沉淀**：P 阶段规划落地后必须同步更新 `.session/current-task.yaml` 与 `.session/runtime-state.json`，标注 `phase = "P 阶段文档已落地，待用户指令进入 D 阶段"` + `blocked_on = "用户发布"`。
-- **结论固化**：P 阶段收口时同步更新 `docs/standards/*` 与 `.github/skills/*`，把本次 P 阶段的字段切分 / 标题层级 / 锚点规则等决定固化进规范（避免结论仅留会话）。
-- **跨文档内部一致性**：「新需求处理原则」+「插队例外清单 3 类」+「合规核验 code-auditor 主责边界必查项」三段必须在 `AGENTS.md §新需求处理原则` + `docs/standards/ai-collaboration.md §1.4` + `docs/standards/planning.md §3.1` 三处保持一致。**修复模式**：(a) 改前先 `rg -n "新需求.*处理原则" docs/standards/ AGENTS.md` 核对所有相关描述；(b) 改后 `pnpm run check:docs` 验证链接 + `rg -n` 交叉验证措辞一致；(c) 关键原则（hard requirement / 插队例外）必须三处同步 + commit message 显式说明。
-
-## 1.5 阶段归档检查 + 沉淀工作流（PDTFC+ 闭环后必经）
-
-PDTFC+ 闭环（F 阶段提交后）的下一阶段启动前，必须执行「阶段归档检查 + 沉淀」独立流程——**不**是归档阶段本身，是阶段之间的衔接工作：
-
-- **① 阶段开工前归档检查（hard requirement）**：启动下一阶段 P 阶段前必须检查——`todo.md` 是否有未 `[x]` 条目（数据漂移信号，`rg "^- ### \[ \]" docs/plan/todo.md`）、`.session/wisdom.md` 活跃条目数（`pnpm distill:wisdom --check`，接近 20 阈值需蒸馏）、`experience-archive.md` 健康窗口（行数 + §号连续性）。**强制提醒**：当上一阶段 `todo.md` 仍有 `[ ]` 条目时，执行角色必须**主动询问**是否需要先归档，不得直接添加下一阶段待办。
-- **② 阶段闭环后沉淀工作流（必经）**：链路为 `F → 归档批次 → 沉淀工作流 → 下一阶段 P`。步骤：**结论提炼**（判断本阶段是否有值得沉淀的内容，准入标准见 [experience-archive.md 文件头](../design/governance/experience-archive.md)——未落入可执行方法论 / 需溯源的关键决策 / 同一模式已复现 >= 2 次 / 工具与环境陷阱）；**归档追加**（在 experience-archive 末尾追加新 §，编号连续，结构含案例 / 结论 / 与既有条目的关联 / 挂接治理检查点 / 准入标准复核）；**规范迁移**（把案例抽象出的可执行方法论挂接到 `docs/standards/*.md` / `.github/skills/*/SKILL.md` / `.github/agents/*.agent.md`，遵循单点声明原则，见 [documentation.md §4](./documentation.md)）；**session 沉淀**（活跃条目 >= 20 时执行 `pnpm distill:wisdom`；新 pattern 按 `pattern-*` / `principle-*` / `practice-*` 格式追加到 `.session/wisdom.md`）。
-- **③ 归档 / 沉淀 commits 必须经过 A 阶段 code-auditor 深度审计（hard requirement）**：涉及 `docs/standards/*.md` / `docs/design/governance/*.md` / `.github/agents/*.agent.md` 等治理定义修改的提交，必须与 feature commits 同等标准审计，不得因「仅文档改动」或「非业务代码」跳过。**审计必查项**：跨文件 cross-reference 完整性（新增 / 修改 / 迁出章节标题时必须 `rg -n "<标题>"` 全仓库扫描并同步更新）；锚点格式正确性（`pnpm run check:docs` 0 error，commit message 须含该证据）；规范单点声明（新规则仅在权威文档完整声明一次，其他文档 / skill / agent 仅一行链接引用）；活跃 wisdom 条目数（是否触达 20 阈值，触达则先蒸馏）；**④ 与既有规范的关联**：本节是 §1.4 P 阶段暂停协议在阶段间的延伸（阶段间衔接也是用户驱动工作流）；阶段间检查可能发现「上一阶段未完成事项需插队处理」，按 §2.1 决策；预防性迁出后须按 [规划规范 §4.4](./planning.md#44-大批量归档批次操作规范) 更新 cross-reference；本节引用「PDTFC+ 闭环」「A 阶段」等术语时不得孤立编号标记，必须带文档路径或章节名。
-
-## 1.6 commit 前轻量级审核流程（PDTFC+ F 阶段必经）
-
-执行 `git commit` 前必须走轻量级审核，禁止随意提交 commit message。
-
-**self-check 4 项必查**：① **执行命令 + 结果数字**——是否含 `pnpm … 0 error` / `N passed` / `+N/-M` 等？→ 删除；② **改动行数描述**——git diff 直接可见 → 删除；③ **无依据的表述**——是否含「确切路径需源码进一步确认」等无证据的推断？→ 删除或精简；④ **关键决策 / 问题结论 / 关联 commit**——有实质信息则保留。**硬约束自动拦截**：上述 4 项 self-check 已落地到 husky `commit-msg` hook（[scripts/commitlint/](../../scripts/commitlint/) 提供 4 个 commitlint plugins 自动执行），违规 commit message 会被直接拒绝；self-check 与 hook 拦截二者择一即可（hook 是兜底防线）。
-
-**code-auditor quick depth 触发条件**：**触发**（任一）——commit message 信息密度异常；改动跨多个独立模块（如 `packages/core` + `apps/platform` + `docs/standards`）；diff 文件数 > 8 或新增行数 > 800（quick depth 触发阈值，与 [§1.4](#14-单次提交审计阈值10-文件--800-行) hard split 阈值 10 文件 / 800 行区分——8 是 audit 触发点，10 是 hard split 阈值）；commit message 中含关键决策 / 风险声明 / 插队理由（需审计背书）。**不触发**——单文件改动 + 单类型 + 信息密度合规；已有相同模式 commit 走过的标准流程。
-
-**与既有规范的关联**：本节是 §4.4 F 阶段本地验证在 commit message 维度的延伸；是 §4.6 audit warning 修复决策协议中「低成本 + 对齐验收」维度的执行；与 [git.md §3.6](./git.md) commit message 信息密度规范一一对应（commitlint 拦截规则集见 [scripts/commitlint/](../../scripts/commitlint/)）；补强 `AGENTS.md §提交规范` 的「质量前置」维度。
-
-## 1.7 阶段启动重复评估自检流程（PDTFC+ P 阶段必经 / M27.1 重复评估问题）
-
-**触发条件**：`todo.md` 当前阶段 banner 修改（新增阶段）；当前阶段新增 `M\d+\.\d+` 原子条目；当前阶段任务段范围 / 验收标准 / 交付物修改；用户决策修订方案上收 backlog 候选。
-
-**5 步自检流程（hard requirement）**：① **todo-archive.md 历史阶段表格扫描**——`rg -n "已闭环|不计入本批|不计入 M\d+|ahead=0.*已推" docs/plan/todo-archive.md docs/plan/archive/todo-archive-phases-*.md`，找到「已闭环」标注的子任务则从 `todo.md` 当前阶段任务段删除对应范围；② **git log 历史核验**——`git log --oneline -- <候选相关路径>` + `git log --all --grep="<候选标识>"` + `git rev-list HEAD ^origin/master --grep="<候选标识>" --count`，已 ahead=0 推送的从任务段删除；③ **实际代码侧 anchor 核对**——`rg -n "<候选特征字段>" <候选相关路径>` 并实际打开文件，验证候选描述与实际代码一致；④ **决策描述前提矛盾厘清**——出现「参考 NNN 实施」时先验证 NNN 是否已落地（`git log --grep="NNN"` + `rg -n "NNN" docs/plan/todo-archive.md`）：已落地则候选不需增强、仅「参考实施」则保留范围；⑤ **backlog 描述同步修订**——新增条目对应 backlog 候选时**必须**同步修订 backlog.md（已闭环子任务追加标注 + commit hash 回填；暂缓子任务追加原因；「保留为后续增强候选」措辞须基于「当前未落地」前提，否则删除）。
-
-**典型反模式**：仅读 `backlog.md` / `todo-archive.md` 文档侧资料而未打开实际代码验证；决策描述中出现「参考 NNN 实施」自相矛盾却未先厘清；决策 D 阶段前未用 `git log --oneline -- <相关路径>` 做 5 分钟核对；仅依赖 backlog 候选描述做规划，未对照 commit history + 实际代码 + todo-archive 表格三重交叉核验。
-
-**合规核验**：由 [code-auditor 主责边界「阶段启动重复评估自检」必查项](../../.github/agents/code-auditor.agent.md) 强制检查——commit 涉及 `todo.md` 当前阶段新增 / 修改时，五步自检任意一步未执行 / 未通过 → Reject 退回。**关联规范**：[planning.md §3.4](./planning.md#34-阶段启动决策前置交叉核验硬要求m271-重复评估问题--2026-09-10) + [归档 §六十四](../design/governance/experience-archive-§49-§57-recent-investigation.md#六十四m271-c66-告警视图增强-重复评估教训阶段启动决策时未对照已闭环清单导致规划无效工作2026-09-10commit-决策-d2-错误)（M27.1 重复评估问题闭环记录）。
-
 ## 2.1 迭代中途发现事项处理
 
 1. **先暂停扩写**：停止直接继续实现，先判断是否已在当前待办或验收范围内。
@@ -143,6 +106,43 @@ PDTFC+ 闭环（F 阶段提交后）的下一阶段启动前，必须执行「�
 | RG | Review Gate | 给出最终审计结论 | code-reviewer 结论、未覆盖边界 |
 
 **最低验证与测试升级**：文档 / 规划 = V0 + V1 + RG；纯逻辑 / 工具函数 / 服务层 = + V2；API / 鉴权 / 数据模型 = + V2（影响关键写路径则升级 V3）；UI 组件 / 页面交互 = + V2 + V3；修复型 Hotfix = V0 + V1 +（对应层级 V2 / V3）+ RG（必须补复现 + 修复后结果）；配置 / 依赖 / CI / 技能与 agent 定义 = V0 + V1 + RG（定向验证：手工跑对应脚本 / workflow / skill 调用，skill / agent 定义补 LLM 单测或契约测试；**依赖升级批次另见 [development.md §5.1.34 ③](./development.md#51-工程实践规则)（口径以该条为准）**。**测试升级口径**：低风险 → 不跑测试或仅保留静态证据（仅适用纯文档、纯技能文案、纯规划整理）；中风险 → 定向测试（逻辑分支、工具函数、服务层、配置脚本入口）；高风险 → 全量测试或 verify 片段（鉴权、关键写路径、跨模块流程、发布前收口）；专项 → Coverage / E2E / 性能验证。**关键约束**：没有 RG 结论的变更只能视为「进行中」，不能视为已完成。
+
+## 2.3 P 阶段规划暂停协议（user-driven）
+
+- **P 阶段仅文档改动**：只允许改动 `docs/plan/*` + `docs/index.md` + 相关规范 / 技能 / 智能体文件；**不**写实现代码，不改 `apps/platform/` / `packages/` 等运行时代码。
+- **提交后暂停**：P 阶段规划 commit 后必须立即暂停，等待用户指令进入 D 阶段，不得自行提前启动实现。
+- **用户驱动工作流**：用户在「确认方案」/「提交本次改动」/「开始规划」等明确指令出现前，执行角色只交付 P 阶段产出 + 收口摘要 + 下一步建议；任何后续动作（commit / push / D 阶段实现）须用户显式触发。
+- **会话沉淀**：P 阶段规划落地后必须同步更新 `.session/current-task.yaml` 与 `.session/runtime-state.json`，标注 `phase = "P 阶段文档已落地，待用户指令进入 D 阶段"` + `blocked_on = "用户发布"`。
+- **结论固化**：P 阶段收口时同步更新 `docs/standards/*` 与 `.github/skills/*`，把本次 P 阶段的字段切分 / 标题层级 / 锚点规则等决定固化进规范（避免结论仅留会话）。
+- **跨文档内部一致性**：「新需求处理原则」+「插队例外清单 3 类」+「合规核验 code-auditor 主责边界必查项」三段必须在 `AGENTS.md §新需求处理原则` + `docs/standards/ai-collaboration.md §2.1.1` + `docs/standards/planning.md §3.1` 三处保持一致。**修复模式**：(a) 改前先 `rg -n "新需求.*处理原则" docs/standards/ AGENTS.md` 核对所有相关描述；(b) 改后 `pnpm run check:docs` 验证链接 + `rg -n` 交叉验证措辞一致；(c) 关键原则（hard requirement / 插队例外）必须三处同步 + commit message 显式说明。
+
+## 2.4 阶段归档检查 + 沉淀工作流（PDTFC+ 闭环后必经）
+
+PDTFC+ 闭环（F 阶段提交后）的下一阶段启动前，必须执行「阶段归档检查 + 沉淀」独立流程——**不**是归档阶段本身，是阶段之间的衔接工作：
+
+- **① 阶段开工前归档检查（hard requirement）**：启动下一阶段 P 阶段前必须检查——`todo.md` 是否有未 `[x]` 条目（数据漂移信号，`rg "^- ### \[ \]" docs/plan/todo.md`）、`.session/wisdom.md` 活跃条目数（`pnpm distill:wisdom --check`，接近 20 阈值需蒸馏）、`experience-archive.md` 健康窗口（行数 + §号连续性）。**强制提醒**：当上一阶段 `todo.md` 仍有 `[ ]` 条目时，执行角色必须**主动询问**是否需要先归档，不得直接添加下一阶段待办。
+- **② 阶段闭环后沉淀工作流（必经）**：链路为 `F → 归档批次 → 沉淀工作流 → 下一阶段 P`。步骤：**结论提炼**（判断本阶段是否有值得沉淀的内容，准入标准见 [experience-archive.md 文件头](../design/governance/experience-archive.md)——未落入可执行方法论 / 需溯源的关键决策 / 同一模式已复现 >= 2 次 / 工具与环境陷阱）；**归档追加**（在 experience-archive 末尾追加新 §，编号连续，结构含案例 / 结论 / 与既有条目的关联 / 挂接治理检查点 / 准入标准复核）；**规范迁移**（把案例抽象出的可执行方法论挂接到 `docs/standards/*.md` / `.github/skills/*/SKILL.md` / `.github/agents/*.agent.md`，遵循单点声明原则，见 [documentation.md §4](./documentation.md)）；**session 沉淀**（活跃条目 >= 20 时执行 `pnpm distill:wisdom`；新 pattern 按 `pattern-*` / `principle-*` / `practice-*` 格式追加到 `.session/wisdom.md`）。
+- **③ 归档 / 沉淀 commits 必须经过 A 阶段 code-auditor 深度审计（hard requirement）**：涉及 `docs/standards/*.md` / `docs/design/governance/*.md` / `.github/agents/*.agent.md` 等治理定义修改的提交，必须与 feature commits 同等标准审计，不得因「仅文档改动」或「非业务代码」跳过。**审计必查项**：跨文件 cross-reference 完整性（新增 / 修改 / 迁出章节标题时必须 `rg -n "<标题>"` 全仓库扫描并同步更新）；锚点格式正确性（`pnpm run check:docs` 0 error，commit message 须含该证据）；规范单点声明（新规则仅在权威文档完整声明一次，其他文档 / skill / agent 仅一行链接引用）；活跃 wisdom 条目数（是否触达 20 阈值，触达则先蒸馏）；**④ 与既有规范的关联**：本节是 §2.3 P 阶段暂停协议在阶段间的延伸（阶段间衔接也是用户驱动工作流）；阶段间检查可能发现「上一阶段未完成事项需插队处理」，按 §2.1 决策；预防性迁出后须按 [规划规范 §4.4](./planning.md#44-大批量归档批次操作规范) 更新 cross-reference；本节引用「PDTFC+ 闭环」「A 阶段」等术语时不得孤立编号标记，必须带文档路径或章节名。
+
+## 2.5 commit 前轻量级审核流程（PDTFC+ F 阶段必经）
+
+执行 `git commit` 前必须走轻量级审核，禁止随意提交 commit message。
+
+**self-check 4 项必查**：① **执行命令 + 结果数字**——是否含 `pnpm … 0 error` / `N passed` / `+N/-M` 等？→ 删除；② **改动行数描述**——git diff 直接可见 → 删除；③ **无依据的表述**——是否含「确切路径需源码进一步确认」等无证据的推断？→ 删除或精简；④ **关键决策 / 问题结论 / 关联 commit**——有实质信息则保留。**硬约束自动拦截**：上述 4 项 self-check 已落地到 husky `commit-msg` hook（[scripts/commitlint/](../../scripts/commitlint/) 提供 4 个 commitlint plugins 自动执行），违规 commit message 会被直接拒绝；self-check 与 hook 拦截二者择一即可（hook 是兜底防线）。
+
+**code-auditor quick depth 触发条件**：**触发**（任一）——commit message 信息密度异常；改动跨多个独立模块（如 `packages/core` + `apps/platform` + `docs/standards`）；diff 文件数 > 8 或新增行数 > 800（quick depth 触发阈值，与 [§1.4](#14-单次提交审计阈值10-文件--800-行) hard split 阈值 10 文件 / 800 行区分——8 是 audit 触发点，10 是 hard split 阈值）；commit message 中含关键决策 / 风险声明 / 插队理由（需审计背书）。**不触发**——单文件改动 + 单类型 + 信息密度合规；已有相同模式 commit 走过的标准流程。
+
+**与既有规范的关联**：本节是 §4.4 F 阶段本地验证在 commit message 维度的延伸；是 §4.6 audit warning 修复决策协议中「低成本 + 对齐验收」维度的执行；与 [git.md §3.6](./git.md) commit message 信息密度规范一一对应（commitlint 拦截规则集见 [scripts/commitlint/](../../scripts/commitlint/)）；补强 `AGENTS.md §提交规范` 的「质量前置」维度。
+
+## 2.6 阶段启动重复评估自检流程（PDTFC+ P 阶段必经 / M27.1 重复评估问题）
+
+**触发条件**：`todo.md` 当前阶段 banner 修改（新增阶段）；当前阶段新增 `M\d+\.\d+` 原子条目；当前阶段任务段范围 / 验收标准 / 交付物修改；用户决策修订方案上收 backlog 候选。
+
+**5 步自检流程（hard requirement）**：① **todo-archive.md 历史阶段表格扫描**——`rg -n "已闭环|不计入本批|不计入 M\d+|ahead=0.*已推" docs/plan/todo-archive.md docs/plan/archive/todo-archive-phases-*.md`，找到「已闭环」标注的子任务则从 `todo.md` 当前阶段任务段删除对应范围；② **git log 历史核验**——`git log --oneline -- <候选相关路径>` + `git log --all --grep="<候选标识>"` + `git rev-list HEAD ^origin/master --grep="<候选标识>" --count`，已 ahead=0 推送的从任务段删除；③ **实际代码侧 anchor 核对**——`rg -n "<候选特征字段>" <候选相关路径>` 并实际打开文件，验证候选描述与实际代码一致；④ **决策描述前提矛盾厘清**——出现「参考 NNN 实施」时先验证 NNN 是否已落地（`git log --grep="NNN"` + `rg -n "NNN" docs/plan/todo-archive.md`）：已落地则候选不需增强、仅「参考实施」则保留范围；⑤ **backlog 描述同步修订**——新增条目对应 backlog 候选时**必须**同步修订 backlog.md（已闭环子任务追加标注 + commit hash 回填；暂缓子任务追加原因；「保留为后续增强候选」措辞须基于「当前未落地」前提，否则删除）。
+
+**典型反模式**：仅读 `backlog.md` / `todo-archive.md` 文档侧资料而未打开实际代码验证；决策描述中出现「参考 NNN 实施」自相矛盾却未先厘清；决策 D 阶段前未用 `git log --oneline -- <相关路径>` 做 5 分钟核对；仅依赖 backlog 候选描述做规划，未对照 commit history + 实际代码 + todo-archive 表格三重交叉核验。
+
+**合规核验**：由 [code-auditor 主责边界「阶段启动重复评估自检」必查项](../../.github/agents/code-auditor.agent.md) 强制检查——commit 涉及 `todo.md` 当前阶段新增 / 修改时，五步自检任意一步未执行 / 未通过 → Reject 退回。**关联规范**：[planning.md §3.4](./planning.md#34-阶段启动决策前置交叉核验硬要求m271-重复评估问题--2026-09-10) + [归档 §六十四](../design/governance/experience-archive-§49-§57-recent-investigation.md#六十四m271-c66-告警视图增强-重复评估教训阶段启动决策时未对照已闭环清单导致规划无效工作2026-09-10commit-决策-d2-错误)（M27.1 重复评估问题闭环记录）。
 
 ## 3. 安全红线
 

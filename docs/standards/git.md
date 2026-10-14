@@ -145,7 +145,7 @@ commit message 应聚焦于"当次提交的改动"+"可供事后复查的信息"
 - **`no-diff-stats` 的误伤**：规则 `[+-]\d+(?=\s|$|[,，])` 会把**日期**（`2026-09-30` → 命中 `-30`）、**色号**（`teal-700` → 命中 `-700`）与**带连字符的代码 token**（`$space-1` → 命中 `-1`）判为 diff 行数 → 被 husky 拦截。**规避**：主题 / 正文避免「连字符 + 数字」紧跟空白；日期改写为「2026 年 9 月 30 日」，色号改写为 token 名（如 `primary-solid`）或让数字后紧跟非空白字符，代码常量改写为自然语言（如「4px 档 / 8px 档」）。**补充（2026-10-09 M38 归档批次蒸馏）**：除「连字符 + 数字」外，规则还会命中「**数字 + 可选空白 + diff 统计量词**」形态（量词为 `行` / `files` / `commits` 等，空白可缺省）——如 `M38 行` / `M38行`（编号尾部数字 + 量词「行」）、`19 commits`（数量 + `commits`）；非 diff 统计量词（如「5 个」）不受影响。**规避**：编号与量词避免紧邻（改写为「M38 条目」「19 条提交」），或调整语序让数字后紧跟非空白字符。
 - **同族规则清单（写正文前一次性规避）**：`no-diff-stats`（连字符 + 数字 / 改动行数）、`no-results-numbers`（百分比与执行结果数字，如「下降 12%」）、`no-exec-commands`（命令字面量，如「在包目录内运行测试」而非写出带 `--filter` 的命令）。三者都在 `commit-msg` 阶段拦截并 exit=1；被拦时按报错精确改写，不要重试原消息。
 
-**commit 前轻量级审核**：执行方 self-check 4 项必查 + 触发 code-auditor quick depth 条件详见 [ai-collaboration.md §1.6 commit 前轻量级审核流程](./ai-collaboration.md)。
+**commit 前轻量级审核**：执行方 self-check 4 项必查 + 触发 code-auditor quick depth 条件详见 [ai-collaboration.md §2.5 commit 前轻量级审核流程](./ai-collaboration.md)。
 
 ### 3.7 提交态自洽：amend / 提交前必须核对全部关联文件入库
 

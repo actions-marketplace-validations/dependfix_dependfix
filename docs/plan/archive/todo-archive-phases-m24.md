@@ -98,7 +98,7 @@
 - **候选池来源**：[backlog.md §短期 / 一次性候选任务](../backlog.md) + 历次 M22 / M23 / M24 audit suggest backlog
 - **类型平衡原则**（与 M24 阶段方案 B 一致）：🚀 能力 1 + 🛡️ 治理 2 + 🧪 测试 1 + 🎨 体验 1 = 5 原子条目
 - **M25 启动决策**：依赖用户输入 M25 阶段范围（候选池众多，需用户决策选 5 原子条目）
-- **M25 P 阶段规划前强制检查**（按 [ai-collaboration.md §1.5 阶段归档检查 + 沉淀工作流](../standards/ai-collaboration.md#15-阶段归档检查--沉淀工作流pdtfc-闭环后必经) + [session-wisdom-distillation.md §2.1 阶段开工前归档检查](../design/governance/session-wisdom-distillation.md#21-阶段开工前归档检查pdtfc-衔接工作流)）：
+- **M25 P 阶段规划前强制检查**（按 [ai-collaboration.md §2.4 阶段归档检查 + 沉淀工作流](../standards/ai-collaboration.md#24-阶段归档检查--沉淀工作流pdtfc-闭环后必经) + [session-wisdom-distillation.md §2.1 阶段开工前归档检查](../design/governance/session-wisdom-distillation.md#21-阶段开工前归档检查pdtfc-衔接工作流)）：
   1. todo.md `[ ]` 数据漂移信号检查
   2. session Wisdom 活跃条目数检查（本批次蒸馏后 WISDOM_OK 17 ≤ 20）
   3. experience-archive.md 最新§号连续性
@@ -107,7 +107,7 @@
 
 ## 准入标准复核
 
-本批次 M24 阶段归档符合 [ai-collaboration.md §1.5 阶段归档检查 + 沉淀工作流](../standards/ai-collaboration.md#15-阶段归档检查--沉淀工作流pdtfc-闭环后必经) 准入标准：
+本批次 M24 阶段归档符合 [ai-collaboration.md §2.4 阶段归档检查 + 沉淀工作流](../standards/ai-collaboration.md#24-阶段归档检查--沉淀工作流pdtfc-闭环后必经) 准入标准：
 - ① 教训未落入规范：5 条 M24.1 教训（自检纪律 / i18n-anchor / PrimeVue multi-sort-meta / zod optional / monitoring-vs-merge）+ 3 条 M24.2 教训（better-auth transaction / h3 async / fixtures throttle）= 8 条全部挂接 standards（`pnpm distill:wisdom --check` WISDOM_OK 17 ≤ 20）
 - ② 重大 bugfix 经验未沉淀：CI 修复 commit `ad1ab17` SCSS 未定义变量教训已挂接 §3c 大批量归档批次规范（6 项 D 阶段自检必查）+ 阶段关键经验段
 - ③ 重复违规预警：M24 阶段 4 个原子条目（M24.2 / M24.3 / M24.4 / M24.5）验收清单 stale 状态反复出现（todo.md 描述与实际状态漂移），与 M23.3 §五十五 教训 4 同模式；本批次同步修正 4 处
