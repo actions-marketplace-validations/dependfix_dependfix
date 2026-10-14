@@ -33,7 +33,7 @@
 | `docs/research/*.md`（调研） | <= 500 行 | 501-800 | > 800 行 |
 | `docs/guide/*.md`（使用指南） | <= 500 行 | 501-800 | > 800 行 |
 
-**强制分片执行规则**：超阈值文档必须按内容逻辑拆分（如 `todo-archive.md` 按阶段分片 → `archive/todo-archive-phases-m{xx}.md`；`experience-archive.md` 按章节分片 → `experience-archive-§{xx}-{slug}.md`），主文档保留近线窗口 + 索引入口；拆到 `archive/` 分片时主文档保留索引入口。**存量超标**（既有文件在阈值入表时已超「强制分片」线）由 `scripts/check-doc-size.mjs` 的豁免表逐条显式登记（含理由），不以缩小计量面代替。
+**强制分片执行规则**：超阈值文档必须按内容逻辑拆分（如 `todo-archive.md` 按阶段分片 → `archive/todo-archive-phases-m{xx}.md`；`experience-archive.md` 按章节分片 → `experience-archive-§{xx}-{slug}.md`；`design/{modules,governance}/<slug>.md` 按连续尾部章节分片 → 同级 `<slug>-<主题>.md`），主文档保留近线窗口 + 索引入口；拆到 `archive/` 分片时主文档保留索引入口。**存量超标**（既有文件在阈值入表时已超「强制分片」线）由 `scripts/check-doc-size.mjs` 的豁免表逐条显式登记（含理由），不以缩小计量面代替。
 
 ## 4. 事实源层次
 
