@@ -30,7 +30,7 @@
 
 ### 2.1 阶段开工前归档检查（PDTFC+ 衔接工作流）
 
-启动下一阶段 P 阶段规划前，必须执行**强制归档检查**（PDTFC+ 闭环后下一阶段开始前的衔接工作流），避免数据漂移。详细规范见 [ai-collaboration.md §1.5 阶段归档检查 + 沉淀工作流](../../../docs/standards/ai-collaboration.md) + [规划规范 §4.4 第 10 条预防性迁出后 cross-reference 更新](../../../docs/standards/planning.md)：
+启动下一阶段 P 阶段规划前，必须执行**强制归档检查**（PDTFC+ 闭环后下一阶段开始前的衔接工作流），避免数据漂移。详细规范见 [ai-collaboration.md §2.4 阶段归档检查 + 沉淀工作流](../../../docs/standards/ai-collaboration.md) + [规划规范 §4.4 第 10 条预防性迁出后 cross-reference 更新](../../../docs/standards/planning.md)：
 
 ```bash
 # 1. 检查 todo.md 数据漂移信号（数据漂移 = [ ] 但实际已闭环）
@@ -152,7 +152,7 @@ pnpm distill:wisdom                      # package.json script 别名
 | 触发点 | 集成方式 |
 |:---|:---|
 | **Session 收尾**（Full Stack Master (全栈大师) agent） | 当 wisdom 条目数 >= 20 时，附加一句提醒："wisdom 条目数已达 N，建议执行蒸馏" |
-| **Session 开局**（Full Stack Master (全栈大师) agent） | 启动下一阶段 P 阶段前必须执行**强制归档检查**（见 §2.1）；当 todo.md `[ ]` 数据漂移信号时主动询问用户"是否需要先归档上一阶段？"——不得直接添加下一阶段待办。详见 [ai-collaboration.md §1.5 阶段归档检查 + 沉淀工作流](../../../docs/standards/ai-collaboration.md) |
+| **Session 开局**（Full Stack Master (全栈大师) agent） | 启动下一阶段 P 阶段前必须执行**强制归档检查**（见 §2.1）；当 todo.md `[ ]` 数据漂移信号时主动询问用户"是否需要先归档上一阶段？"——不得直接添加下一阶段待办。详见 [ai-collaboration.md §2.4 阶段归档检查 + 沉淀工作流](../../../docs/standards/ai-collaboration.md) |
 | **阶段归档**（planning.md §4.3） | 在阶段归档最低验证中增加蒸馏检查项（已落地 2026-08-06） |
 | **阶段闭环 F → 下一阶段 P** | PDTFC+ 闭环后下一阶段开始前的衔接工作流（见 §2.1）：归档批次 → 沉淀工作流 → 下一阶段 P 阶段规划——**不**是归档阶段本身，是阶段间的衔接工作 |
 | **归档/沉淀 commits 治理审计**（code-auditor.agent.md 必查项） | 归档/沉淀 commits 涉及的 `docs/standards/*.md` / `docs/design/governance/*.md` / `.github/agents/*.agent.md` 等治理定义修改必须 A 阶段深度审计（与 D 阶段 feature commits 同等标准），不得因为"仅文档改动"就跳过审计 |

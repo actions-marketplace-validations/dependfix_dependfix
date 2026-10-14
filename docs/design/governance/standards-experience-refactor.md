@@ -164,7 +164,7 @@
 
 - [规范与文档治理设计](./spec-and-doc-governance.md)（v1；其 G1-G6 由本文 §4 承接）
 - [文档规范 §3 文档行数阈值](../../standards/documentation.md)（唯一阈值权威）
-- [AI 协作规范 §1.5 沉淀工作流](../../standards/ai-collaboration.md)
+- [AI 协作规范 §2.4 沉淀工作流](../../standards/ai-collaboration.md)
 - [Session Wisdom 蒸馏机制](./session-wisdom-distillation.md)
 - [经验归档](./experience-archive.md)（L3 载体）
 - [文档站 + 包 README 多语言实施设计](./docs-and-readme-i18n.md)（站点结构）

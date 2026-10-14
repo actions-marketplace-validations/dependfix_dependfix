@@ -51,7 +51,7 @@ cd /root/projects/dependfix && pnpm distill:wisdom --check
 wc -l docs/design/governance/experience-archive.md
 ```
 
-**强制提醒**：当 todo.md 仍有 `[ ]` 条目（数据漂移信号）时，执行角色必须**主动询问**"是否需要先归档上一阶段？"——不得直接添加下一阶段待办。这是 [ai-collaboration.md §1.5 阶段归档检查 + 沉淀工作流](../../../docs/standards/ai-collaboration.md) + §1.4 P 阶段规划暂停协议的延伸。
+**强制提醒**：当 todo.md 仍有 `[ ]` 条目（数据漂移信号）时，执行角色必须**主动询问**"是否需要先归档上一阶段？"——不得直接添加下一阶段待办。这是 [ai-collaboration.md §2.4 阶段归档检查 + 沉淀工作流](../../../docs/standards/ai-collaboration.md) + §2.3 P 阶段规划暂停协议的延伸。
 
 **完整衔接工作流**：
 ```
@@ -62,7 +62,7 @@ wc -l docs/design/governance/experience-archive.md
   roadmap.md
 ```
 
-详见 [ai-collaboration.md §1.5 阶段归档检查 + 沉淀工作流](../../../docs/standards/ai-collaboration.md)。
+详见 [ai-collaboration.md §2.4 阶段归档检查 + 沉淀工作流](../../../docs/standards/ai-collaboration.md)。
 
 - **技能**：`requirement-analyst`、`context-analyzer`
 

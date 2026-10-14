@@ -2,7 +2,7 @@
  * commitlint plugin: no-exec-commands
  *
  * 拦截 commit message 中包含执行命令的写法（如 `pnpm run` / `git rev-list` / `node scripts/`）。
- * 完整规则集见 docs/standards/git.md §3.6 第 1 条「不写执行命令」+ ai-collaboration.md §1.6。
+ * 完整规则集见 docs/standards/git.md §3.6 第 1 条「不写执行命令」+ ai-collaboration.md §2.5。
  *
  * commitlint plugin 接口：`async (parsed, when, value) => [boolean, string]`
  * - parsed: commitlint 解析后的 commit 对象（含 header / body / footer / type / scope / subject）
