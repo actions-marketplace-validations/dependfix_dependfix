@@ -65,13 +65,22 @@ vi.mock('../ai/app-integration', () => ({
 // ---------------------------------------------------------------------------
 
 function verificationResult(success: boolean) {
+    /** fixture 的 scripts 为 { lint, build }（无 typecheck / test）——实际链 = install / lint / build */
+    const chain = [
+        'pnpm install --frozen-lockfile',
+        'pnpm lint',
+        'pnpm build',
+    ]
     return {
         success,
-        commandResults: [
-            { command: 'pnpm install --frozen-lockfile', exitCode: success ? 0 : 1, durationMs: 0, stdout: '', stderr: success ? '' : 'mock install failure' },
-            { command: 'pnpm lint', exitCode: success ? 0 : 1, durationMs: 0, stdout: '', stderr: success ? '' : 'mock lint failure' },
-            { command: 'pnpm build', exitCode: success ? 0 : 1, durationMs: 0, stdout: '', stderr: success ? '' : 'mock build failure' },
-        ],
+        // 与 runVerification「首个失败即停」语义一致：失败时结果集在首个失败命令处截断
+        commandResults: (success ? chain : chain.slice(0, 1)).map((command) => ({
+            command,
+            exitCode: success ? 0 : 1,
+            durationMs: 0,
+            stdout: '',
+            stderr: success ? '' : 'mock verification failure',
+        })),
     }
 }
 

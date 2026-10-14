@@ -524,12 +524,13 @@ describe('runVerification', () => {
         const result = await runVerification({ workDir: '/tmp/test' })
 
         expect(result.success).toBe(true)
-        expect(result.commandResults).toHaveLength(4)
-        // 默认命令: frozen-lockfile → lint → build → test
+        expect(result.commandResults).toHaveLength(5)
+        // 默认命令: frozen-lockfile → lint → build → typecheck → test
         expect(result.commandResults[0].command).toContain('--frozen-lockfile')
         expect(result.commandResults[1].command).toContain('lint')
         expect(result.commandResults[2].command).toContain('build')
-        expect(result.commandResults[3].command).toContain('test')
+        expect(result.commandResults[3].command).toContain('typecheck')
+        expect(result.commandResults[4].command).toContain('test')
     })
 
     it('uses custom commands when provided', async () => {
@@ -780,11 +781,12 @@ describe('formatVerificationError', () => {
 // ---------------------------------------------------------------------------
 
 describe('DEFAULT_VERIFY_COMMANDS', () => {
-    it('含 test 且顺序为 install → lint → build → test', () => {
+    it('含 typecheck / test 且顺序为 install → lint → build → typecheck → test', () => {
         expect(DEFAULT_VERIFY_COMMANDS).toEqual([
             'pnpm install --frozen-lockfile',
             'pnpm lint',
             'pnpm build',
+            'pnpm typecheck',
             'pnpm test',
         ])
     })

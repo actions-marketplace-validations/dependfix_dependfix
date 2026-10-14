@@ -1,4 +1,4 @@
-// verify-project.test.ts — verifyProject（默认命令链 install 与工具链同版本 + test 纳入默认链）。
+// verify-project.test.ts — verifyProject（默认命令链 install 与工具链同版本 + typecheck / test 纳入默认链）。
 // 拆分自 app/helpers.test.ts（原 1031 行超 max-lines 1000）。
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -36,7 +36,7 @@ describe('verifyProject', () => {
         writeFileSync(join(workDir, 'package.json'), JSON.stringify({
             name: 'fixture',
             version: '1.0.0',
-            scripts: { lint: 'eslint .', build: 'tsc', test: 'vitest run' },
+            scripts: { lint: 'eslint .', build: 'tsc', typecheck: 'tsc --noEmit', test: 'vitest run' },
         }, null, 2))
         verificationRunnerMock.runVerification.mockReset()
         verificationRunnerMock.runVerification.mockResolvedValue({
@@ -68,6 +68,8 @@ describe('verifyProject', () => {
         expect(commands[0]).toBe('corepack pnpm@10.5.2 install --frozen-lockfile')
         expect(commands[1]).toBe('pnpm lint')
         expect(commands[2]).toBe('pnpm build')
+        expect(commands[3]).toBe('pnpm typecheck')
+        expect(commands[4]).toBe('pnpm test')
     })
 
     it('keeps bare pnpm install when no toolchain version is set', async () => {
@@ -117,7 +119,7 @@ describe('verifyProject', () => {
     })
 
     // -----------------------------------------------------------------------
-    // test 纳入默认链（install → lint → build → test）
+    // typecheck / test 纳入默认链（install → lint → build → typecheck → test）
     // -----------------------------------------------------------------------
 
     /** 覆盖 fixture 的 package.json（用于构造「有 / 无 test 脚本」两类仓库） */
@@ -127,7 +129,7 @@ describe('verifyProject', () => {
         }, null, 2))
     }
 
-    /** 复现原始事故形态：install / lint / build 全绿，pnpm test 失败（ESM-only 依赖破坏 CJS 消费方） */
+    /** 复现原始事故形态：install / lint / build / typecheck 全绿，pnpm test 失败（ESM-only 依赖破坏 CJS 消费方） */
     function mockTestFailureAtEnd() {
         verificationRunnerMock.runVerification.mockResolvedValue({
             success: false,
@@ -136,6 +138,7 @@ describe('verifyProject', () => {
                 { command: 'pnpm install --frozen-lockfile', exitCode: 0, durationMs: 1, stdout: '', stderr: '' },
                 { command: 'pnpm lint', exitCode: 0, durationMs: 1, stdout: '', stderr: '' },
                 { command: 'pnpm build', exitCode: 0, durationMs: 1, stdout: '', stderr: '' },
+                { command: 'pnpm typecheck', exitCode: 0, durationMs: 1, stdout: '', stderr: '' },
                 {
                     command: 'pnpm test',
                     exitCode: 1,
@@ -147,22 +150,48 @@ describe('verifyProject', () => {
         })
     }
 
+    /**
+     * 复现本条目事故形态：install / lint / build 全绿，`pnpm typecheck` 失败
+     * （依赖升级引入类型面破坏——消费方引用了已不存在的类型导出）。
+     * 结果集在首个失败命令处截断，与 `runVerification`「首个失败即停」语义一致
+     * （typecheck 失败后 `pnpm test` 不会被执行）。
+     */
+    function mockTypecheckFailureAtEnd() {
+        verificationRunnerMock.runVerification.mockResolvedValue({
+            success: false,
+            failedCommand: 'pnpm typecheck',
+            commandResults: [
+                { command: 'pnpm install --frozen-lockfile', exitCode: 0, durationMs: 1, stdout: '', stderr: '' },
+                { command: 'pnpm lint', exitCode: 0, durationMs: 1, stdout: '', stderr: '' },
+                { command: 'pnpm build', exitCode: 0, durationMs: 1, stdout: '', stderr: '' },
+                {
+                    command: 'pnpm typecheck',
+                    exitCode: 2,
+                    durationMs: 1,
+                    stdout: '',
+                    stderr: `src/mail.ts(12,24): error TS2503: Cannot find namespace 'nodemailer'.`,
+                },
+            ],
+        })
+    }
+
     // -----------------------------------------------------------------------
     // 既有失败基线判定：修复前即红的命令不归因本次改动
     // -----------------------------------------------------------------------
 
-    /** 修复前基线采样：install / lint / build 绿、test 红（目标仓库长期红测试套件的典型形态） */
+    /** 修复前基线采样：install / lint / build / typecheck 绿、test 红（目标仓库长期红测试套件的典型形态） */
     function baselineWithTestFailure(): CommandResult[] {
         return [
             { command: 'pnpm install --frozen-lockfile', exitCode: 0, durationMs: 1, stdout: '', stderr: '' },
             { command: 'pnpm lint', exitCode: 0, durationMs: 1, stdout: '', stderr: '' },
             { command: 'pnpm build', exitCode: 0, durationMs: 1, stdout: '', stderr: '' },
+            { command: 'pnpm typecheck', exitCode: 0, durationMs: 1, stdout: '', stderr: '' },
             { command: 'pnpm test', exitCode: 1, durationMs: 1, stdout: '', stderr: 'pre-existing failure' },
         ]
     }
 
     it('基线红 + 修复后仍红 → 标记 preExisting，不归因本次改动（报告单列 PRE_EXISTING_FAILURE）', async () => {
-        writePkg({ lint: 'eslint .', build: 'tsc', test: 'vitest run' })
+        writePkg({ lint: 'eslint .', build: 'tsc', typecheck: 'tsc --noEmit', test: 'vitest run' })
         mockTestFailureAtEnd()
         const ctx = makeVerifyCtx(undefined)
         const actions = await verifyProject(ctx, 'foo/bar', { baseline: baselineWithTestFailure() })
@@ -170,9 +199,9 @@ describe('verifyProject', () => {
         const testAction = actions.find((a) => a.target === 'pnpm test')
         expect(testAction?.success).toBe(false)
         expect(testAction?.preExisting).toBe(true)
-        // 归因口径：只有 test 是既有失败，其余三条仍为成功
+        // 归因口径：只有 test 是既有失败，其余四条仍为成功
         expect(actions.filter((a) => a.success).map((a) => a.target)).toEqual([
-            'pnpm install --frozen-lockfile', 'pnpm lint', 'pnpm build',
+            'pnpm install --frozen-lockfile', 'pnpm lint', 'pnpm build', 'pnpm typecheck',
         ])
         // 报告口径：既有失败单列，不混入「本次引入的失败」
         expect(ctx.allErrors).toEqual([expect.objectContaining({
@@ -180,11 +209,28 @@ describe('verifyProject', () => {
         })])
     })
 
+    it('typecheck 基线红 + 修复后仍红 → 不归因本次改动（既有失败豁免同样适用于 typecheck）', async () => {
+        writePkg({ lint: 'eslint .', build: 'tsc', typecheck: 'tsc --noEmit', test: 'vitest run' })
+        mockTypecheckFailureAtEnd()
+        const baseline = baselineWithTestFailure()
+        baseline[3] = { command: 'pnpm typecheck', exitCode: 2, durationMs: 1, stdout: '', stderr: 'pre-existing type error' }
+        baseline[4] = { command: 'pnpm test', exitCode: 0, durationMs: 1, stdout: '', stderr: '' }
+        const ctx = makeVerifyCtx(undefined)
+        const actions = await verifyProject(ctx, 'foo/bar', { baseline })
+
+        const typecheckAction = actions.find((a) => a.target === 'pnpm typecheck')
+        expect(typecheckAction?.success).toBe(false)
+        expect(typecheckAction?.preExisting).toBe(true)
+        expect(ctx.allErrors).toEqual([expect.objectContaining({
+            repository: 'foo/bar', stage: 'verify', category: 'PRE_EXISTING_FAILURE', target: 'pnpm typecheck',
+        })])
+    })
+
     it('基线绿 + 修复后红 → 归因本次改动（不标记 preExisting，交由门禁回滚）', async () => {
-        writePkg({ lint: 'eslint .', build: 'tsc', test: 'vitest run' })
+        writePkg({ lint: 'eslint .', build: 'tsc', typecheck: 'tsc --noEmit', test: 'vitest run' })
         mockTestFailureAtEnd()
         const baseline = baselineWithTestFailure()
-        baseline[3] = { command: 'pnpm test', exitCode: 0, durationMs: 1, stdout: '', stderr: '' }
+        baseline[4] = { command: 'pnpm test', exitCode: 0, durationMs: 1, stdout: '', stderr: '' }
         const ctx = makeVerifyCtx(undefined)
         const actions = await verifyProject(ctx, 'foo/bar', { baseline })
 
@@ -195,7 +241,7 @@ describe('verifyProject', () => {
     })
 
     it('基线中缺少该命令（pristine 链路未跑到）→ 不适用豁免，保守归因本次改动', async () => {
-        writePkg({ lint: 'eslint .', build: 'tsc', test: 'vitest run' })
+        writePkg({ lint: 'eslint .', build: 'tsc', typecheck: 'tsc --noEmit', test: 'vitest run' })
         mockTestFailureAtEnd()
         const ctx = makeVerifyCtx(undefined)
         // 基线只覆盖 install（pristine 安装即失败 → runVerification 遇错即停，未采样到 test）
@@ -208,7 +254,7 @@ describe('verifyProject', () => {
     })
 
     it('未提供基线 → 维持原始口径（全部失败均归因，不标记 preExisting）', async () => {
-        writePkg({ lint: 'eslint .', build: 'tsc', test: 'vitest run' })
+        writePkg({ lint: 'eslint .', build: 'tsc', typecheck: 'tsc --noEmit', test: 'vitest run' })
         mockTestFailureAtEnd()
         const ctx = makeVerifyCtx(undefined)
         const actions = await verifyProject(ctx, 'foo/bar')
@@ -222,13 +268,13 @@ describe('verifyProject', () => {
     // -----------------------------------------------------------------------
 
     it('基线采样只测量：逐命令结果返回、失败只记日志不写 allErrors', async () => {
-        writePkg({ lint: 'eslint .', build: 'tsc', test: 'vitest run' })
+        writePkg({ lint: 'eslint .', build: 'tsc', typecheck: 'tsc --noEmit', test: 'vitest run' })
         mockTestFailureAtEnd()
         const ctx = makeVerifyCtx(undefined)
         const result = await sampleVerificationBaseline(ctx, 'foo/bar')
 
         expect(result?.map((cr) => cr.command)).toEqual([
-            'pnpm install --frozen-lockfile', 'pnpm lint', 'pnpm build', 'pnpm test',
+            'pnpm install --frozen-lockfile', 'pnpm lint', 'pnpm build', 'pnpm typecheck', 'pnpm test',
         ])
         // 既有状态不得渲染成本次运行的问题
         expect(ctx.allErrors).toEqual([])
@@ -259,7 +305,7 @@ describe('verifyProject', () => {
     })
 
     it('基线采样：外联违规只 warn 留痕、不入 allErrors（既有状态不渲染成本次问题）', async () => {
-        writePkg({ lint: 'eslint .', build: 'tsc', test: 'vitest run' })
+        writePkg({ lint: 'eslint .', build: 'tsc', typecheck: 'tsc --noEmit', test: 'vitest run' })
         verificationRunnerMock.runVerification.mockResolvedValue({
             success: false,
             commandResults: [{ command: 'pnpm lint', exitCode: 1, durationMs: 1, stdout: '', stderr: 'boom' }],
@@ -273,7 +319,7 @@ describe('verifyProject', () => {
     })
 
     it('基线采样异常 → 返回 undefined（调用方退回全量归因，不静默豁免）', async () => {
-        writePkg({ lint: 'eslint .', build: 'tsc', test: 'vitest run' })
+        writePkg({ lint: 'eslint .', build: 'tsc', typecheck: 'tsc --noEmit', test: 'vitest run' })
         verificationRunnerMock.runVerification.mockRejectedValue(new Error('spawn EACCES'))
         const ctx = makeVerifyCtx(undefined)
         const result = await sampleVerificationBaseline(ctx, 'foo/bar')
@@ -282,8 +328,8 @@ describe('verifyProject', () => {
         expect(ctx.logger.warn).toHaveBeenCalledWith(expect.stringContaining('Sampling failed'))
     })
 
-    it('默认命令链纳入 test，顺序 install → lint → build → test', async () => {
-        writePkg({ lint: 'eslint .', build: 'tsc', test: 'vitest run' })
+    it('默认命令链纳入 typecheck，顺序 install → lint → build → typecheck → test', async () => {
+        writePkg({ lint: 'eslint .', build: 'tsc', typecheck: 'tsc --noEmit', test: 'vitest run' })
         await verifyProject(makeVerifyCtx(undefined), 'foo/bar')
 
         const commands = verificationRunnerMock.runVerification.mock.calls[0][0].commands
@@ -291,46 +337,76 @@ describe('verifyProject', () => {
             'pnpm install --frozen-lockfile',
             'pnpm lint',
             'pnpm build',
+            'pnpm typecheck',
             'pnpm test',
         ])
     })
 
-    it('无 test 脚本的仓库跳过 pnpm test 并记 SCRIPT_NOT_FOUND 审计（不误伤未配置测试的仓库）', async () => {
-        writePkg({ lint: 'eslint .', build: 'tsc' }) // 显式构造无 test 脚本的仓库
+    it('无 typecheck 脚本的仓库跳过 pnpm typecheck 并记 SCRIPT_NOT_FOUND 审计（不误伤未配置类型检查的仓库）', async () => {
+        writePkg({ lint: 'eslint .', build: 'tsc', test: 'vitest run' }) // 显式构造无 typecheck 脚本的仓库
         const ctx = makeVerifyCtx(undefined)
         await verifyProject(ctx, 'foo/bar')
 
         const commands = verificationRunnerMock.runVerification.mock.calls[0][0].commands
-        expect(commands).toEqual(['pnpm install --frozen-lockfile', 'pnpm lint', 'pnpm build'])
+        expect(commands).toEqual(['pnpm install --frozen-lockfile', 'pnpm lint', 'pnpm build', 'pnpm test'])
+        expect(commands).not.toContain('pnpm typecheck')
+        expect(ctx.allErrors).toEqual([expect.objectContaining({
+            repository: 'foo/bar', stage: 'verify', category: 'SCRIPT_NOT_FOUND', target: 'pnpm typecheck',
+        })])
+    })
+
+    it('无 test 脚本的仓库跳过 pnpm test 并记 SCRIPT_NOT_FOUND 审计（不误伤未配置测试的仓库）', async () => {
+        writePkg({ lint: 'eslint .', build: 'tsc', typecheck: 'tsc --noEmit' }) // 显式构造无 test 脚本的仓库
+        const ctx = makeVerifyCtx(undefined)
+        await verifyProject(ctx, 'foo/bar')
+
+        const commands = verificationRunnerMock.runVerification.mock.calls[0][0].commands
+        expect(commands).toEqual(['pnpm install --frozen-lockfile', 'pnpm lint', 'pnpm build', 'pnpm typecheck'])
         expect(commands).not.toContain('pnpm test')
         expect(ctx.allErrors).toEqual([expect.objectContaining({
             repository: 'foo/bar', stage: 'verify', category: 'SCRIPT_NOT_FOUND', target: 'pnpm test',
         })])
     })
 
-    it('ESM-only 依赖破坏 CJS 消费方：install/lint/build 全绿但 test 失败 → verification action 失败', async () => {
-        writePkg({ lint: 'eslint .', build: 'tsc', test: 'jest' })
+    it('依赖升级引入类型面破坏：install/lint/build 全绿但 typecheck 失败 → verification action 失败', async () => {
+        writePkg({ lint: 'eslint .', build: 'tsc', typecheck: 'tsc --noEmit', test: 'vitest run' })
+        mockTypecheckFailureAtEnd()
+        const actions = await verifyProject(makeVerifyCtx(undefined), 'foo/bar')
+
+        const typecheckAction = actions.find((a) => a.target === 'pnpm typecheck')
+        expect(typecheckAction?.success).toBe(false)
+        expect(typecheckAction?.error).toContain(`TS2503`)
+        // 复现事故形态：install / lint / build 三条仍为成功——类型面破坏只能由 typecheck 暴露
+        // （typecheck 之后的 pnpm test 未执行，与「首个失败即停」一致）
+        const beforeTypecheck = actions.filter((a) => ['pnpm install --frozen-lockfile', 'pnpm lint', 'pnpm build'].includes(a.target))
+        expect(beforeTypecheck).toHaveLength(3)
+        expect(beforeTypecheck.every((a) => a.success)).toBe(true)
+    })
+
+    it('ESM-only 依赖破坏 CJS 消费方：install/lint/build/typecheck 全绿但 test 失败 → verification action 失败', async () => {
+        writePkg({ lint: 'eslint .', build: 'tsc', typecheck: 'tsc --noEmit', test: 'jest' })
         mockTestFailureAtEnd()
         const actions = await verifyProject(makeVerifyCtx(undefined), 'foo/bar')
 
         const testAction = actions.find((a) => a.target === 'pnpm test')
         expect(testAction?.success).toBe(false)
         expect(testAction?.error).toContain(`Unexpected token 'export'`)
-        // 复现原始事故形态：其余三条仍为成功——破坏只能由 test 暴露
+        // 复现原始事故形态：其余四条仍为成功——破坏只能由 test 暴露
         expect(actions.filter((a) => a.target !== 'pnpm test').every((a) => a.success)).toBe(true)
     })
 
-    it('组合：test 失败 → verificationPassed=false → 验证门禁阻断交付并回滚', async () => {
-        writePkg({ lint: 'eslint .', build: 'tsc', test: 'jest' })
-        mockTestFailureAtEnd()
-
+    /**
+     * 门禁组合用例（真实 git 仓库 + 模拟修复改动）：verifyProject → verificationPassed=false
+     * → enforceVerificationGate 阻断并真实回滚。供不同失败源（typecheck / test）共用。
+     */
+    async function assertGateBlocksAndRollsBack() {
         // 门禁回滚需要真实 git 仓库
         execSync('git init -q', { cwd: workDir })
         execSync('git config user.name test', { cwd: workDir })
         execSync('git config user.email test@test', { cwd: workDir })
         execSync('git add . && git commit -qm init', { cwd: workDir })
         // 模拟修复改动（待回滚还原）：只改 version，保留 scripts——否则 validateVerifyCommands 会把链降级，
-        // 与实际验证链不一致（mock 返回的是 4 条常驻结果）
+        // 与实际验证链不一致（mock 返回的是 5 条常驻结果）
         const pkgBefore = JSON.parse(readFileSync(join(workDir, 'package.json'), 'utf-8')) as Record<string, unknown>
         writeFileSync(join(workDir, 'package.json'), JSON.stringify({ ...pkgBefore, version: '2.0.0' }, null, 2))
         execSync('git add package.json', { cwd: workDir })
@@ -353,5 +429,17 @@ describe('verifyProject', () => {
         expect(ctx.allErrors.some((e) => e.category === 'VERIFICATION_FAILED')).toBe(true)
         // 修复改动已回滚（package.json 回到初始版本）
         expect(execSync('git show HEAD:package.json', { cwd: workDir, encoding: 'utf-8' })).toContain('"version": "1.0.0"')
+    }
+
+    it('组合：typecheck 失败 → verificationPassed=false → 验证门禁阻断交付并真实回滚', async () => {
+        writePkg({ lint: 'eslint .', build: 'tsc', typecheck: 'tsc --noEmit', test: 'vitest run' })
+        mockTypecheckFailureAtEnd()
+        await assertGateBlocksAndRollsBack()
+    }, 30_000)
+
+    it('组合：test 失败 → verificationPassed=false → 验证门禁阻断交付并真实回滚', async () => {
+        writePkg({ lint: 'eslint .', build: 'tsc', typecheck: 'tsc --noEmit', test: 'jest' })
+        mockTestFailureAtEnd()
+        await assertGateBlocksAndRollsBack()
     }, 30_000)
 })

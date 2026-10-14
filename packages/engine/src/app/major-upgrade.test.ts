@@ -118,27 +118,25 @@ function mockUpgradeWritingManifest(
 }
 
 function verificationResult(success: boolean) {
+    /** 默认链 5 条命令（与 DEFAULT_VERIFY_COMMANDS 同序） */
+    const chain = [
+        'pnpm install --frozen-lockfile',
+        'pnpm lint',
+        'pnpm build',
+        'pnpm typecheck',
+        'pnpm test',
+    ]
     return {
         success,
-        commandResults: [{
-            command: 'pnpm install --frozen-lockfile',
+        // 与 runVerification「首个失败即停」语义一致：失败时结果集在首个失败命令处截断
+        // （全红形态会给读者「后续命令仍被执行」的错觉；断言只消费 success，形态仍须忠实）
+        commandResults: (success ? chain : chain.slice(0, 1)).map((command) => ({
+            command,
             exitCode: success ? 0 : 1,
             durationMs: 0,
             stdout: '',
-            stderr: success ? '' : 'mock install failure',
-        }, {
-            command: 'pnpm lint',
-            exitCode: success ? 0 : 1,
-            durationMs: 0,
-            stdout: '',
-            stderr: success ? '' : 'mock lint failure',
-        }, {
-            command: 'pnpm build',
-            exitCode: success ? 0 : 1,
-            durationMs: 0,
-            stdout: '',
-            stderr: success ? '' : 'mock build failure',
-        }],
+            stderr: success ? '' : 'mock verification failure',
+        })),
     }
 }
 
@@ -253,7 +251,7 @@ describe('DependfixApp cross-major upgrade (--allow-major-upgrade)', () => {
         writeFileSync(join(workDir, 'package.json'), JSON.stringify({
             name: 'fixture',
             version: '1.0.0',
-            scripts: { lint: 'exit 0', build: 'exit 0', test: 'exit 0' },
+            scripts: { lint: 'exit 0', build: 'exit 0', typecheck: 'exit 0', test: 'exit 0' },
             devDependencies: { vite: '^5.4.0' },
         }, null, 2))
         writeSingleVersionLockfile(workDir)
@@ -262,7 +260,7 @@ describe('DependfixApp cross-major upgrade (--allow-major-upgrade)', () => {
 
         const { result } = await runApp({ cliOverrides: { allowMajorUpgrade: true } })
 
-        // 跨线告警进入 2.0.2：真实升级 + 强制完整验证（install+lint+build+test）→ fixed
+        // 跨线告警进入 2.0.2：真实升级 + 强制完整验证（install+lint+build+typecheck+test）→ fixed
         expect(result.summary.alertsSkipped).toBe(0)
         expect(result.summary.alertsFixed).toBe(1)
         const majorActions = result.actions.filter((a) => a.strategy === 'major-upgrade')
@@ -273,14 +271,16 @@ describe('DependfixApp cross-major upgrade (--allow-major-upgrade)', () => {
             isMajor: true,
             success: true,
         })
-        // 完整验证链（4 条命令：install + lint + build + test），非 lint-only
+        // 完整验证链（5 条命令：install + lint + build + typecheck + test），非 lint-only
+        // （基线采样与修复后验证使用同一链，`find` 命中任一条即可断言链形态）
         const verificationCalls = mockRunVerification.mock.calls
-        const fullVerifyCall = verificationCalls.find(([params]) => params.commands.length === 4)
+        const fullVerifyCall = verificationCalls.find(([params]) => params.commands.length === 5)
         expect(fullVerifyCall).toBeDefined()
         expect(fullVerifyCall![0].commands).toEqual([
             'pnpm install --frozen-lockfile',
             'pnpm lint',
             'pnpm build',
+            'pnpm typecheck',
             'pnpm test',
         ])
         // 声明已更新为 ^6.4.3
@@ -292,7 +292,7 @@ describe('DependfixApp cross-major upgrade (--allow-major-upgrade)', () => {
         writeFileSync(join(workDir, 'package.json'), JSON.stringify({
             name: 'fixture',
             version: '1.0.0',
-            scripts: { lint: 'exit 0', build: 'exit 0', test: 'exit 0' },
+            scripts: { lint: 'exit 0', build: 'exit 0', typecheck: 'exit 0', test: 'exit 0' },
             devDependencies: { vite: '^5.4.0' },
         }, null, 2))
         writeSingleVersionLockfile(workDir)
@@ -377,7 +377,7 @@ describe('DependfixApp cross-major upgrade (--allow-major-upgrade)', () => {
         writeFileSync(join(workDir, 'package.json'), JSON.stringify({
             name: 'fixture',
             version: '1.0.0',
-            scripts: { lint: 'exit 0', build: 'exit 0', test: 'exit 0' },
+            scripts: { lint: 'exit 0', build: 'exit 0', typecheck: 'exit 0', test: 'exit 0' },
             devDependencies: { vite: '^5.4.0' },
         }, null, 2))
         writeFileSync(join(workDir, 'pnpm-workspace.yaml'), 'packages:\n  - docs\n')
@@ -414,7 +414,7 @@ describe('DependfixApp cross-major upgrade (--allow-major-upgrade)', () => {
         writeFileSync(join(workDir, 'package.json'), JSON.stringify({
             name: 'fixture',
             version: '1.0.0',
-            scripts: { lint: 'exit 0', build: 'exit 0', test: 'exit 0' },
+            scripts: { lint: 'exit 0', build: 'exit 0', typecheck: 'exit 0', test: 'exit 0' },
             devDependencies: { vite: '^5.4.0' },
         }, null, 2))
         writeSingleVersionLockfile(workDir)
@@ -438,7 +438,7 @@ describe('DependfixApp cross-major upgrade (--allow-major-upgrade)', () => {
         writeFileSync(join(workDir, 'package.json'), JSON.stringify({
             name: 'fixture',
             version: '1.0.0',
-            scripts: { lint: 'exit 0', build: 'exit 0', test: 'exit 0' },
+            scripts: { lint: 'exit 0', build: 'exit 0', typecheck: 'exit 0', test: 'exit 0' },
             dependencies: { '@dependfix/core': '^1.0.0' },
         }, null, 2))
         writeFileSync(join(workDir, 'pnpm-workspace.yaml'), 'packages:\n  - docs\n')
@@ -462,7 +462,7 @@ describe('DependfixApp cross-major upgrade (--allow-major-upgrade)', () => {
         writeFileSync(join(workDir, 'package.json'), JSON.stringify({
             name: 'fixture',
             version: '1.0.0',
-            scripts: { lint: 'exit 0', build: 'exit 0', test: 'exit 0' },
+            scripts: { lint: 'exit 0', build: 'exit 0', typecheck: 'exit 0', test: 'exit 0' },
             devDependencies: { vite: '^5.4.0' },
         }, null, 2))
         writeSingleVersionLockfile(workDir)
@@ -471,13 +471,14 @@ describe('DependfixApp cross-major upgrade (--allow-major-upgrade)', () => {
 
         const { result } = await runApp({ cliOverrides: { allowMajorUpgrade: true } })
 
-        // 跨线验证链（install+lint+build+test）作为 verification 动作写入报告（可审计）
+        // 跨线验证链（install+lint+build+typecheck+test）作为 verification 动作写入报告（可审计）
         const verifyActions = result.actions.filter((a) => a.type === 'verification')
         expect(verifyActions.length).toBeGreaterThanOrEqual(3)
         const majorVerifyCommands = verifyActions.map((a) => a.target)
         expect(majorVerifyCommands).toContain('pnpm install --frozen-lockfile')
         expect(majorVerifyCommands).toContain('pnpm lint')
         expect(majorVerifyCommands).toContain('pnpm build')
+        expect(majorVerifyCommands).toContain('pnpm typecheck')
         // 成功证据可审计：验证动作全部 success
         expect(verifyActions.every((a) => a.success)).toBe(true)
     })
