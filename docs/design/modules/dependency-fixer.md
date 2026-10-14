@@ -13,7 +13,7 @@
 - 对已过滤出的可修复告警执行单包精确版本升级
 - 输出标准化修复结果（`fromVersion` / `toVersion` / `isMajor` / `success`）
 - 升级失败（`pnpm install` 退出码非 0）时自动回滚 `package.json` 和 `pnpm-lock.yaml`
-- 不在此层判断升级后的 lint/build/test 是否通过（由 T107 验证执行器负责）
+- 不在此层判断升级后的 lint/build/typecheck/test 是否通过（由 T107 验证执行器负责）
 - 纯函数设计（以 `workDir` 为工作目录，不硬编码路径）
 
 ---
@@ -88,7 +88,7 @@ export interface DependencyFixResult {
  * - 在 workDir 中查找 `package.json` 并修改目标包的版本为精确值
  * - 执行 `pnpm install --no-frozen-lockfile` 更新 lockfile
  * - 失败时自动回滚 package.json 和 pnpm-lock.yaml
- * - 不执行任何验证（lint/build/test），由 T107 负责
+ * - 不执行任何验证（lint/build/typecheck/test），由 T107 负责
  *
  * @param params - 包名、目标版本、工作目录
  * @returns 修复结果
@@ -391,7 +391,7 @@ T105 (upgradeDependency)
     ▼
 T107 (验证执行器)
     │
-    │  pnpm install --frozen-lockfile → pnpm lint → pnpm build → pnpm test
+    │  pnpm install --frozen-lockfile → pnpm lint → pnpm build → pnpm typecheck → pnpm test
     ▼
 T108 (报告生成器)
 ```
@@ -404,7 +404,7 @@ T108 (报告生成器)
 - 不处理 workspace 协议（`workspace:*`）的版本替换
 - 不处理 git/file 协议的依赖版本
 - ~~不支持 pnpm overrides / pnpm.patchedDependencies~~ → **M2 已实现**，支持 `pnpm-workspace.yaml` 和 `package.json#pnpm.overrides` 双路径
-- 不在此层判断升级后是否破坏 lint/build/test（T107 负责）
+- 不在此层判断升级后是否破坏 lint/build/typecheck/test（T107 负责）
 - 不引入 semver 包做完整版本比较
 - 不支持跨工作区批量升级（M4 T401）
 - 不生成 `pnpm list --json` 做重验证（性能不划算）
@@ -451,14 +451,15 @@ T108 (报告生成器)
 - `--allow-major-upgrade`（CLI 专属，**无 env 通道**，Action 结构性禁用）显式授权后，**仅**以下跨线告警进入自动跨线链路（2.0.2）：
   - **根 package.json** 直接依赖（`isRootDirectDependency`，修复器只改根 manifest——workspace 成员独占声明维持人工，Review Gate P2-2 修正）
   - lockfile 中该包**单版本**（`readLockfileVersions` 长度 1）
-- 处理流程：快照 → `upgradeDependency`（改根声明，install 失败内建回滚）→ **升级后实例复核**（重读 lockfile：仍存在 `< recommended` 的脆弱实例——workspace 成员同 range / 传递依赖 pin 残留——则回滚 + failed，不进入验证，避免误标 fixed 且下一轮被最高实例掩盖误判 converged）→ **强制完整验证**（`verifyProject`：install + lint + build + test，非 lint-only——跨线 breaking change 面大，类型/构建错误 lint 无法兜底；test 用于捕获「lint/build 通过但测试无法运行或失败」的破坏，无 `test` 脚本的仓库自动跳过并记 `SCRIPT_NOT_FOUND` 审计）→ 全部通过保留 / 任一失败 `restoreTrackedFiles` 回滚并计 failed。验证动作入 allActions（报告可审计，Review Gate P2-3 修正）。
+- 处理流程：快照 → `upgradeDependency`（改根声明，install 失败内建回滚）→ **升级后实例复核**（重读 lockfile：仍存在 `< recommended` 的脆弱实例——workspace 成员同 range / 传递依赖 pin 残留——则回滚 + failed，不进入验证，避免误标 fixed 且下一轮被最高实例掩盖误判 converged）→ **强制完整验证**（`verifyProject`：install + lint + build + typecheck + test，非 lint-only——跨线 breaking change 面大，类型面破坏 lint / build 均无法兜底（lint 只跑规则、tsdown 的 `dts` 只发射声明、vitest 走 esbuild 转译）；test 用于捕获「lint/build 通过但测试无法运行或失败」的破坏；无 `typecheck` / `test` 脚本的仓库对应命令自动跳过并记 `SCRIPT_NOT_FOUND` 审计）→ 全部通过保留 / 任一失败 `restoreTrackedFiles` 回滚并计 failed。验证动作入 allActions（报告可审计，Review Gate P2-3 修正）。
+- **默认链纳入 typecheck（M44.1，2026-10-14）**：默认验证链由 `install → lint → build → test` 扩为 `install → lint → build → typecheck → test`。**顺序硬约束**：typecheck 必须排在 build 之后——workspace 包的 `tsc` 依赖前置包已发射的 `dist` 声明（实测移出 `packages/{core,engine,cli}/dist` 后 `pnpm --filter @dependfix/platform typecheck` 报大量 `TS2307 Cannot find module`）；typecheck 排在 test 之前是为最大化基线采样覆盖率（`runVerification` 随首个失败命令中止，前缀覆盖见「已知限制」）。**动因（假绿实证）**：既有四条命令互不重叠地都不做类型检查（lint 只跑规则 / `dts` 只发射声明 / vitest 走 esbuild 转译），依赖升级引入的类型面破坏被判 `verificationPassed = true` 并交付成 PR——消费方 `nodemailer.Transporter` 在依赖升到 10.x 后不再存在（TS2503），直到目标仓库 CI 才红。**边界**：`"build": "tsc"` 形态的仓库 build 本身即类型检查，此时本命令为冗余（只增耗时，无害）而非新增防线；覆盖默认链的自定义命令（`--commands` / 平台 `verifyCommands` / action `commands`）须自行保留 `typecheck` / `test`。
 - **维持人工的场景**（即使开启）：
   - 间接依赖跨线（全局 override 会波及所有实例与声明，破坏面不可控）
   - workspace 成员独占声明（root 未声明——修复器 `upgradeDependency` 仅改根 manifest，必然失败）
   - 多版本共存跨线（版本化 overrides 跨 major 会破坏依赖方 range 导致 install 失败；全局 override 会降级根声明——C10 教训）
 - 同包多条跨线告警按包聚合，取最高 `recommendedVersion` 为升级目标（镜像 `dedupeFixableAlerts` 语义，Review Gate P2-1 修正）
 - 统计口径：跨线升级成功 → fixed；失败（install 失败 / 实例残留 / 验证失败）→ failed；维持人工 → skipped。不误标纪律延续（PR #28）。
-- 已知限制：install/lint/build 通过 ≠ 运行时功能正确（test 已纳入默认链，但仍无法覆盖未写成测试的运行时行为）；验证耗时逐包完整链（含 test，通常为最慢一步）；快照回滚不还原 node_modules；**既有失败基线已做区分（命令级）**——修复前先在 pristine 工作区**一次性采样**验证基线（`sampleVerificationBaseline`，与修复后同一命令口径），修复后仍失败且**同一命令在基线中也失败**时报 `PRE_EXISTING_FAILURE` 并标记 `FixAction.preExisting`：该失败不归因本次改动、门禁不据此回滚（报告 Fix Actions 表标注「既有失败（修复前即红，未归因本次改动）」），而基线中**缺失**的命令（pristine 链路未跑到）仍保守归因本次；`verificationPassed`（链路是否全绿）与 `verificationBlocking`（是否存在本次引入的失败）两个口径并存，门禁用后者；代价是每次修复运行**最多**多跑一次验证链（首失败即停，可能只覆盖到失败命令；dry-run 不采样；多仓库共享 workDir 时沿用首采基线）；**退出码 / 平台 run 状态口径已同步（2026-10-09 修复）**——「仅存在既有失败」的运行不再判失败：`PRE_EXISTING_FAILURE` 纳入 `SKIPPED_AUDIT_CATEGORIES`、既有失败验证 action（`preExisting`）不计入失败动作、仓库成功判定改用归因口径（`isRepoVerificationBlocked`，与门禁单一事实源）——这类运行的退出码为 0/1（平台 `completed`），不再触发 `engine_exit_2` 误标 `failed`；本次改动引入的失败（`verificationBlocking === true`）仍判失败（exit 2）不变；test 另引入三条新失败路径——占位 test 脚本（`npm init` 默认的 `exit 1`）/ 测试依赖网络·密钥·浏览器等外部资源 / 套件耗时超单命令超时（10 分钟），三者均按当前口径判失败并回滚。
+- 已知限制：install/lint/build/typecheck 通过 ≠ 运行时功能正确（test 已纳入默认链，但仍无法覆盖未写成测试的运行时行为）；命令语义不实（如 `"typecheck": "tsc --noEmit || true"`）无法机检；「typecheck / test 长期为红」由命令级既有失败基线豁免，但基线随首个失败命令中止（前缀覆盖）——靠前命令先红会遮蔽其后的采样；验证耗时逐包完整链（含 typecheck / test，test 通常为最慢一步）；快照回滚不还原 node_modules；**既有失败基线已做区分（命令级）**——修复前先在 pristine 工作区**一次性采样**验证基线（`sampleVerificationBaseline`，与修复后同一命令口径），修复后仍失败且**同一命令在基线中也失败**时报 `PRE_EXISTING_FAILURE` 并标记 `FixAction.preExisting`：该失败不归因本次改动、门禁不据此回滚（报告 Fix Actions 表标注「既有失败（修复前即红，未归因本次改动）」），而基线中**缺失**的命令（pristine 链路未跑到）仍保守归因本次；`verificationPassed`（链路是否全绿）与 `verificationBlocking`（是否存在本次引入的失败）两个口径并存，门禁用后者；代价是每次修复运行**最多**多跑一次验证链（首失败即停，可能只覆盖到失败命令；dry-run 不采样；多仓库共享 workDir 时沿用首采基线）；**退出码 / 平台 run 状态口径已同步（2026-10-09 修复）**——「仅存在既有失败」的运行不再判失败：`PRE_EXISTING_FAILURE` 纳入 `SKIPPED_AUDIT_CATEGORIES`、既有失败验证 action（`preExisting`）不计入失败动作、仓库成功判定改用归因口径（`isRepoVerificationBlocked`，与门禁单一事实源）——这类运行的退出码为 0/1（平台 `completed`），不再触发 `engine_exit_2` 误标 `failed`；本次改动引入的失败（`verificationBlocking === true`）仍判失败（exit 2）不变；test 另引入三条新失败路径——占位 test 脚本（`npm init` 默认的 `exit 1`）/ 测试依赖网络·密钥·浏览器等外部资源 / 套件耗时超单命令超时（10 分钟），三者均按当前口径判失败并回滚。
 - **环境性安装失败与非归因口径（2026-10-13）**：容器内 `pnpm install` 环境性失败（无 stderr 诊断）归 `ENVIRONMENT_ERROR` 并**不归因本次运行**（机制、信号保留与平台侧映射详见 [pnpm-lockfile-fixer.md §2.4](./pnpm-lockfile-fixer.md)）；**零告警仓库另跳过 lockfile repair**（保留修复后验证链——其 `verificationPassed` 是多仓库运行出口码判定的成功信号），既消除「零告警 + 环境性安装失败 + 既有基线失败」被 `engine_exit_2`「所有仓库失败或全量回滚」误标的最大放大器，又不退化多仓成功判定；`pnpm install` 执行方式（`--no-frozen-lockfile`）与锁文件修复策略链语义不变。**已知边界**：修复前基线采样（`sampleVerificationBaseline`）仍对零告警仓库执行（其时机须早于修复动作写盘，无法后移），故零告警仓库仍有一次验证链开销——属成本项非正确性项，留作后续优化候选。
 
 ### 12.7 目标仓库专属配置 `.github/dependfix.yml`（C85）

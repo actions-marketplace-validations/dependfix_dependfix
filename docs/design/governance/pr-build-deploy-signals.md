@@ -11,7 +11,7 @@
 
 | 层 | 发生在哪 | 当前 dependfix 覆盖 |
 |:---|:---|:---|
-| **本地构建** | engine 沙箱内 `verification-runner` 跑 install / lint / build / test | ✅ 已落 `ScanRun.logsJson` + `RunResult.errors[]`（见 [运行失败分类与筛选设计](./run-failure-taxonomy.md)） |
+| **本地构建** | engine 沙箱内 `verification-runner` 跑 install / lint / build / typecheck / test | ✅ 已落 `ScanRun.logsJson` + `RunResult.errors[]`（见 [运行失败分类与筛选设计](./run-failure-taxonomy.md)） |
 | **CI 构建** | 目标仓库 GitHub Actions | ⚠️ 仅 PR Check 抓**单个** `Test` check |
 | **预览 / 生产部署** | Cloudflare Workers Builds / Vercel / 其它 | ❌ **完全未覆盖** |
 

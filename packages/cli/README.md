@@ -31,7 +31,7 @@ dependfix report-only --repo owner/repo --github-token $GITHUB_TOKEN
 
 ### `fix` — 修复告警
 
-执行依赖升级、lockfile 修复和验证（lint / build / test），修改仅限本地文件，不创建分支或 PR。
+执行依赖升级、lockfile 修复和验证（lint / build / typecheck / test），修改仅限本地文件，不创建分支或 PR。
 
 ```bash
 dependfix fix --repo owner/repo --github-token $GITHUB_TOKEN --severity-threshold high
@@ -60,7 +60,7 @@ dependfix fix-and-pr --repo owner/repo --github-token $GITHUB_TOKEN
 | `--create-pr` | — | 创建 Pull Request（`fix-and-pr` 模式自动启用） | `false` |
 | `--commit` | — | 修复完成后在本地当前分支直接提交（仅 `fix` 模式；不推送、不创建 PR） | `false` |
 | `--max-alerts-per-repository` | — | 每仓库最大告警处理数 | `20` |
-| `--commands` | — | 自定义验证命令（逗号分隔），覆盖默认的 `install/lint/build/test` | — |
+| `--commands` | — | 自定义验证命令（逗号分隔），覆盖默认的 `install/lint/build/typecheck/test` | — |
 | `--override-protect` | — | overrides 保护名单（按仓库粒度，`repo-glob:pkg1,pkg2;...`）；命中则不写入该包 override | — |
 | `--verbose` | — | 详细日志输出 | `false` |
 
@@ -89,7 +89,7 @@ const { result, exitCode } = await app.run()
 2. **过滤排序** — 按严重级别过滤、优先级排序、数量限制
 3. **依赖升级** — `pnpm update <package>` 升级到推荐版本
 4. **lockfile 修复** — 检测并修复 `pnpm frozen-lockfile` 问题
-5. **验证** — 执行 `pnpm install --frozen-lockfile` → `pnpm lint` → `pnpm build` → `pnpm test`
+5. **验证** — 执行 `pnpm install --frozen-lockfile` → `pnpm lint` → `pnpm build` → `pnpm typecheck` → `pnpm test`
 6. **分支与 PR** — `fix-and-pr` 模式下，创建分支、commit、push、PR
 
 ## 相关包

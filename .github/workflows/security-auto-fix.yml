@@ -43,7 +43,7 @@ on:
         required: false
         default: true
       commands:
-        description: "自定义验证命令（逗号分隔；留空使用本仓库默认链：install + nuxt prepare + lint + build）"
+        description: "自定义验证命令（逗号分隔；留空使用本仓库默认链：install + nuxt prepare + lint + build + typecheck）"
         type: string
         required: false
         default: ""
@@ -86,5 +86,5 @@ jobs:
           dependabot-alerts-token: ${{ secrets.GH_PAT }}
           cleanup-branches-auto: ${{ inputs.cleanup-branches-auto || 'true' }}
           # 自定义验证链：Nuxt 平台 lint 依赖 .nuxt/tsconfig.json（nuxt prepare 生成物），
-          # 默认链（install + lint + build）无 prepare 步骤会导致 eslint Parsing error（教训：run 31552922137）
-          commands: ${{ inputs.commands || 'pnpm install --frozen-lockfile, pnpm --filter @dependfix/platform exec nuxt prepare, pnpm lint, pnpm build' }}
+          # 引擎默认链无 prepare 前置步骤会导致 eslint Parsing error（教训：run 31552922137）
+          commands: ${{ inputs.commands || 'pnpm install --frozen-lockfile, pnpm --filter @dependfix/platform exec nuxt prepare, pnpm lint, pnpm build, pnpm typecheck' }}

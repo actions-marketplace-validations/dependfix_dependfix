@@ -218,7 +218,7 @@ interface FixError {
 |------|------------|--------|---------|---------|----------|
 | dependency-upgrade | owner/repo | lodash | 4.17.20 → 4.17.21 | ✅ | 2.3s |
 | lockfile-repair | owner/repo | pnpm-lock.yaml | REGENERATE: +5/-3 lines | ✅ | 1.1s |
-| verification | owner/repo | install+lint+build+test | — | ❌ | 5.2s |
+| verification | owner/repo | install+lint+build+typecheck+test | — | ❌ | 5.2s |
 | verification | owner/repo | test | 既有失败（修复前即红，未归因本次改动） | ❌ | 4.8s |
 
 ## Errors

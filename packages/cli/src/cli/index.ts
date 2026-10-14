@@ -122,7 +122,7 @@ export const argsDef = {
     },
     'allow-major-upgrade': {
         type: 'boolean' as const,
-        description: '跨线告警（推荐版本跨大版本，当前线内无修复版本）显式授权自动升级：仅根 package.json 直接依赖（workspace 成员独占声明维持人工）且 lockfile 单版本的告警自动跨线升级，升级后复核脆弱实例、强制完整验证（install+lint+build+test），失败自动回滚；间接依赖 / 多版本共存跨线告警维持人工处理。仅 CLI 可用，Action 不支持',
+        description: '跨线告警（推荐版本跨大版本，当前线内无修复版本）显式授权自动升级：仅根 package.json 直接依赖（workspace 成员独占声明维持人工）且 lockfile 单版本的告警自动跨线升级，升级后复核脆弱实例、强制完整验证（install+lint+build+typecheck+test），失败自动回滚；间接依赖 / 多版本共存跨线告警维持人工处理。仅 CLI 可用，Action 不支持',
         negativeDescription: '不自动升级跨线告警（默认，维持人工处理）',
     },
     'max-alerts-per-repository': {
@@ -164,7 +164,7 @@ export const argsDef = {
     },
     commands: {
         type: 'string' as const,
-        description: '自定义验证命令（逗号分隔），覆盖默认的 install/lint/build/test',
+        description: '自定义验证命令（逗号分隔），覆盖默认的 install/lint/build/typecheck/test',
     },
     verbose: {
         type: 'boolean' as const,
