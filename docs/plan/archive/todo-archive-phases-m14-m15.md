@@ -6,7 +6,7 @@
 >
 > **关键导航**：
 > - **backlog 历史归档指针段**：详见 [todo-archive.md](../todo-archive.md)
-> - **roadmap 状态**：[roadmap.md §M14](../roadmap.md#m14-platform-release-通道--ux-反馈跟进已完成-2026-08-26-归档) + [§M15](../roadmap.md#m15-扫描历史详情侧栏增强-ux-r2已完成-2026-08-26-归档) + Milestone 概述表 M14/M15 行
+> - **roadmap 状态**：[roadmap.md §M14](roadmap-phases-m0-m38.md#m14-platform-release-通道--ux-反馈跟进已完成-2026-08-26-归档) + [§M15](roadmap-phases-m0-m38.md#m15-扫描历史详情侧栏增强-ux-r2已完成-2026-08-26-归档) + Milestone 概述表 M14/M15 行
 > - **archive 索引**：[archive/index.md §4 当前基线](index.md) + §5 近期归档批次登记 M14/M15 行
 > - **M14 关键 commit 实证**：T1310 `300b318` / `1819b59` / `733e198` / `7b40a2c` / `a74d07d` / `1fd38c1` / M14.1 收口 / M14.2 `81bd8d2` `581e1a9` `1a9eddf` 收口 + `17b5643` / M14.3 `5ccaaf4` / M14.x `92cc348` `ea0e24f` `84b4e1a` `b45f55e` / M14.y dependabot PR commits
 > - **M15 关键 commit 实证**：`5c65177` P 阶段 docs + `1112017` UX-R2 实施（5 文件 / +425/-12）+ `0a60e3d` test 覆盖（2 文件 / +251）+ `d517a7f` release.yml CI 修复（不计入 M15 总投入）

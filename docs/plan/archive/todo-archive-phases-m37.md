@@ -42,4 +42,4 @@
 >
 > **ahead commits 实证**：归档时 `git rev-list HEAD ^origin/master --count` 实测 = **19**（`git rev-list origin/master ^HEAD --count` = 0，双向核验）；本归档 + 蒸馏批次 commits 另计，均待用户推送确认。
 >
-> **关联**：[roadmap.md §M37](../roadmap.md#m37-运行可观测性与体验记忆2026-10-06-用户决策方案-b--2026-10-08-已闭环--归档) + [archive/index.md](../archive/index.md) + [run-failure-taxonomy.md](../../design/governance/run-failure-taxonomy.md) + [scan-preferences.md](../../design/governance/scan-preferences.md) + [backlog.md](../backlog.md)（M37 执行期延后项与审计衍生候选）
+> **关联**：[roadmap.md §M37](roadmap-phases-m0-m38.md#m37-运行可观测性与体验记忆2026-10-06-用户决策方案-b--2026-10-08-已闭环--归档) + [archive/index.md](../archive/index.md) + [run-failure-taxonomy.md](../../design/governance/run-failure-taxonomy.md) + [scan-preferences.md](../../design/governance/scan-preferences.md) + [backlog.md](../backlog.md)（M37 执行期延后项与审计衍生候选）

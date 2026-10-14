@@ -51,6 +51,6 @@
 >
 > **ahead commits 实证**：M30 全部 commits 已推送 `origin/master`（`git rev-list HEAD ^origin/master --count` 归档时实测 = 0）。
 >
-> **关联**：[roadmap.md §M30](../roadmap.md#m30-治理债清理--迁移可行性验证--能力扩展--测试补强2026-09-27-启动--2026-09-28-已闭环--归档) + [backlog.md](../backlog.md)（C90 已上收 [§M31](todo-archive-phases-m31.md#m31-appsplatform-ui-组件库迁移primevue--caomei-ui-m311m316-全部已闭环--2026-09-29-归档)；C91 保留于 §规范与治理）+ [archive/index.md §5 批次登记](index.md) + 经验归档（tsdown dts 冲突 / vue-demi allowBuilds / ESM mock 受限）
+> **关联**：[roadmap.md §M30](roadmap-phases-m0-m38.md#m30-治理债清理--迁移可行性验证--能力扩展--测试补强2026-09-27-启动--2026-09-28-已闭环--归档) + [backlog.md](../backlog.md)（C90 已上收 [§M31](todo-archive-phases-m31.md#m31-appsplatform-ui-组件库迁移primevue--caomei-ui-m311m316-全部已闭环--2026-09-29-归档)；C91 保留于 §规范与治理）+ [archive/index.md §5 批次登记](index.md) + 经验归档（tsdown dts 冲突 / vue-demi allowBuilds / ESM mock 受限）
 
 ---

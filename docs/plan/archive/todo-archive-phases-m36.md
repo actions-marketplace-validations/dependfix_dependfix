@@ -32,4 +32,4 @@
 > **审计轮次**：A 阶段覆盖全部 10 原子条目（M36.1 2 分区 standard → quick；M36.2 standard Reject → quick；M36.3 standard Pass；M36.4 standard Pass；M36.5 standard Pass；M36.6 多轮 standard → quick；M36.7 standard → quick ×2；M36.8 3 分区 standard + 2 分区 quick；M36.9 standard Reject → quick Pass；M36.10 standard → quick），全部收敛后放行，记录在 `artifacts/review-gate/`（gitignored）。
 > **未完成项 / 已知边界**（均登记 backlog §候选评估中，不随本阶段闭环）：① BatchRun 反向竞态（async 全部入队失败 stale save）与 stale-cleanup 无条件 save；② 详情 GET 计数无变化时并发响应瞬时不一致；③ 部分源失败汇总的仓库级错误重复信号；④ caomei-ui 版本陈旧（`tech-stack.md:36` / `platform.md:16` 标 `0.3.0`，实际 `0.5.0`）；⑤ M36.1 检测脚本未接入 CI 门禁；⑥ M36.6 未在新镜像实跑一次 `DependfixApp.run()` 全链路（需真实 GitHub 凭据）；⑦ M36.7 `^0 ↔ 0` 等罕用等价形态保守欠合并。
 > **ahead commits 实证**：`git rev-list HEAD ^origin/master --count` 归档时实测 = 0（M36 全部 commits 已推送 `origin/master`）。
-> **关联**：[roadmap.md §M36](../roadmap.md#m36-治理债清仓--可观测性与测试稳定性2026-10-02-用户决策方案-a--2026-10-05-已闭环--归档) + [backlog.md](../backlog.md)（M36 衍生候选）+ [archive/index.md](../archive/index.md)
+> **关联**：[roadmap.md §M36](roadmap-phases-m0-m38.md#m36-治理债清仓--可观测性与测试稳定性2026-10-02-用户决策方案-a--2026-10-05-已闭环--归档) + [backlog.md](../backlog.md)（M36 衍生候选）+ [archive/index.md](../archive/index.md)

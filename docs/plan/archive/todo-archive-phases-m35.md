@@ -19,7 +19,7 @@
 >
 > **commit 数量实证**：`git log master --first-parent --oneline` 自 M34 归档末 `291e4ab` 起按上列条目统计 = **7 commits**（`041b4df` / `222ca6d` / `33d93dd` / `ae4b038` / `8ae502c` / `d4ddf1f` / `db66f15`）；本归档批次另含归档 commits。归档时 `git rev-list HEAD ^origin/master --count` 实测 = 0（M35 全部 commits 已推送 `origin/master`）。
 >
-> **关键决策 D1-D4**（2026-10-02 用户授权 + 执行期敲定；完整记录见 [roadmap.md §M35](../roadmap.md#m35-批量运行终态兜底对账--进度可见性修复2026-10-02-用户授权启动--2026-10-02-已闭环--归档)）：
+> **关键决策 D1-D4**（2026-10-02 用户授权 + 执行期敲定；完整记录见 [roadmap.md §M35](roadmap-phases-m0-m38.md#m35-批量运行终态兜底对账--进度可见性修复2026-10-02-用户授权启动--2026-10-02-已闭环--归档)）：
 >
 > - **D1**（2026-10-02 用户授权）：新增 M35 阶段修复（[规划规范 §3.1](../../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement)「用户直接决策」路径），方案 = 周期兜底对账 + 详情实时聚合双通道
 > - **D2**：对账复用既有周期插件 `stale-cleanup.ts`（5 分钟节拍，长驻 Docker 部署可靠），不引入 Worker 回调（保持原设计低耦合）
@@ -34,4 +34,4 @@
 >
 > **遗留观察项**：① `BatchRun` 写回的非原子竞态（详情 GET / sync 尾部 vs 并发 `force-fail`）已登记 backlog §候选评估中（M35.1 A 阶段 RG-W01R）；② backfill `--apply` 待用户在生产执行（脚本已入库）；③ 设计 §5.2 双通道语义以 M35.6 为现行口径。
 >
-> **关联**：[roadmap.md §M35](../roadmap.md#m35-批量运行终态兜底对账--进度可见性修复2026-10-02-用户授权启动--2026-10-02-已闭环--归档) + [backlog.md §候选评估中](../backlog.md)（非原子竞态候选）+ [archive/index.md §5 批次登记](../archive/index.md)
+> **关联**：[roadmap.md §M35](roadmap-phases-m0-m38.md#m35-批量运行终态兜底对账--进度可见性修复2026-10-02-用户授权启动--2026-10-02-已闭环--归档) + [backlog.md §候选评估中](../backlog.md)（非原子竞态候选）+ [archive/index.md §5 批次登记](../archive/index.md)

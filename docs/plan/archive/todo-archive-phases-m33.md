@@ -24,7 +24,7 @@
 >
 > **commit 数量实证**：`git log master --first-parent --oneline` 按 `M33` 去重统计 = **20 commits**（阶段启动 `e6c5502` + 11 原子条目的实现与闭环登记 commits），全部已推送 `origin/master`。
 >
-> **关键决策 D1-D9**（2026-09-30 用户裁定；完整记录见 [roadmap.md §M33](../roadmap.md#m33-治理债收口--测试基建扩展2026-09-30-用户决策方案-a--2026-09-30-已闭环--归档)）：
+> **关键决策 D1-D9**（2026-09-30 用户裁定；完整记录见 [roadmap.md §M33](roadmap-phases-m0-m38.md#m33-治理债收口--测试基建扩展2026-09-30-用户决策方案-a--2026-09-30-已闭环--归档)）：
 >
 > - **D1**：方案 A（治理 + 测试基建收口）——6 原子条目，类型平衡 📚 1 + 🛠️ 3 + 🧪 2
 > - **D2**：C80 采用**方案 C（观察期）**——维持 `|| true` + 标注可判定转阻断条件（存量清零后连续 3 次 `master` push clean）
@@ -60,4 +60,4 @@
 >
 > **ahead commits 实证**：M33 全部 commits 已推送 `origin/master`（`git rev-list HEAD ^origin/master --count` 归档时实测 = 0；期间含远端 dependabot bump 与合并 commit）。
 >
-> **关联**：[roadmap.md §M33](../roadmap.md#m33-治理债收口--测试基建扩展2026-09-30-用户决策方案-a--2026-09-30-已闭环--归档) + [backlog.md](../backlog.md)（M33 衍生候选）+ [archive/index.md](index.md)
+> **关联**：[roadmap.md §M33](roadmap-phases-m0-m38.md#m33-治理债收口--测试基建扩展2026-09-30-用户决策方案-a--2026-09-30-已闭环--归档) + [backlog.md](../backlog.md)（M33 衍生候选）+ [archive/index.md](index.md)
