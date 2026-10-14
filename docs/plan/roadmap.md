@@ -706,7 +706,7 @@ per-alert 模型 + reconcile + API 简化 + UI 调整 + backfill 脚本。5 子�
 
 ## M39: 平台视图体验与可观测补强（2026-10-09 用户决策方案 A / 2026-10-10 已闭环 + 归档）
 
-承接 M38 平台执行模型隔离归档后的平台视图体验与可观测阶段。2026-10-08 定时扫描批量失败的排查过程中，用户在同一批反馈 8 项平台问题，经 2026-10-09 用户决策（方案 A）归并为 6 原子进入本阶段；同批排查另有「既有基线失败被误判为运行失败」的引擎口径缺陷 1 项，已按 [§3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 可用性插队例外先行修复（`e5c59b8`，口径见 [dependency-fixer.md §12.6](../design/modules/dependency-fixer.md)），不计入本阶段；其衍生的 3 项运行时可靠性候选（部署产物版本戳陈旧校验 / 失败 run 落 summary 快照 / 执行超时可配置化）留 [backlog.md](backlog.md) 待评估。
+承接 M38 平台执行模型隔离归档后的平台视图体验与可观测阶段。2026-10-08 定时扫描批量失败的排查过程中，用户在同一批反馈 8 项平台问题，经 2026-10-09 用户决策（方案 A）归并为 6 原子进入本阶段；同批排查另有「既有基线失败被误判为运行失败」的引擎口径缺陷 1 项，已按 [§3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 可用性插队例外先行修复（`e5c59b8`，口径见 [dependency-fixer.md §12.6](../design/modules/dependency-fixer-records.md)），不计入本阶段；其衍生的 3 项运行时可靠性候选（部署产物版本戳陈旧校验 / 失败 run 落 summary 快照 / 执行超时可配置化）留 [backlog.md](backlog.md) 待评估。
 
 **6 原子条目**（覆盖 🎨 3 + 🚀 2 + 🛡️ 1，接近 [规划规范 §1.1 L12 类型平衡建议](../standards/planning.md#11-硬性约束)；🧪 无独立条目，缺口已显式标注）：
 
@@ -869,7 +869,7 @@ per-alert 模型 + reconcile + API 简化 + UI 调整 + backfill 脚本。5 子�
 - **M44.5** [P3 🎨 体验] 站点语言切换器未翻译页 404 兜底（M41.4 导航分层后剩余唯一非导航面死链来源）
 - **M44.6** [P3 📚 治理] `tech-stack` 平台依赖表行级一致性（版本口径不一致 + 无引用占位行）
 
-**建议顺序**：M44.1（治本主线）→ M44.2（门禁就位，防后续文档批次回归）→ M44.3（命名 / 编号收口，牵动锚点面先于拆分）→ M44.4（存量拆分，在门禁就位后分批）→ M44.5（可并行）∥ M44.6。**条目容量**：6 原子（5-6 项上限内）；M44.1 与 M44.3 均触及 > 10 文件面——M44.1 命中[设计文档硬阈值](../design/governance/spec-and-doc-governance.md#24-设计文档硬阈值hard-requirement)，承载面经用户裁定为 [dependency-fixer.md](../design/modules/dependency-fixer.md) 验证链章节；M44.3 的承载面为该文件自身编号结构与分片命名。
+**建议顺序**：M44.1（治本主线）→ M44.2（门禁就位，防后续文档批次回归）→ M44.3（命名 / 编号收口，牵动锚点面先于拆分）→ M44.4（存量拆分，在门禁就位后分批）→ M44.5（可并行）∥ M44.6。**条目容量**：6 原子（5-6 项上限内）；M44.1 与 M44.3 均触及 > 10 文件面——M44.1 命中[设计文档硬阈值](../design/governance/spec-and-doc-governance.md#24-设计文档硬阈值hard-requirement)，承载面经用户裁定为 [dependency-fixer.md](../design/modules/dependency-fixer-records.md) 验证链章节；M44.3 的承载面为该文件自身编号结构与分片命名。
 
 **范围边界（不做什么）**：不改 `quickVerifyProject` 的 lint-only 定位、不做脚本名探测 / 非阻断观察期 / 从目标仓库 CI 反推验证链（M44.1）；不做外链存活检查与文档全文渲染校验（M44.2）；不改 standards 规则语义（M44.3）；不缩小计量面、不新增豁免表条目（M44.4）；不做全量 en 翻译、不改 `ignoreDeadLinks`（M44.5）；不做依赖实际升降级（M44.6）。
 
