@@ -3,7 +3,7 @@ import { existsSync, readFileSync, writeFileSync, readdirSync, rmSync, mkdirSync
 /**
  * Linux cgroup v2 资源限制模块（执行期宿主侧防护：恶意脚本触发资源炸弹时的硬性 OOM/CPU 上限）。
  *
- * 设计要点（见 docs/design/governance/executor-sandbox.md §7 与 todo.md 决策会议结论）：
+ * 设计要点（见 docs/design/governance/executor-sandbox-implementation.md §7 与 todo.md 决策会议结论）：
  * - **跨平台 fallback**：仅在 Linux + cgroup v2 上生效；v1、macOS、Windows 静默 no-op（caller 据
  *   `applied=false` 决定是否依赖 Node 自身 `--max-old-space-size` 等软限制）
  * - **强一致性双层防护**：sandbox 容器（--memory/--cpus）已是第一层；本模块作用于宿主进程

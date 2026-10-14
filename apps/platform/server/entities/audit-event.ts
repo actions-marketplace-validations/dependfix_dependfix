@@ -23,7 +23,7 @@ import { ScanRun } from './scan-run'
  * - sandbox_degraded：scan-orchestrator 产出的 degradedReason（A 场景 sandbox 启动降级）
  * - container_unavailable：container 路由前 `ContainerExecutor.isAvailable()` 返回 false
  *   （工作根不可写 / 磁盘满 / 只读 FS）——默认部署下的执行环境健康信号
- * - ai_config_update：Organization / Repository AI 研判配置更新（todo.md §M26.1 / [platform-ai-integration.md §8.3](../design/governance/platform-ai-integration.md) 审计要求）
+ * - ai_config_update：Organization / Repository AI 研判配置更新（todo.md §M26.1 / [platform-ai-integration.md §8.3](../design/governance/platform-ai-integration-governance.md) 审计要求）
  * - verify_commands_update：Repository 自定义验证命令更新（todo.md §M32.1 / docs/standards/platform.md §3.8）——
  *   该字段等价于远程命令执行面，变更必须留痕
  *

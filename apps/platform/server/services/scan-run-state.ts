@@ -12,7 +12,7 @@ export interface ScanRunStateDecision {
  *
  * 触发场景：引擎 `fix` / `fix-and-pr` 内部流程走到交付阶段后失败（git commit 失败、PR 创建失败、
  * 验证门禁回滚、catch-all FATAL）。这些错误**不应**让状态机误判为 `completed`——否则 UI 会显示
- * "已完成 + 已修复 N"，但远程实际没有分支/PR 落地，与 [C53 状态机契约](../../../../docs/design/governance/executor-sandbox.md) 的
+ * "已完成 + 已修复 N"，但远程实际没有分支/PR 落地，与 [C53 状态机契约](../../../../docs/design/governance/executor-sandbox-implementation.md) 的
  * "副作用已落库" 语义直接冲突。
  *
  * 备注：commit failed 路径下 result 仍可能存在（前面几个仓库 commit 成功、最后一个失败）；
@@ -69,8 +69,8 @@ function hasEngineDeliveryFailure(result: RunResult | undefined): FixError | nul
  * 状态机通过扫描 `result.errors[]` 的 category 命中白名单识别 → **failed**。
  * 该路径 errorJson 优先用引擎错（带 message），fallback 才用 executor error。
  *
- * 详细契约与背景见 [executor-sandbox.md §7.8 降级状态机契约](../../../../docs/design/governance/executor-sandbox.md)、
- * [executor-sandbox.md §8 push + PR 机制](../../../../docs/design/governance/executor-sandbox.md)。
+ * 详细契约与背景见 [executor-sandbox.md §7.8 降级状态机契约](../../../../docs/design/governance/executor-sandbox-implementation.md)、
+ * [executor-sandbox.md §8 push + PR 机制](../../../../docs/design/governance/executor-sandbox-implementation.md)。
  *
  * B 模式（github-action）三分支：
  * - 触发已受理但结果未就绪（`result_fetch_failed` / `run_url_not_resolved`）→ dispatched
@@ -146,7 +146,7 @@ export const resolveScanRunState = (
     // 启动时降级（A 场景：sandbox 启动时不可用 → 自动降级 ContainerExecutor 跑成功）
     // 必须放在 error && !result 分支之前：degraded 场景 result 存在 + degradedReason 有值
     // 语义：「你让我做的事，做成了，但走的路不是你想要的那条」（业务结果完整，路径偏离）
-    // 详见 executor-sandbox.md §7.8.1 A 场景
+    // 详见 executor-sandbox-implementation.md §7.8.1 A 场景
     if (result && degradedReason) {
         return { status: 'degraded', errorJson: degradedReason }
     }

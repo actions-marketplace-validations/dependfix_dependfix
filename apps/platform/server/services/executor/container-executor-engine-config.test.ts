@@ -18,7 +18,7 @@ import type { ScanExecutorContext } from './types'
  * 回归背景（2026-10-11 生产实证）：report-only 扫描按原始模式不 clone（needsClone=false），
  * 但引擎 config 被**无条件**覆写为 `mode:'fix' + commit:true` → 引擎在空 workDir 上执行
  * `git config user.name` → `fatal: not in a git directory` → `COMMIT_FAILED` → 平台
- * `engine_delivery_failed` 误标整次运行失败。口径见 [executor-sandbox.md §8.5]。
+ * `engine_delivery_failed` 误标整次运行失败。口径见 [executor-sandbox-implementation.md §8.5]。
  */
 const childProcessMock = vi.hoisted(() => {
     const execFile = vi.fn()

@@ -315,7 +315,7 @@ const runScanInternal = async (
             //   （业务结果完整，UI info 提示，不静默降级）
             // - 运行时偶发故障（execute() 抛 errno）→ 不静默降级，sandbox_unavailable 错误码 → failed 状态
             //   （环境中途变化，UI warn 告警，避免掩盖真实错误）
-            // 详见 executor-sandbox.md §7.8
+            // 详见 executor-sandbox-implementation.md §7.8
             const sandbox = new SandboxExecutor({
                 workRoot: process.env.RUN_WORK_ROOT ?? 'data/runs',
                 // todo.md §M11 T1005-B：仓库级 sandboxLimits 透传（可选；undefined 时走平台 SANDBOX_DEFAULTS）。
@@ -371,7 +371,7 @@ const runScanInternal = async (
         // - B 模式（github-action）：结果已拉取 → completed + results；触发已受理但结果未就绪
         //   （result_fetch_failed / run_url_not_resolved：action 已在目标仓库运行）→ dispatched + runUrl + 提示；
         //   仅触发级失败（workflow 未配置/不存在/无权限等，action 未运行）→ failed
-        // - sandbox 启动时降级（A 场景，详见 executor-sandbox.md §7.8）：degraded + summaryJson + runUrl + errorJson
+        // - sandbox 启动时降级（A 场景，详见 executor-sandbox-implementation.md §7.8）：degraded + summaryJson + runUrl + errorJson
         //   （业务结果完整，路径偏离；errorJson 保留 sandbox_unavailable 错误码便于审计）
         const decision = resolveScanRunState(executorKind, error, result, degradedReason, exitCode)
         // 失败分类落库（单一事实源 run-failure-classify）：failed / dispatched 写三列，其余清空。

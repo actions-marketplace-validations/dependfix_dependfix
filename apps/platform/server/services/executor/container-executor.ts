@@ -299,7 +299,7 @@ export class ContainerExecutor implements ScanExecutor {
             // 构造 RuntimeConfig：凭据来自 credential service 解密结果（来源单一，见契约要点 1）
             // 平台交付降级口径：fix / fix-and-pr 被降级为 `mode: 'fix' + commit: true + createPullRequest: false`，
             // 让引擎只做本地修复+commit（不动 push/PR），由 [platform-delivery] 接管带凭据的 push + PR
-            // 见 [executor-sandbox.md §8.5 push + PR 链路修复后流程]
+            // 见 [executor-sandbox-implementation.md §8.5 push + PR 链路修复后流程]
             // report-only：保持原模式与 `commit: false`（只读扫描不产出提交），与上方 needsClone / needsPush 同源
             const config: RuntimeConfig = {
                 ...ctx.config,
