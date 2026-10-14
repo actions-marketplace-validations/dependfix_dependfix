@@ -195,11 +195,12 @@ if (value) { ... }  // 对 0, "", false 失效
 
 修改 `docs/**/*.md` / `.github/skills/**/*.md` / `.github/agents/**/*.md` / `docs/plan/**/*.md` 等含本地链接的 md 文件时，检查：
 
-- **本地 check:docs 执行证据**：是否本地执行 `pnpm run check:docs`（`scripts/check-docs.mjs`，零依赖统一入口，覆盖 links + vue-interp 双规则）并提供通过证据？CI 是兜底，但提交前自检可避免 PR 失败往返
+- **本地 check:docs 执行证据**：是否本地执行 `pnpm run check:docs`（`scripts/check-docs.mjs`，零依赖统一入口，覆盖 `links` / `vue-interp` / `link-text` / `link-syntax` / `emphasis` / `site-links` / `archive-anchors` 七类规则）并提供通过证据？CI 是兜底，但提交前自检可避免 PR 失败往返
+- **五类「合法文本但语义漂移」信号（新规则面）**：① `link-text`——链接文本 `§N` 与目标锚点编号**不互为前缀**（锚点可指向父级章节，属合法）；② `link-syntax`——残留 `](` 或「`.md` 片段 + `#锚点` + 孤立 `)`」（文本被截断 / 就地改写错误）；③ `emphasis`——`**` 在段落 / 表格行内计数为奇数（渲染出字面 `**`）；④ `site-links`——站点静态绝对链接（nav / sidebar / 首页 frontmatter）无对应源文件（`ignoreDeadLinks: true` 会静默放过）；⑤ `archive-anchors`——归档文档的自锚点 / 跨文档锚点无对应标题（file-dead 维持豁免）。出现即检查该行是否被截断或批量替换误伤
 - **CI check:docs 步骤**：CI Test job `Run pnpm run check:docs` 步骤是否通过？该步骤失败 → Test job 后续 `docs:build` / `typecheck` / `test` / `build` 共 5 步被 skipped（GitHub Actions 默认行为），盲区极大（run 32396605272 实证：Test job step 12 失败 → step 13-17 全部 skipped；其他类型如 `lint` / `lint:i18n` / `i18n:audit:missing` / `docs:check:i18n` / `lint:md:check` 在该 run 中均通过，唯 check:docs 卡住后续全部盲区）
 - **典型失败场景**：标题重命名 / 文档归档 / 跨文档锚点迁移 → 锚点漂移 → 跨文档锚点链接失效；GitHub 移除全角标点 `（）`、`、` 等生成锚点，VS Code / VitePress 保留 → 跨平台锚点漂移（check:docs 按宽松规范化兼容三平台差异）
 - **修复路径**：全局检索指向变更标题的锚点链接（`rg -n '\[[^]]*\]\([^)]*#.*'`）→ 同步改指新位置/新锚点；check:docs 输出 `path:line:col message` 格式可直接定位
-- **与 lint:md / docs:build 边界**：lint:md 不查链接存在性；check:docs 不查 HTML 标签配对；docs:build 不查链接锚点（VitePress 默认宽容）；三者是**互补**而非替代关系，缺一不可（详见 run 32396605272 与 [documentation.md §链接检查](../../../../docs/standards/documentation.md)）。
+- **与 lint:md / docs:build 边界**：lint:md 不查链接存在性；check:docs 不查 HTML 标签配对（`emphasis` 规则只覆盖 `**` **未配对**，成对但语义错位不查）；docs:build 不查链接锚点（VitePress 默认宽容）；三者是**互补**而非替代关系，缺一不可（详见 run 32396605272 与 [documentation.md §链接检查](../../../../docs/standards/documentation.md)）。
 
 ### Node 脚本 main 入口守卫（必查项）
 
@@ -309,7 +310,7 @@ if (value) { ... }  // 对 0, "", false 失效
 | [platform.md §7.4 caomei-ui 接线约定](../../../../docs/standards/platform.md#74-caomei-ui-接线约定) | 筛选 / 偏好类下拉的「全部 / 未设置」项 | `SelectItem` 的 `value` 是否非空串（空串触发 SSR 500）；哨兵值是否在对外提交前映射为「不传参」或 `null`，且**不落盘 / 不参与枚举校验** |
 | [platform.md §7.4 caomei-ui 接线约定](../../../../docs/standards/platform.md#74-caomei-ui-接线约定) | `CaomeiDialog` 响应式宽度 / 弹窗宽度写法 | 需要响应式宽度时是否用设计钩子 `--caomei-dialog-width`（非 inline `:style="{width}"`——inline 恒胜 `:breakpoints`，会使其成为死代码，窄视口失效） |
 | [platform.md §7.6 运行时 env 开关的 UI 状态暴露](../../../../docs/standards/platform.md#76-运行时-env-开关的-ui-状态暴露用只读端点) | UI 反映服务端运行时 env 开关（如 `ACTION_STATUS_MONITOR_ENABLED`） | 是否用服务端**只读端点**按请求读 `process.env`（非 `runtimeConfig.public`——构建期烘焙会漂移）；UI 文案是否说明「设置后需重启」 |
-| [documentation.md §2](../../../../docs/standards/documentation.md) | 规范 / 设计文档的条款标题 | 标题内是否嵌套了强调标记（`**`）导致渲染破损（门禁全绿但渲染错乱）？边界说明 / 交叉引用是否放在正文？ |
+| [documentation.md §2](../../../../docs/standards/documentation.md) | 规范 / 设计文档的条款标题 | 标题内是否嵌套了强调标记（`**`）导致渲染破损？边界说明 / 交叉引用是否放在正文？（**未配对**形态已由 `check:docs` 的 `emphasis` 规则机检，本检查点聚焦「成对但语义错位」——如嵌套进已加粗标题——的门禁盲区） |
 | [testing.md §6.5](../../../../docs/standards/testing.md) | 交互断言（点击 / 提交）区分度 | 点击目标是否确认为**事件绑定元素**？断言是否只能由该行为产生的状态（如排序属性）满足？三态控件是否逐次操作并等待属性回写（避免过冲）？ |
 | [testing.md §6.6](../../../../docs/standards/testing.md) | ESM 接线断言 | 是否用 `vi.mock` + `importOriginal` **部分 mock**（记录实参后委托真实实现），而非整体 mock 破坏依赖真实行为的既有用例？ |
 | [testing.md §6.7](../../../../docs/standards/testing.md) | 页面可见改动 → 视觉基线 | 改动页面的整页基线是否重建？**以该页为背景的视口基线**是否连带重建？是否连跑两遍验证幂等？无视觉守卫的页面是否显式登记？ |

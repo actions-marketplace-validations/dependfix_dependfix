@@ -61,7 +61,7 @@ Agent-First 的完整项目级定义以 `AGENTS.md` 为准：Agent 是默认任�
 
 ### 2.0 D 阶段自检三向验证纪律
 
-D 阶段自检不能仅依赖 `pnpm exec eslint --fix`（自动修复 import/order、eol-last 等警告级问题），必须分别跑以下三向独立命令并取 0 error 证据：① 无 `--fix` 的 `pnpm exec eslint <本批改动文件>`（避免 lint 警告被自动压制后误判为通过）；② `pnpm --filter @dependfix/platform run typecheck`（CI 实际命令；vitest 走 esbuild 不触发 TS 严格检查）；③ `pnpm --filter @dependfix/platform exec vitest run`（确认不破坏现有测试）；**CI 失败兜底**：上述三向验证通过 + `pnpm run check:docs` exit 0 +（含 SCSS / CSS 改动时）`pnpm --filter @dependfix/platform build` exit 0，才能进入 A 阶段审计。CI 通过 = 最终裁决，本地通过 ≠ 完成。
+D 阶段自检不能仅依赖 `pnpm exec eslint --fix`（自动修复 import/order、eol-last 等警告级问题），必须分别跑以下三向独立命令并取 0 error 证据：① 无 `--fix` 的 `pnpm exec eslint <本批改动文件>`（避免 lint 警告被自动压制后误判为通过）；② `pnpm --filter @dependfix/platform run typecheck`（CI 实际命令；vitest 走 esbuild 不触发 TS 严格检查）；③ `pnpm --filter @dependfix/platform exec vitest run`（确认不破坏现有测试）；**CI 失败兜底**：上述三向验证通过 + `pnpm run check:docs` exit 0（现覆盖 `links` / `vue-interp` / `link-text` / `link-syntax` / `emphasis` / `site-links` / `archive-anchors` 七类，覆盖面与边界见 [文档规范 §2](./documentation.md)）+（含 SCSS / CSS 改动时）`pnpm --filter @dependfix/platform build` exit 0，才能进入 A 阶段审计。CI 通过 = 最终裁决，本地通过 ≠ 完成。
 
 **P (Plan) — 需求分析与规划**：必须读取 `docs/plan/todo.md`，存在歧义时发起「采访」模式；新事项先核对 `todo.md` / `roadmap.md` / `todo-archive.md` 与当前验收标准；不在规划内先完成快速分流（阻塞 / 高风险 → 允许插队，其他 → 延期）；更新 `todo.md` 标记为 `进行中`；输出受影响文件清单及技术实现路径。
 

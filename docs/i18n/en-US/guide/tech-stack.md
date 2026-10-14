@@ -77,7 +77,7 @@ Coverage reports are output to `coverage/` (lcov + html + json formats), uploade
 - **commitlint**: Conventional Commits enforcement, run by husky `commit-msg` hook. Commit format: `<type>(<scope>): <subject>`
 - **lint-staged**: auto-fix staged files (ESLint `--fix` + `lint-md`) before commit
 - **markdownlint**: `lint-md` for `.md` files (project consistency)
-- **check:docs**: `scripts/check-docs.mjs` validates links + VitePress anchors, runs in CI
+- **check:docs**: `scripts/check-docs.mjs` validates local links, link-text section numbers, malformed links, emphasis pairing, site absolute links and archive anchors, runs in CI
 - **i18n:audit**: scripts/i18n/audit-locale-keys.mjs validates zh-CN / en-US key set parity, runs in CI
 - **distill:wisdom**: scripts/distill-wisdom.mjs validates wisdom active entry count <= threshold, runs before session end
 
