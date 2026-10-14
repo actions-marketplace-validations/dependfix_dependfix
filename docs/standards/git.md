@@ -154,7 +154,7 @@ commit message 应聚焦于"当次提交的改动"+"可供事后复查的信息"
 - **执行**：`git commit` / `git commit --amend` 前先 `git status`，逐项确认所有关联文件已暂存（不只修复点文件）。
 - **审计口径**：Review Gate 以「提交态自洽」而非「工作区自洽」为准。
 - **反例**：M29.7 修复 commit 只含 4 文件（纯函数 + 组件 + 测试 + e2e 注释），`disabled` 透传 + i18n key 未暂存 → A 阶段审计 RG-B3 Reject。
-- 详见 [归档 §六十五](../design/governance/experience-archive-§49-§57-recent-investigation.md#六十五m30-归档批次经验沉淀)
+- 详见 [归档 §六十五](../design/governance/experience-archive-§49-§69-recent-investigation.md#六十五m30-归档批次经验沉淀)
 
 ### 3.7.1 lint-staged 的 `git add` 任务会连带暂存工作区其它已改文件
 

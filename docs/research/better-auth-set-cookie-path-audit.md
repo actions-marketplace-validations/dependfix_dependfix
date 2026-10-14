@@ -84,7 +84,7 @@ session 即将过期时会刷新 session 并 Set-Cookie：
 
 ## 4. better-auth 1.7 中间件 Set-Cookie 触发机制
 
-基于 better-auth 1.7 上游文档 + [经验归档 §五十](../design/governance/experience-archive-§49-§57-recent-investigation.md)：
+基于 better-auth 1.7 上游文档 + [经验归档 §五十](../design/governance/experience-archive-§49-§69-recent-investigation.md)：
 
 ### 4.1 better-auth 中间件工作原理
 
@@ -183,7 +183,7 @@ SET_COOKIE_TRACE_BASE_URL=http://localhost:3000 \
 ### 7.3 相关文档
 
 - [M22.8 hotfix 完整记录](../plan/todo-archive.md)（检索"M22.8 未认证 API 测试显式空 storageState"）
-- [经验归档 §五十二 Playwright test.use 存储状态传染导致未认证 API 测试收到 200](../design/governance/experience-archive-§49-§57-recent-investigation.md)（检索"Playwright test.use 存储状态传染"）
-- [经验归档 §五十四 M23.2 Playwright fixture pool 跨 scope 隐式行为源码实证](../design/governance/experience-archive-§49-§57-recent-investigation.md)（检索"Playwright 1.62 fixture pool"）
+- [经验归档 §五十二 Playwright test.use 存储状态传染导致未认证 API 测试收到 200](../design/governance/experience-archive-§49-§69-recent-investigation.md)（检索"Playwright test.use 存储状态传染"）
+- [经验归档 §五十四 M23.2 Playwright fixture pool 跨 scope 隐式行为源码实证](../design/governance/experience-archive-§49-§69-recent-investigation.md)（检索"Playwright 1.62 fixture pool"）
 - [平台开发规范 §6 API 规范](../standards/platform.md#6-api-规范serverapi)
 - [平台开发规范 §3.7.1 fixtures API 无节流默认 + 节流触发条件](../standards/platform.md#371-fixtures-api-无节流默认--节流触发条件)

@@ -23,7 +23,7 @@
 | [§29-§35](./experience-archive-§29-§35-integration.md) | §二十九 - §三十五 | 集成与基础设施 |
 | [§36-§40](./experience-archive-§36-§40-toolchain.md) | §三十六 - §四十 | 工具链 |
 | [§41-§48](./experience-archive-§41-§48-archive-batch.md) | §四十一 - §四十八 | 归档批次与集成深化 |
-| [§49-§57](./experience-archive-§49-§57-recent-investigation.md) | §四十九 - §六十九 | 近期排查与归档沉淀 |
+| [§49-§69](./experience-archive-§49-§69-recent-investigation.md) | §四十九 - §六十九 | 近期排查与归档沉淀 |
 | [§70-§99](./experience-archive-§70-§99-delivery-platform.md) | §七十 - §九十九 | 交付正确性与平台加固 |
 
 > 章节编号**全局唯一、跨文件稳定**（分片仅按范围切分，不影响锚点）；外链引用按 `§编号` 命中。

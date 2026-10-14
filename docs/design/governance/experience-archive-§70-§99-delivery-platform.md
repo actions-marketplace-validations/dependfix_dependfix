@@ -1,6 +1,6 @@
 # 经验归档分片：§七十 - §九十九（交付正确性与平台加固）
 
-> 本分片自 2026-10-11 M42 归档批次起启用（原 [§49-§69 分片](./experience-archive-§49-§57-recent-investigation.md) 累计至 §六十九，接近单分片行数上界）。章节编号**全局唯一、跨文件稳定**，分片仅按范围切分不影响锚点；L3 主题索引见 [experience-archive.md](./experience-archive.md)。
+> 本分片自 2026-10-11 M42 归档批次起启用（原 [§49-§69 分片](./experience-archive-§49-§69-recent-investigation.md) 累计至 §六十九，接近单分片行数上界）。章节编号**全局唯一、跨文件稳定**，分片仅按范围切分不影响锚点；L3 主题索引见 [experience-archive.md](./experience-archive.md)。
 
 ---
 

@@ -494,4 +494,4 @@ POST   /api/repos/[id]/scan
 - [platform-auth-users.md](./platform-auth-users.md) — Organization 实体扩展基线（M7.1 已落地）
 - [platform-scheduled-batch.md](./platform-scheduled-batch.md) — 定时扫描链路，AI 研判可统一应用
 - [sandbox-security-governance.md](./sandbox-security-governance.md) — AI 研判在供应链防护的角色
-- [experience-archive.md §五十六（M24.1 关键决策 D8）](../../design/governance/experience-archive-§49-§57-recent-investigation.md) — 监测系统 vs 自动合并解耦
+- [experience-archive.md §五十六（M24.1 关键决策 D8）](../../design/governance/experience-archive-§49-§69-recent-investigation.md) — 监测系统 vs 自动合并解耦

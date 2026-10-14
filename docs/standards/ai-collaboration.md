@@ -142,7 +142,7 @@ PDTFC+ 闭环（F 阶段提交后）的下一阶段启动前，必须执行「�
 
 **典型反模式**：仅读 `backlog.md` / `todo-archive.md` 文档侧资料而未打开实际代码验证；决策描述中出现「参考 NNN 实施」自相矛盾却未先厘清；决策 D 阶段前未用 `git log --oneline -- <相关路径>` 做 5 分钟核对；仅依赖 backlog 候选描述做规划，未对照 commit history + 实际代码 + todo-archive 表格三重交叉核验。
 
-**合规核验**：由 [code-auditor 主责边界「阶段启动重复评估自检」必查项](../../.github/agents/code-auditor.agent.md) 强制检查——commit 涉及 `todo.md` 当前阶段新增 / 修改时，五步自检任意一步未执行 / 未通过 → Reject 退回。**关联规范**：[planning.md §3.4](./planning.md#34-阶段启动决策前置交叉核验硬要求m271-重复评估问题--2026-09-10) + [归档 §六十四](../design/governance/experience-archive-§49-§57-recent-investigation.md#六十四m271-c66-告警视图增强-重复评估教训阶段启动决策时未对照已闭环清单导致规划无效工作2026-09-10commit-决策-d2-错误)（M27.1 重复评估问题闭环记录）。
+**合规核验**：由 [code-auditor 主责边界「阶段启动重复评估自检」必查项](../../.github/agents/code-auditor.agent.md) 强制检查——commit 涉及 `todo.md` 当前阶段新增 / 修改时，五步自检任意一步未执行 / 未通过 → Reject 退回。**关联规范**：[planning.md §3.4](./planning.md#34-阶段启动决策前置交叉核验硬要求m271-重复评估问题--2026-09-10) + [归档 §六十四](../design/governance/experience-archive-§49-§69-recent-investigation.md#六十四m271-c66-告警视图增强-重复评估教训阶段启动决策时未对照已闭环清单导致规划无效工作2026-09-10commit-决策-d2-错误)（M27.1 重复评估问题闭环记录）。
 
 ## 3. 安全红线
 
