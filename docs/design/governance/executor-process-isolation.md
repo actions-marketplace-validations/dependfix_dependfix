@@ -3,7 +3,7 @@
 > 状态：✅ 已落地（2026-10-09 M38 闭环归档；选型 2026-10-08：方案 ①′ 独立 worker 进程 + 方案 ③ 已落地；见 §3.1 实现路径调整）
 > 提出：2026-10-06（生产运行日志根因分析）
 > 范围：`apps/platform`（队列执行拓扑 / 执行器路由）；不触碰引擎修复与验证业务语义
-> 关联：[executor-sandbox.md §7.2 / §7.4 / §7.8](./executor-sandbox.md)、[platform.md §3.3 / §10](../../standards/platform.md)、`apps/platform/server/services/queue/scan-worker.ts`、`apps/platform/server/services/executor/container-executor.ts`、`docs/plan/roadmap.md` §M38
+> 关联：[executor-sandbox.md §7.2 / §7.4 / §7.8](./executor-sandbox-implementation.md)、[platform.md §3.3 / §10](../../standards/platform.md)、`apps/platform/server/services/queue/scan-worker.ts`、`apps/platform/server/services/executor/container-executor.ts`、`docs/plan/roadmap.md` §M38
 
 ## 1. 背景与问题
 
@@ -94,7 +94,7 @@ scan-queue.add(jobId = scan-<repositoryId>)   [scan-queue.ts]
 
 **落地要点**：
 
-1. 需要**自包含 subprocess 入口**（可执行 bundle），能在 runtime 镜像中直接运行引擎。当前 runtime 镜像自 2026-10-02 起仅含 Nuxt `.output`、不再随附 workspace `node_modules`；[executor-sandbox.md §7.2](./executor-sandbox.md) 已登记"独立沙箱真实执行落地时须提供自包含入口（自包含 CLI bundle），不得依赖 workspace `node_modules`"这一缺口——`SandboxExecutor.buildCmd` 目前即为占位实现。
+1. 需要**自包含 subprocess 入口**（可执行 bundle），能在 runtime 镜像中直接运行引擎。当前 runtime 镜像自 2026-10-02 起仅含 Nuxt `.output`、不再随附 workspace `node_modules`；[executor-sandbox.md §7.2](./executor-sandbox-implementation.md) 已登记"独立沙箱真实执行落地时须提供自包含入口（自包含 CLI bundle），不得依赖 workspace `node_modules`"这一缺口——`SandboxExecutor.buildCmd` 目前即为占位实现。
 2. 序列化协议：`ScanExecutorContext` → 子进程（凭据经 env / stdin，不进 argv）；`ScanExecutorResult`（含 `result` / `logsJson`）→ 主进程。
 3. 执行器路由接入 `scan-orchestrator.service.ts` 的 `resolveExecutorKind` 分支。
 4. 幂等兜底：子进程异常退出时主进程需将 run 归入 `execution_failed`（复用既有错误分类）。
@@ -209,7 +209,7 @@ scan-queue.add(jobId = scan-<repositoryId>)   [scan-queue.ts]
 
 ## 7. 关联文档
 
-- [executor-sandbox.md](./executor-sandbox.md)：§3 接口契约 / §7.2 镜像策略（自包含入口缺口）/ §7.4 执行器并存路由 / §7.8 降级状态机契约
+- [executor-sandbox.md](./executor-sandbox.md)：§3 接口契约；[沙箱执行器设计与推送机制分片](./executor-sandbox-implementation.md)：§7.2 镜像策略（自包含入口缺口）/ §7.4 执行器并存路由 / §7.8 降级状态机契约
 - [platform.md](../../standards/platform.md)：§3.3 迁移与数据库口径 / §10 运行时与部署
 - 代码锚点：`apps/platform/server/services/queue/queue.service.ts`、`scan-worker.ts`、`scan-queue.ts`、`apps/platform/server/services/executor/container-executor.ts`、`apps/platform/server/plugins/stale-cleanup.ts`
 - 规划：`docs/plan/roadmap.md` §M38（2026-10-09 已闭环归档，见 [todo-archive.md §M38](../../plan/archive/todo-archive-phases-m38.md#m38-平台执行模型隔离m381m386-全部已闭环--2026-10-09-归档)）+ [platform.md §10.5 / §10.6](../../standards/platform.md)

@@ -3,7 +3,7 @@
 > 状态：✅ 已落地（2026-10-07 —— 分类模型 + 落库回填 + API 筛选 + UI 展示全部实现；§5.5 受约束重试入口仍延后并登记 backlog）
 > 提出：2026-10-02（用户报告 —— 运行列表只显示「失败」，无法区分失败阶段；网络类失败可考虑重试，验证类失败需重点研判）
 > 范围：`apps/platform`（实体 / API / UI）+ 可选 `packages/core` 分类常量；不改引擎修复逻辑
-> 关联：[executor-sandbox.md §7.8 降级状态机契约](./executor-sandbox.md)、[platform.md](../../standards/platform.md)、`apps/platform/server/services/scan-run-state.ts`、`apps/platform/server/entities/scan-run.ts`
+> 关联：[executor-sandbox.md §7.8 降级状态机契约](./executor-sandbox-implementation.md)、[platform.md](../../standards/platform.md)、`apps/platform/server/services/scan-run-state.ts`、`apps/platform/server/entities/scan-run.ts`
 
 ## 1. 背景与问题
 
@@ -185,7 +185,7 @@
 
 ## 8. 关联文档
 
-- [executor-sandbox.md §7.8 降级状态机契约](./executor-sandbox.md)
+- [executor-sandbox.md §7.8 降级状态机契约](./executor-sandbox-implementation.md)
 - [platform.md](../../standards/platform.md)
 - [backlog.md](../../plan/backlog.md)（受约束重试入口延后登记）
 - [todo-archive.md §M37](../../plan/archive/todo-archive-phases-m37.md#m37-运行可观测性与体验记忆m371m376-全部已闭环--2026-10-08-归档)（M37.1 已闭环归档）
