@@ -5,12 +5,21 @@ import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
     _internals,
+    anchorLeadingNumber,
+    checkArchiveAnchors,
+    checkEmphasis,
+    checkLinkSyntax,
+    checkLinkText,
     checkLinks,
+    checkSiteLinks,
     checkVueInterp,
+    chineseNumeralToNumber,
     collectTitles,
     looseNorm,
     normAnchor,
     scanVueInterp,
+    stripInline,
+    textSectionNumbers,
 } from './check-docs.mjs'
 
 let root
@@ -369,12 +378,368 @@ describe('checkVueInterp - docs/ 扫描', () => {
 })
 
 // ============================================================
+// ============   link-text / link-syntax / emphasis 规则测试   ====
+// ============================================================
+
+describe('chineseNumeralToNumber', () => {
+    it('解析十位 / 百位组合', () => {
+        expect(chineseNumeralToNumber('五十六')).toBe(56)
+        expect(chineseNumeralToNumber('七十二')).toBe(72)
+        expect(chineseNumeralToNumber('十九')).toBe(19)
+        expect(chineseNumeralToNumber('十')).toBe(10)
+        expect(chineseNumeralToNumber('一百')).toBe(100)
+        expect(chineseNumeralToNumber('八')).toBe(8)
+    })
+
+    it('非纯中文数字返回 null', () => {
+        expect(chineseNumeralToNumber('56')).toBeNull()
+        expect(chineseNumeralToNumber('五十六、')).toBeNull()
+        expect(chineseNumeralToNumber('')).toBeNull()
+    })
+})
+
+describe('textSectionNumbers', () => {
+    it('解析阿拉伯链与中文数字', () => {
+        expect([...textSectionNumbers('见 §5.1.22 条款')]).toEqual(['5122'])
+        expect([...textSectionNumbers('见 §五十六 条款')]).toEqual(['56'])
+    })
+
+    it('末尾 .x 记为前缀匹配项', () => {
+        expect([...textSectionNumbers('见 §5.1.x 条款')]).toEqual(['^51'])
+    })
+
+    it('多 § 引用返回多项（调用方据此跳过比对）', () => {
+        const numbers = textSectionNumbers('见 §5.1.4 / §5.1.11')
+        expect(numbers.size).toBe(2)
+    })
+
+    it('无 § 编号返回空集合', () => {
+        expect(textSectionNumbers('见 planning.md').size).toBe(0)
+    })
+})
+
+describe('anchorLeadingNumber', () => {
+    it('解析阿拉伯与中文前导编号', () => {
+        expect(anchorLeadingNumber('44-大批量归档批次操作规范')).toBe('44')
+        expect(anchorLeadingNumber('5122-baseline-lint-治理路径')).toBe('5122')
+        expect(anchorLeadingNumber('五十六m24-归档批次蒸馏')).toBe('56')
+    })
+
+    it('URL 编码锚点先解码', () => {
+        expect(anchorLeadingNumber('44%20规则')).toBe('44')
+    })
+
+    it('无前导编号返回 null', () => {
+        expect(anchorLeadingNumber('主要风险与应对')).toBeNull()
+        expect(anchorLeadingNumber('')).toBeNull()
+    })
+})
+
+describe('stripInline', () => {
+    it('剥离 inline code、链接与图片', () => {
+        expect(stripInline('见 `code](` 与 [文本](a.md)')).toBe('见  与 <LINK>')
+        expect(stripInline('图 ![alt](img.png) 尾部')).toBe('图 <IMG> 尾部')
+    })
+
+    it('剥离「图片作为链接文本」的嵌套形态', () => {
+        expect(stripInline('[![Chart](https://api.example.com/svg)](https://example.com)')).toBe('<LINK>')
+    })
+})
+
+describe('checkLinkText', () => {
+    it('文本 §N 与锚点编号一致：通过', () => {
+        write('docs/a.md', '[§4.4 规范](b.md#44-规则)\n\n[§五十六 经验](b.md#五十六某个标题)')
+        write('docs/b.md', '## 4.4 规则')
+        const { errors } = checkLinkText(root)
+        expect(errors).toEqual([])
+    })
+
+    it('锚点为父级章节（文本编号以锚点编号为前缀）：通过', () => {
+        write('docs/a.md', '[§5.1.15 条款](b.md#51-工程实践规则)')
+        const { errors } = checkLinkText(root)
+        expect(errors).toEqual([])
+    })
+
+    it('锚点编号比文本更深（同段相邻漂移）：报错', () => {
+        // `§5.1.1` → `#5115-…`：展平后 "511" 是 "5115" 的前缀，但按段切分属编号漂移——不反向容忍
+        write('docs/a.md', '[§5.1.1 条款](b.md#5115-别的叶子)')
+        const { errors } = checkLinkText(root)
+        expect(errors).toHaveLength(1)
+        expect(errors[0]).toContain('不一致')
+    })
+
+    it('文本 §5.1.x 前缀通配：通过', () => {
+        write('docs/a.md', '[§5.1.x 条款](b.md#51-工程实践规则)')
+        const { errors } = checkLinkText(root)
+        expect(errors).toEqual([])
+    })
+
+    it('编号不一致：报错并定位', () => {
+        write('docs/a.md', '[§4.4 规范](b.md#43-别的章节)')
+        const { errors } = checkLinkText(root)
+        expect(errors).toHaveLength(1)
+        expect(errors[0]).toContain('docs/a.md:1')
+        expect(errors[0]).toContain('链接文本章节号与目标锚点不一致')
+    })
+
+    it('中文数字与阿拉伯锚点比对', () => {
+        write('docs/a.md', '[§五十六 经验](b.md#57-另一节)')
+        const { errors } = checkLinkText(root)
+        expect(errors).toHaveLength(1)
+        expect(errors[0]).toContain('不一致')
+    })
+
+    it('多 § 引用 / 无编号锚点 / 外链：跳过', () => {
+        write('docs/a.md', [
+            '[§5.1.4 / §5.1.11](b.md#51-工程实践规则)',
+            '[§3.1 原则](b.md#主要风险与应对)',
+            '[§7.7](https://example.com#77)',
+        ].join('\n\n'))
+        const { errors } = checkLinkText(root)
+        expect(errors).toEqual([])
+    })
+
+    it('fenced code block 与 inline code 内的链接不参与', () => {
+        write('docs/a.md', ['`[§4.4](b.md#43-x)`', '', '```md', '[§4.4](b.md#43-x)', '```'].join('\n'))
+        const { errors } = checkLinkText(root)
+        expect(errors).toEqual([])
+    })
+})
+
+describe('checkLinkSyntax', () => {
+    it('合法链接（含嵌套图片）与行内代码：通过', () => {
+        write('docs/a.md', [
+            '[文本](b.md)',
+            '[![Chart](https://api.example.com/svg?repos=a/b)](https://example.com)',
+            '`code](` 在行内代码内不检查',
+            '正文（含半角括号如 pg 与 pnpm-lock.yaml) 属正常文本',
+        ].join('\n\n'))
+        const { errors } = checkLinkSyntax(root)
+        expect(errors).toEqual([])
+    })
+
+    it('残留 "]( "：报错', () => {
+        write('docs/a.md', '见 [broken]( 结尾')
+        const { errors } = checkLinkSyntax(root)
+        expect(errors).toHaveLength(1)
+        expect(errors[0]).toContain('docs/a.md:1')
+        expect(errors[0]).toContain('链接括号未成对')
+    })
+
+    it('孤立「.md#锚点 + )」片段：报错', () => {
+        write('docs/a.md', '见 errance/foo-§49-§57.md#五十六) + 其它')
+        const { errors } = checkLinkSyntax(root)
+        expect(errors).toHaveLength(1)
+        expect(errors[0]).toContain('疑似畸形链接')
+    })
+
+    it('半角括号包裹的路径引用（正文引用形态）：不报', () => {
+        write('docs/a.md', ['参考 (docs/guide/x.md#标题) 与 [正常](y.md)', '', '英文页 (see specs.md#anchor) 亦然'].join('\n'))
+        const { errors } = checkLinkSyntax(root)
+        expect(errors).toEqual([])
+    })
+
+    it('归档文档同样纳入（缺陷与路径漂移无关）', () => {
+        write('docs/plan/archive/x.md', '见 [broken]( 结尾')
+        const { errors } = checkLinkSyntax(root)
+        expect(errors.some((e) => e.includes('docs/plan/archive/x.md'))).toBe(true)
+    })
+})
+
+describe('checkEmphasis', () => {
+    it('成对强调 / 水平线 / 行内代码 / fenced：通过', () => {
+        write('docs/a.md', [
+            '**加粗** 与 **另一处**',
+            '',
+            '***',
+            '',
+            '行内代码 `**` 不计入',
+            '',
+            '```md',
+            '**未配对',
+            '```',
+            '',
+            '| 表头 | 说明 |',
+            '|:--|:--|',
+            '| **a** | **b** |',
+        ].join('\n'))
+        const { errors } = checkEmphasis(root)
+        expect(errors).toEqual([])
+    })
+
+    it('表格行不成对：定位到该行', () => {
+        write('docs/a.md', ['| 表头 | 说明 |', '|:--|:--|', '| **a** | **b |'].join('\n'))
+        const { errors } = checkEmphasis(root)
+        expect(errors).toHaveLength(1)
+        expect(errors[0]).toContain('docs/a.md:3')
+    })
+
+    it('段落不成对：定位到使计数失衡的行', () => {
+        write('docs/a.md', ['- **标题** 说明', '- **裸 glob** 如 apps/**/*.md 破坏强调'].join('\n'))
+        const { errors } = checkEmphasis(root)
+        expect(errors).toHaveLength(1)
+        expect(errors[0]).toContain('docs/a.md:2')
+    })
+
+    it('跨行成对（同一段落）不误报', () => {
+        write('docs/a.md', ['**加粗开始', '加粗结束**'].join('\n'))
+        const { errors } = checkEmphasis(root)
+        expect(errors).toEqual([])
+    })
+
+    it('归档文档同样纳入', () => {
+        write('docs/plan/archive/x.md', '段落 **未配对')
+        const { errors } = checkEmphasis(root)
+        expect(errors.some((e) => e.includes('docs/plan/archive/x.md'))).toBe(true)
+    })
+
+    it('HTML 注释内的 ** 不计入（不参与渲染）', () => {
+        write('docs/a.md', ['<!-- 注释里的 ** 单个标记 -->', '', '正文 **成对** 结束'].join('\n'))
+        const { errors } = checkEmphasis(root)
+        expect(errors).toEqual([])
+    })
+
+    it('紧密列表：每个列表项自成一块（跨项不配对）', () => {
+        write('docs/a.md', ['- **未配对一', '- **未配对二'].join('\n'))
+        const { errors } = checkEmphasis(root)
+        expect(errors).toHaveLength(2)
+        expect(errors[0]).toContain('docs/a.md:1')
+        expect(errors[1]).toContain('docs/a.md:2')
+    })
+
+    it('标题行自成块：失衡定位到标题行（非后续行）', () => {
+        write('docs/a.md', ['## **未配对标题', '正文 **成对** 结束'].join('\n'))
+        const { errors } = checkEmphasis(root)
+        expect(errors).toHaveLength(1)
+        expect(errors[0]).toContain('docs/a.md:1')
+    })
+})
+
+// ============================================================
+// ============   site-links / archive-anchors 规则测试   ========
+// ============================================================
+
+describe('checkSiteLinks', () => {
+    it('nav / sidebar / 首页 frontmatter 链接命中源文件：通过', () => {
+        write('docs/.vitepress/config.ts', [
+            'const zhNav = [',
+            `    { text: '快速开始', link: '/guide/quick-start' },`,
+            `    { text: 'GitHub', link: 'https://github.com/dependfix/dependfix' },`,
+            ']',
+            `const enNav = [{ text: 'Home', link: '/en-US/' }]`,
+        ].join('\n'))
+        write('docs/guide/quick-start.md', '# 快速开始')
+        write('docs/index.md', ['---', 'features:', '    - title: 路线图', '      link: /plan/roadmap', '---'].join('\n'))
+        write('docs/plan/roadmap.md', '# 路线图')
+        write('docs/i18n/en-US/index.md', '# Home')
+        const { errors } = checkSiteLinks(root)
+        expect(errors).toEqual([])
+    })
+
+    it('未命中源文件：报错（站点 ignoreDeadLinks 会静默放过）', () => {
+        write('docs/.vitepress/config.ts', `const zhNav = [{ text: 'x', link: '/nope/missing' }]`)
+        const { errors } = checkSiteLinks(root)
+        expect(errors).toHaveLength(1)
+        expect(errors[0]).toContain('docs/.vitepress/config.ts')
+        expect(errors[0]).toContain('/nope/missing')
+    })
+
+    it('目录 / README / index 形态与锚点解析', () => {
+        write('docs/.vitepress/config.ts', [
+            `const zhSidebar = { items: [{ text: '规范索引', link: '/standards/' }, { text: '调研规范', link: '/research/README' }] }`,
+            `const nav = [{ text: '路线图', link: '/plan/roadmap#阶段总览' }]`,
+        ].join('\n'))
+        write('docs/standards/index.md', '# 项目规范')
+        write('docs/research/README.md', '# 调研')
+        write('docs/plan/roadmap.md', '## 阶段总览')
+        const { errors } = checkSiteLinks(root)
+        expect(errors).toEqual([])
+    })
+
+    it('站点链接锚点无对应标题：报错', () => {
+        write('docs/.vitepress/config.ts', `const nav = [{ text: 'x', link: '/plan/roadmap#不存在' }]`)
+        write('docs/plan/roadmap.md', '## 阶段总览')
+        const { errors } = checkSiteLinks(root)
+        expect(errors).toHaveLength(1)
+        expect(errors[0]).toContain('锚点无对应标题')
+    })
+
+    it('双引号 config 链接与带引号 frontmatter 值均正确解析', () => {
+        write('docs/.vitepress/config.ts', [
+            `const nav = [{ text: 'x', link: "/plan/roadmap" }]`,
+            `const side = [{ text: 'y', link: "/guide/quick-start" }]`,
+        ].join('\n'))
+        write('docs/plan/roadmap.md', '# 路线图')
+        write('docs/guide/quick-start.md', '# 快速开始')
+        write('docs/index.md', ['---', 'features:', `    - title: 路线图`, `      link: '/plan/roadmap'`, '---', '', '正文里的 link: /not-a-frontmatter-link 不参与校验'].join('\n'))
+        const { errors } = checkSiteLinks(root)
+        expect(errors).toEqual([])
+    })
+
+    it('frontmatter 之外的同名键不参与校验', () => {
+        write('docs/index.md', ['---', 'layout: home', '---', '', '| link: /nope/outside |'].join('\n'))
+        const { errors } = checkSiteLinks(root)
+        expect(errors).toEqual([])
+    })
+
+    it('docs/ 缺失：静默返回空错误集', () => {
+        const { errors } = checkSiteLinks(root)
+        expect(errors).toEqual([])
+    })
+})
+
+describe('checkArchiveAnchors', () => {
+    it('自锚点与跨文档锚点命中：通过', () => {
+        write('docs/plan/archive/index.md', ['## 归档索引', '', '[本页](#归档索引)', '', '[已归档段](../todo-archive.md#已归档段)'].join('\n'))
+        write('docs/plan/todo-archive.md', '## 已归档段')
+        const { errors } = checkArchiveAnchors(root)
+        expect(errors).toEqual([])
+    })
+
+    it('file-dead 的锚点维持豁免（仅链接存在性面豁免）', () => {
+        write('docs/plan/archive/index.md', '[历史](missing-shard.md#任意锚点)')
+        const { errors } = checkArchiveAnchors(root)
+        expect(errors).toEqual([])
+    })
+
+    it('自锚点缺失：报错', () => {
+        write('docs/plan/archive/index.md', '## 归档索引\n\n[本页](#不存在的标题)')
+        const { errors } = checkArchiveAnchors(root)
+        expect(errors).toHaveLength(1)
+        expect(errors[0]).toContain('docs/plan/archive/index.md:3')
+        expect(errors[0]).toContain('站内锚点')
+    })
+
+    it('跨文档锚点缺失：报错', () => {
+        write('docs/plan/archive/index.md', '[已归档段](../todo-archive.md#旧锚点)')
+        write('docs/plan/todo-archive.md', '## 已归档段')
+        const { errors } = checkArchiveAnchors(root)
+        expect(errors).toHaveLength(1)
+        expect(errors[0]).toContain('跨文档锚点')
+    })
+
+    it('docs/plan/archive 缺失：返回空集合', () => {
+        const { files, errors } = checkArchiveAnchors(root)
+        expect(files).toEqual([])
+        expect(errors).toEqual([])
+    })
+})
+
+// ============================================================
 // ============      _internals 正则常量回归         =========
 // ============================================================
 
 describe('_internals 正则常量回归', () => {
-    it('RULES 暴露两个规则', () => {
-        expect(Object.keys(_internals.RULES).sort()).toEqual(['links', 'vue-interp'])
+    it('RULES 暴露七条规则', () => {
+        expect(Object.keys(_internals.RULES).sort()).toEqual([
+            'archive-anchors',
+            'emphasis',
+            'link-syntax',
+            'link-text',
+            'links',
+            'site-links',
+            'vue-interp',
+        ])
     })
 
     it('INLINE_CODE_RE 匹配典型 inline code', () => {
