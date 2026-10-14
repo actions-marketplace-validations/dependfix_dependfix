@@ -213,7 +213,7 @@
 - **交付物**: 函数体 degraded 分支实现 + orchestrator 降级信号透传 + `apps/platform/server/services/batch/batch-aggregate.ts` 新增 `degradedCount`（独立计）+ TERMINAL_STATUSES 含 `'degraded'` + 14 个新断言
 - **关键 commit**: `64135ed` feat(platform): T1005-C 状态机扩展 degraded 终态
 - **完成定义**: A 场景 → degraded + info UI（业务完整 + 路径偏离）；B 场景 → failed + warn UI（环境变化，避免掩盖真实错误）
-- **关联**: 设计契约落盘于 [executor-sandbox.md §7.8](../../../design/governance/executor-sandbox.md)
+- **关联**: 设计契约落盘于 [executor-sandbox.md §7.8](../../../design/governance/executor-sandbox-implementation.md)
 - **审计**: 1 轮 standard Pass with Warning（warning 全部闭环）
 
 #### T1005-D: quick-start.md 同步 ✅
@@ -227,7 +227,7 @@
 
 - **总变更**: 5 commits + 27 个 sandboxLimits 相关测试（branches 80.44% ≥ 80%；`parseSandboxLimits` 单元测试全分支覆盖（entities/repository.ts 100%）；144 files / 1996 tests 全绿）
 - **审计覆盖**: 2 核心 commit standard Pass + 1 quick Pass
-- **关联升级**: 状态机扩展与 B 模式 `dispatched` 语义对齐（A 模式 PR 失败也走 dispatched 兜底）；设计契约统一收口于 [executor-sandbox.md §7.8](../../../design/governance/executor-sandbox.md)
+- **关联升级**: 状态机扩展与 B 模式 `dispatched` 语义对齐（A 模式 PR 失败也走 dispatched 兜底）；设计契约统一收口于 [executor-sandbox.md §7.8](../../../design/governance/executor-sandbox-implementation.md)
 
 ---
 
@@ -310,7 +310,7 @@
 - **测试覆盖**: +56 新测试（composable 27 + audit-events 15 + notification 41 + scan-orchestrator 集成 4 + alerts rowGroup 4 + e2e 11）= 681 tests pass
 - **branches coverage**: 80.49% ≥ 80% 阈值
 - **审计覆盖**: 2 轮深度 standard Pass（C58 + C-ENV-CHANGE-ALERT）+ 多轮 quick Pass（其他 sub-task）
-- **文档落盘**: `docs/standards/security.md` §5.4 + §5.5 / `docs/design/governance/executor-sandbox.md` §7.8 / `docs/guide/quick-start.md` 同步
+- **文档落盘**: `docs/standards/security.md` §5.4 + §5.5 / `docs/design/governance/executor-sandbox-implementation.md` §7.8 / `docs/guide/quick-start.md` 同步
 - **历史教训**（已迁移至 docs/standards/）:
   - **TypeORM 1.x 复合索引必须类级声明**：列级 `@Index(['col1', 'col2'])` 会生成仅含末列的单列索引；e2e 二次运行会暴露第二个仓库的 500 错误 → [开发规范 §5.1.13](../../../standards/development.md)
   - **PrimeVue 4 rowGroup 模式数据排序**：必须预排序（相邻行字段值变化触发 subheader）+ `sortMode="multiple"` 保留 groupRowsBy 为第一排序键 + `expandableRowGroups` + DataTableExpandedRows 期望 `Record<string, boolean>` 而非 Set
