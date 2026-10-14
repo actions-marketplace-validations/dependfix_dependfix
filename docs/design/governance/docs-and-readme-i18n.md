@@ -120,7 +120,7 @@ docs/i18n/
 - ✅ `design/governance/platform-ai-integration.md`（AI 研判集成文档近期评审）
 
 `source-only` 范围（首批不翻译）：
-- 设计文档（`design/packages/*` / `design/governance/*` 除已列）—— 仅提供中文事实源入口
+- 设计文档（`design/modules/*` / `design/governance/*` 除已列）—— 仅提供中文事实源入口
 - 低频 Guide（`auto-merge.md` / `release.md` 等）—— 不承诺持续维护
 - 所有 `plan/` 与 `research/` —— 中文事实源优先
 

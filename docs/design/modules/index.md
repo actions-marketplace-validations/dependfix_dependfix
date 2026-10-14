@@ -1,4 +1,4 @@
-# 模块设计（packages）
+# 模块设计（modules）
 
 > 本文档收录**当前已实现或正在实现**的模块设计文档，按模块职责归类。
 > 专项设计、治理与杂项见 [governance](../governance/index.md)。
