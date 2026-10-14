@@ -128,6 +128,11 @@
   - **触发条件**：该基线在**不带 update** 的复跑中失败（即超出容差）；或用户要求清理视觉基线噪声。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
+- **本仓库自用 dependfix 验证链与引擎默认链的面差（待评估）** —— 现象：`.github/workflows/security-auto-fix.yml` 的 `commands` 回退链为 `install → nuxt prepare → lint → build → typecheck`（2026-10-14 随 M44.1 补入 `typecheck`），而引擎默认链为 `install → lint → build → typecheck → test`——自用链**未含 `test`**。该项自 [M29.3 归档段](archive/todo-archive-phases-m29.md) 将 `test` 纳入引擎默认链（2026-09-21）后即成面差；本文件的自定义链自 2026-08-12 引入（run 31552922137 的 prepare 修复）起即固定为「install + prepare + lint + build」，属既有状态、非 M44.1 引入（该批次用户裁定仅补 `typecheck`）。
+  - **待评估点**：① 自用链是否补齐 `test`（`pnpm test` ≈ 全量 vitest 运行，容器内耗时上升）；② 或维持面差并以注释显式登记理由（该修复 PR 仍由本仓库 Test job 兜底）；③ 是否改 `commands` 的语义（当前为**整链替换**，追加语义可避免每次默认链扩展时自用链接口漂移）。
+  - **触发条件**：自用链放行的坏修复被本仓库 Test job 拦下时；或 `commands`（整链替换 vs 追加）被重新设计时。
+  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
+
 ### 待上收候选（评估完成，等待用户决策）
 
 > 本节为「评估完成、等待用户决策」候选的暂存区；候选**不含 `M\d+` 阶段编号**（[规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement)）。

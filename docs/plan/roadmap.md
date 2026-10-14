@@ -858,7 +858,7 @@ per-alert 模型 + reconcile + API 简化 + UI 调整 + backfill 脚本。5 子�
 
 ## M44: 验证链治本 + 文档门禁可信度收口（2026-10-14 用户决策方案 A）
 
-承接 M43 归档后的「**对质量的承诺与实际执行之间的落差**」主线，同一根因在两条线各暴露一次——**交付侧**：验证链 `DEFAULT_VERIFY_COMMANDS`（`verification-runner.ts:84-89`）四条命令互不重叠地都不做类型检查（lint 只跑规则 / tsdown `dts` 只发射声明 / vitest 走 esbuild 转译）→ 类型面破坏被判 `verificationPassed = true` 并交付成 PR（用户实证：nodemailer 10.x 升级后 `nodemailer.Transporter` 报 TS2503；M30.3 C84 `21bf8bb` 当年改文档而非补链路，使缺口在文档层被抹平）；**文档侧**：`check-docs.mjs:131-169` 只校验锚点存在性、`.vitepress/config.ts:147` `ignoreDeadLinks: true`，四类「合法文本但语义漂移」缺陷长期无门禁。经 2026-10-14 用户决策（方案 A）从 [backlog.md](backlog.md) §待上收候选（C95）+ §候选评估中上收 10 项候选，收敛为 6 原子条目。
+承接 M43 归档后的「**对质量的承诺与实际执行之间的落差**」主线，同一根因在两条线各暴露一次——**交付侧**：验证链 `DEFAULT_VERIFY_COMMANDS` 四条命令互不重叠地都不做类型检查（lint 只跑规则 / tsdown `dts` 只发射声明 / vitest 走 esbuild 转译）→ 类型面破坏被判 `verificationPassed = true` 并交付成 PR（用户实证：nodemailer 10.x 升级后 `nodemailer.Transporter` 报 TS2503；M30.3 C84 `21bf8bb` 当年改文档而非补链路，使缺口在文档层被抹平）；**文档侧**：`check-docs.mjs:131-169` 只校验锚点存在性、`.vitepress/config.ts:147` `ignoreDeadLinks: true`，四类「合法文本但语义漂移」缺陷长期无门禁。经 2026-10-14 用户决策（方案 A）从 [backlog.md](backlog.md) §待上收候选（C95）+ §候选评估中上收 10 项候选，收敛为 6 原子条目。
 
 **6 原子条目**（🛡️ 1 + 🛠️ 1 + 📚 3 + 🎨 1；🚀 与 🧪 独立条目缺口显式标注——候选池内两项能力候选同域且与 M43.2 强耦合，宜独立批次串行推进）：
 
@@ -873,7 +873,7 @@ per-alert 模型 + reconcile + API 简化 + UI 调整 + backfill 脚本。5 子�
 
 **范围边界（不做什么）**：不改 `quickVerifyProject` 的 lint-only 定位、不做脚本名探测 / 非阻断观察期 / 从目标仓库 CI 反推验证链（M44.1）；不做外链存活检查与文档全文渲染校验（M44.2）；不改 standards 规则语义（M44.3）；不缩小计量面、不新增豁免表条目（M44.4）；不做全量 en 翻译、不改 `ignoreDeadLinks`（M44.5）；不做依赖实际升降级（M44.6）。
 
-**§3.4 交叉核验**：**0 项重复评估**——归档表格扫描零命中已闭环项（唯一同族命中为 M41 归档段自身的「未完成项」清单，即本批候选来源）+ git log 无对应实现 commit（`scripts/check-docs.mjs` 最近为 `d315840`）+ 代码 anchor 逐项实证未闭环（`verification-runner.ts:84-89` 4 条命令无 typecheck / `check-docs.mjs:131-169` 仅校验锚点存在 / `config.ts:147` `ignoreDeadLinks: true` / `distill-wisdom.mjs:61` + `docs-and-readme-i18n.md:123` + `modules/index.md:1` 旧目录名 / `ai-collaboration.md` L82/91/99/109 跨段编号 / `experience-archive-§49-§57-…md` H1 为「§四十九 - §六十八」/ `apps/platform/package.json:44` 版本口径与无声明行）。
+**§3.4 交叉核验**：**0 项重复评估**——归档表格扫描零命中已闭环项（唯一同族命中为 M41 归档段自身的「未完成项」清单，即本批候选来源）+ git log 无对应实现 commit（`scripts/check-docs.mjs` 最近为 `d315840`）+ 代码 anchor 逐项实证未闭环（`DEFAULT_VERIFY_COMMANDS` 4 条命令无 typecheck / `check-docs.mjs:131-169` 仅校验锚点存在 / `config.ts:147` `ignoreDeadLinks: true` / `distill-wisdom.mjs:61` + `docs-and-readme-i18n.md:123` + `modules/index.md:1` 旧目录名 / `ai-collaboration.md` L82/91/99/109 跨段编号 / `experience-archive-§49-§57-…md` H1 为「§四十九 - §六十八」/ `apps/platform/package.json:44` 版本口径与无声明行）。
 
 **审计 depth 预告**：M44.1 → `deep`（建议 2 分区并发：P1 引擎与默认链 + 测试 / P2 文案口径与平台同步）；M44.2 / M44.3 / M44.4 → `standard`；M44.5 / M44.6 → `quick`。
 
