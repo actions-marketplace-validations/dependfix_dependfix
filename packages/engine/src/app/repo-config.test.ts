@@ -1,7 +1,7 @@
 // repo-config.test.ts
 // 目标仓库专属配置 `.github/dependfix.yml` 的读取 / 降级（缺失 · 非法 YAML · schema 不匹配 · 未知键）
 // 与合并（中央配置优先），以及在修复链路的实际生效与「中央优先」证伪（app 级集成）。
-// 设计与降级矩阵见 docs/design/modules/dependency-fixer.md §12.7。
+// 设计与降级矩阵见 docs/design/modules/dependency-fixer-records.md §12.7。
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'

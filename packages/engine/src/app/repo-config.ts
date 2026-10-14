@@ -3,7 +3,7 @@
 // 范式与 `dependabot.yml` / `mergify.yml` 一致：配置随仓库走，管理大量仓库时无需中央维护名单。
 // 合并口径为**中央配置优先**（防目标仓库绕过中央保护策略）：目标仓库声明仅在中央未指定时生效。
 // 非法 / 缺失一律降级为「未引入本配置前」的行为，不中断修复。
-// 设计见 docs/design/modules/dependency-fixer.md §12.7。
+// 设计见 docs/design/modules/dependency-fixer-records.md §12.7。
 
 import { lstatSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'

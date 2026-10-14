@@ -145,7 +145,7 @@ export function mergeAiUsage(
  * - `SCRIPT_NOT_FOUND`：无对应 `package.json#scripts`，跳过该验证命令
  * - `PRE_EXISTING_FAILURE`：修复前即红的既有基线失败（`verificationBlocking === false`），
  *   目标仓库本就如此，不归因本次改动（口径见 [isRepoVerificationBlocked] 与
- *   [docs/design/modules/dependency-fixer.md 既有失败基线]）
+ *   [docs/design/modules/dependency-fixer-records.md 既有失败基线]）
  * - `ENVIRONMENT_ERROR`：环境性安装失败（诊断步无 stderr 诊断：被信号杀死 / 超时 / 静默非零退出），
  *   无法归因目标仓库（与既有失败基线同族口径；对应 action 的 `environmentalFailure` 标记）
  */

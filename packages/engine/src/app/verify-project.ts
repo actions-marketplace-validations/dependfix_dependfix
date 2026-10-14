@@ -5,7 +5,7 @@
 //
 // 归因口径（既有失败基线判定）：修复前在 pristine 工作区采样一次基线；修复后仍失败、且
 // **同一命令**在基线下也失败 → 标记 `preExisting`（既有失败，不归因本次改动）；
-// 基线中缺失的命令保守归因本次（未知不算既有）。详见 docs/design/modules/dependency-fixer.md。
+// 基线中缺失的命令保守归因本次（未知不算既有）。详见 docs/design/modules/dependency-fixer-records.md。
 import { toErrorMessage, type FixAction } from '@dependfix/core'
 import { logNetworkAudit, redactUrlForReport } from '../runners/network-audit'
 import {
