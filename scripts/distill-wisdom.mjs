@@ -58,7 +58,7 @@ const SUSPECT_LINE_RE = /\[\d{4}-\d{2}-\d{2}\]/u
 const TYPE_MIGRATION_TARGETS = {
     bug: '`docs/design/governance/` 对应治理文档',
     pattern: '`docs/standards/` 对应规范文档',
-    decision: '`docs/design/packages/` 或 `docs/design/governance/`',
+    decision: '`docs/design/modules/` 或 `docs/design/governance/`',
     env: '`docs/guide/tech-stack.md` 或 `docs/guide/ai-development.md`',
     test: '`docs/standards/testing.md`',
     baseline: '`docs/research/`',
