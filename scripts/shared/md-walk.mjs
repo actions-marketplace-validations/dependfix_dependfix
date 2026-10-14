@@ -33,6 +33,10 @@ import { fileURLToPath } from 'node:url'
  *   各分片的 anchor / gh-slug 失配（anchor-dead=0 / gh-slug=0），剩余 file-dead
  *   为既有路径前缀问题。
  *   决策：维持历史豁免 + 注释登记；待独立 fix 批次统一处理。
+ *   **豁免范围限定为 links 面（file-dead）**（2026-10-14 明确）：锚点子集（自锚点 +
+ *   跨文档锚点）、强调标记配对、畸形链接三类规则已覆盖归档文档（`walkMdFiles` 的
+ *   `includeDirs: ['archive']` 放回该目录）——这三类与「归档导致的路径位置漂移」
+ *   无关，属真实破损；file-dead 仍维持豁免。
  * - `.agents` / `.claude`：opencode / claude code 的 agent 定义目录，
  *   不进 VitePress 编译且非文档，豁免。
  * - `artifacts`：review-gate 审计产物（gitignored），若被扫描，本地存在的
@@ -63,18 +67,24 @@ export const MD_EXCLUDED_DIRS = new Set([
  * 而按路径前缀只跳过目标目录。命中在**下降前剪枝**——运行时目录下可能有成千上万个
  * 克隆 / 产物文件，遍历后再过滤的代价不可接受。
  *
+ * `options.includeDirs`：把指定目录名从排除集合中放回（默认空）。用于「该目录在
+ * **链接存在性**面整体豁免、但在**其它规则**面仍须扫描」的场景——`archive` 的
+ * 相对链接会因归档动作指向预期外位置（见 MD_EXCLUDED_DIRS 说明），故 links 面继续
+ * 排除；而强调标记配对 / 锚点子集等与「路径位置无关」的规则需要覆盖归档文档。
+ *
  * @param {string} dir 起始目录（绝对路径）
  * @param {string[]} [out] 累积输出，供递归调用
  * @param {string[]} [excludedPaths] 相对遍历起点的排除目录前缀（POSIX）
+ * @param {{ includeDirs?: string[] }} [options] 放回排除集合的目录名
  * @returns {string[]} .md 文件绝对路径数组
  */
-export function walkMdFiles(dir, out = [], excludedPaths = []) {
-    return walkDir(dir, dir, out, excludedPaths)
+export function walkMdFiles(dir, out = [], excludedPaths = [], options = {}) {
+    return walkDir(dir, dir, out, excludedPaths, new Set(options.includeDirs ?? []))
 }
 
-function walkDir(baseDir, dir, out, excludedPaths) {
+function walkDir(baseDir, dir, out, excludedPaths, includeDirs) {
     for (const entry of readdirSync(dir)) {
-        if (MD_EXCLUDED_DIRS.has(entry)) {
+        if (MD_EXCLUDED_DIRS.has(entry) && !includeDirs.has(entry)) {
             continue
         }
         const full = join(dir, entry)
@@ -82,7 +92,7 @@ function walkDir(baseDir, dir, out, excludedPaths) {
             if (isExcludedPath(baseDir, full, excludedPaths)) {
                 continue
             }
-            walkDir(baseDir, full, out, excludedPaths)
+            walkDir(baseDir, full, out, excludedPaths, includeDirs)
         } else if (entry.endsWith('.md')) {
             out.push(full)
         }

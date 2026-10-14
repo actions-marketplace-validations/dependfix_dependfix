@@ -25,7 +25,7 @@
 
 | pnpm 命令 | 脚本 | 用途 |
 |---|---|---|
-| `pnpm check:docs` | `check-docs.mjs` | 校验仓库内 .md 文件规范（links：路径存在、锚点 slug、拒绝绝对路径/目录越界；vue-interp：docs/ 行内代码不触发 VitePress 编译失败）；`--only=<links\|vue-interp>` 单跑 |
+| `pnpm check:docs` | `check-docs.mjs` | 校验仓库内 .md 文件规范（七类规则：links：路径存在、锚点 slug、拒绝绝对路径/目录越界；vue-interp：docs/ 行内代码不触发 VitePress 编译失败；link-text：链接文本 §N ↔ 目标锚点编号；link-syntax：畸形链接；emphasis：`**` 未配对；site-links：站点静态绝对链接；archive-anchors：归档文档锚点子集）；`--only=<links\|vue-interp\|link-text\|link-syntax\|emphasis\|site-links\|archive-anchors>` 单跑（覆盖面与边界见 [文档规范 §2](../docs/standards/documentation.md#2-markdown-约定)） |
 | `pnpm docs:check:i18n` | `docs/check-i18n-duplicates.mjs` | 检查 docs 翻译页是否同时存在于旧目录（`docs/<locale>/`）与 `docs/i18n/<locale>/`（回流即报错；详见 [i18n 规范](../docs/standards/i18n.md)） |
 
 ### 代码注释治理
