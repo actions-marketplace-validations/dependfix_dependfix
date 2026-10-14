@@ -33,7 +33,7 @@ export interface VerificationParams {
     workDir: string
     /**
      * 要执行的命令序列。
-     * 默认: `pnpm install --frozen-lockfile` → `pnpm lint` → `pnpm build` → `pnpm test`
+     * 默认: `pnpm install --frozen-lockfile` → `pnpm lint` → `pnpm build` → `pnpm typecheck` → `pnpm test`
      */
     commands?: string[]
     /**
@@ -70,21 +70,40 @@ export interface VerificationResult {
 /**
  * 默认验证命令链（**唯一事实源**——app 层经此导入，消除此前的双副本漂移）。
  *
- * **顺序** install → lint → build → test：与常见 CI 约定一致；test 置于最后——它通常是
- * 最慢的一步，前置的便宜命令先失败可快速短路，且「测试套件依赖 build 产物」的仓库前提已满足。
+ * **顺序** install → lint → build → typecheck → test：
+ * - 便宜且失败信息明确的命令靠前，先失败可快速短路；test 置于最后（通常是链中最慢一步）。
+ * - typecheck 必须排在 build 之后：workspace 包的 `tsc` 依赖前置包已发射的 `dist` 声明
+ *   （实测移出 `packages/{core,engine,cli}/dist` 后 `pnpm --filter @dependfix/platform typecheck`
+ *   报大量 `TS2307 Cannot find module`）。
+ * - typecheck 排在 test 之前：基线采样随首个失败命令中止（见 `sampleVerificationBaseline`），
+ *   靠前可最大化「既有失败」的采样覆盖率。
+ *
+ * **为何纳入 typecheck**：改动前的四条命令互不重叠地都不做类型检查——lint 只跑规则
+ * （类型解析失败通常降级为规则告警而非错误）、tsdown 的 `dts` 只发射声明、vitest 走 esbuild
+ * 转译。实证：消费方 `nodemailer.Transporter` 在依赖升到 10.x 后不再存在（TS2503），
+ * 而 install / lint / build / test 四条全绿——类型面破坏被判 `verificationPassed = true`
+ * 并交付成 PR，直到目标仓库 CI 才红。**边界**：`"build": "tsc"` 形态的仓库 build 本身即
+ * 类型检查，此时本命令为冗余（只增耗时，无害），并非新增防线。
  *
  * **为何纳入 test**：仅 install/lint/build 的矩阵无法捕获「lint/build 通过但测试无法运行或失败」
  * 的破坏。实证：目标仓库把 `decode-uri-component` 升到纯 ESM 版本后，CJS 消费方
  * `query-string@7.1.3` 在 Jest 下无法加载该模块（`SyntaxError: Unexpected token 'export'`），
  * 而 install / lint / build 三条全绿——坏修复被交付成 PR。
  *
- * 无 `test` 脚本的仓库由 `validateVerifyCommands` 跳过并记 `SCRIPT_NOT_FOUND` 审计，
- * 不会误伤未配置测试的仓库。
+ * 无 `typecheck` / `test` 脚本的仓库由 `validateVerifyCommands` 跳过并记 `SCRIPT_NOT_FOUND` 审计，
+ * 不会误伤未配置对应脚本的仓库。
+ *
+ * **已知边界**：脚本语义不实（如 `"typecheck": "tsc --noEmit || true"`）无法机检；
+ * 「typecheck / test 长期为红」的仓库由命令级既有失败基线豁免，但基线随首个失败命令中止
+ * （前缀覆盖）——靠前命令先红会遮蔽后续命令的采样（见 `sampleVerificationBaseline`）；
+ * 需 `nuxt prepare` 之类前置步骤的仓库默认链不成立，走 `--commands` / 平台 `verifyCommands` /
+ * action `commands` 逃生舱。
  */
 export const DEFAULT_VERIFY_COMMANDS = [
     'pnpm install --frozen-lockfile',
     'pnpm lint',
     'pnpm build',
+    'pnpm typecheck',
     'pnpm test',
 ]
 

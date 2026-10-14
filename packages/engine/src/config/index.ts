@@ -121,7 +121,7 @@ export interface RuntimeConfig {
      *
      * 开启后仅对「根 package.json 直接依赖（workspace 成员独占声明维持人工）
      * + lockfile 单版本」的跨线告警自动升级，升级后复核脆弱实例消除、
-     * 强制完整验证（install + lint + build + test），失败自动回滚；
+     * 强制完整验证（install + lint + build + typecheck + test），失败自动回滚；
      * 间接依赖 / 多版本共存跨线告警维持人工处理（skipped + warn）。
      */
     allowMajorUpgrade: boolean
@@ -282,7 +282,7 @@ export interface CliConfigOverrides {
     aiTrigger?: AiTriggerKind
     /** 是否输出详细日志 */
     verbose?: boolean
-    /** 自定义验证命令（覆盖默认的 `pnpm install --frozen-lockfile` / `pnpm lint` / `pnpm build` / `pnpm test`） */
+    /** 自定义验证命令（覆盖默认的 `pnpm install --frozen-lockfile` / `pnpm lint` / `pnpm build` / `pnpm typecheck` / `pnpm test`） */
     commands?: string[]
     /**
      * 历史查询（仅 CLI `--history`）：读取归档索引列出仓库历史运行摘要，
