@@ -206,9 +206,9 @@ jobs:
 
 #### 启用 rootless sandbox 执行（推荐用于多租户/owner 模式）
 
-> **✅ 状态：M11 T1005 路由接线已就位（2026-08-20）**——`Repository.executorKind` 已接受 `container` / `github-action` / `sandbox` 三值；scan-orchestrator 已接入 sandbox 路由与降级状态机契约（[executor-sandbox.md §7.8 降级状态机契约](../design/governance/executor-sandbox.md)）。平台 Web UI 仓库表单已暴露 sandbox 选项（仓库管理 → 添加/编辑 → 执行方式下拉），管理员可直接在 UI 选择；或经 API 显式指定。
+> **✅ 状态：M11 T1005 路由接线已就位（2026-08-20）**——`Repository.executorKind` 已接受 `container` / `github-action` / `sandbox` 三值；scan-orchestrator 已接入 sandbox 路由与降级状态机契约（[executor-sandbox.md §7.8 降级状态机契约](../design/governance/executor-sandbox-implementation.md)）。平台 Web UI 仓库表单已暴露 sandbox 选项（仓库管理 → 添加/编辑 → 执行方式下拉），管理员可直接在 UI 选择；或经 API 显式指定。
 >
-> **适用范围**：owner/org 多仓库扫描、`--allow-major-upgrade` 跨线升级、对不可信仓库 owner 模式修复——这些场景下恶意依赖脚本在容器内执行的风险显著高于单可信仓库场景，sandbox 执行把执行隔离在独立 rootless 容器内（与平台容器解耦），详见 [executor-sandbox.md §7](../design/governance/executor-sandbox.md#7-sandbox-执行器设计)。
+> **适用范围**：owner/org 多仓库扫描、`--allow-major-upgrade` 跨线升级、对不可信仓库 owner 模式修复——这些场景下恶意依赖脚本在容器内执行的风险显著高于单可信仓库场景，sandbox 执行把执行隔离在独立 rootless 容器内（与平台容器解耦），详见 [executor-sandbox.md §7](../design/governance/executor-sandbox-implementation.md#7-sandbox-执行器设计)。
 >
 > **不启用**：单可信仓库 + 本地开发场景下默认 `ContainerExecutor` 即可，无 rootless daemon 启动成本。
 
@@ -264,12 +264,12 @@ export DEPENDFIX_ALLOWED_DOMAINS="registry.internal.example.com,artifacts.exampl
 export SANDBOX_RUNTIME=sysbox-runc
 ```
 
-**降级行为**（依据 [executor-sandbox.md §7.8 降级状态机契约](../design/governance/executor-sandbox.md)）：
+**降级行为**（依据 [executor-sandbox.md §7.8 降级状态机契约](../design/governance/executor-sandbox-implementation.md)）：
 
 - **启动时不可用**（开发机无 Docker / 未启用 rootless / user namespace 受限）→ `sandbox.isAvailable()` 返回 false → 自动降级回 `ContainerExecutor` + `degradedReason` 记录 → **run 标 `degraded`**（业务结果完整，UI info 蓝色提示「未启用 rootless，已自动使用平台容器」）
 - **运行时失败**（daemon 中途挂掉）→ `sandbox.execute()` 抛 errno → **不静默降级**（避免掩盖环境中途变化）→ **run 标 `failed`**（`error.code = 'sandbox_unavailable'`，UI warn 黄色告警「沙箱执行器运行时不可用，环境配置可能已变化，请联系管理员」）
 
-A/B 场景差异化见 [executor-sandbox.md §7.8.1](../design/governance/executor-sandbox.md)；治理登记见 [sandbox-security-governance.md §5 G5](../design/governance/sandbox-security-governance.md#5-治理决议与登记) + [§7.1 验收段](../design/governance/sandbox-security-governance.md)。
+A/B 场景差异化见 [executor-sandbox.md §7.8.1](../design/governance/executor-sandbox-implementation.md)；治理登记见 [sandbox-security-governance.md §5 G5](../design/governance/sandbox-security-governance.md#5-治理决议与登记) + [§7.1 验收段](../design/governance/sandbox-security-governance.md)。
 
 **反模式（绝对禁止）**：
 
@@ -277,7 +277,7 @@ A/B 场景差异化见 [executor-sandbox.md §7.8.1](../design/governance/execut
 - **DinD `--privileged` 启动 sandbox**：[CVE-2019-5736](https://unit42.paloaltonetworks.com/cve-2019-5736/) runc 覆写 `/proc/self/exe` 逃逸 + [CVE-2024-21626](https://github.com/advisories/GHSA-xfj7-4fh9-h89v) runc `WORKDIR` 文件描述符泄漏——这两条 CVE 与 `--privileged` 强绑定，rootless mode 默认关闭
 - **平台容器启动 rootless daemon 自身作为 sandbox**：破坏"独立 PID/Mount namespace"目的，平台漏洞直接蔓延到 sandbox
 
-完整设计、RuntimeAdapter 抽象、K8s+Helm 部署预留见 [executor-sandbox.md §7](../design/governance/executor-sandbox.md#7-sandbox-执行器设计)；威胁模型与治理登记见 [sandbox-security-governance.md §5 G5](../design/governance/sandbox-security-governance.md#5-治理决议与登记)。
+完整设计、RuntimeAdapter 抽象、K8s+Helm 部署预留见 [executor-sandbox.md §7](../design/governance/executor-sandbox-implementation.md#7-sandbox-执行器设计)；威胁模型与治理登记见 [sandbox-security-governance.md §5 G5](../design/governance/sandbox-security-governance.md#5-治理决议与登记)。
 
 ### Action 输出
 

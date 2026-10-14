@@ -144,7 +144,7 @@ T901-T906 全部完成：规范同步 + 脚本同步（4 audit + 1 shared CLI）
 
 兑现沙箱治理决议 G5：Docker rootless runtime + 应用层白名单代理 + cgroup v2 资源限制 + Node 20 自动识别。`SandboxExecutor` 与 `ContainerExecutor` 并存；自托管 docker-compose 优先 / K8s+Helm 仅规划。
 
-T1001-T1004 全部完成：Docker rootless runtime + RuntimeAdapter 抽象层 + 出站白名单拦截代理 + cgroup v2 资源限制 + 文档收口。共 13 commits。设计文档：[executor-sandbox.md §7](../design/governance/executor-sandbox.md#7-sandbox-执行器设计) + [sandbox-security-governance.md §5 G5 升级](../design/governance/sandbox-security-governance.md#5-治理决议与登记)。
+T1001-T1004 全部完成：Docker rootless runtime + RuntimeAdapter 抽象层 + 出站白名单拦截代理 + cgroup v2 资源限制 + 文档收口。共 13 commits。设计文档：[executor-sandbox.md §7](../design/governance/executor-sandbox-implementation.md#7-sandbox-执行器设计) + [sandbox-security-governance.md §5 G5 升级](../design/governance/sandbox-security-governance.md#5-治理决议与登记)。
 
 > 详细任务与验收见 [archive/todo-archive-phases-m10-c53-c59c61.md §M10](archive/todo-archive-phases-m10-c53-c59c61.md)
 
@@ -688,7 +688,7 @@ per-alert 模型 + reconcile + API 简化 + UI 调整 + backfill 脚本。5 子�
 
 **关键决策**（2026-10-08 用户裁定 + 执行期追加）：
 
-- **主线方案**：方案 ① + 方案 ③（锁参数与观测）阶段内止血；方案 ②（独立子进程执行引擎）登记 backlog 长期演进（依赖未闭环的自包含 subprocess 入口，见 [executor-sandbox.md §7.2](../design/governance/executor-sandbox.md)）。
+- **主线方案**：方案 ① + 方案 ③（锁参数与观测）阶段内止血；方案 ②（独立子进程执行引擎）登记 backlog 长期演进（依赖未闭环的自包含 subprocess 入口，见 [executor-sandbox.md §7.2](../design/governance/executor-sandbox-implementation.md)）。
 - **路径调整决策**（同日追加，独立命名以避免与设计稿 §4 的 D1-D5 编号混淆）：M38.1 实现路径调整为方案 ①′ 独立 worker 进程。
 - **条目容量控制**：5-6 项——上收 4 项 backlog 候选（`scan.post` failover / e2e 卡片计数 / `scan-queue.ts` 注释 / schedule 选项口径），移出 2 项（`distill-wisdom` 计数假阴性 / `tech-stack` 依赖表行级不一致）留 backlog。
 
