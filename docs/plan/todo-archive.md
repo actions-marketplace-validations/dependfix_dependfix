@@ -30,8 +30,8 @@
   - **M38**：[archive/todo-archive-phases-m38.md](archive/todo-archive-phases-m38.md)（**2026-10-14 M43 归档批次预防性分片迁出**——M43 段新增后完整段将达 6 个，超 [archive/index.md §2](archive/index.md) 定义的「3-5 个已归档阶段」上界；M38 是主窗口最早的完整段，按该健康策略迁出）
 
 ## 主窗口保留范围
-
-- 主文档保留最近 3-5 个完整段的近线归档块（当前 3 个，处 [archive/index.md §2](archive/index.md) 定义区间内：M43 完整段 + M42 完整段 + M41 完整段，按时间倒序排列在顶部；**M40 / M39 完整段随 2026-10-15 M44.4 批次③ 迁出**至 [archive/todo-archive-phases-m39-m40.md](archive/todo-archive-phases-m39-m40.md)，仅留指针段）+ 早期阶段指针段；各阶段 ahead 状态以各段 commit 列表 + `git rev-list HEAD ^origin/master --count` 实证为准，不写死具体数字。**预防性分片同步记录**：M38 已于 2026-10-14 M43 归档批次预防性迁出至 [archive/todo-archive-phases-m38.md](archive/todo-archive-phases-m38.md)（M43 段新增后完整段将达 6 个，超「3-5 个已归档阶段」上界，M38 为主窗口最早完整段）；M37 已于 2026-10-11 M42 归档批次预防性迁出至 [archive/todo-archive-phases-m37.md](archive/todo-archive-phases-m37.md)（M42 段新增后完整段将达 6 个，超「3-5 个已归档阶段」上界，M37 为主窗口最早完整段）；M35 已于 2026-10-10 M40 归档批次预防性迁出至 [archive/todo-archive-phases-m35.md](archive/todo-archive-phases-m35.md)（M40 段新增后完整段将达 6 个，超「3-5 个已归档阶段」上界，M35 为主窗口最早完整段）；M34 已于 2026-10-10 M39 归档批次预防性迁出至 [archive/todo-archive-phases-m34.md](archive/todo-archive-phases-m34.md)（M39 段新增后完整段将达 6 个，超「3-5 个已归档阶段」上界，M34 为主窗口最早完整段）；M33 已于 2026-10-09 M38 归档批次预防性迁出至 [archive/todo-archive-phases-m33.md](archive/todo-archive-phases-m33.md)（M38 段新增后完整段将达 6 个，超「3-5 个已归档阶段」上界，M33 为主窗口最早完整段）；M31 已于 2026-10-05 M36 归档批次预防性迁出至 [archive/todo-archive-phases-m31.md](archive/todo-archive-phases-m31.md)（M36 段新增后完整段达 6 个，超「3-5 个已归档阶段」上界，M31 为主窗口最早完整段）；M32 已于 2026-10-08 M37 归档批次预防性迁出至 [archive/todo-archive-phases-m32.md](archive/todo-archive-phases-m32.md)（M37 段新增后完整段将达 6 个，超「3-5 个已归档阶段」上界，M32 为主窗口最早完整段）；M30 已于 2026-10-02 M35 归档批次预防性迁出至 [archive/todo-archive-phases-m30.md](archive/todo-archive-phases-m30.md)（M35 段新增前主窗口 573 行，M35 段新增后完整段将达 6 个，超「3-5 个已归档阶段」上界，M30 为主窗口最早完整段）；M29 已于 2026-10-01 M34 归档批次预防性迁出至 [archive/todo-archive-phases-m29.md](archive/todo-archive-phases-m29.md)（M34 段新增前主窗口 648 行 + M34 段新增将超 700 强制分片阈值，M29 为主窗口最早完整段）；M23 已于 2026-09-30 M33 归档批次预防性迁出至 [archive/todo-archive-phases-m23.md](archive/todo-archive-phases-m23.md)；M28.6 归档批次（2026-09-11）已预防性迁出至 [archive/todo-archive-phases-m28.md](archive/todo-archive-phases-m28.md)；M26 已于 2026-09-10 M26 归档批次迁出至 [archive/todo-archive-phases-m26.md](archive/todo-archive-phases-m26.md)；M24 / M25 已于 2026-09-08 迁出至 [archive/todo-archive-phases-m24.md](archive/todo-archive-phases-m24.md) + [archive/todo-archive-phases-m25.md](archive/todo-archive-phases-m25.md)；M19 / M20 / M21 已于 2026-09-10 M26 归档批次预防性分片迁出至 [archive/todo-archive-phases-m19-m21.md](archive/todo-archive-phases-m19-m21.md)；M14 + M15 已于 2026-08-31 迁出至 [archive/todo-archive-phases-m14-m15.md](archive/todo-archive-phases-m14-m15.md)；M16 + M17 已于 2026-08-31 迁出至 [archive/todo-archive-phases-m16-m17.md](archive/todo-archive-phases-m16-m17.md)；M18 已于 2026-09-01 M22 归档批次预防性迁出至 [archive/todo-archive-phases-m18.md](archive/todo-archive-phases-m18.md)；M22 已于 2026-09-28 M30 归档批次预防性迁出至 [archive/todo-archive-phases-m22.md](archive/todo-archive-phases-m22.md)。
+- 主文档保留最近 3-5 个完整段的近线归档块（当前 4 个：**M44** + M43 + M42 + M41，按时间倒序排列在顶部；**M40 及更早阶段的完整段已收敛为指针段**，内容与 commits 见各自分片）。
+- **2026-10-15 M44.4 批次③ 迁出记录**：M40 / M39 完整段随该批次迁出至 [todo-archive-phases-m39-m40.md](archive/todo-archive-phases-m39-m40.md)（主窗口完整段由 5 个收敛为 3 个，原位置留指针段）。
 - **2026-10-14 M43 归档批次**：M43 段（6 原子条目 **50 commits**（阶段启动 1 + 前置热修 3 + M43.1 3 + M43.2 27 + M43.3 5 + M43.4 3 + M43.5 4 + M43.6 4；`git log master --first-parent --oneline 68ad47f^..HEAD` 去重统计，实证见 [commit 数量](#m43-pr-check-能力补强--运行时可靠性与工程治理2026-10-12-用户决策方案-a--2026-10-14-归档)））新增至主窗口顶部；主窗口保留范围相应调整为 **M43/M42/M41/M40/M39 共 5 个完整段**（位于 [archive/index.md §2](archive/index.md) 定义的 3-5 个阶段区间上界）；**M38 完整段随 M43 新增预防性迁出**至 [archive/todo-archive-phases-m38.md](archive/todo-archive-phases-m38.md)（M43 段新增后完整段将达 6 个，超区间上界，M38 为主窗口最早完整段）；M43 前期条目（M43.1 / M43.2 / M43.3 及其前）已由用户推送 `origin/master`，M43.4 / M43.5 / M43.6 共 11 commits 归档前为本地 ahead（`git rev-list HEAD ^origin/master --count` 实测 = 11，`origin/master ^HEAD` = 0 双向核验），待用户推送确认。同期同步 `M0-M42` → `M0-M43` 里程碑口径（`docs/index.md` + `backlog.md` + `todo.md`）。
 - **2026-10-10 M41 归档批次**：M41 段（5 原子条目 **15 commits**（阶段启动 1 + M41.1 5 + M41.2 2 + M41.3 3 + M41.4 2 + M41.5 2；`git log master --first-parent --oneline 1681d0a^..HEAD` 去重统计，实证见 [commit 数量](#m41-规范与经验管理体系重构m411m415-全部已闭环--2026-10-10-归档)）；范围内另有 1 commit 属并行 session 的候选登记，不计入本阶段）新增至主窗口顶部；主窗口保留范围相应调整为 **M41/M40/M39/M38/M37 共 5 个完整段**（位于 [archive/index.md §2](archive/index.md) 定义的 3-5 个阶段区间上界）；**M36 完整段随 M41 新增预防性迁出**至 [archive/todo-archive-phases-m36.md](archive/todo-archive-phases-m36.md)；M41 全部 commits 归档时为本地 ahead（`git rev-list HEAD ^origin/master --count` 归档前实测 = 21，`origin/master ^HEAD` = 0 双向核验），待用户推送确认。同期同步 `M0-M40` → `M0-M41` 里程碑口径（`docs/index.md` + `docs/i18n/en-US/index.md` + `backlog.md` + `todo.md`）。
 - **2026-10-10 M40 归档批次**：M40 段（6 原子条目 **20 commits**（阶段启动 1 + M40.6 5 + M40.5 2 + M40.2 2 + M40.3 4 + M40.4 3 + M40.1 3；`git log master --first-parent --oneline origin/master..HEAD` 去重统计，实证见 [commit 数量](archive/todo-archive-phases-m39-m40.md#m40-运行时可靠性与可观测性深化m401m406-全部已闭环--2026-10-10-归档)））新增至主窗口顶部；主窗口保留范围相应调整为 **M40/M39/M38/M37/M36 共 5 个完整段**（位于 [archive/index.md §2](archive/index.md) 定义的 3-5 个阶段区间上界）；**M35 完整段随 M40 新增预防性迁出**至 [archive/todo-archive-phases-m35.md](archive/todo-archive-phases-m35.md)（M40 段新增后完整段将达 6 个，超区间上界，M35 为主窗口最早完整段）；M40 全部 commits 归档时为本地 ahead（`git rev-list HEAD ^origin/master --count` 实测 = 20，`origin/master ^HEAD` = 0 双向核验），待用户推送确认。同期同步 `M0-M39` → `M0-M40` 里程碑口径（`docs/index.md` + `docs/i18n/en-US/index.md` + `backlog.md` + `todo.md`）。
@@ -56,6 +56,177 @@
 - **2026-08-26 同期动作（已迁出）**：M14.1 / M14.2 / M14.3 / M14.x / M14.y + M15.1 详见 [archive/todo-archive-phases-m14-m15.md](archive/todo-archive-phases-m14-m15.md)（2026-08-31 M19 归档批次预防性迁出）。M14.1 / M14.2 / M14.x / M14.y 阶段 commits 已全部推送至 `origin/master`（ahead=0 `git rev-list HEAD ^origin/master --count` 2026-08-26 实测）；M15.1 3 commits 落地 + release.yml CI 修复 1 commit 同期落地（后续已推送 origin/master；ahead commits 按 [规划规范 §4.4 §5 ahead 实证](../../docs/standards/planning.md) 动态核验）。
 
 ---
+
+## M44: 验证链治本 + 文档门禁可信度收口（M44.1~M44.6 全部已闭环 / 2026-10-15 归档）
+
+> **阶段定位**：承接 M43 归档后的阶段。主线为「**对质量的承诺与实际执行之间的落差**」——同一个根因在两条线上各出现一次：① **交付侧**：修复后验证链 `DEFAULT_VERIFY_COMMANDS` 四条命令均不做类型检查，依赖升级引入的类型面破坏被判「验证通过」并交付成 PR（用户 2026-10-14 反馈 nodemailer 10.x 升级后消费方 `nodemailer.Transporter` 报 TS2503 而目标仓库 CI 失败）；② **文档侧**：`check-docs` 只校验锚点**存在**、站点 `ignoreDeadLinks: true` 使跨 locale 死链静默通过，四类「合法文本但语义漂移」缺陷长期无门禁（M41 归档「未完成项」清单即该侧的存量暴露）。两条线均为「门禁形同虚设」同族，故合并为一个阶段。
+>
+> **类型平衡**：🛡️ 1（M44.1）+ 🛠️ 1（M44.2）+ 📚 3（M44.3 / M44.4 / M44.6）+ 🎨 1（M44.5）= 6 原子；**🚀 能力扩展与 🧪 测试覆盖独立条目缺口显式标注**（按 [规划规范 §1.1](../standards/planning.md#11-硬性约束) 类型平衡建议的显式标注惯例；本阶段以「门禁可信度」为单一主线，能力项留 M45 候选池）。**本批未含 🚀 项的原因**：候选池内 3 项能力候选（PR Check provider 原生日志富化 / PR Check 告警关注集 / 受约束重试入口）中前两项**同域**（同一采集层与配置面）且与 M43.2 强耦合，宜作为独立批次串行推进，避免与治本项争抢验证预算。
+>
+> **阶段期间插队热修（不占阶段编号，2026-10-14 用户授权）**：entrypoint 双进程信号处置顺序竞态——`apps/platform/docker/entrypoint.sh` 的 TERM / INT 转发 trap 晚于「看护进程 pid」就绪行安装，落在该窗口的停止信号按默认处置直接终止 PID 1（观测方读到 signal 终止而非约定的 143 退出码，看护循环与 worker 短暂失去父进程）；2026-10-13 master push 的同 commit Coverage 与 Docker QA job 偶发红、失败 job 重跑即绿（同 runner 镜像实证，非该提交引入）。按 [规划规范 §3.1 插队例外清单第 3 类「CI 主链路阻塞」](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 处置：修复 trap 安装顺序 + fail-safe 退出、补源码顺序静态守卫与退出形态断言，规则与检查点落 [platform.md §10.6](../standards/platform.md#106-队列执行进程隔离独立-worker-进程) + [review 检查点矩阵](../../.github/skills/code-reviewer/references/code-quality-checklist.md#规范条款-review-检查点矩阵严格约束逐条挂接)；批次记录见 [archive/index.md §4](archive/index.md)。**不计入本阶段原子条目数与类型平衡**。
+>
+> **§3.4 三重交叉核验**：**0 项重复评估**——① `todo-archive.md` + `archive/todo-archive-phases-*.md` 全量扫描（关键词 `typecheck` / `验证链` / `锚点一致性` / `强调标记` / `design/packages` / `§49-§57` / `locale` / `字体` / `依赖表`）零命中已闭环项，唯一同族命中为 M41 归档段自身的「未完成项」清单（即本批候选来源）；② `git log` 核验无对应实现 commit（`git log --oneline -3 -- scripts/check-docs.mjs` 最近为 `d315840` 本地验证跳过产物目录 / `verify-chain` 相关无 typecheck 条目 commit / `scripts/distill-wisdom.mjs` 迁移串未改 / `docs/.vitepress/config.ts` 无 locale 兜底 commit）；③ 代码 anchor 逐项实测未闭环（详见各条目「依赖」段）。
+>
+> **审计 depth 预告**：M44.1（跨 engine + cli / platform + docs，预估 20-30 文件）→ **`deep`**，建议 2 分区并发（P1 引擎与默认链 + 测试 / P2 文案口径与平台同步）；M44.2（脚本 + CI 接线 + 负例标定）→ `standard`；M44.3（跨仓锚点重排 + 分片重命名）→ `standard`；M44.4（批量文档拆分）→ `standard`；M44.5（站点配置 + 构建产物验证）→ `quick`；M44.6（文档依赖表核对）→ `quick`。
+>
+> **建议顺序**：M44.1（治本主线，先落地以结束假绿交付）→ M44.2（门禁机检，防后续文档批次回归）→ M44.3（命名 / 编号收口，牵动锚点面应先于拆分）→ M44.4（存量拆分，量大宜在门禁就位后分批）→ M44.5（站点兜底，可并行）∥ M44.6（依赖表核对，最小的收尾项）。
+>
+> **条目容量**：6 原子符合 [规划规范 §1.1](../standards/planning.md#11-硬性约束) 的 5-6 项上限；**M44.1 预估 > 10 文件（命中[设计文档硬阈值](../design/governance/spec-and-doc-governance.md#24-设计文档硬阈值hard-requirement)）**，承接面经用户 2026-10-14 裁定为「沿用 `docs/design/modules/dependency-fixer-records.md` 验证链章节承载」（该章节随 M44.4 批次① 迁出为分片）；**M44.3 亦触及 > 10 文件面（全仓锚点重指）**，承接面为该文档自身的编号结构与分片命名，不新增专项设计文档；其余条目均未超单条阈值。
+
+### M44.1 [P2 🛡️] 验证命令链纳入 `typecheck`（**已闭环** `4a47ef8` + `cce2c07` + `2188b16`）
+
+- **目标**：把 `pnpm typecheck` 纳入修复后验证链的**同级直接阻断**命令（与 lint / build / test 同权），消除「依赖升级引入类型面破坏 → 被判验证通过 → 交付成 PR → 目标仓库 CI 才红」的假绿交付链路。
+- **优先级**：P2
+- **范围**：唯一事实源 `packages/engine/src/runners/verification-runner.ts`（`DEFAULT_VERIFY_COMMANDS` + 顺序 / 边界论证 JSDoc）；测试 `runners/verification-runner.test.ts` / `app/verify-project.test.ts` / `app/major-upgrade.test.ts`（+ 同源 `app/ai-integration.test.ts` fixture）；文案与口径同步（**25 文件**，可复现：`rg -l "install/lint/build/test|lint \+ build \+ test" --glob '!docs/plan/archive/**'`）= engine 注释面（`helpers/index.ts` / `ai/safety-gate.ts` / `ai/app-integration.ts` / `config/index.ts` / `runners/verification-gate.ts` / `app/index.ts` 本地执行警告）+ `packages/cli`（help + README 双语）+ `action.yml` + `.github/workflows/security-auto-fix.yml` + `apps/platform/i18n/locales/*`（双语）+ `skills/dependfix-remediator/**` 与 `packages/skills/**` 镜像 + `docs/design/{modules,governance}/*` + `docs/guide/*` + `docs/i18n/en-US/**`（**反向恢复**：M30.3 C84 `21bf8bb` 曾把 `lint/typecheck/build/test` 口径改为 `install/lint/build/test` 以对齐当时的实际链，本条目改为含 typecheck 的 5 段口径）。
+- **验收标准**：
+  - [x] ① **默认链形态**：单测断言链为 5 条且顺序为 `install --frozen-lockfile → lint → build → typecheck → test`（常量与执行断言 / 解析链断言 / 完整验证链断言；含工具链版本替换路径）。
+  - [x] ② **真实端到端复现**（非 mock，D 阶段取证，产物 `artifacts/m44.1/e2e-ac2-evidence.md`）：临时仓库（真实 install / lint / build / test + 真实 `tsc`）基线链全绿 → 注入类型错误后 verification 在 typecheck 失败（exit 2，实测 `TS2322`）→ `enforceVerificationGate` 判定阻断并触发真实 git 回滚（HEAD 未变 / 工作树 clean）。
+  - [x] ③ **无脚本优雅跳过**：无 `typecheck` 脚本的仓库跳过该命令并记 `SCRIPT_NOT_FOUND` 审计（新增独立用例，与既有「无 `test` 脚本」用例并列）；基线采样与修复后验证**同口径**。
+  - [x] ④ **既有失败豁免**：typecheck 基线红 + 修复后仍红 → 记 `PRE_EXISTING_FAILURE` 并标 `preExisting`、不归因本次改动、门禁不据此回滚（新增定向用例）。
+  - [x] ⑤ **口径同步全净**：`rg` 复扫命中清单逐条复核（25 处站点已同步；其余为历史叙述 / 不同源，逐条列明理由——归档历史记录 3 处、早期 T107 契约草案 1 处、CI job 与文档门禁命令集 4 处、自定义命令 fixture 5 处、`docs/plan/archive/**` 整体豁免）；`pnpm lint` / `pnpm typecheck` / `pnpm test:coverage` / `pnpm run check:docs` / `pnpm run lint:md:check` 全绿。
+- **D 阶段定稿（2026-10-14）**：① **顺序** = typecheck 置于 build 之后、test 之前（build 之后因 workspace 包的 `tsc` 依赖前置包已发射的 `dist` 声明；test 之前因基线采样随首个失败命令中止，靠前可最大化既有失败采样率）；② **本仓库自用安全自动修复链同批补入 typecheck**（用户裁定；仅补 typecheck 未扩至 `test`——该面差登记为 backlog 候选）；③ **AC ② 取证形态** = D 阶段真实端到端执行留痕 + 提交侧 mock 化断言与真实 git 回滚断言（对齐 M29.3 范式）。
+- **实际交付**：`4a47ef8` feat(engine)（默认链 + JSDoc 论证 + 同源注释口径）；`cce2c07` test(engine)（断言与门禁回滚用例 + mock 形态对齐「首个失败即停」）；`2188b16` docs（公开契约 / 设计 / 指南 / 双语镜像 / skill 双副本 / 自用链，25 文件）；本条登记 commit。**质量门**：`pnpm lint` 0 error（2 条存量 `max-lines` warning，无新增）；`pnpm typecheck` 全包 Done；engine 全量 65 文件 / 1294 passed / 1 skipped；全仓 `pnpm run test:coverage`（Statements 88.28 / Branches 82.99 / Functions 87.62 / Lines 88.43）通过；`pnpm -r build` exit 0（dist 冒烟：导出常量含 typecheck）；`check:docs` OK（151/87）；`lint:md` Done；`check:doc-size` 62/13/1/0；`check:orphan-ids` 0（676）；`check:standards-redundant:strict` 0；`docs:check:i18n` passed；`i18n:check:anchor` OK；`i18n:audit:missing` parity 0；`check:readme-i18n` OK；`docs:build` exit 0；`sync:skills` 幂等。**mutation 标定 4/4 击杀**（去链中 typecheck 条目 / 顺序前移到 build 之前 / 去脚本存在性跳过分支 / 去既有失败豁免）。**审计**：deep 2 分区并发 R1 **两分区均 Pass**（P1 引擎与测试 0 blocker / 2 warning / 5 suggest；P2 文档口径与分发面 0 blocker / 1 warning / 5 suggest）→ 收口 13 项（mock 形态对齐「首个失败即停」并同源改净三处 fixture、JSDoc 与设计文档补边界句、真空断言补长度、action 与 workflow 示例链补全、workflow 注释去 stale 枚举、roadmap 行号指针改符号名）→ R2 quick **Pass**（修复点逐条关闭；新增 1 项 warning「自用链未含 test」按范围外陈旧处置——软化规范断言 + backlog 候选登记）。
+- **残余**：① 目标仓库 typecheck 长期为红时，基线前缀覆盖（首个失败即停）可能遮蔽其后的 typecheck 采样 → 保守归因本次并回滚（方向安全，已入 JSDoc 与设计文档的已知边界）；② 脚本语义不实（如命令内忽略退出码的写法）无法机检；③ 需 `nuxt prepare` 等前置步骤的仓库默认链不成立面扩大，依赖自定义链逃生舱；④ 本仓库自用链仍未含 `test`（非本批引入），已登记 backlog 候选；⑤ `docs/design/governance/architecture.md` 行尾既有残片（非本批引入）由 M44.2 承载。
+- **不做什么**：不改 `quickVerifyProject`（保留 lint-only 的组级快速信号）；不做脚本名探测（`typecheck` / `type-check` / `tsc` 三选一自动识别）；不做「非阻断观察期」机制；不从目标仓库 CI workflow 反推验证链（另立候选）；不在默认链注入 `nuxt prepare`（沿用 `--commands` / 平台 `verifyCommands` / action `commands` 逃生舱，见 [经验归档 §三十六](../design/governance/experience-archive-§36-§40-toolchain.md)）；不改单命令超时（10 分钟）与 install 命令的 corepack 版本替换语义。
+- **依赖**：用户 2026-10-14 反馈（nodemailer 10.x 事故）；先例 M29.3「验证链纳入 test」（同一唯一事实源口径 + 7 commits）；**顺序硬约束的实测依据**——移出 `packages/{core,engine,cli}/dist` 后 `pnpm --filter @dependfix/platform typecheck` exit 2 + 大量 `TS2307 Cannot find module '@dependfix/core'`，故 typecheck 必须在 build 之后；**承载面经用户裁定**为 [dependency-fixer.md](../design/modules/dependency-fixer-records.md) 验证链章节（该章节随 M44.4 批次① 迁入同级分片，主文档与分片现均在健康窗口内）。
+- **交付物**：预计 4-6 commits——① `feat(engine)` 默认链 + JSDoc 论证；② `test(engine)` 断言与端到端复现用例；③ `docs` 文案 sweep（含 C84 反向恢复 4 文件 8 处 + 模块设计章节）；④ `docs(plan)` 闭环登记。预计 20-30 文件 / 250-450 行（以文案为主）。
+- **风险与缓解**：**R1 目标仓库 `typecheck` 脚本长期红**——既有命令级基线豁免覆盖，但**基线为前缀覆盖**（`runVerification` 首失败即停），lint / build 先红会遮蔽 typecheck 采样 → 保守归因本次 → 误回滚；缓解：基线限制随本条目登记为已知边界，且 typecheck 置于 test 之前以最大化基线采样率。**R2 脚本语义不实**（`typecheck: tsc --noEmit || true`）无法机检；缓解：登记已知边界。**R3 需 `nuxt prepare` 的仓库默认链不成立面扩大**；缓解：逃生舱 + 文档显式登记。**R4 耗时上升**；缓解：单命令超时 10 min 与平台 `EXECUTION_TIMEOUT_MS`（默认 30 min）不变，列入观察项。**R5 漏改同源文案**；缓解：AC ⑤ 的结构化复扫 + 双语镜像单独扫（[规划规范 §4.4 第 13 条](../standards/planning.md#44-大批量归档批次操作规范)）。
+
+### M44.2 [P3 🛠️] 文档门禁机检缺口收敛（四类「合法文本但语义漂移」）（**已闭环** `d839442` + `3652f49` + `9ff2310` + `fc6bca4` + `5ee1b10`）
+
+- **目标**：把四类当前**静默通过**的文档缺陷变为 CI 可阻断的机检项——链接文本章节号与目标锚点不一致、VitePress 站点绝对链接（nav / sidebar / 首页卡片）死链、未成对 `](` 的畸形链接、强调标记（`**`）未配对破损。
+- **优先级**：P3
+- **范围**：`scripts/check-docs.mjs`（规则集由双规则扩为七类：`link-text` / `link-syntax` / `emphasis` / `site-links` / `archive-anchors`）+ `scripts/shared/md-walk.mjs`（新增 `includeDirs` 放回选项）+ `scripts/check-docs.test.mjs`（单测 47 → 83）+ `scripts/README.md` + 存量清理 4 文件 + 规范口径（`documentation.md §2` / `planning.md §4.4 第 15 条配套` / `ai-collaboration.md §2.0`）+ 检查点矩阵（`code-quality-checklist` 必查项与矩阵行）+ `code-auditor.agent.md` 必查项 + `test.yml` 注释 + `docs/i18n/en-US/guide/tech-stack.md`。
+- **验收标准**：
+  - [x] ① **四类负例标定**（+ 归档锚点子集，计 **五类**各一）：每类植入最小负例 → `check:docs` exit 1 且输出 `文件:行:明细`；还原后 exit 0（工件 `artifacts/m44.2/negcase-five-classes.txt` 含各轮 exit 码与工作区 / 备份的逐行 md5 核对）。**标定选点原则已固化**：植入点必须落在规则的**可检出子集**内——`link-text` 须用同段相邻漂移；把文本编号改成「锚点编号的更深层」会落在合法前缀容忍内，属结构上不可检出（R1 审计 blocker 的根因）。
+  - [x] ② **正例零误报 + 豁免面显式化**：全仓现行文档跑通 exit 0（清理前该规则集在真实仓库报出 **7 处**：畸形链接 1 / 强调标记 4 / 归档死锚 2，本条目一并修净）；豁免面显式声明——`docs/plan/archive/**` 仅保留**链接存在性面（file-dead）**豁免，锚点子集 / 强调标记 / 畸形链接三类已覆盖归档（含 `archive/index.md` §5 表格链接），边界写入 [文档规范 §2](../standards/documentation.md#2-markdown-约定) 与 `md-walk.mjs` 排除集合注释。
+  - [x] ③ **复合形态覆盖**：`§5.1.x` 通配、中文数字（`§五十六` ↔ 阿拉伯锚点）均有断言；多编号引用与纯文字锚点显式跳过（可机检子集）；双语镜像页面（`docs/i18n/en-US/**`）纳入同一扫描面。
+  - [x] ④ **CI 接线**：七类规则随 `pnpm run check:docs` 在 Test job 静态检查簇内执行（位于 `docs:build` 之前），本地与 CI 同口径（执行顺序无需改动，仅补规则面与标定口径声明注释）；`pnpm run docs:build` exit 0。
+- **D 阶段定稿（2026-10-14）**：① **可机检子集**用显式白名单而非猜测——`link-text` 仅比对「唯一章节号 ↔ 锚点前导编号」且**单向**容忍（文本编号以锚点编号为前缀 = 指向父级章节属合法；锚点比文本更深 = 编号漂移须报）；`link-syntax` 的孤立片段须同时满足「前置非词字符」与「该行右括号多于左括号」；`emphasis` 按块（段落 / 表格行 / 标题行 / 列表项）计奇偶并剥离 HTML 注释与行内代码；② **`site-links` 面向静态配置**（nav / sidebar / 首页 frontmatter），运行期生成链接（语言切换器等）不在面内——以构建产物对照实证（去重站内内容链接 153 条，其中 96 条为运行期生成的跨 locale 链接）；③ **归档面分治** = 链接存在性面豁免、锚点 / 强调 / 畸形链接面覆盖（按目录名放回）。
+- **批次规模与拆分依据**：本批 **17 文件 / 911 行**（超 [规划规范 §1.1](../standards/planning.md#11-硬性约束) 的 10 文件与 800 行单次阈值）→ 拆为 **6 个 atomic commits**（脚本实现 / 脚本单测 / 存量修复 / 规范与矩阵 / CI 声明 / 闭环登记），**单次最大 506 行**，逐个可独立验证；**适用范围判定**：本批为「文档门禁工具链 + 规范口径同步 + 存量修复」的工程批次，**不构成** [规范与文档治理设计 §2.4](../design/governance/spec-and-doc-governance.md#24-设计文档硬阈值hard-requirement) 的「专项治理设计稿」情形（未新增 / 重构治理设计文档，规范改动为既有条款的口径同步），故按 `standard` 审计。
+- **数量口径换算**：AC ① 的「四类」指四类**语义漂移**规则（`link-text` / `link-syntax` / `emphasis` / `site-links`）；负例标定另含 `archive-anchors`（AC ② 承载），合计 **五类**——`test.yml` 注释与 `artifacts/m44.2/**` 文案中的「五类」即此换算。
+- **实际交付**：`d839442` feat(scripts)（七类规则 + `md-walk` 选项 + scripts/README）；`3652f49` test(scripts)（单测 47 → 83）；`9ff2310` fix(docs)（存量破损 7 处）；`fc6bca4` docs(standards)（规范口径 + 检查点矩阵 + agent 必查项 + en-US 镜像）；`5ee1b10` ci(workflows)（规则面与标定口径声明）；本条登记 commit。**质量门**：`pnpm lint` 0 error（2 条存量 `max-lines` warning，无新增）；`pnpm typecheck` 全包 Done；脚本单测 37 文件 / 685 passed（`check-docs.test.mjs` 83）；全仓 `pnpm run test:coverage` 254 文件 / 4048 passed / 10 skipped（Statements 88.42 / Branches 83.13 / Functions 87.76 / Lines 88.57）；`check:docs` OK（151 / 87 / 151 / 180 / 180 / 3 / 28）；`lint:md` Done；`check:doc-size` 62/13/1/0（无新增 warning）；`check:orphan-ids` 0（676）；`check:standards-redundant:strict` 0；`docs:check:i18n` passed；`i18n:check:anchor` OK；`check:readme-i18n` OK；`check:experience-landing` OK；`docs:build` exit 0。**mutation 标定 6/6 击杀**（去前缀容忍 / 去水平线排除 / 去 file-dead 豁免 / 去嵌套图片剥离 / 去站点锚点校验 / 去表格-标题-列表项块边界），工件与原始输出见 `artifacts/m44.2/`（记录被审修订 HEAD 与脚本 md5）。**审计**：standard **2 分区并发 R1 两分区均 Reject**（P1 blocker：`link-text` 负例标定落在合法容忍内 → 标定无效且工件与结论矛盾；P2 blocker：`code-auditor.agent.md` 同源旧口径未同步）→ 收口 15 项（标定选点改同段相邻漂移并重生成含 md5 的工件、同源旧口径改净并复扫 0 命中、`emphasis` 补 HTML 注释剥离与标题 / 列表项块边界、`link-syntax` 补前置约束与孤立右括号判定、`site-links` 补引号与 frontmatter 作用域、mutation 脚本与输出归档并钉住被审修订、`link-text` 收紧为单向前缀、规范覆盖边界精确化）→ **quick R2 Pass**（修复点逐条关闭；两项 warning 顺延本条兑现——被审修订 md5 已补、批次拆分依据与数量口径换算即上两段）。
+- **残余**：① 「成对但语义错位」的强调标记（如归档索引既有 `**；**`）不在机检面内——已在 [文档规范 §2](../standards/documentation.md#2-markdown-约定) 声明为显式盲区并登记 backlog 候选；② `emphasis` 对「列表项内含水平线」的理论计数边界（仓库无此写法，已入规则 JSDoc）；③ `site-links` 不识别变量拼接 / 模板串构造的配置链接（当前配置面全为字面量，已入 JSDoc 已知边界）；④ 运行期生成的站点链接（语言切换器等）不在静态面内，未翻译页兜底由 M44.5 承接。
+
+- **不做什么**：不做外链（`http(s)`）存活检查（需网络，另立项）；不改变 `ignoreDeadLinks: true` 的既有宽松策略（改为独立校验面，不动站点构建行为）；不做文档全文渲染级校验（仅强调标记配对）；不引入新依赖（复用现有零依赖脚本形态）。
+- **依赖**：M41 归档「未完成项」清单 ①（链接文本一致性机检，本次实测曾命中 2 处）+ 候选 `architecture.md` 畸形 markdown 链接（未成对 `](`）+ 候选「文档中的『字面强调标记』存量破损（实测 `archive/index.md` 七处 + `roadmap.md` 一处为存量）」；**代码 anchor**：`scripts/check-docs.mjs:131-169` 仅校验锚点**存在性**（`titles.has(normAnchor(anchor))`），不比对链接文本；`docs/.vitepress/config.ts:147` `ignoreDeadLinks: true`；`scripts/shared/md-walk.mjs:20-35` 记录 `docs/plan/archive/**` 豁免理由。**规划批次实测的活体实例**（M44 规划批次 A 阶段审计发现，随本条目一并修）：`archive/index.md:92`（M43 归档行）跨文档锚点与 `roadmap.md` H2 实际形式不匹配的存量死锚；该发现同时佐证 AC ② 的 archive anchor 子集校验必要性。
+- **交付物**：预计 3-4 commits——① `feat(scripts)` 四类检测 + 负例标定；② `ci` 接线 + 存量清理（命中项逐条修）；③ `docs(standards)` 一行引用 + 闭环登记。预计 6-10 文件 / 250-450 行。
+- **风险与缓解**：**R1 误报面失控**（中文数字 / 复合编号 / 引用性文本）→ 采用「可机检子集 + 显式白名单」而非全量猜测，白名单条目须带理由；**R2 站点链接面解析遗漏**（主题内建 locale 菜单等运行时生成的链接脚本看不到）→ 以构建产物抽样对照（`dist/**/*.html` 内链接集合 vs 校验面）并在规范声明覆盖边界；**R3 存量清理触碰归档文档**→ 按 [规划规范 §4.4](../standards/planning.md#44-大批量归档批次操作规范) 操作（anchor 实证 + 跨文件外链追踪）。
+
+### M44.3 [P3 📚] 文档口径与命名一致性收口（**已闭环** `9f7991b` + `27cc2d0` + `a20c199` + `6548cb8` + `3049f37` + `a2bec9a`）
+
+- **目标**：清掉三处「旧路径 / 旧编号 / 旧命名」的存量不一致，使「目录名 - 文件 H1 - 章节编号 - 分片文件名」四者互相对齐且可机检。
+- **优先级**：P3
+- **范围**：① `scripts/distill-wisdom.mjs:61` 迁移目标推荐串仍写 `docs/design/packages/`（蒸馏输出会把落点指向已不存在目录）；② `docs/design/governance/docs-and-readme-i18n.md:123` 现行陈述用旧目录名 `design/packages/*`；③ `docs/design/modules/index.md:1` H1 仍为「模块设计（packages）」（实际目录为 `design/modules/`，该 H1 不被目录名字面 pattern 命中，须单独扫）；④ `docs/standards/ai-collaboration.md` 跨段重复编号——`## 1.4`–`## 1.7`（L82/91/99/109）位于 `## 2. PDTFC+ 工作流`（L58）**之后**（跨段错位），且与 `### 1.4` / `### 1.5`（L47/53）编号重复；`## 2.1` / `## 2.2`（L119/130）编号与 §2 自洽，但被上述错位块与 `## 3. 安全红线`（L147）夹住，重排时需一并归位；⑤ `docs/design/governance/experience-archive-§49-§57-recent-investigation.md` 文件名与内容范围不符（H1 实为「§四十九 - §六十八」）。
+- **验收标准**：
+  - [x] ① `rg -n "design/packages" --glob '!docs/plan/archive/**'` 命中仅剩**历史叙述段**，逐条在条目闭环记录中列明并声明不改的理由（实测 7 行 = 现行引用 3 处已改净 + 历史叙述 2 处 + 缺陷与规划描述 2 处站点；分类清单见下）。
+  - [x] ② `rg -n "^## |^### 1\.[0-9]" docs/standards/ai-collaboration.md` 编号唯一、无跨段重复、顺序连续；全仓引用该文件旧编号锚点的链接同批更新（实测 `1` / `1.1`–`1.5` / `2` / `2.1`–`2.6` / `3` / `4` / `5`；**复扫命令按归一化锚点形态订正为 `rg -n "ai-collaboration\.md#1[4-7]-" .`**——原 AC 给定的 `#1\.[4-7]` 形态改前改后均零命中、无鉴别力）。
+  - [x] ③ 分片文件名与 H1 范围一致，且全仓外链重指（`rg -n "§49-§57|experience-archive-§49" docs/ .github/ scripts/ | cat` 逐条核对；命中分类清单见下）；改名按 [规划规范 §4.4 第 2 / 3 / 6 / 7 条](../standards/planning.md#44-大批量归档批次操作规范) 先列落点清单再改。
+  - [x] ④ `pnpm run check:docs` exit 0（151 links / 87 vue-interp 面零 error）+ `pnpm run lint:md:check` 通过 + `pnpm run check:doc-size` 无新增 warning（实测 76 个文档 → 健康 62 / warning 13 / 豁免 1 / 超阈值 0；`ai-collaboration.md` 重排后 200 行（`wc -l`）未触阈）。
+- **D 阶段实证订正（2026-10-14）**：规划 ⑤ 的假设为「文件名与内容范围不符，H1 正确」，实测**仅部分成立**——分片内容实至 `## 六十九、`（末 H2），故文件 H1「§四十九 - §六十八」同样错一档。三方不一致的完整实证：文件名 `§49-§57` / H1「§四十九 - §六十八」/ 实测内容自 `## 四十九、` 至 `## 六十九、`/ `experience-archive.md` §2 索引表范围列与后继分片头部早已按 `§49-§69` 记述。本批按**实测内容范围**一次性对齐文件名与 H1（其余六个分片的文件名 / H1 / 实测范围经逐条核验一致）。
+- **AC ① 命中分类清单**（实测 7 行）：**现行引用 3 处已改净**——`scripts/distill-wisdom.mjs:61` 推荐串 / `docs/design/governance/docs-and-readme-i18n.md:123` 现行陈述 / `docs/design/modules/index.md:1` H1（该 H1 不被目录名字面检索命中，单独扫出）；**历史叙述 2 处保留**——`spec-and-doc-governance.md:43`（M41 治理设计「问题」段）/ `todo-archive.md:165`（M41 归档未完成项清单）；**缺陷与规划描述 2 处站点保留**——`todo.md:28/80/82/87`（M44 规划核验 + 条目自身范围文本）/ `roadmap.md:867`（里程碑行）。后两类是对本缺陷的记述，改写会破坏规划与归档记录原义；判定口径 = **现行指向性引用为零**。
+- **AC ③ 命中分类清单**（逐行核对）：**链接面全量重指**——live 十二文件 + 归档三处（`todo-archive-phases-m22.md` ×4 / `archive/index.md` ×1 / `todo-archive-phases-m24.md` 旧编号锚点 ×2）；**正文描述面冻结三处**——`todo.md:80` / `roadmap.md:876` / `archive/todo-archive-phases-m26.md:134`（「当时分片位置」描述）；**命名快照冻结**——`standards-experience-refactor.md:16`（M41 规划期体量表）/ `experience-archive.md:51`（M41.2 决策记录）/ `archive/index.md` 批次记录措辞；**合成夹具一处**——`check-docs.test.mjs:530` 的 `errance/foo-§49-§57.md#五十六` 为畸形链接语法样本（虚构路径），保留。
+- **历史正文内旧编号的冻结口径**（R1 审计登记项）：**链接与锚点（指向性引用）随批更新，正文事实陈述冻结**——先例见 `caomei-ui-migration.md`「纯文本历史引用保持原样 —— 这些是当时的事实陈述，重写会破坏归档冻结原则」。冻结站点共 **13 处 / 7 文件**：`experience-archive-§49-§69` 的 §六十二（标题与正文）/ §六十四 · `roadmap.md:297/533/545` · `todo-archive.md:299` · `archive/index.md:112` · `archive/todo-archive-phases-m25.md:124` · `archive/todo-archive-phases-m29.md:117/126` · `archive/todo-archive-phases-m26.md:133/260`；均指旧 `§1.4`（跨文档一致性）/ `§1.5`（归档检查）/ `§1.7`（阶段启动自检），现为 `§2.3` / `§2.4` / `§2.6`。**已知语义陷阱**：历史句中的 `§1.4` 在现行编号下唯一指向「单次提交审计阈值」，其上下文已自明为当时记录（不构成误导读者的断链）。
+- **批次规模与拆分依据**：实现批次 **27 文件 / +78 −78**（`git diff --numstat` 口径，含 1 处重命名，`bf06b76..a2bec9a`）→ 拆 **6 个 atomic commits**（文件数依次 1 / 5 / 8 / 2 / 13 / 2），**单次最大 13 文件**即改名批；该批超出单次提交文件数阈值，属**派生例外**——改名与链接存在性面存在**原子性约束**（任一 docs 侧链接未同步即 link-dead，该提交无法独立验证），依据规范「任何 commit 不可被独立验证即拆分错位」；其余 5 批均 ≤ 10 文件。**独立验证实证**：六个 commit 快照逐个复跑 `check:docs` 均 exit 0。
+- **实际交付**：`9f7991b` fix(scripts)（推荐串指向现存目录）；`27cc2d0` refactor(standards)（编号重排 + 直连引用与归档锚点）；`a20c199` docs(standards)（编号引用面）；`6548cb8` docs(design)（目录名与模块索引 H1）；`3049f37` docs(design)（分片改名与全仓外链重指）；`a2bec9a` docs(plan)（归档面旧名链接）；（本条登记 commit）。**质量门**：`pnpm lint` 0 error（2 条存量 `max-lines` warning，无新增）；`pnpm typecheck` 全包 Done；脚本单测 37 文件 / 685 passed；`check:docs` OK（151 / 87 / 151 / 180 / 180 / 3 / 28）；`lint:md` 通过；`check:doc-size` 62/13/1/0（无新增）；`check:orphan-ids` 0（676）；`check:standards-redundant:strict` 0；`check:experience-landing` OK；`docs:build` exit 0；`docs:check:i18n` 与 `i18n:check:anchor` 通过；新增行编号标记扫描 0 命中。**审计**：standard **2 分区并发 R1 两分区均 Pass**（0 blocker；分区 A 两项 warning：归档分片旧锚点未同步 / 历史旧编号未声明口径；分区 B 一项 warning：改名后归档面死链未登记）→ 收口（归档分片旧锚点与旧名链接同步 + 冻结口径与命中分类清单落档 + 两条存量候选登记）→ **quick R2 Pass**（修复点逐条关闭，数字口径按实测订正）。
+- **残余**：① `### 2.0`（h3）与 `#### P.1`（h4）相对 `## 2.1`–`## 2.6`（h2）的层级不对称属**存量**，本批按验收面扫描口径与规划范围未动层级（避免制造层级空洞并牵动 `#20-…` 锚点面）；② 归档目录内 file-dead 相对链接前缀（既有边界）未随本批处理，已登记 backlog 候选；③ 经验归档分片范围声明口径（规划上界 vs 实测范围）与段序异常，已登记 backlog 候选；④ 历史正文旧编号引用按冻结口径保留（13 处清单见上）；⑤ `todo.md` / `roadmap.md` 内的缺陷描述文本保留。
+- **不做什么**：不改 standards 的规则语义（仅编号 / 标题 / 路径口径）；不删除历史归档叙述与问题记录段（`spec-and-doc-governance.md:43` 为历史问题记录，保留）；不动 `check-orphan-ids` 真常量白名单与其正则；不合并或拆分 `ai-collaboration.md` 的内容块（仅重排编号）。
+- **依赖**：M41 归档「未完成项」清单 ②⑤⑥；**反向核验的实证依据**（可复现：`rg -n "design/packages" --glob '!docs/plan/archive/**'`）——现行引用 **2** 处（`scripts/distill-wisdom.mjs:61` + `docs/design/governance/docs-and-readme-i18n.md:123`）+ 历史记录 **2** 处（`spec-and-doc-governance.md:43` + `todo-archive.md:165`，保留不改）+ 目录名字面 pattern **不命中**的 H1 **1** 处（`docs/design/modules/index.md:1`，须单独扫）；`spec-and-doc-governance.md:43` 称「7 处未同步」为 2026-09-08 的历史快照，须以当前实测为准逐条判定。
+- **交付物**：预计 3 commits——① `docs(governance+modules)` 旧路径与 H1 收口；② `refactor(standards)` `ai-collaboration.md` 编号重排 + 全仓锚点重指；③ `docs` 分片重命名 + 外链重指 + 闭环登记。预计 8-14 文件 / 150-350 行。
+- **风险与缓解**：**R1 编号重排打破既有外链锚点**（该文件被 AGENTS.md / skills / agents / 多个 design 文档引用）→ 改前 `rg` 全仓落点清单、改后 `pnpm run check:docs` 兜底 + 明文列更新清单；**R2 分片重命名牵动跨目录相对路径**→ 严格按 §4.4 第 3 条（old 片段从路径字符起写、改后 malformed 检测 `rg -n "\[[^]\n]*\((\.\.?/|/)"` 0 命中）；**R3 与 M44.4 拆分批次互相踩踏**→ 本条目先行，M44.4 在本条目闭环后再动 `design/modules` 与 `design/governance` 内文件。
+
+### M44.4 [P3 📚] 设计文档存量超健康窗口分批拆分（**已闭环** 14 commits：批次① `9e1205e` + `cc9bf33` + `b9e463d` + `44cdf84` + `2758bc9` + `838c76b` / 批次② `b44f040` + `14c6750` + `0f2d539` + `6c085f6` + `cbbcf6c` + `6e68ac5` / 批次③ `1d672cb`；本条登记 commit）
+
+- **目标**：把处在 warning 带与强制分片线之上的文档按内容逻辑分批拆到健康窗口内，避免继续增长直接触「强制分片」线，并让索引 / 入口在拆分后保持可用。
+- **优先级**：P3
+- **范围**：以 `pnpm run check-doc-size` 输出为准（**13 个 warning 文件 + 1 个豁免文件**，测量方：执行角色；实测命令见「验收标准」④）——`docs/design/modules/{dependabot-fetcher, dependency-fixer, github-client, pnpm-lockfile-fixer, report-generator}.md`（>300）+ `docs/design/governance/{architecture, c22-pat-backward-compat, docs-and-readme-i18n, executor-sandbox, platform-ai-integration, platform-scheduled-batch}.md`（>400）+ `docs/plan/{roadmap,todo-archive}.md` + 豁免项 `docs/design/governance/caomei-ui-migration.md`（940 行）。
+- **验收标准**：
+  - [x] ① **量级下降**：warning 带文件数由 13 降至 ≤ 6（测量方：执行角色，命令 `node scripts/check-doc-size.mjs`）；超阈值（强制分片）仍为 0。（**实测**：批次① `design/modules` 5 文件 → warning 13 → 8；批次② `design/governance` 6 文件 → **warning 8 → 2**（余 `docs/plan/roadmap.md` 与 `docs/plan/todo-archive.md`，随批次③ 处理）；计量 76 → 87、健康 62 → 84、豁免 1、超阈值 0。）
+  - [x] ② **单批可独立验证**：每个拆分批次单独验收（拆分后目标文件 ≤ 阈值 + 主文档保留索引 / 入口指针 + `pnpm run check:docs` exit 0）。（**实测**：批次① / 批次② 各批 commit 快照逐个复跑 `check:docs` exit 0；主文档与分片均在健康窗口；主文档尾部「分片索引（迁出章节）」表提供分片链接 + 章节范围 + 主题。）
+  - [x] ③ **信息不丢**：拆分保留原始层级与状态；按 [规划规范 §4.4 第 9 条](../standards/planning.md#44-大批量归档批次操作规范) 区分「可删除的已归档内容」与「必须保留的必要信息」。（**实测**：批次② 六组「HEAD 原文非空行序列 == 主文档（去分片索引）+ 分片（去头部）」逐行校验通过——仅有的差异为已声明的引用重指，无内容增删；§ 编号跨文件稳定、未重编号。）
+  - [x] ④ **规划文档拆分与归档协同**：`roadmap.md` / `todo-archive.md` 的拆分须与阶段归档批次协同（不产生二次改动）；拆分后归档批次登记与 `archive/index.md` 索引同步。（**实测**：`roadmap.md` 按 [archive/index §2](../plan/archive/index.md) 的「保留概述与最近阶段、更早阶段迁出分片」策略把 M0-M38 阶段详情迁出至 `archive/roadmap-phases-m0-m38.md`（主文档 898 → 252 行）；`todo-archive.md` 按「主窗口保留 3-5 个完整段」把 M40 / M39 完整段迁出至 `archive/todo-archive-phases-m39-m40.md`（主文档 546 → 500 行，完整段 5 → 3 个）；`archive/index.md` §4 基线（两文件行数）、分片记录与批次登记同批同步；迁出后全部外链重指分片，未产生二次改动。）
+- **批次进展（2026-10-14 批次①：`design/modules` 5 文件）**：`dependabot-fetcher` / `dependency-fixer` / `github-client` / `pnpm-lockfile-fixer` / `report-generator` 按「连续尾部章节」迁出为同级分片（`dependabot-fetcher-runtime` / `dependency-fixer-records` / `github-client-testing` / `pnpm-lockfile-fixer-records` / `report-generator-records`），主文档保留设计本体 + 尾部「分片索引（迁出章节）」表。**量级实测**：`check-doc-size` 计量 76 → 81、健康 62 → 72、**warning 13 → 8**、豁免 1、超阈值 0（阈值见 [文档规范 §3](../standards/documentation.md#3-文档行数阈值)）。**AC 状态**：②（单批可独立验证）与 ③（信息不丢）按批次① 实测满足（拆分后主文档与分片均在健康窗口、`check:docs` exit 0；内容保真以「HEAD 原文非空行序列 == 主文档（去分片索引）+ 分片（去头部）」逐组校验通过）；**① 未达标（实测 warning 带 8 处 > 6），④ 随批次③ 兑现 → 本条目未闭环**。
+- **批次① 实际交付**：`9e1205e` 拆分本体（5 主文档 + 5 分片）；`cc9bf33` 设计与指南引用重指（含 zh / en-US 镜像成对）；`b9e463d` 规范与检查点引用重指；`44cdf84` 源码注释指针同步；`2758bc9` 分片约定登记（[文档规范 §3](../standards/documentation.md#3-文档行数阈值) 补设计文档分片示例 + [模块索引](../design/modules/index.md) 一行引用）；本条登记 commit。**口径**：链接与指针随批更新、正文事实陈述冻结（M44 现行阶段记录内的承接面指针同步改指分片；历史阶段记录内的家族文档链接按冻结保留）。**质量门**：`check:docs` OK（links 156 / vue-interp 92 / link-text 156 / link-syntax 185 / emphasis 185 / site-links 3 / archive-anchors 28）；`lint:md` Done；`check:doc-size` 无新增 warning（warning 带由 13 降为 8）；`check:orphan-ids` 0（676）；`check:standards-redundant:strict` 0；`check:experience-landing` OK；`docs:build` exit 0；`docs:check:i18n` / `i18n:check:anchor` 通过；`lint` 0 error（2 条存量 `max-lines` warning）；`typecheck` 全包 Done；`pnpm -r build`（packages）exit 0；定向 engine 单测（repo-config / verify-project）通过。**审计**：standard **2 分区并发 R1 两分区均 Reject**（RG-B1 blocker：引用重指改了链接文本却未改链接目标，5 处文本与目标自相矛盾）→ 收口（按「文本 = 家族文档名 / URL = 物理分片」惯例修正 + 补齐中文文本与双语镜像形态的引用 + 文件级指针 + 工件口径订正）→ quick R2 **Reject**（blocker：当前阶段记录内的文件级指针残留；另 3 项 warning）→ 收口（指针改指 + 括注口径订正 + 同源表述对齐）→ quick R3 **Pass**（0 blocker；1 项工件口径 warning 已订正）。
+- **批次① 残余 / 后续**：① AC ① 需批次②（`design/governance` 6 文件）与批次③（`plan/roadmap` / `plan/todo-archive` / 豁免项方案）达成 ≤6；② 逐行保真迁入的存量半角括号（`(Non-Goals)` 等）留待独立批次；③ 历史阶段记录内的家族文档链接（如 `roadmap.md` M34 D6 决策记录）按冻结口径保留；④ 分片命名 / 连续尾部章节约定无机检，以 [文档规范 §3](../standards/documentation.md#3-文档行数阈值) 示例 + 本条目口径声明承载。
+- **批次进展（2026-10-14 批次②：`design/governance` 6 文件）**：`architecture` / `c22-pat-backward-compat` / `docs-and-readme-i18n` / `executor-sandbox` / `platform-ai-integration` / `platform-scheduled-batch` 按「连续尾部章节」迁出为同级分片（`architecture-platform` / `c22-pat-backward-compat-records` / `docs-and-readme-i18n-rollout` / `executor-sandbox-implementation` / `platform-ai-integration-governance` / `platform-scheduled-batch-rollout`），主文档保留设计本体 + 尾部「分片索引（迁出章节）」表（主文档 260 / 367 / 332 / 201 / 378 / 397，分片 246 / 87 / 219 / 354 / 100 / 126，均在健康窗口 ≤400）。**量级实测**：`check-doc-size` 计量 81 → 87、健康 72 → 84、**warning 8 → 2**、豁免 1、超阈值 0（**AC ① 达标**）。**引用面**：锚点（指向已迁出章节）11 处 / 文件级 URL 16 处 / 正文与注释路径 9 处 / 判定类（以章节名指代）8 处改指分片；混合引用站点拆「主文档 + 分片」双链接；**残余检测 0**（三形态复扫 + 形态 ④「代码片段内路径 + 独立 `§N`」逐条核对）。**约定与边界**：`governance/index.md` 使用约定补分片约定行（与 `modules/index.md` 对称、一行指向 [文档规范 §3](../standards/documentation.md#3-文档行数阈值)）；en-US 镜像不在拆分面（`check-doc-size` 阈值表 glob 不匹配 `docs/i18n/**`、`docs:check:i18n` 仅查重复页）→ 已登记 backlog 观察项；`architecture.md` 分片索引沿用位置编号（该文 H2 无编号，全仓无 `architecture.md §N` 形态引用）。
+- **批次② 实际交付**：`b44f040` 架构 / 执行器两篇拆分 + 锚点引用（含拆分本体与锚点同批以满足独立可验证）；`14c6750` 其余四篇拆分；`0f2d539` 设计文档间引用重指；`6c085f6` 归档面指针重指；`cbbcf6c` 源码注释指针同步；本条登记 commit。**质量门**：`check:docs` OK（links 162 / vue-interp 98 / link-text 162 / link-syntax 191 / emphasis 191 / site-links 3 / archive-anchors 28）；`lint:md` Done；`check:doc-size` 87 → 84 健康 / 2 warning / 超阈值 0；`check:orphan-ids` 0（676）；`check:standards-redundant:strict` 0；`check:experience-landing` OK；`docs:build` exit 0；`docs:check:i18n` / `i18n:check:anchor` 通过；改动源码 `eslint` 0 error；`typecheck` 全包 Done；`pnpm -r build` exit 0；全量测试 254 文件 / 4048 passed / 10 skipped（连续多次复跑全绿）。**审计**：standard **2 分区并发 R1 = 分区 A Pass / 分区 B Reject**（blocker：`sandbox-security-governance.md` 链接文本 `§7.8` 但 URL 仍指主文档——复扫形态缺口「链接文本内裸 `§N`」；2 warning：c22 分片范围标注与实际不符 / 治理索引缺分片约定行）→ 收口（URL 改指分片 + 范围标注订正 + 索引约定行 + 复扫口径扩展至三形态 + 2 条观察项登记）→ quick R2 **Pass**（0 blocker；1 warning：提交分组须按行数均衡并按家族成对以保证独立可验证 → 已按「拆分本体 + 该家族锚点引用同批」重排为 6 批）。
+- **批次② 残余 / 后续**：① **AC ④**（`roadmap.md` / `todo-archive.md` 拆分与阶段归档协同 + `archive/index.md` 索引同步）随批次③ 兑现 → **本条目未闭环**；② en-US 镜像结构漂移（zh 拆分后镜像未拆）已登记 backlog 观察项；③ 全量 vitest 单次偶发失败（未复现、明细缺失）已登记 backlog §已知边界；④ `sandbox-security-governance.md` G5 行单元格数少于表头（存量、非本批引入）；⑤ 迁出章节内的家族名纯文本指针（如 `platform-ai-integration-governance.md` 内 `architecture.md / standards/index.md`）按家族级口径保留。
+- **批次进展（2026-10-15 批次③：`plan/roadmap` + `plan/todo-archive` + 豁免项方案）**：`roadmap.md` M0-M38 阶段详情迁出（主文档保留 Milestone 概述表 + 最近阶段 M39-M44 + 详细任务 + 交付原则）、`todo-archive.md` M40 / M39 完整段迁出（主窗口保留 M43 / M42 / M41 三个完整段 + 早期指针段）；**量级实测**：`check-doc-size` 计量 87 / 健康 84 → 86 / **warning 2 → 0** / 豁免 1 / 超阈值 0（`roadmap.md` 898 → 252、`todo-archive.md` 546 → 500）。**引用面**：锚点重指共 **64 处链接实例 / 16 文件**（含 in-page 锚点、裸前缀与任意相对前缀；口径 = 目标改指新分片的链接实例数）——按迁出面：roadmap 迁出 ×48（archive/index ×23 / 归档分片 ×15（12 文件）/ scan-preferences ×1 / todo-archive ×9）+ todo-archive 迁出 ×16（archive/index ×6 / roadmap ×8 / todo-archive ×2）；方法 = 以 `check:docs` 报出的失效锚点为权威清单迭代重指，并对归档面 file-dead 形态（裸前缀）人工复扫补 2 处。**分片内相对路径**：新建分片正文内的相对链接按新目录（`docs/plan/archive/`）重算（100 处）+ 归档面指向分片的相对前缀按同目录口径修正（42 处）；与既有归档分片的 `../` 惯例一致。**豁免项方案**：`caomei-ui-migration.md`（940 行，豁免表登记理由为「入链面广且 §15 迁移实证需保序，待独立内容治理批次」）产出可执行拆分方案（主文档 §1-§12 / 分片 A §13-§14 / 分片 B §15.1-§15.10 / 分片 C §15.11-§15.15，保序、各部分 ≤400）并登记 backlog 候选（无阶段编号）；**维持豁免**（豁免表「待该批次落地后移除此条」口径不变）。
+- **批次③ 实际交付**：规划文档拆分本体 + 全部锚点引用同批（保证该提交自身通过文档门禁）；`archive/index.md` §4 基线与分片记录同步；豁免项方案候选登记；本条登记 commit。**质量门**：`check:docs` OK（links 162 / vue-interp 98 / link-text 162 / link-syntax 193 / emphasis 193 / site-links 3 / archive-anchors 30）；`lint:md` Done；`check:doc-size` 87 → 健康 86 / warning 0 / 豁免 1 / 超阈值 0；`check:orphan-ids` 0（676）；`check:standards-redundant:strict` 0；`check:experience-landing` OK；`docs:build` exit 0；`docs:check:i18n` / `i18n:check:anchor` 通过。**规模与拆分依据**：本批 20 文件（18 修改 + 2 新增分片）超单次提交文件数阈值，属派生例外——拆分本体与「指向被迁出段落的锚点引用」须同批（否则中间 commit 锚点断裂、`check:docs` 红），新增行数合计 784（< 800）。
+- **条目闭环（2026-10-15）**：4 条验收标准全部达成——warning 带 13 → **0**（计量 76 → 87 / 健康 62 → 86 / 超阈值 0）；三个批次各自独立验收（各批 commit 快照逐个复跑 `check:docs` exit 0）；内容保真以「HEAD 原文非空行序列 == 主文档（去分片索引）+ 分片（去头部）」逐组校验；规划文档拆分与归档协同按 [archive/index §2](../plan/archive/index.md) 策略执行并同步索引。产出 13 个分片（模块 5 / 治理 6 / 规划 2）。**审计**：批次① standard 2 分区并发 R1 两分区均 Reject（引用重指方向错误）→ 收口 → quick R2 Reject（当前阶段记录内的文件级指针残留）→ 收口 → quick R3 Pass；批次② standard 2 分区并发 R1 分区 A Pass / 分区 B Reject（复扫形态缺口「链接文本内裸 `§N`」）→ 收口 → quick R2 Pass；批次③ 见下。
+- **批次③ 残余 / 后续**：① `caomei-ui-migration.md` 维持豁免（拆分方案已登记 backlog 候选，待独立内容治理批次执行后移除豁免条目）；② en-US 镜像结构漂移与全量测试偶发失败两条观察项已在批次② 登记 backlog；③ `roadmap.md` 后续增量仍可能触 warning 带（当前余量充足）；④ 迁出分片内的家族级纯文本指针按家族级口径保留。
+- **不做什么**：不缩小计量面、不新增豁免表条目（存量豁免已逐条登记）；不删除历史信息与既有实证数据；不在单批次内一次拆完全部 13 个文件（分批，每批独立验收 + 独立审计）；不改 `caomei-ui-migration.md §15` 迁移实证的时序（保序拆分）。
+- **依赖**：M41.5「阈值与事实源唯一化」（`docs/standards/documentation.md §3` 为唯一权威阈值表 + `check-doc-size` 计量脚本）；M41 归档「未完成项」清单 ④（存量超健康窗口）；M44.3 先行（旧路径 / H1 / 分片命名收口后再拆，避免拆完再改名）。
+- **交付物**：预计 3-5 commits（按目标文件分组成 3 批）——① `design/modules` 5 文件；② `design/governance` 6 文件；③ `plan/roadmap` + `plan/todo-archive` + 豁免项方案 + 闭环登记。预计 15-25 文件 / 净减 ≥ 600 行（拆分为分片迁移，非删除）。
+- **风险与缓解**：**R1 拆分牵动大量外链与锚点**→ 每批先 `rg` 落点清单（§4.4 第 2 / 3 / 6 / 10 条）+ 改后 `pnpm run check:docs` 兜底；**R2 拆分后读者入口丢失**→ AC ② 强制「主文档保留索引 / 入口」；**R3 与 M44.2 门禁未就位时批量改动会引入新破损**→ 建议顺序上 M44.2 先行（门禁就位后再拆）。
+
+### M44.5 [P3 🎨] 站点语言切换器未翻译页 404 兜底
+
+- **目标**：消除「点击 English 落到 404」的站点体验缺陷——VitePress 内建语言菜单按「当前路径 → 目标 locale 同路径」映射，对无 en 译文的页面（`plan/roadmap.md` / `plan/todo.md` / `standards/*` / `design/modules/*` 等）生成不存在的 `/en-US/<同路径>` 链接。
+- **优先级**：P3
+- **范围**：`docs/.vitepress/config.ts`（locale 菜单行为面）+ 兜底策略实现（D 阶段定稿三选一：① 未翻译页 locale 兜底页 / 重定向；② 接受现状并在 [i18n.md](../standards/i18n.md) 显式声明为已知行为；③ 生成占位译文页）+ `docs/i18n/en-US/**` 结构 + 构建产物抽样断言。
+- **验收标准**：
+  - [x] ① **选型落地**：D 阶段在三个候选中定稿并记录理由（含对 sitemap / 站内搜索的影响评估）。（**定稿候选 ①「未翻译页 locale 兜底入口页」**：为每个无 en 译文的页面在构建期生成 `/en-US/<同路径>` 入口页（`noindex` + 中文原文入口 + 英文首页入口）。理由：与 [i18n 规范 §2.1](../standards/i18n.md) `source-only`「保留 locale URL 的入口页」既有声明一致，且保留已翻译页的对应跳转能力。**影响评估**：站点未配置 sitemap（产物无 `sitemap.xml`）→ 无影响；入口页在 `buildEnd` 生成（晚于渲染与索引构建）→ 实测 `dist/assets/**` 中兜底短语命中 0 处，不进入站内搜索索引。否决 ②「接受现状」——规范已声明需保留入口页，静默保留缺陷违反该声明；否决 ③「提交占位译文页」——约 109 个文件且需额外排除搜索/导航，体量与风险不成比例。另评估并否决两个备选：`themeConfig.i18nRouting: false`（语言菜单统一指向 locale 首页，一行改动，但丢失已翻译页对应跳转 → UX 回归）；主题组件覆写（耦合 VitePress 内部实现，R1 易碎）。）
+  - [x] ② **行为达标**（选 ① 或 ③ 时）：未翻译页点 English 不再落 404——以构建产物抽样断言（如 `dist/plan/roadmap.html` 不再含指向不存在 en 页的链接，或存在可用兜底目标），抽样页清单写进条目闭环记录。（**实测**：构建期生成 **109** 个兜底入口页（119 根页面 − 10 已有 en 译文）；断言脚本 `scripts/docs/check-i18n-fallback.mjs` 全量校验「每个根页面在 `en-US/` 下有可用目标 + 未翻译页带兜底目标标记与点击补丁 + 已翻译页不带标记 + 每个 en 页有根 locale 对应页」= 119/119 通过，并抽样校验入口页标记面（标记 / `noindex` / 中文原文入口）。**抽样页清单**：未翻译页 `plan/roadmap` / `plan/todo` / `plan/backlog` / `standards/development` / `design/modules/index` / `design/modules/dependabot-fetcher`（须命中兜底标记）；已翻译页 `index` / `guide/quick-start` / `guide/tech-stack` / `standards/i18n` / `design/governance/architecture`（须为真实译文页、不得被兜底页覆盖）。**行为面（真实浏览器端到端，Playwright + `vitepress preview`）**：① ASCII 未翻译页点语言菜单 → 整页导航到入口页、无 `PAGE NOT FOUND`；② **非 ASCII（`§`）未翻译页**（`experience-archive-§1-§21-spec-compliance`）→ 同样落到入口页（链接 href 为 `%C2%A7` 编码、标记为原文，补丁两侧归一后比较）；③ 反向对照——移除目标标记后点击 → 命中客户端 404（证明标记 + 点击补丁是机制关键）；④ 已翻译页点语言菜单 → 站内导航到真实译文页；⑤ 站内切换到另一未翻译页后点语言菜单 → 命中该页入口页（标记随页面更新）。断言脚本自检：删除任一兜底页后失败（`缺少语言切换目标`）✓。）
+  - [x] ③ **导航面回归**：nav / sidebar 的语言项与既有入口行为不变（导航面已在 M41.4 收敛为仅指向真实页面，不得回退）。（**实测**：本项仅新增 `buildEnd` 钩子与独立模块，`zhNav` / `enNav` / `zhSidebar` / `enSidebar` / `locales` 配置零改动；语言菜单映射行为未改，已翻译页仍走对应跳转（入口页标记在真实译文页中缺失 ✓）。）
+  - [x] ④ `pnpm --filter dependfix-docs build` exit 0 + `pnpm run check:docs` exit 0。（**实测**：`docs:build` exit 0（日志 `i18n fallback entries generated: 109`）；`check:docs` OK；`pnpm --filter dependfix-docs typecheck` exit 0；`pnpm run docs:check:fallback` 通过；定向单测 30 通过（模块 13 + 断言脚本 17）。）
+- **批次进展（2026-10-15）**：`docs/.vitepress/i18n-fallback.mjs`（构建期入口页生成：路径归一 / 兜底清单计算 / HTML 渲染 / 产物写入 / 兜底目标判定与 meta 注入 / 语言切换点击补丁）+ `config.ts` `buildEnd` + `transformPageData` + `head` 三处接线 + `scripts/docs/check-i18n-fallback.mjs`（构建产物断言：全量 + 抽样 + 反向，导出纯函数 + CLI 守卫）+ 两份定向单测 + `docs:check:fallback` 脚本 + [docs.yml](../../.github/workflows/docs.yml) 与 [test.yml](../../.github/workflows/test.yml) 断言步骤 + [i18n 规范 §2.1/§7](../standards/i18n.md) 落地说明与回归项。
+- **实际交付**：`feat(docs)` 兜底入口页实现与配置；`test(docs)` 定向单测；`ci(docs)` 构建产物断言接入 + 规范与条目登记。**质量门**：lint（改动文件 eslint 0 error）· `docs` typecheck exit 0 · `check:docs` OK · `docs:check:fallback` 通过 · 定向单测 30 通过 · 全量测试见条目闭环。
+- **审计与修复（R1 → 收口）**：R1 standard 2 分区并发——分区 A Reject（blocker：兜底入口页由 `buildEnd` 直写产物、不在客户端路由表（`hashmap.json`）中，语言菜单点击仍命中 SPA `NotFound`；根因证据：路由 `link.hasAttribute('target')` 才放行 + `__VP_HASH_MAP__` 不含兜底页），分区 B 见下。**修复**：先尝试 `transformHtml` 注入 `target="_self"` → **真实浏览器实测发现 Vue hydration 会移除 SSR-only 属性**（属性失效）→ 改为「`transformPageData` 注入 `<meta name="i18n-fallback-target">`（frontmatter head，随 SPA 导航更新）+ 站点 `<head>` 注入捕获阶段点击补丁（先于路由处理器补 `target="_self"`）」，并以 Playwright 端到端复验（含反向对照）。**R2 quick 复审 Reject（残余 blocker）**：补丁做精确字符串比较 → 非 ASCII 路径（`§`，7 页）的链接 href 为 `%C2%A7` 编码、标记为原文 → 失配 → 仍落客户端 404（断言因「只查标记存在」而漏判）。**收口**：补丁两侧统一 `decodeURI` 归一；断言升级为「标记 content 与产物中语言菜单链接 href（去 hash、编码归一）逐页一致」；补单测（编码一致通过 / 路径失配失败）；`vitepress dev` 不注入标记（避免整页导航落到 dev 404）。复验：构建产物断言 119/119 通过 + 浏览器端到端 5/5 通过（含 `§` 页与反向对照）。
+- **残余 / 后续**：① `vitepress dev` 下未翻译页仍为 404（入口页只作用于构建产物）——已写入 [i18n 规范 §2.1](../standards/i18n.md) 第 4 条，属已知边界；② 兜底入口页为静态页（无站点导航），如需导航需改为主题层实现（耦合内部实现，暂不做）；③ 语言切换整页导航补丁依赖 VitePress 路由的 `target` 放行行为（升级时需回归 `docs:check:fallback` + 浏览器验证）；④ en-US 镜像结构漂移（批次② 已登记 backlog）与本项无关但同属 i18n 面。
+- **不做什么**：不做全量 en 翻译（未翻译页清单与翻译批次另立项）；不改 `ignoreDeadLinks: true`（站点构建策略不变）；不引入外部依赖；若选 ③，占位页不得进入站内搜索与导航（需 noindex / 排除配置）。
+- **依赖**：M41 归档「未完成项」清单 ③（本次实测：`docs/.vitepress/config.ts:147` `ignoreDeadLinks: true`，故构建不报错；`locales` 配置见 `config.ts:158-190`）；M41.4 导航分层已收敛导航面，本项为**剩余唯一非导航面死链来源**。
+- **交付物**：5 commits（① `feat(docs)` 兜底入口页实现与配置接线 + 模块单测；② `test(docs)` 构建产物断言脚本 + 其单测；③ `ci(docs)` `package.json` 脚本 + `docs.yml` / `test.yml` 断言步骤；④ `docs(standards)` i18n 规范落地说明与回归项；⑤ `docs(plan)` 条目闭环登记）。**规模依据**：单 commit 新增均 < 800 行；合计 10 文件 / 新增 ≈ 1064 行超单次阈值 → 按原子条目拆分，理由：模块 + 断言脚本 + 接线 + 文档四类变更须独立可验证。
+- **风险与缓解**：**R1 主题层覆写 locale 菜单耦合 VitePress 内部实现**（升级易碎）→ 优先级排序为「兜底页 / 重定向」优于「主题覆写」；**R2 兜底页污染搜索与 sitemap**→ AC ④ 强制排除或 noindex；**R3 选「接受现状」时体验缺陷仍在**→ 必须在 i18n.md 显式声明为已知行为并登记 backlog 观察项，不得静默保留。
+
+### M44.6 [P3 📚] `tech-stack` 平台依赖表行级一致性
+
+- **目标**：让 `docs/guide/tech-stack.md` 的平台依赖表与 `apps/platform/package.json` / `nuxt.config.ts` 逐行对应，消除「文档声明存在但代码无引用」与「版本口径不一致」两类漂移。
+- **优先级**：P3
+- **范围**：`docs/guide/tech-stack.md:37,39,40,41`（`@lucide/vue` 文档写 `^1.48` 而 `apps/platform/package.json:44` 为 `^1.53.0`；`@vueuse/core` / `@vueuse/nuxt` / `@sentry/nuxt` / `@vite-pwa/nuxt` 四行声明在 `package.json` 与 `nuxt.config.ts` 模块列表中无对应）+ en-US 镜像 `docs/i18n/en-US/guide/tech-stack.md` + 表格口径决策（是否统一为「不写具体版本号，指向 `package.json`」）。
+- **验收标准**：
+  - [x] ① **逐行核对清单**：表中每一行的「依赖名 → 引用位置」对照（引用位置取值：`package.json` / `nuxt.config.ts` / 源码 import）清单落进条目闭环记录，第三方可凭清单复现核对。（**清单见下方「逐行核对清单」段**；引用位置判定命令：声明面 `rg -c "<dep>" apps/platform/package.json apps/platform/nuxt.config.ts`、源码面 `rg -l "<dep>" apps/platform/{app,server,i18n}`（子串口径）。）
+  - [x] ② **无引用行处置**：确认无引用的行**删除**（避免模板期占位残留）；若确为规划中能力，则补声明到 `package.json`（需在条目内说明依据）。（**实测**：平台内零引用行 **8 行 / 11 个依赖包**全部删除（`@vueuse/core` + `@vueuse/nuxt` 合并一行、`@sentry/nuxt`、`@vite-pwa/nuxt`、`@better-auth/sso`、`better-auth-localization`、`class-transformer` + `class-validator` 合并一行、`dayjs`、`dompurify` + `sanitize-html` 合并一行）；「平台内零引用」口径 = `apps/platform` 的 `package.json` / `nuxt.config.ts` / 源码均无命中（`dayjs` 仅在 `packages/cli/package.json` 有声明，平台侧无）。**未向 `package.json` 补任何声明**：Sentry 属 [backlog T705「生产级部署」](../plan/backlog.md) 明确暂缓项（2026-08-12 用户指示暂缓排期），其余为未采用技术；补声明将引入无引用依赖，违反本项「不做什么」。）
+  - [x] ③ **版本口径**：`@lucide/vue` 等版本不一致行同步为准确值，或按 D 阶段选型统一为「不写具体版本号 + 指向 `package.json`」。（**选型**：统一为**不写具体版本号 + 指向 `package.json`**——表格删除「版本」列，表前加口径说明（`apps/platform/package.json` 为单一事实源、`nuxt.config.ts` 为模块接线位置）；`caomei-ui` 保留「精确锁定版本」这一**策略事实**与升级史（非版本号）。理由：dependabot 每次升级都会让写死版本号漂移，本项缺陷根因即此；口径单一化避免后续再次漂移（对应 R3 缓解）。）
+  - [x] ④ **双语与门禁**：en-US 镜像同步；`pnpm run docs:check:i18n` / `pnpm run check:docs` / `pnpm run lint:md:check` 通过。（**实测**：en 镜像新增 `## Platform dependencies (apps/platform)` 段（同口径：不写版本号 + 指向 `package.json`）；同步修正镜像内两处陈旧事实——`apps/platform` 运行时 `Node.js >= 20 (LTS)` → `>= 22 (LTS)`（对齐 `apps/platform/package.json` `engines.node`）、`pnpm >= 9` → `pnpm`（版本以 `package.json` `packageManager` 为准，实为 `pnpm@11.17.0`）。`check:docs` OK / `lint:md` Done / `docs:check:i18n` passed。）
+- **逐行核对清单（AC ①）**：
+
+| 表行 | 引用位置（实证） | 处置 |
+|:--|:--|:--|
+| nuxt | `package.json`（框架本体，无源码 import） | 保留 |
+| vue | `package.json` + 源码 import | 保留 |
+| vue-router | `package.json`（Nuxt 路由底层） | 保留 |
+| caomei-ui | `package.json`（精确锁定）+ `nuxt.config.ts` modules（`caomei-ui/nuxt`）+ 源码 import | 保留（版本号移出表格，保留精确锁定说明） |
+| @lucide/vue | `package.json` + 源码 import | 保留（原写 `^1.48` 与实际 `^1.53.0` 不一致 → 去版本号） |
+| @nuxtjs/i18n | `package.json` + `nuxt.config.ts` modules + 源码 import | 保留 |
+| @vueuse/core + @vueuse/nuxt | 平台内零引用 | **删除** |
+| @sentry/nuxt | 平台内零引用（backlog T705 暂缓项） | **删除** |
+| @vite-pwa/nuxt | 平台内零引用 | **删除** |
+| better-auth | `package.json` + 源码 import | 保留（SSO 能力并入用途说明） |
+| @better-auth/sso | 平台内零引用（SSO 由 `better-auth/plugins` 的 `genericOAuth` 提供，`server/utils/auth.ts:2`） | **删除**（能力信息合并） |
+| better-auth-localization | 平台内零引用 | **删除** |
+| typeorm | `package.json` + 源码 import | 保留 |
+| reflect-metadata | `package.json` + 源码 import | 保留 |
+| class-transformer + class-validator | 平台内零引用（校验走 zod） | **删除** |
+| better-sqlite3 | `package.json` + 源码 import | 保留 |
+| pg | `package.json` + 源码 import | 保留 |
+| mysql2 | `package.json` + 源码 import | 保留 |
+| bullmq | `package.json` + 源码 import | 保留 |
+| ioredis | `package.json` + 源码 import | 保留 |
+| zod | `package.json` + 源码 import | 保留 |
+| dayjs | 平台内零引用（`packages/cli` 另有声明） | **删除** |
+| lodash-es | `package.json`（声明行，源码无 import） | 保留 |
+| winston | `package.json` + 源码 import | 保留 |
+| nodemailer | `package.json` + 源码 import | 保留 |
+| dompurify + sanitize-html | 平台内零引用（无 `v-html` 使用面；`server/utils/sanitize.ts` 为敏感信息脱敏工具，非 XSS） | **删除** |
+
+- **批次进展（2026-10-15）**：`docs/guide/tech-stack.md` 平台依赖表按「不写版本号 + 指向 `package.json`」重写并删除 8 行零引用条目（11 个依赖包）；`docs/i18n/en-US/guide/tech-stack.md` 新增平台依赖段并修正两处陈旧事实；本条目登记闭环。
+- **实际交付**：`docs(guide)` 双语平台依赖表修正；`docs(plan)` 条目闭环登记。**质量门**：`check:docs` OK · `lint:md` Done · `check-doc-size` warning 0 · `docs:check:i18n` passed · `docs:build` 见闭环。
+- **残余 / 后续**：① `docs/design/governance/architecture.md` §技术选型表仍列「Sentry（@sentry/nuxt）」「PWA（@vite-pwa/nuxt）」等 momei 复用项（该表有「来源」列标注 momei，非「当前已采用」断言）——已登记 backlog §候选评估中 观察项；② `lodash-es`（平台）与 `dayjs`（`packages/cli`）在 `package.json` 有声明但源码零 import（未使用依赖，属依赖清理面，非本项范围）；③ 本项只改文档口径，未做依赖升级/降级。
+- **不做什么**：不做依赖实际升级或降级（仅文档口径）；不为「规划中能力」新增未确认的运行时依赖；不改 `apps/platform/package.json` 中已正确声明的依赖版本。
+- **依赖**：候选来源为 M43 归档前后的审计与复核衍生项（登记为「tech-stack 平台依赖表与 `apps/platform/package.json` 行级不一致」）；**实证**：`rg -n "pinia|@vueuse/core|@sentry/nuxt|@vite-pwa/nuxt" apps/platform/package.json` 零命中，`rg -n "@lucide/vue" apps/platform/package.json` 命中 `^1.53.0`；`docs/guide/tech-stack.md` 由 M40.6「平台环境变量文档完整性治理」批次同源形成。
+- **交付物**：预计 1-2 commits——① `docs(guide)` 表格逐行修正 + 双语同步；② 闭环登记（如需补声明则另计 `chore(platform)` commit）。预计 3-5 文件 / 40-120 行。
+- **风险与缓解**：**R1 误删「规划中能力」行**→ 删除前对每行 `rg` 全仓引用（`package.json` / `nuxt.config.ts` / `apps/platform/**` 源码）+ 清单留痕；**R2 补声明引入新依赖风险**→ 仅在能给出实际引用点时才补，否则按删除处置；**R3 表格口径反复**→ D 阶段先定「是否写版本号」的单一口径，避免后续再次漂移。
 
 ## M43: PR Check 能力补强 + 运行时可靠性与工程治理（2026-10-12 用户决策方案 A / 2026-10-14 归档）
 
@@ -97,6 +268,7 @@
 > **ahead commits 实证**：归档前 `git rev-list HEAD ^origin/master --count` 实测 = **11**（`git rev-list origin/master ^HEAD --count` = 0 双向核验）；M43.1 / M43.2 / M43.3 及其前已由用户推送（归档前 `origin/master` = `1a6aca1`），剩余 M43.4 / M43.5 / M43.6 共 11 commits 待推送确认；**本归档 + 沉淀批次 commits 另计**，均待用户推送确认。
 >
 > **关联**：[roadmap.md §M43](roadmap.md#m43-pr-check-能力补强--运行时可靠性与工程治理2026-10-12-用户决策方案-a--2026-10-14-已闭环--归档) + [archive/index.md](archive/index.md) + [pr-build-deploy-signals.md](../design/governance/pr-build-deploy-signals.md) + [caomei-ui-migration.md §15.15](../design/governance/caomei-ui-migration.md) + [run-failure-taxonomy.md](../design/governance/run-failure-taxonomy.md) + [pnpm-lockfile-fixer.md §2.4](../design/modules/pnpm-lockfile-fixer.md) + [git.md §3.8](../standards/git.md) + [session-wisdom-distillation.md §6](../design/governance/session-wisdom-distillation.md) + [backlog.md](backlog.md)（M43 衍生候选）
+
 
 ## M42: 修复交付正确性 + 平台能力与体验补强（M42.1~M42.6 全部已闭环 / 2026-10-11 归档）
 
@@ -140,6 +312,7 @@
 >
 > **关联**：[roadmap.md §M42](roadmap.md#m42-修复交付正确性--平台能力与体验补强2026-10-10-用户决策方案-ab-混合--2026-10-11-已闭环--归档) + [archive/index.md](archive/index.md) + [sandbox-security-governance.md](../design/governance/sandbox-security-governance.md)（治理决议登记）+ [security.md](../standards/security.md)（§5.3.1 网络外联审计）+ [backlog.md](backlog.md)（M42 衍生候选）
 
+
 ## M41: 规范与经验管理体系重构（M41.1~M41.5 全部已闭环 / 2026-10-10 归档）
 
 > **归档日期**：2026-10-10
@@ -166,15 +339,20 @@
 > **ahead commits 实证**：归档批次开始前 `git rev-list HEAD ^origin/master --count` 实测 = **21**（`git rev-list origin/master ^HEAD --count` = 0 双向核验），全部为本阶段及此前 M40 归档批次 commits，待用户推送确认。
 > **关联**：[roadmap.md §M41](roadmap.md#m41-规范与经验管理体系重构2026-10-10-用户决策方案-b--2026-10-10-已闭环--归档) + [standards-experience-refactor.md](../design/governance/standards-experience-refactor.md) + [backlog.md](backlog.md)（M41 衍生候选）+ [archive/index.md](archive/index.md)
 
+
 ## M40: 运行时可靠性与可观测性深化（已归档 → 2026-10-15 M44.4 批次③ 迁出至 [archive/todo-archive-phases-m39-m40.md](archive/todo-archive-phases-m39-m40.md)）
+
 
 ## M39: 平台视图体验与可观测补强（已归档 → 2026-10-15 M44.4 批次③ 迁出至 [archive/todo-archive-phases-m39-m40.md](archive/todo-archive-phases-m39-m40.md)）
 
+
 ## M38: 平台执行模型隔离（M38.1~M38.6 全部已闭环 / 2026-10-09 归档 → 2026-10-14 M43 归档批次预防性分片迁出）
+
 
 ## M36: 治理债清仓 + 可观测性与测试稳定性（M36.1~M36.10 全部已闭环 / 2026-10-05 归档 → 2026-10-10 M41 归档批次预防性分片迁出）
 
 > 完整段见 [archive/todo-archive-phases-m36.md](archive/todo-archive-phases-m36.md)。
+
 
 ## M35: 批量运行终态兜底对账 + 进度可见性修复（M35.1~M35.6 全部已闭环 / 2026-10-02 归档 → 2026-10-10 M40 归档批次预防性分片迁出）
 
@@ -182,11 +360,13 @@
 
 ---
 
+
 ## M34: 治理与体验收口 + 组件库升级与巡检基建（M34.1~M34.7 全部已闭环 / 2026-10-01 归档 → 2026-10-10 M39 归档批次预防性分片迁出）
 
 > 详见 [archive/todo-archive-phases-m34.md §M34](archive/todo-archive-phases-m34.md#m34-治理与体验收口--组件库升级与巡检基建m341m347-全部已闭环--2026-10-01-归档)。
 
 ---
+
 
 ## M33: 治理债收口 + 测试基建扩展（M33.1~M33.11 全部已闭环 / 2026-09-30 归档 → 2026-10-09 M38 归档批次预防性分片迁出）
 
@@ -194,11 +374,13 @@
 
 ---
 
+
 ## M32: 能力扩展优先（M32.1~M32.5 全部已闭环 / 2026-09-30 归档 → 2026-10-08 M37 归档批次预防性分片迁出）
 
 > 详见 [archive/todo-archive-phases-m32.md §M32](archive/todo-archive-phases-m32.md#m32-能力扩展优先m321m325-全部已闭环--2026-09-30-归档)。
 
 ---
+
 
 ## M31: apps/platform UI 组件库迁移（PrimeVue → caomei-ui）（已归档 → 2026-10-05 M36 归档批次预防性分片迁出）
 
@@ -206,11 +388,13 @@
 
 ---
 
+
 ## M30: 治理债清理 + 迁移可行性验证 + 能力扩展 + 测试补强（已归档 → 2026-10-02 M35 归档批次预防性分片迁出）
 
 > 详见 [archive/todo-archive-phases-m30.md §M30](archive/todo-archive-phases-m30.md#m30-治理债清理--迁移可行性验证--能力扩展--测试补强m301m306-全部已闭环--2026-09-28-归档)。
 
 ---
+
 
 ## M29: 修复交付链路正确性 + 能力扩展（已归档 → 2026-10-01 M34 归档批次预防性分片迁出）
 
@@ -219,105 +403,39 @@
 ---
 
 
+
 ## M23: M22 治理债收口 + 根因排查 + 能力扩展 + 测试补强（已归档 → 2026-09-30 M33 归档批次预防性分片迁出）
 
 > 详见 [archive/todo-archive-phases-m23.md §M23](archive/todo-archive-phases-m23.md#m23-m22-治理债收口--根因排查--能力扩展--测试补强m230m231m232m233m234-全部已闭环--2026-09-02-归档)。
 
 ---
 
+
 ## M27: 用户体验 + 治理优先（M27.1+M27.2 W1+M27.3 W2+M27.4 W4+M27.5 全部已闭环 / 2026-09-10 归档）
 
-> **2026-09-10 M27 归档批次迁出**：M27 段（5 原子条目 8 atomic commits 实施 + 3 docs 收口 commits = **11 commits**）已从 `todo.md` 主窗口迁入 [todo-archive.md §M27](#m27-用户体验--治理优先m271m272-w1m273-w2m274-w4m275-全部已闭环--2026-09-10-归档)。M27 段完整实施记录 / 关键经验 / 待迁移经验均在 git log 中可查。主窗口 [todo-archive.md §M27](#m27-用户体验--治理优先m271m272-w1m273-w2m274-w4m275-全部已闭环--2026-09-10-归档) 仅保留导航指针 + 关键 commit 实证。
->
-> **关键导航**：
-> - **roadmap 状态**：[roadmap.md §M27](./archive/roadmap-phases-m0-m38.md#m27-用户体验--治理优先2026-09-10-用户决策修订方案-b-1--2026-09-10-m271-重复评估修正--2026-09-10-已闭环--归档) + Milestone 概述表 M27 行状态更新（active → 已完成 2026-09-10 归档）
-> - **archive 索引**：[archive/index.md §4 当前基线](archive/index.md) + §5 近期归档批次登记 M27 行
-> - **关键 commit 实证**：
->   - **M27 P 阶段启动**（1 commit）：`0ddd4e2` docs(plan): M27 阶段启动（修订方案 B-1）
->   - **M27.1 重复评估教训**（1 commit）：`596f71e` docs(plan): 更新 M27.1 重复评估教训及阶段启动决策前置交叉核验要求
->   - **M27.2 W1 stylelint**（2 commits）：`7888435` chore(platform): apps/platform 增配 stylelint + lint 系列 scripts + `ea0dbc6` docs(plan): M27.2 W1 apps/platform stylelint 闭环
->   - **M27.3 W2 logger**（1 commit）：`af07189` refactor(logger): 重构日志模块以支持可测性和初始化逻辑
->   - **M27.4 W4 container-executor**（1 commit）：`544e5a7` test(platform): 补齐 container-executor 单测恢复 branches 80% coverage gate
->   - **M27.5 ECONNRESET 候选 ① 诊断**（2 commits）：`b252f93` feat(platform): better-auth transaction trace 日志落地 + `45449314` docs(plan): M27.5 ECONNRESET 候选 ① follow-up 关闭
->   - **M27 启动相关 docs 收口**（3 commits）：`3f4b055` docs(plan): todo.md 清理为最小化骨架 + `4e54afd` docs(plan): backlog.md 清理已闭环条目 + `ed2d0ce` docs(plan): 归档 M26 阶段并预防性分片迁出 M19-M21
-> - **ahead commits 实证**：M27 全部 11 commits 已推送 `origin/master`（`git rev-list HEAD ^origin/master --count` 实测）
-> - **完整实施记录 / 关键经验 / 待迁移经验**：见 `git log M27 启动前 ~` 关键 commit 链
->
-> **状态**：✅ 全部完成（M27.1 + M27.2 W1 + M27.3 W2 + M27.4 W4 + M27.5 全部 5 原子条目共 **8 atomic commits 实施 + 3 docs 收口 commits = 11 commits**）
->
-> **关键决策 D1-D5**：
-> - **D1**：按 §1.1 任务粒度约束（每原子 < 5 commits / < 800 行推荐粒度，< 10 文件 / < 800 行硬阈值）+ §1.1 L12 类型平衡原则选 5 原子（🚀 0 + 🛡️ 2 + 🧪 2 + 📚 教训治理 1）
-> - **D2**（修正）：M27.1 重复评估错误归正 —— todo.md §M27 阶段启动 commit `0ddd4e2` 决策 D2 错误地把 C66-C / C66-D 归类为"未落地"；实际 C66-C 已在 M23.3 commit `650a0d2` 闭环 + C66-D 已在 M16.2 闭环（reuseScanRunId API + use-fix-now composable + alert-run-sidebar 按钮）；M27.1 修订为 1 docs(plan+governance) commit 修正状态（commit `596f71e`）
-> - **D3**：W1 / W2 / W4 均为 quick depth（单 commit 模式）；M22.7 根因排查为 P1 优先（剩余 ECONNRESET 偶发根因）
-> - **D4**：M22 neat-freak 收敛已 M23.0 G1 闭环（不在 M27 复用）；M22.7 根因 follow-up 中 ② Nitro h3 async generator + ③ Playwright 版本对比 + ④ fixtures API 节流留 backlog 后续批次
-> - **D5**（新增）：M27 重复评估教训治理 —— 修订 planning.md §3.4「决策前置交叉核验」硬要求 + ai-collaboration.md §1.7「阶段启动重复评估自检」流程 + backlog.md C66 5 子任务现状明确标注 + experience-archive §六十四 完整教训 + wisdom.md governance check point「阶段启动必须对照 todo-archive.md 最近 3 个阶段表格 + commit history + 实际代码状态三重交叉核验」
-
----
+> 本段已迁出至分片：内容、commits 关联表与导航见 [archive/todo-archive-phases-m27.md](archive/todo-archive-phases-m27.md)（主窗口仅保留指针）。
 
 ## M26: 平台 AI 研判应用层 + 批量导入 Resource owner 化 + 文档站 i18n + License 收口 + 经验沉淀（M26.1+M26.2+M26.3+M26.4a+M26.4b+M26.4c+M26.5 全部已闭环 / 2026-09-10 归档）
 
-> **2026-09-10 M26 归档批次迁出**：M26 段（7 原子条目 23 atomic commits + 13 配套 commits = **36 commits 全部 ahead=0 已推送至 origin/master** / ~3240 行净增）已从 `todo.md` 主窗口迁入新分片 [archive/todo-archive-phases-m26.md](archive/todo-archive-phases-m26.md)。M26 段完整实施记录 / 关键经验 / 待迁移经验均在分片中。主窗口 [todo-archive.md §M26](#m26-平台-ai-研判应用层--批量导入-resource-owner-化--文档站-i18n--license-收口--经验沉淀m261m262m263m264am264bm264cm265-全部已闭环--2026-09-10-归档) 仅保留导航指针 + 关键 commit 实证。
->
-> **关键导航**：
-> - **roadmap 状态**：[roadmap.md §M26](./archive/roadmap-phases-m0-m38.md#m26-平台-ai-研判应用层--批量导入-resource-owner-化--文档站-i18n--license-收口--经验沉淀2026-09-08-用户决策方案-a--m264-拆分--m264c-e2e-适配--2026-09-10-已闭环--归档) + Milestone 概述表 M26 行状态更新（进行中 → 已完成 2026-09-10 归档）
-> - **archive 索引**：[archive/index.md §4 当前基线](archive/index.md) + §5 近期归档批次登记 M26 行
-> - **关键 commit 实证**：
->   - **M26 P 阶段**：`0ad509c` ahead commits 实证（0 → 31）
->   - **M26.1 应用层**（10 commits）：`80138b1` `d7fb63b` `46ce342` `6ef2e27` `2fe6d1a` `b97babd` `8becb80` `a899a5c` `a461c4c` `4be6e52`
->   - **M26.2 C67 Resource owner 化**（4 commits）：`10af85c` `9ae7c2c` `531c252` `dc48c4a`
->   - **M26.3 C69 文档站 + 包 README 多语言 en-US P0**（7 commits）：`4dfd630` `1b43cf5` `d5e6786` `175c709` `bb61814` `b31f5a8` `a1f4357`
->   - **M26.4a primeicons 降级**（1 commit）：`7ce7803`
->   - **M26.4b lint baseline 治理**（4 commits）：`d02713a` `03e7dad` `7407ed8` `b6b52bb`
->   - **M26.4c e2e 适配**（5 commits）：`c37aac7` `be74d21` `6f26ae3` `79dfc6a` `0be2b2a`
->   - **M26.5 经验归档 + wisdom 蒸馏**（1 commit）：`6b01e35`
->   - **M26 配套治理 + docs 收口**（7 commits）：`a0bb647` `f482708` `dd33fac` `cab3710` `cd79724` `da0ebdf` `db50191`
->   - **CI Coverage 修复**（1 commit）：`a4a5680` fix(ci)
-> - **ahead commits 实证**：`git rev-list HEAD ^origin/master --count` = **0**（M26 全部 36 commits 已推 origin/master / 2026-09-10 实测）
-> - **完整实施记录 / 关键经验 / 待迁移经验**：见 [archive/todo-archive-phases-m26.md](archive/todo-archive-phases-m26.md)
-> - **2026-09-10 M26 归档批次预防性分片同步迁出 M19 / M20 / M21 三阶段**（主窗口 ≤ 700 强制分片阈值）—— 详见 [archive/todo-archive-phases-m19-m21.md](archive/todo-archive-phases-m19-m21.md)
-
----
+> 本段已迁出至分片：内容、commits 关联表与导航见 [archive/todo-archive-phases-m26.md](archive/todo-archive-phases-m26.md)（主窗口仅保留指针）。
 
 ## M22: SQLite 数据保护防御加固（M22.1+M22.2+M22.3+M22.4+M22.5+M22.6 全部已闭环 / 2026-09-01 归档 → 2026-09-28 M30 归档批次预防性分片迁出）
 
 > **2026-09-28 M30 归档批次预防性分片迁出**：M22 段（M22 沉淀 + 6 原子条目，13 commits，commits 已推送 `origin/master`）已从 `todo-archive.md` 主窗口迁至新分片 [archive/todo-archive-phases-m22.md](archive/todo-archive-phases-m22.md)。M30 完整段新增前主窗口 682 行 + M30 段新增将超 700 强制分片阈值，触发预防性分片（与 M26/M28 归档批次同源策略）。
 
 ---
+
 ## M19: 治理 + 能力扩展 + 测试补强（M19.1+M19.2+M19.3+M19.4+M19.5 全部已闭环 / 2026-08-31 归档 → 2026-09-10 M26 归档批次预防性分片迁出）
 
-> **2026-09-10 M26 归档批次预防性分片迁出**：M19 段（5 子任务 + 配套 7 commits ~12 commits 落地）已从 `todo-archive.md` 主窗口迁至新分片 [archive/todo-archive-phases-m19-m21.md](archive/todo-archive-phases-m19-m21.md)。M26 完整段迁出主窗口后必须 ≤ 700 强制分片阈值，触发预防性分片。M19 / M20 / M21 三阶段同期迁出，保持主窗口 3-5 个阶段健康策略。
->
-> **关键导航**：
-> - **roadmap 状态**：[roadmap.md §M19](./archive/roadmap-phases-m0-m38.md#m19-治理--能力扩展--测试补强) + Milestone 概述表 M19 行
-> - **archive 索引**：[archive/index.md §4 当前基线](archive/index.md) + §5 近期归档批次登记 M19 行
-> - **关键 commit 实证**：`0c536c1` M19.1 / `c998d58` M19.2 / `5839771` M19.3 / `8db2fd4` M19.4 / `a20ea02` M19.5 + `ae33671` M19.x 收口 + `2f9eb38` `bee5c3f` `61b3ddc` `4231ffb` 配套
-> - **完整实施记录 / 关键经验 / 待迁移经验**：见 [archive/todo-archive-phases-m19-m21.md §M19](archive/todo-archive-phases-m19-m21.md#m19-治理--能力扩展--测试补强m191m192m193m194m195-全部已闭环--2026-08-31-归档)
-
----
+> 本段已迁出至分片：内容、commits 关联表与导航见 [archive/todo-archive-phases-m19-m21.md](archive/todo-archive-phases-m19-m21.md)（主窗口仅保留指针）。
 
 ## M20: ScanResult 数据模型重构（M20.1+M20.3+M20.5+M20.6+M20.7 全部已闭环 / 2026-08-31 归档 → 2026-09-10 M26 归档批次预防性分片迁出）
 
-> **2026-09-10 M26 归档批次预防性分片迁出**：M20 段（5 子阶段 8 commits）已从 `todo-archive.md` 主窗口迁至新分片 [archive/todo-archive-phases-m19-m21.md](archive/todo-archive-phases-m19-m21.md)。M19 / M20 / M21 三阶段同期迁出，与 M26 完整段迁出同步推进。
->
-> **关键导航**：
-> - **roadmap 状态**：[roadmap.md §M20](./archive/roadmap-phases-m0-m38.md#m20-scanresult-数据模型重构) + Milestone 概述表 M20 行
-> - **archive 索引**：[archive/index.md §4 当前基线](archive/index.md) + §5 近期归档批次登记 M20 行
-> - **关键 commit 实证**：`acb2d35` M20.1 / `2e4ab1b` M20.3 / `170fee1` M20.5 / `c7ba014` M20.6 / `a399323` M20.7 + `ca6a1dc` M20.7 脚本精简
-> - **完整实施记录 / 关键经验 / 待迁移经验**：见 [archive/todo-archive-phases-m19-m21.md §M20](archive/todo-archive-phases-m19-m21.md#m20-scanresult-数据模型重构m201m203m205m206m207-全部已闭环--2026-08-31-归档)
-
----
+> 本段已迁出至分片：内容、commits 关联表与导航见 [archive/todo-archive-phases-m19-m21.md](archive/todo-archive-phases-m19-m21.md)（主窗口仅保留指针）。
 
 ## M21: 治理收口 + 能力扩展 + 测试补强（M21.1+M21.2+M21.4+M21.5 全部已闭环 / 2026-08-31 归档 → 2026-09-10 M26 归档批次预防性分片迁出）
 
-> **2026-09-10 M26 归档批次预防性分片迁出**：M21 段（4 子阶段 11 atomic commits + 4 docs 收口 = 15 commits 全部 ahead=0 已推送 origin/master）已从 `todo-archive.md` 主窗口迁至新分片 [archive/todo-archive-phases-m19-m21.md](archive/todo-archive-phases-m19-m21.md)。M19 / M20 / M21 三阶段同期迁出。
->
-> **关键导航**：
-> - **roadmap 状态**：[roadmap.md §M21](roadmap.md) + Milestone 概述表 M21 行
-> - **archive 索引**：[archive/index.md §4 当前基线](archive/index.md) + §5 近期归档批次登记 M21 行
-> - **关键 commit 实证**：`0a83c74` `a77e557` M21.1 / `fe7cc0f` `ad376c8` `0903f06` `b6d8539` M21.2 / `f1dd5df` `beea5b9` `c9939cb` M21.4 / `9850e24` `b9e35f7` M21.5 + `a8604c6` `d66b11d` `6516e34` `cbcb15d` 文档收口
-> - **完整实施记录 / 关键经验 / 待迁移经验**：见 [archive/todo-archive-phases-m19-m21.md §M21](archive/todo-archive-phases-m19-m21.md#m21-治理收口--能力扩展--测试补强m211m212m214m215-全部已闭环--2026-08-31-归档)
-
----
+> 本段已迁出至分片：内容、commits 关联表与导航见 [archive/todo-archive-phases-m19-m21.md](archive/todo-archive-phases-m19-m21.md)（主窗口仅保留指针）。
 
 ## M18: 平台 GitHub App BYO App 模式（已归档 → 2026-09-01 M22 归档批次预防性分片迁出）
 
@@ -326,11 +444,13 @@
 ---
 
 
+
 ## M17: 安全与可用性收口（已归档 → 2026-08-31 M20 归档批次预防性分片迁出）
 
 > 详见 [archive/todo-archive-phases-m16-m17.md §M17](archive/todo-archive-phases-m16-m17.md#m17-安全与可用性收口m171m172m173m174m175m176-全部已闭环--2026-08-28-归档)。
 
 ---
+
 
 ## M16: 平台可用性深化（已归档 → 2026-08-31 M20 归档批次预防性分片迁出）
 
@@ -338,163 +458,39 @@
 
 ---
 
+
 ## M13: 治理 + UX 反馈 + 网络治理 + Code Scanning（已归档 → 2026-08-30 M18 归档批次预防性分片迁出）
 
-> **2026-08-30 M18 归档批次预防性分片迁出**：M13 段（12 子任务 / 26 commits / T1310 同步推进）已迁至新分片 [archive/todo-archive-phases-m13.md](archive/todo-archive-phases-m13.md)。M18 段新增前主窗口 673 行接近 700 分片阈值，预防性迁出与 M16/M15 归档批次同源策略。主窗口不再保留完整实施记录，仅保留导航指针。
->
-> **迁出触发**：todo-archive.md M18 归档批次新增后主窗口将超 700 强制分片阈值；M13 是 2026-08-26 闭环阶段（距今 4 天），按"主窗口保留 3-5 个阶段"健康策略迁出。
->
-> **关键导航**：
-> - **backlog 历史归档指针段**：详见 [todo-archive.md](todo-archive.md)
-> - **roadmap 状态**：[roadmap.md §M13](./archive/roadmap-phases-m0-m38.md#m13-治理--ux-反馈--网络治理--code-scanning已完成-2026-08-26-归档) + Milestone 概述表 M13 行
-> - **archive 索引**：[archive/index.md §4 当前基线](archive/index.md) + §5 近期归档批次登记 M13 行
-> - **关键 commit 实证**：T1301 `b57b8d8` / T1302 `f43edf1` / T1303 `c2e3d7b` `7282f65` / T1304 `25b46eb` / T1305 `0f08c40` `5269d0a` `9c79fc9` / T1306 `e3d93b7` `4447ff8` `2ae2a77` / T1309 `6023da8` `e9197c1` `1cb0364` `9b536e1` `56de1a1` / T1307 `792e8c8` `7b1ac01` `3cccce0` / T1308 `b0f6e84` `e63cdb9` / T1401 `2dce01d` / T1402+T1403 `bb3b49a` / T1310 `300b318` `1819b59` `733e198` `7b40a2c` `a74d07d`
-> - **完整实施记录 / commit 引用 / 验证矩阵 / 关键决策 / 关键经验 / 待迁移经验**：见 [archive/todo-archive-phases-m13.md](archive/todo-archive-phases-m13.md)
+> 本段已迁出至分片：内容、commits 关联表与导航见 [archive/todo-archive-phases-m13.md](archive/todo-archive-phases-m13.md)（主窗口仅保留指针）。
 
 ## M14: platform release 通道闭环 + UX 反馈跟进（已归档 → 2026-08-31 M19 归档批次预防性分片迁出）
 
-> **2026-08-31 M19 归档批次预防性分片迁出**：M14 段（4 子阶段 + M14.y 依赖批量治理，约 115 行）已从 `todo-archive.md` 主窗口迁至新分片 [archive/todo-archive-phases-m14-m15.md](archive/todo-archive-phases-m14-m15.md)。M19 段新增前主窗口 699 行 + M19 段预估 80-100 行 = 779-799 行，超 700 强制分片阈值；M14 是 2026-08-26 闭环阶段（距今 5 天），按"主窗口保留 3-5 个阶段"健康策略迁出。M14 + M15 同源批次同期迁出。
->
-> **关键导航**：
-> - **backlog 历史归档指针段**：详见 [todo-archive.md](todo-archive.md)
-> - **roadmap 状态**：[roadmap.md Milestone 概述表 M14 行](roadmap.md) + roadmap.md §M14 段历史上未单独列出（与 §M18 段缺失说明同模式 —— 2026-08-31 M19 归档批次校正）
-> - **archive 索引**：[archive/index.md §4 当前基线](archive/index.md) + §5 近期归档批次登记 M14 行
-> - **关键 commit 实证**：T1310 `300b318` / `1819b59` / `733e198` / `7b40a2c` / `a74d07d` / `1fd38c1` / M14.1 收口 / M14.2 `81bd8d2` `581e1a9` `1a9eddf` 收口 + `17b5643` / M14.3 `5ccaaf4` / M14.x `92cc348` `ea0e24f` `84b4e1a` `b45f55e` / M14.y dependabot PR commits
-> - **完整实施记录 / commit 引用 / 验证矩阵 / 关键决策 / 关键经验 / 待迁移经验**：见 [archive/todo-archive-phases-m14-m15.md §M14](archive/todo-archive-phases-m14-m15.md#m14-platform-release-通道闭环--ux-反馈跟进m14123xy-全部已闭环)
+> 本段已迁出至分片：内容、commits 关联表与导航见 [archive/todo-archive-phases-m14-m15.md](archive/todo-archive-phases-m14-m15.md)（主窗口仅保留指针）。
 
 ## M15: 扫描历史详情侧栏增强（UX-R2）（已归档 → 2026-08-31 M19 归档批次预防性分片迁出）
 
-> **2026-08-31 M19 归档批次预防性分片迁出**：M15 段（1 子阶段 4 子任务，约 65 行）已从 `todo-archive.md` 主窗口迁至新分片 [archive/todo-archive-phases-m14-m15.md](archive/todo-archive-phases-m14-m15.md)。M19 段新增前主窗口 699 行 + M19 段预估 80-100 行 = 779-799 行，超 700 强制分片阈值；M15 是 2026-08-26 闭环阶段（距今 5 天），按"主窗口保留 3-5 个阶段"健康策略迁出。M14 + M15 同源批次同期迁出。
->
-> **关键导航**：
-> - **backlog 历史归档指针段**：详见 [todo-archive.md](todo-archive.md)
-> - **roadmap 状态**：[roadmap.md §M15](./archive/roadmap-phases-m0-m38.md#m15-扫描历史详情侧栏增强-ux-r2已完成-2026-08-26-归档) + Milestone 概述表 M15 行
-> - **archive 索引**：[archive/index.md §4 当前基线](archive/index.md) + §5 近期归档批次登记 M15 行
-> - **关键 commit 实证**：`5c65177` P 阶段 docs + `1112017` UX-R2 实施（5 文件 / +425/-12）+ `0a60e3d` test 覆盖（2 文件 / +251）+ `d517a7f` release.yml CI 修复（不计入 M15 总投入）
-> - **完整实施记录 / commit 引用 / 验证矩阵 / 关键决策 / 关键经验 / 待迁移经验**：见 [archive/todo-archive-phases-m14-m15.md §M15](archive/todo-archive-phases-m14-m15.md#m15-扫描历史详情侧栏增强ux-r2已闭环)
-
----
+> 本段已迁出至分片：内容、commits 关联表与导航见 [archive/todo-archive-phases-m14-m15.md](archive/todo-archive-phases-m14-m15.md)（主窗口仅保留指针）。
 
 ## M12: 平台 UX 一致性 + i18n 治理（已归档 → 2026-08-28 M17 归档批次预防性分片迁出）
 
-> **2026-08-28 M17 归档批次预防性分片迁出**：M12 段（19 commits / C65-A 5 + C65-B 2 + standards check:docs 1 + C65-C 2 + C65-D 5 + CI 修复 1 + CI 稳定性 1 + network-audit 2）已迁出至新分片 [archive/todo-archive-phases-m12.md](archive/todo-archive-phases-m12.md)。M17 段 152 行新增后主窗口接近 700 分片阈值，预防性迁出与 M16 批次预防性迁出 M10/T912/C53/C59-C61 同源策略。主窗口不再保留完整实施记录，仅保留导航指针。
->
-> **迁出触发**：todo-archive.md M17 归档批次新增 152 行后主窗口 ≈ 738 行 > 700 强制分片阈值；M12 是 2026-08-21 闭环阶段（距今 7 天），按"主窗口保留 3-5 个阶段"健康策略迁出。
->
-> **关键导航**：
-> - **backlog 历史归档指针段**：详见 [todo-archive.md](todo-archive.md)
-> - **roadmap 状态**：[roadmap.md §M12](./archive/roadmap-phases-m0-m38.md#m12-平台-ux-一致性--i18n-治理已完成-2026-08-21-归档) + Milestone 概述表 M12 行
-> - **archive 索引**：[archive/index.md §4 当前基线](archive/index.md) + §5 近期归档批次登记 M12 行
-> - **关键 commit 实证**：C65-A1 `1d7c5c8` / C65-A3 `b10e270` / C65-B1 `789ed2f` / C65-C1+C2 `5dff002` / C65-D1 `348502d` / C65-D2 `132b944` / C65-D3 `374a278` / C65-D4 `ad6ce70` / CI 修复 `0c57211` `4043918` / network-audit `2104b9f` `0eb8704`
-> - **关键经验沉淀**：`docs/standards/platform.md §7.2` i18n 单点声明条款 + `docs/standards/development.md §3` 同模式扫描 + `docs/standards/git.md §3` F 阶段本地验证口径差异
-> - **完整实施记录 / commit 引用 / 验证矩阵 / 关键决策 / 关键经验 / 待迁移经验**：见 [archive/todo-archive-phases-m12.md](archive/todo-archive-phases-m12.md)
-
----
-
----
-
+> 本段已迁出至分片：内容、commits 关联表与导航见 [archive/todo-archive-phases-m12.md](archive/todo-archive-phases-m12.md)（主窗口仅保留指针）。
 
 ## M8: 安全加固与容器执行完备（已归档 → 迁出至分片）
 
-> **2026-08-20 neat-freak 归档批次迁出**：M8 段已迁至 [archive/todo-archive-phases-m6-m7-t711.md](archive/todo-archive-phases-m6-m7-t711.md)（M6 / M7.1 / M7.2 / T711 / M8），不再在 todo-archive.md 主窗口保留。本条仅保留导航指针。
->
-> **原始背景**：M8 阶段 6 任务（T801-T806）由 C38-C45 治理项驱动，20 个提交当时本地待推送。详见分片文档。
-
----
-
+> 本段已迁出至分片：内容与导航见 [archive/todo-archive-phases-m6-m7-t711.md](archive/todo-archive-phases-m6-m7-t711.md)（主窗口仅保留指针）。
 
 ## C53 / M10 / T912 / 2026-08-20 平台 UI 增强（C59-C61）/ 2026-08-20 M11 推进批次（已归档 → 迁出至分片）
 
-> **2026-08-28 M16 归档批次预防性迁出**：本节段 5 个早期批次（C53 / M10 / T912 / 2026-08-20 平台 UI 增强 C59-C61 / 2026-08-20 M11 推进批次摘要）已迁至新分片 [archive/todo-archive-phases-m10-c53-c59c61.md](archive/todo-archive-phases-m10-c53-c59c61.md) 与既有分片 [archive/todo-archive-phases-m11.md §M11 推进批次](archive/todo-archive-phases-m11.md#m11-推进批次业务可见性--沙箱落地--安全文档--通知基建)（C53-后-A/B/C 衍生子任务）。主窗口不再保留完整实施记录，仅保留导航指针与本批次归档背景说明。
->
-> **迁出触发**：M16 段 110 行新增前主窗口 618 行接近 700 分片阈值，预防性迁出与 M15 归档批次同源策略。
-
-| 批次 | 关键 commit 数 | 详情 |
-|:--|:--:|:--|
-| **C53** 平台集成模式 fix 修复结果推送远程 | 3 commits（`83ec736` / `46b7c15` / `3ed8303`） | [分片 §C53](archive/todo-archive-phases-m10-c53-c59c61.md#c53-平台集成模式-fix-修复结果推送远程已归档)（含 C53-1 push 链路 + C53-2 PR 创建 + C53-3 清理时序；衍生子任务 C53-后-A/B/C 在 [archive-phases-m11.md](archive/todo-archive-phases-m11.md) §M11 推进批次） |
-| **M10** 独立沙箱容器 C26 实施规划 | 13 commits（T1001 B1+B2 + T1002 + T1003 + T1004） | [分片 §M10](archive/todo-archive-phases-m10-c53-c59c61.md#m10-独立沙箱容器-c26-实施规划已归档)（含 Docker rootless + 出站白名单代理 + cgroup v2 资源限制 + 文档收口） |
-| **T912** SMTP 邮件发送器主体收口 | 3 commits（`edc9c94` / `6f00937` / `6e28207`） | [分片 §T912](archive/todo-archive-phases-m10-c53-c59c61.md#t912-smtp-邮件发送器主体收口t912-3--c28-联动)（T912-3 合并入 C28） |
-| **2026-08-20 平台 UI 增强**（C59-C61） | 10 commits（C59 `9949504` + `03ba3b2` / C60 `a1d5bd9` `532ea78` `6b994b5` `5bba3f4` `5fbad71` / C61 `ffacfca` `5abd914` `402dc03`） | [分片 §2026-08-20 平台 UI 增强](archive/todo-archive-phases-m10-c53-c59c61.md#2026-08-20-平台-ui-增强c59--c60--c61)（C59 mixin 修复 + C60 sortable + C61 dashboard 图表） |
-| **2026-08-20 M11 推进批次** | 22 commits（M11 推进批次 12 + M11 启动批次 10） | [分片 §M11 推进批次](archive/todo-archive-phases-m11.md#m11-推进批次业务可见性--沙箱落地--安全文档--通知基建)（C53-后-A/B/C + T1005-A/B/C/D + C28 + C56/C57 + C58 + C-ENV-CHANGE-ALERT） |
-
----
-
+> 本段已迁出至分片：内容、commits 关联表与导航见 [archive/todo-archive-phases-m10-c53-c59c61.md](archive/todo-archive-phases-m10-c53-c59c61.md)（主窗口仅保留指针）。
 
 ## M24: PR Check MVP + 治理债 + 测试补强 + 用户体验（M24.1+M24.2+M24.3+M24.4+M24.5 全部已闭环 / 2026-09-03 归档）
 
-> **2026-09-03 M24 归档批次预防性分片迁出**：M24 段（5 原子条目 12 commits / ~2960 行净增 / 方案 B 能力突破优先）已从 `todo-archive.md` 主窗口迁出至新分片 [archive/todo-archive-phases-m24.md](archive/todo-archive-phases-m24.md)。M24 段完整实施记录 / 关键经验 / 待迁移经验均在分片中。主窗口仅保留导航指针（与 M18 / M17 / M16 / M13 同源策略）。
->
-> **关键导航**：
-> - **roadmap 状态**：[roadmap.md §M24](./archive/roadmap-phases-m0-m38.md#m24-pr-check-mvp--治理债--测试补强--用户体验) + Milestone 概述表 M24 行
-> - **archive 索引**：[archive/index.md §4 当前基线](archive/index.md) + §5 近期归档批次登记 M24 行
-> - **关键 commit 实证**：`36ee026` PRCheck 实体 / `1068d6e` service + scheduler / `89e1344` API + i18n / `e841b82` UI / `19037d5` UI follow-up / `4803372` UI 重构 / `7120533` Phase 5 docs / `bbb8f30` M24.2 根因 / `ad1ab17` CI 修复 / `a0be125` M24.3 cron-preview / `aaf8e7b` M24.4 治理债 / `7c926a9` Wisdom 蒸馏
-> - **完整实施记录 / 关键经验 / 待迁移经验**：见 [archive/todo-archive-phases-m24.md §M24](archive/todo-archive-phases-m24.md)
-
+> 本段已迁出至分片：内容、commits 关联表与导航见 [archive/todo-archive-phases-m24.md](archive/todo-archive-phases-m24.md)（主窗口仅保留指针）。
 
 ## M25: PrimeUI License 治理 + 平台 AI 研判集成 + lint baseline 治理 + M24 follow-up 工具化（M25.1+M25.2a+M25.3+M25.4 全部已闭环 / 2026-09-08 归档）
 
-> **2026-09-08 M25 归档批次迁出**：M25 段（4 原子条目 17 commits / ~1821 行净增 / 方案 A 治理优先 + 能力扩展 + 测试补强）已从 `todo.md` 主窗口迁入新分片 [archive/todo-archive-phases-m25.md](archive/todo-archive-phases-m25.md)。M25 段完整实施记录 / 关键经验 / 待迁移经验均在分片中。主窗口 todo.md 仅保留导航指针（与 M24 归档批次同源策略）。
->
-> **关键导航**：
-> - **roadmap 状态**：[roadmap.md](roadmap.md)（Milestone 概述表 M25 行 + §M25 段已新增详细实施状态段）+ 状态更新：M25 行从「进行中」→「**已完成**（2026-09-08 完整闭环 4 原子条目 17 commits / ~1821 行净增；ahead=17（2026-09-08 当时实测，后续已推送 origin/master））」
-> - **archive 索引**：[archive/index.md §4 当前基线](archive/index.md) + §5 近期归档批次登记 M25 行
-> - **关键 commit 实证**：`9bf640c` §1.4 规范修正 / `482438d` 方案 A 规划 / `35e4935` PrimeUI License 降级 / `4c51d19` platform.md §3.7 同步 / `1c65582` 数据模型 / `f174cce` Schema+Service / `7250ec1` 三执行器透传 / `49480a6` typecheck 修复 / `782fa27` M25.2a 收口 / `57f3b88` baseline lint 修复 / `4030f3b` packages/cli 修复 / `c88379e` M25.3 收口 / `80912c2` i18n-anchor-check / `65a8ec1` zod-helpers / `66c02ff` M25.4 收口 / `3947279` 锚点修正 + `4818e5d` M25.1 收口
-> - **ahead commits 实证**：`git rev-list HEAD ^origin/master --count` = **17**（2026-09-08 当时实测，后续已推送 origin/master）
-> - **完整实施记录 / 关键经验 / 待迁移经验**：见 [archive/todo-archive-phases-m25.md](archive/todo-archive-phases-m25.md)
-
----
+> 本段已迁出至分片：内容、commits 关联表与导航见 [archive/todo-archive-phases-m25.md](archive/todo-archive-phases-m25.md)（主窗口仅保留指针）。
 
 ## M28: 治理债清理 + 能力扩展（M28.1-M28.5 全部已闭环 / 2026-09-11 归档）
 
-> **2026-09-11 M28.6 归档批次迁出**：[archive/todo-archive-phases-m28.md](archive/todo-archive-phases-m28.md)（**指针段模式**——M28 完整实施记录承载于 roadmap.md §M28 段，主窗口仅保留导航指针 + ahead commits 关联表 + 关键决策 D6；与 M26/M27 归档批次同源策略）
->
-> **关键导航**：
-> - **roadmap 状态**：[roadmap.md §M28](./archive/roadmap-phases-m0-m38.md#m28-治理债清理--能力扩展2026-09-11-用户决策方案-m28-a--m281-重编号--m286-归档已落地)（Milestone 概述表 M28 行状态已更新：**已完成** + §M28 段已新增 D6 决策增补 + ahead commits 关联表）
-> - **archive 索引**：[archive/index.md §4 当前基线](archive/index.md) + §5 近期归档批次登记 M28 行
-> - **todo.md 同步**：[todo.md](todo.md)（当前无活跃阶段；M28 已归档，下一阶段启动待用户明确决策）
-> - **backlog.md 同步**：M28 候选 C14 / C33 已 M28.6 归档批次同步清理；C15 第二阶段（实际样本采集 + 规则分级修正）保留为未闭环候选（见 [backlog.md §Code Scanning 规则体系](backlog.md#code-scanning-规则体系)）
->
-> **ahead commits 实证**：M28 全部 commits 已推送 `origin/master`（`git rev-list HEAD ^origin/master --count` 实测；按 [AGENTS.md §5 推送禁令](../../AGENTS.md) 未经用户明确要求不得执行 `git push`）
->
-> **M28 ahead commits 关联表**（按提交顺序 / 完整闭环 5 候选 + M28 启动批次 + 治理债清理 + §4.4 规则强化）：
->
-> | 候选 / 类别 | commit | subject |
-> |:---|:---|:---|
-> | M28 启动 | `1e68948` | docs(plan): M28 启动决策落地 todo.md + roadmap.md §M28 + §M27 D4 stale 修正 |
-> | M28 评估 | `a4abb71` | docs(plan): M28.2-M28.5 P 阶段评估修订 todo.md §M28.4 验收标准 + 类型平衡 + 执行顺序 |
-> | backlog 清理 | `608bcac` | docs(plan): backlog.md 治理债清理 + M22.7/M22.8 follow-up stale 同步 |
-> | 跨文档同步 | `f5be990` | docs(plan): 跨文档 stale 同步（todo-archive.md §M22.7/§M22.8 + archive/index.md 健康窗口 + planning.md §4.4 第 11 条 C36 引用） |
-> | M28.1 | `1a75068` | docs(standards): planning.md §4.4 第 11 条规则强化（§已知边界段部分闭环处理指引） |
-> | M28.5 | `d7289df` | docs(platform): better-auth 中间件 Set-Cookie 路径扫描脚本 + 报告 |
-> | M28.2 benchmark | `395ee29` | test(engine): verification-runner 多 cs 告警性能基准基线 |
-> | M28.2 优化 | `eaaa997` | fix(engine): runCodeScanningFixes 批处理 + 测试覆盖（M28.2 优化） |
-> | M28.3 | `99302b5` | feat(engine): Code Scanning 真实仓库样本采集脚本 + 报告模板（M28.3 / C15） |
-> | M28.4 tool | `9207481` | feat(mcp): 新增 pnpm_audit 本地回退数据源 tool |
-> | M28.4 对齐 | `5cf2d22` | feat(mcp): runScan 返回结构 RunResult 对齐 5 字段 |
->
-> **关键决策 D1-D6**（2026-09-11 用户决策 + M28 完整闭环后）：
->
-> - **D1**：方案 M28-A 类型平衡原则（5 候选 = 📚 1 + 🛡️ 3 + 🚀 1）—— 按 §1.1 L12 推荐粒度（5-6 原子条目硬上限）；UX / 测试覆盖缺口真实存在显式标注
-> - **D2**：M28.1 重编号为 backlog.md §已知边界段批量治理 + §4.4 第 11 条规则强化 —— **优先治本 §4.4 第 11 条结构性缺陷**，避免 M27.1 教训复发
-> - **D3**：backlog.md 治理债清理 D 阶段已落地（6 文件 modified → 4 atomic commits ahead）—— W1 / C9 / C13 / C36 已闭环条目整段/行删除 + §已知边界 M22.7/M22.8 follow-up stale 同步 + session 元数据 ahead=17 → 0 同步
-> - **D4**（M28.4 诚实修订）：`packages/mcp/src/tools/errors.ts` 已 M26.x 阶段落地（`ToolError` + `requireToken()` + `toToolError()` 双 helper），本任务不再做错误包装 helper；仅做未落地部分：pnpm-audit 本地 tool + RunResult 5 字段对齐
-> - **D5**（§3.4 五步流程完整执行）：M28.2-M28.5 P 阶段 §3.4 五步流程核验全部 0 项重复评估 + M28.4 部分已落地修订 todo.md §M28.4 验收标准 + 执行顺序建议按"用户决策方案"实际推进
-> - **D6**（M28 完整闭环）：5 候选共 11 commits（含 M28 启动 2 + 治理债清理 3 + M28 完整闭环 6）—— M28.6 归档批次落地指针模式
->
-> **类型平衡复核**：
-> - 🛡️ 技术债 / 治本：2 项（M28.2 / M28.5）—— ✅ 满足
-> - 🚀 能力扩展：1 项（M28.4 C33 MCP）—— ✅ 满足
-> - 🛡️ 技术债：1 项（M28.3 C15）—— ✅ 满足
-> - 📚 治理：1 项（M28.1 重编号）—— ✅ 满足
-> - 🎨 用户体验：**0 项** —— ❌ 缺口（C36 / C37 均已闭环或前置依赖）
-> - 🧪 测试覆盖：**0 项** —— ❌ 缺口（db-restore S-1/S-2 恢复条件不明确）
->
-> **关键经验**：
-> - **M28.1 §4.4 第 11 条规则强化治本 §4.4 第 11 条结构性缺陷**（粗粒度触发 vs 细粒度触发 + 二元决策 vs 三元决策）——避免 M27.1 教训复发（重复评估）
-> - **M28.2 批处理折中方案**（batchSize=10 / 提速 ~10x / 回滚粒度 = batchSize）——比合并验证保守（回滚粒度更细）
-> - **M28.3 第一阶段脚本 + fixture + 报告框架就绪**——实际 GitHub API 采集合 CI/staging 环境跑 `GITHUB_TOKEN=xxx node sample-collector.mjs`
-> - **M28.4 RunResult 对齐保持向后兼容**（8 字段保留 + 5 字段新增 + 2 可选字段按需）——不破坏现有 MCP 客户端契约
-> - **M28.5 治本验证通过**（better-auth 中间件对非 `/api/auth/*` 端点不会主动设置 Set-Cookie）——M22.8 follow-up ② 建议关闭
-> - **§3.4 五步流程完整执行**（todo-archive + git log + 代码侧 anchor + git log --grep 候选 ID + 关联决策交叉核验）——避免本次踩中的"M27.1 教训复发"
->
-> **完整实施记录 / 关键经验 / 待迁移经验**：见 [archive/todo-archive-phases-m28.md](archive/todo-archive-phases-m28.md)（2026-09-11 M28.6 归档批次预防性分片迁出——M28 完整记录 5 候选 × 8 要素 + 性能基准数据 + 批处理决策表 + RunResult 对齐前后对照 + better-auth 中间件 Set-Cookie 触发机制分析）
+> 本段已迁出至分片：内容、commits 关联表与导航见 [archive/todo-archive-phases-m28.md](archive/todo-archive-phases-m28.md)（主窗口仅保留指针）。
