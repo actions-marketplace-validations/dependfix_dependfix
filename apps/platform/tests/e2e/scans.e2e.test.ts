@@ -250,15 +250,30 @@ test.describe('/scans 独立页面', () => {
         expect(box!.width).toBeLessThanOrEqual(480)
     })
 
-    test('case 7: 批量日志导出入口 + 已认证导出命中静态路由 + 未认证被拒', async ({ page, browser }) => {
+    test('case 7: 批量日志导出入口 + 当前页窗口导出 + 未认证被拒', async ({ page, browser }) => {
         const stamp = Date.now()
         const owner = `e2e-export-${stamp}`
         const repositoryId = await scanRunRepository(page, owner, `e2e-export-repo-${stamp}`)
 
         await page.goto('/scans')
         await waitForHydration(page)
-        // 运行列表筛选工具栏的批量导出按钮（默认「全部运行」tab）
-        await expect(page.locator('button:has-text("导出当前筛选日志")')).toBeVisible({ timeout: 15000 })
+        // 运行列表筛选工具栏的批量导出入口：主按钮 = 导出当前页（默认「全部运行」tab）
+        await expect(page.getByRole('button', { name: '导出当前页日志' })).toBeVisible({ timeout: 15000 })
+
+        // 二级入口：全部筛选结果（菜单项文案带命中数；命中数随库内总量变化 → 只锁定文案形状，
+        // 且**不放行尾**：总量 > 全量上限时文案追加「超出单次上限 N 条」后缀）
+        await page.getByRole('button', { name: '导出范围' }).click()
+        await expect(page.getByRole('menuitem', { name: /导出全部筛选结果（共 \d+ 条/ })).toBeVisible()
+        await page.keyboard.press('Escape')
+
+        // 主按钮点按 → 请求携带列表同一分页窗口（服务端按窗口取数，与屏幕所见一致）
+        const [exportRequest] = await Promise.all([
+            page.waitForRequest((request) => request.url().includes('/api/runs/logs-export')),
+            page.getByRole('button', { name: '导出当前页日志' }).click(),
+        ])
+        const exportUrl = new URL(exportRequest.url())
+        expect(exportUrl.searchParams.get('page')).toBe('1')
+        expect(exportUrl.searchParams.get('pageSize')).toBe('10')
 
         // 已认证导出：命中静态路由 /api/runs/logs-export（证明优先于 /api/runs/[id] 的假 id 分支）
         const cookies = (await page.context().cookies()).map((c) => `${c.name}=${c.value}`).join('; ')
@@ -271,6 +286,15 @@ test.describe('/scans 独立页面', () => {
         const body = await authed.text()
         expect(body).toContain('# dependfix 执行日志导出')
         expect(body).toContain(`# 筛选：repositoryId=${repositoryId}`)
+        expect(body).toMatch(/# 导出范围：全部筛选结果（共 \d+ 条）/)
+
+        // 分页窗口导出：同一仓库按窗口取数，文件头标注页码窗口
+        const windowed = await page.request.get(
+            `/api/runs/logs-export?repositoryId=${repositoryId}&page=1&pageSize=10`,
+            { headers: { cookie: cookies } },
+        )
+        expect(windowed.status()).toBe(200)
+        expect(await windowed.text()).toMatch(/# 导出范围：第 1 页（每页 10 条，共 \d+ 条）/)
 
         // 未认证请求（强制空 storageState 的独立 context）→ 401
         const context = await unauthenticatedApiContext(browser)

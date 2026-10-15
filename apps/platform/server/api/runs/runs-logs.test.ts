@@ -3,8 +3,11 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { createError } from 'h3'
 import { expectError, makeEvent, setupMemoryDatabase, teardownMemoryDatabase } from '../../../tests/api-helper'
 import reposIndexHandler from '../repos/index'
+// 前端镜像常量：断言两侧等值，避免「服务端上限调整、前端预判不跟随」的静默漂移
+import { EXPORT_RUNS_LIMIT } from '../../../app/utils/run-view'
 import logsGetHandler from './[id]/logs.get'
 import logsExportHandler, { MAX_EXPORT_RUNS } from './logs-export.get'
+import { RUNS_PAGE_SIZE_MAX } from '#server/utils/runs-query'
 import { ScanRun, type ScanRunStatus } from '#server/entities/scan-run'
 import { Repository } from '#server/entities/repository'
 import { Organization } from '#server/entities/organization'
@@ -213,5 +216,63 @@ describe('GET /api/runs/logs-export（批量日志导出）', () => {
         })
         const err = await expectError(callExport(`?repositoryId=${bigRepoId}`).promise, 413)
         expect(err.data.code).toBe('RUN_LOGS_EXPORT_TOO_LARGE')
+    })
+
+    it('分页窗口导出：逐页不重不漏 + 文件头标注窗口范围', async () => {
+        const pageRepoId = await createRepo('logs-page')
+        const seededIds = [
+            (await seedRun(pageRepoId)).id,
+            (await seedRun(pageRepoId)).id,
+            (await seedRun(pageRepoId)).id,
+        ]
+
+        // 同毫秒插入时 createdAt 可能并列 → 不锁定「哪一条在第 1 页」，只锁定窗口划分语义
+        const page1 = await callExport(`?repositoryId=${pageRepoId}&page=1&pageSize=2`).promise as string
+        const page2 = await callExport(`?repositoryId=${pageRepoId}&page=2&pageSize=2`).promise as string
+
+        expect(page1).toContain('# 运行数：2')
+        expect(page1).toContain('# 导出范围：第 1 页（每页 2 条，共 3 条）')
+        expect(page2).toContain('# 运行数：1')
+        expect(page2).toContain('# 导出范围：第 2 页（每页 2 条，共 3 条）')
+
+        const exportedIds = [...page1.matchAll(/# Run (\S+)/g), ...page2.matchAll(/# Run (\S+)/g)]
+            .map((match) => match[1])
+            .sort()
+        expect(exportedIds).toEqual([...seededIds].sort())
+    })
+
+    it('分页窗口越界 → 404 RUN_LOGS_NOT_FOUND', async () => {
+        const repoId = await createRepo('logs-page-out-of-range')
+        await seedRun(repoId, {})
+
+        const err = await expectError(callExport(`?repositoryId=${repoId}&page=9&pageSize=10`).promise, 404)
+        expect(err.data.code).toBe('RUN_LOGS_NOT_FOUND')
+    })
+
+    it('分页窗口每页条数超上限 → 静默钳制到共享上限（与列表同源）', async () => {
+        const repoId = await createRepo('logs-page-size-clamp')
+        await seedRun(repoId, {})
+
+        // 只传 pageSize（page 缺省 1）+ 请求值 500 > RUNS_PAGE_SIZE_MAX → 文件头体现钳制后的页宽
+        const body = await callExport(`?repositoryId=${repoId}&pageSize=500`).promise as string
+        expect(body).toContain(`# 导出范围：第 1 页（每页 ${RUNS_PAGE_SIZE_MAX} 条，共 1 条）`)
+    })
+
+    it('分页窗口不受全量运行数上限约束（上限只约束全量导出）', async () => {
+        const windowRepoId = await createRepo('logs-window-over-cap')
+        for (let i = 0; i <= MAX_EXPORT_RUNS; i += 1) {
+            await seedRun(windowRepoId)
+        }
+
+        // 全量导出仍按上限拒绝
+        await expectError(callExport(`?repositoryId=${windowRepoId}`).promise, 413)
+        // 窗口导出取该页全部（页大小 150 > MAX_EXPORT_RUNS，未被运行数上限拦截）
+        const body = await callExport(`?repositoryId=${windowRepoId}&page=1&pageSize=150`).promise as string
+        expect(body).toContain(`# 运行数：${MAX_EXPORT_RUNS + 1}`)
+        expect(body).toContain(`# 导出范围：第 1 页（每页 150 条，共 ${MAX_EXPORT_RUNS + 1} 条）`)
+    })
+
+    it('前端镜像的全量导出上限与服务端常量一致（防口径漂移）', () => {
+        expect(EXPORT_RUNS_LIMIT).toBe(MAX_EXPORT_RUNS)
     })
 })

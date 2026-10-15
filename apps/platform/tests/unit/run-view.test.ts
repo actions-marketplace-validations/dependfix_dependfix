@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
     alertsFound,
+    buildExportScopeItems,
+    EXPORT_RUNS_LIMIT,
     failureKindLabel,
     failureStageLabel,
     formatRunDuration,
@@ -133,6 +135,29 @@ describe('utils/run-view', () => {
                 t,
             )
             expect(result).toContain('alerts.runDurationSeconds(seconds:')
+        })
+    })
+
+    describe('buildExportScopeItems', () => {
+        it('未超上限：可点且文案带命中数', () => {
+            expect(buildExportScopeItems(12, t)).toEqual([
+                { label: 'scans.runList.exportAllLogs(total:12)', disabled: false },
+            ])
+        })
+
+        it('恰好等于上限：仍可点（边界不含超限）', () => {
+            expect(buildExportScopeItems(EXPORT_RUNS_LIMIT, t)).toEqual([
+                { label: `scans.runList.exportAllLogs(total:${EXPORT_RUNS_LIMIT})`, disabled: false },
+            ])
+        })
+
+        it('超上限：禁用并标注上限原因', () => {
+            expect(buildExportScopeItems(EXPORT_RUNS_LIMIT + 1, t)).toEqual([
+                {
+                    label: `scans.runList.exportAllLogsOverLimit(total:${EXPORT_RUNS_LIMIT + 1},limit:${EXPORT_RUNS_LIMIT})`,
+                    disabled: true,
+                },
+            ])
         })
     })
 })

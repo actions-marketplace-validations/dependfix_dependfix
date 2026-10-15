@@ -141,12 +141,12 @@ describe('GET /api/runs', () => {
         expect(seeded).toHaveLength(5)
     })
 
-    it('clamps pageSize to PAGE_SIZE_MAX (200)', async () => {
+    it('clamps pageSize to shared RUNS_PAGE_SIZE_MAX (200)', async () => {
         const res = await call('GET', '/api/runs?pageSize=500') as PaginatedRunsResponse
         expect(res.pageSize).toBe(200)
     })
 
-    it('clamps pageSize to PAGE_SIZE_MAX (silently, no error)', async () => {
+    it('clamps pageSize to shared RUNS_PAGE_SIZE_MAX (silently, no error)', async () => {
         // 上限钳制是静默的：pageSize=300 → 200，page/total 仍正常返回
         const res = await call('GET', '/api/runs?pageSize=300&page=1') as PaginatedRunsResponse
         expect(res.pageSize).toBe(200)
