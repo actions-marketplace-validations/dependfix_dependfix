@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import nock from 'nock'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Logger } from '@dependfix/core'
 import { resolveRuntimeConfig } from '../config'
 import { DependfixApp } from './index'
 
@@ -224,7 +225,7 @@ describe('DependfixApp member upgrade (2.0.3)', () => {
         rmSync(workDir, { recursive: true, force: true })
     })
 
-    function runApp(overrides: { env?: Record<string, string>, cliOverrides?: NonNullable<Parameters<typeof resolveRuntimeConfig>[0]>['cliOverrides'] } = {}): Promise<Awaited<ReturnType<DependfixApp['run']>>> {
+    function runApp(overrides: { env?: Record<string, string>, cliOverrides?: NonNullable<Parameters<typeof resolveRuntimeConfig>[0]>['cliOverrides'], logger?: Logger } = {}): Promise<Awaited<ReturnType<DependfixApp['run']>>> {
         const config = resolveRuntimeConfig({
             env: {
                 GITHUB_TOKEN: 'main-token-value',
@@ -234,9 +235,41 @@ describe('DependfixApp member upgrade (2.0.3)', () => {
             },
             cliOverrides: overrides.cliOverrides,
         })
-        const app = new DependfixApp({ config, workDir, reportOutputDir: join(workDir, 'reports') })
+        const app = new DependfixApp({ config, workDir, reportOutputDir: join(workDir, 'reports'), logger: overrides.logger })
         return app.run()
     }
+
+    function makeLogger(): Logger & { warn: ReturnType<typeof vi.fn> } {
+        return {
+            info: vi.fn(),
+            warn: vi.fn(),
+            error: vi.fn(),
+            debug: vi.fn(),
+        } as never
+    }
+
+    it('logs the install failure reason when the member upgrade cannot be applied', async () => {
+        setupMemberWorkspace(workDir)
+        writeSingleVersionLockfile(workDir)
+        nockAlerts([makeViteMemberAlert(1, '5.4.20')])
+        mockUpgradeDependency.mockResolvedValue({
+            packageName: 'vite',
+            fromVersion: '^5.4.0',
+            toVersion: '^5.4.20',
+            isMajor: false,
+            success: false,
+            error: 'pnpm install failed: signal SIGKILL',
+        })
+
+        const logger = makeLogger()
+        const { result } = await runApp({ logger })
+
+        // 失败原因进执行日志，且带成员 manifest 路径（多成员场景可定位到具体文件）
+        expect(logger.warn).toHaveBeenCalledWith(
+            '[member-upgrade] vite (packages/web/package.json): upgrade failed — pnpm install failed: signal SIGKILL',
+        )
+        expect(result.summary.alertsFailed).toBe(1)
+    })
 
     it('upgrades a member manifest direct dependency with lint verification (fixed)', async () => {
         const memberPkgPath = setupMemberWorkspace(workDir)

@@ -42,6 +42,7 @@ import {
 import { sampleVerificationBaseline, verifyProject } from './verify-project'
 import { fetchDefaultBranch, fetchRepoAlerts, truncatedWarning } from './repo-alerts'
 import { alertsFetchTokenHint } from './token-hints'
+import { recordUpgradeFailure } from './upgrade-failure'
 
 // ---------------------------------------------------------------------------
 // 单仓库修复管线（fix / fix-and-pr 模式共用）
@@ -77,7 +78,7 @@ export interface RepoFixCtx extends AppContext {
      *
      * - 首次需要时惰性采样一次（修复前 pristine 工作区）
      * - 多仓库共享同一 workDir（就地修复）时沿用首采结果——与既有 `preExistingDirty`
-     *   的运行级语义一致；多仓库场景的粒度局限同 `verification-gate.ts` 所述（todo.md G3）
+     *   的运行级语义一致；多仓库场景的粒度局限同 `verification-gate.ts` 所述（按 run 级归因，无法逐仓库区分）
      * - 未提供（如测试直接构造 ctx）⇒ 不采样，退回原始「全量归因」口径
      */
     verificationBaseline?: { value?: CommandResult[] }
@@ -352,7 +353,7 @@ async function applyLockfileFixes(
         }
         if (!result.success) {
             ctx.allActions.push(action)
-            progress.failed++
+            recordUpgradeFailure(ctx, progress, 'multi-version', alert.packageName, result.error)
             continue
         }
         // 组级快速验证：lint 通过 → 保留；失败 → 回滚
@@ -426,7 +427,7 @@ async function applyLockfileFixes(
                 error: majorResult.error,
                 durationMs: 0,
             })
-            progress.failed++
+            recordUpgradeFailure(ctx, progress, 'major-upgrade', alert.packageName, majorResult.error)
             continue
         }
         const remainingVersions = readLockfileVersions(lockfilePath, alert.packageName)
@@ -607,7 +608,7 @@ async function applyMemberUpgrades(
                 durationMs: 0,
                 filePath: memberManifestPath,
             })
-            progress.failed++
+            recordUpgradeFailure(ctx, progress, 'member-upgrade', `${alert.packageName} (${memberManifestPath})`, memberResult.error)
             continue
         }
         const remainingMemberVersions = readLockfileVersions(lockfilePath, alert.packageName)

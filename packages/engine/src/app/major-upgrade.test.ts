@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import nock from 'nock'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Logger } from '@dependfix/core'
 import { resolveRuntimeConfig } from '../config'
 import { DependfixApp } from './index'
 
@@ -213,7 +214,16 @@ describe('DependfixApp cross-major upgrade (--allow-major-upgrade)', () => {
         rmSync(workDir, { recursive: true, force: true })
     })
 
-    function runApp(overrides: { env?: Record<string, string>, cliOverrides?: NonNullable<Parameters<typeof resolveRuntimeConfig>[0]>['cliOverrides'] } = {}): Promise<Awaited<ReturnType<DependfixApp['run']>>> {
+    function makeLogger(): Logger & { warn: ReturnType<typeof vi.fn> } {
+        return {
+            info: vi.fn(),
+            warn: vi.fn(),
+            error: vi.fn(),
+            debug: vi.fn(),
+        } as never
+    }
+
+    function runApp(overrides: { env?: Record<string, string>, cliOverrides?: NonNullable<Parameters<typeof resolveRuntimeConfig>[0]>['cliOverrides'], logger?: Logger } = {}): Promise<Awaited<ReturnType<DependfixApp['run']>>> {
         const config = resolveRuntimeConfig({
             env: {
                 GITHUB_TOKEN: 'main-token-value',
@@ -223,7 +233,7 @@ describe('DependfixApp cross-major upgrade (--allow-major-upgrade)', () => {
             },
             cliOverrides: overrides.cliOverrides,
         })
-        const app = new DependfixApp({ config, workDir, reportOutputDir: join(workDir, 'reports') })
+        const app = new DependfixApp({ config, workDir, reportOutputDir: join(workDir, 'reports'), logger: overrides.logger })
         return app.run()
     }
 
@@ -311,6 +321,34 @@ describe('DependfixApp cross-major upgrade (--allow-major-upgrade)', () => {
         // 声明已回滚到 ^5.4.0
         const pkg = JSON.parse(readFileSync(join(workDir, 'package.json'), 'utf-8')) as { devDependencies: Record<string, string> }
         expect(pkg.devDependencies.vite).toBe('^5.4.0')
+    })
+
+    it('logs the install failure reason when the cross-major upgrade cannot be applied', async () => {
+        writeFileSync(join(workDir, 'package.json'), JSON.stringify({
+            name: 'fixture',
+            version: '1.0.0',
+            scripts: { lint: 'exit 0', build: 'exit 0', typecheck: 'exit 0', test: 'exit 0' },
+            devDependencies: { vite: '^5.4.0' },
+        }, null, 2))
+        writeSingleVersionLockfile(workDir)
+        nockAlerts([makeViteAlert(1, '6.4.3')])
+        mockUpgradeDependency.mockResolvedValue({
+            packageName: 'vite',
+            fromVersion: '^5.4.0',
+            toVersion: '^6.4.3',
+            isMajor: true,
+            success: false,
+            error: 'pnpm install failed: signal SIGKILL',
+        })
+
+        const logger = makeLogger()
+        const { result } = await runApp({ cliOverrides: { allowMajorUpgrade: true }, logger })
+
+        // 失败原因进执行日志（不只在随工作目录清理一并消失的 action 里）
+        expect(logger.warn).toHaveBeenCalledWith(
+            '[major-upgrade] vite: upgrade failed — pnpm install failed: signal SIGKILL',
+        )
+        expect(result.summary.alertsFailed).toBe(1)
     })
 
     it('keeps indirect-dependency cross-major alerts manual even when enabled', async () => {

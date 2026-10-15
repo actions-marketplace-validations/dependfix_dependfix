@@ -54,7 +54,7 @@ export function rollbackChanges(workDir: string): void {
  * - 判定用 `verificationBlocking`（本次改动引入的失败）；修复前即红的既有失败
  *   （`PRE_EXISTING_FAILURE`）不阻断交付
  * - 注意：验证的是"修复后工作区"而非"修复增量"；多仓库共享 workDir 时，
- *   任一仓库失败会全量回滚（归因局限见 todo.md G3）
+ *   任一仓库失败会全量回滚（多仓库共享 `workDir` 时按 run 级归因，无法逐仓库区分）
  */
 export function enforceVerificationGate(
     ctx: Pick<AppContext, 'logger' | 'workDir' | 'allErrors' | 'repoResults'>,
