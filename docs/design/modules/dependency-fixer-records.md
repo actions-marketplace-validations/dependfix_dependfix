@@ -206,3 +206,11 @@ T108 (报告生成器)
 - **优先级：中央配置优先**。中央（env `DEPENDFIX_OVERRIDE_PROTECT` / CLI `--override-protect`）一旦指定该字段，目标仓库声明即被**整体忽略**（不按仓库 glob 逐条合并）——防止目标仓库通过声明弱化中央保护策略；中央未指定（含解析为空）时目标仓库声明生效。生效来源经日志区分（仓库生效 → `info`；被中央覆盖 → `debug`）。
 - **降级矩阵**（一律**回退中央配置**、不中断修复）：文件缺失（预期常态，仅 `debug`）/ 空文件（等价未声明，无告警）/ 非普通文件（符号链接 · 目录 → **不跟随链接**读取检出目录之外的内容）/ 超过大小上限（256 KiB）/ 读取失败 / YAML 非法 / schema 不匹配（类型错误）→ `warn` 告警并忽略该文件；未知顶层键 → `warn` 列出后忽略（向前兼容后续版本新增字段，同时避免拼写错误静默失效）；`overrideProtect` 内的原型链风险键（`__proto__` / `constructor` / `prototype`）→ `warn` 丢弃（与 env / CLI 入口共用 `isSafePrototypeKey` 口径）。
 - **不做什么**：不替代中央配置（两者并存）；不改 `dependabot.yml` 语义；不做全量配置项迁移（后续字段按需扩展 `repoConfigSchema`）；不新增 contents API 探测（读取走本地检出，见上）。
+
+### 12.8 升级失败取证留痕与安装失败证据（2026-10-16）
+
+- **动机**：失败原因原先只落在 `FixAction.error`，而平台执行后工作目录（含 `dependfix-reports/`）被整体清理、平台仅持久化引擎日志与 `summary`——「抓到告警、已修复 0」的运行事后没有失败原因可查。生产实证：四次 run 中 11 次依赖升级全部失败，日志里只有 `applying versioned overrides`，没有任何失败文本。
+- **失败就地留痕（计数与日志成对）**：依赖升级链的三处**升级动作**失败分支（版本化 overrides / 跨线升级 / 成员级升级）在失败计数自增的同一处输出 `warn`——`[<scope>] <包名>: upgrade failed — <失败文本>`（成员级升级带成员 manifest 路径），由 `app/upgrade-failure.ts` 的 `recordUpgradeFailure` 统一承载。**就地**而非收尾统一输出的理由：平台按执行超时截断时只保留截断前已产生的日志（`MemoryLogger` 快照早于引擎收尾），收尾输出可能整段丢失。日志文本与报告 Fix Actions 表同源，且**不写入 `allErrors`**——失败判定与出口码口径不变。**范围说明**：链上其余失败分支（升级后的实例残留 / 快速验证 / 完整验证 / 锁文件修复）本就有各自的 `warn`，本条目只补齐此前仅计数不留痕的三处。
+- **安装失败证据形态**：安装失败文本由 `fixers/dependency/overrides-io.ts` 的 `describeInstallError` 组装——**进程级信号在前、原始诊断在后**：`<signal SIGTERM, timed out | signal SIGKILL | exit code N | spawn error ENOENT>: <stderr 或 err.message 回退>`。超时与被信号杀死时 pnpm 的进度写在 stdout，**stderr 为空是常态**，此时 `err.message`（如 `spawnSync /bin/sh ETIMEDOUT`）与进程信号是唯一能区分「超时 / 被杀 / 装不动」的证据；两者都缺时以 `no error detail` 占位，不留空尾。
+- **单一事实源**：进程信号抽取与渲染集中在 `fixers/process-signals.ts`，lockfile 修复链与依赖升级链共用（此前两处各一份实现，升级链缺 `err.message` 回退 → 日志与报告只剩前缀 `pnpm install failed:`（冒号后为空））。两链的**进程信号渲染**同源；外层包装与证据裁剪口径不同——lockfile 链写入 `environmental install failure (<signals>): <evidence>` 且 stderr 证据截断到 200 字符（见 [pnpm-lockfile-fixer.md §2.4](./pnpm-lockfile-fixer.md)），依赖升级链写入 `pnpm install failed: <signals>: <detail>` 且不截断（证据完整性优先）。
+- **不做什么**：不改失败判定与出口码 / 回滚语义；不改告警选择与 override 策略；不做平台侧报告归档与 `actions` 落库（保留期与磁盘策略需单独决策）。
