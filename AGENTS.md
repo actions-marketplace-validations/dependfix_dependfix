@@ -120,7 +120,8 @@ A 阶段 `code-auditor` 审计必须触发的场景：
    - **安全问题**：已确认的安全漏洞（Code Scanning 告警、Snyk/Dependabot critical、有 PoC 的安全 issue）
    - **漏洞问题**：依赖链中高危漏洞（critical CVE、GHSA 标识 critical/high 且影响 dependfix 自身或被 dependfix 管理的仓库）
    - **直接影响可用性的任务**：生产环境故障、P0/P1 事故恢复、CI 主链路阻塞、用户报告的 blocker 级功能缺失
-5. **合规核验**：本原则由 [code-auditor 主责边界「新需求未默认升级为下一阶段 todo」必查项](.github/agents/code-auditor.agent.md) 强制检查，违规即 Reject 退回。
+5. **清单外经用户授权的追加通道**：清单外事项经用户明确授权后可写入 `todo.md` 当前阶段，但须按 [规划规范 §3.1](docs/standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement)「**追加临时待办（不占阶段条目编号）**」标记口径处理。标记形态、位置与编号规则以 `planning.md §3.1` 为唯一权威声明，本条仅作指针。
+6. **合规核验**：本原则由 [code-auditor 主责边界「新需求未默认升级为下一阶段 todo」必查项](.github/agents/code-auditor.agent.md) 强制检查，违规即 Reject 退回。
 
 ## 审查要求
 

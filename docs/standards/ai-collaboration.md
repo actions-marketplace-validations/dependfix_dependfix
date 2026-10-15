@@ -88,7 +88,7 @@ P 阶段在 `todo.md` 顶部 banner / 阶段 banner 写 ahead 状态时，**必�
 
 ### 2.1.1 新需求总原则（跨工作流适用）
 
-按 [planning.md §3.1](./planning.md#31-新需求默认走评估--backlog原则hard-requirement)：**新需求默认走「评估 → backlog」**——用户提出新需求后 AI 不直接进入 D 阶段，先评估（[requirement-analyst skill](../../.github/skills/requirement-analyst/SKILL.md)）→ 形成 [backlog.md §短期候选](../plan/backlog.md#短期--一次性候选任务上收后去重) 条目 → 等待用户明确决策阶段；**不默认赋予阶段编号**（backlog 候选不得自动获得 `Mxx` 编号，未经明确授权不得写入 `todo.md` 当前阶段）；**不默认最高优先级判断**（候选池按「类型平衡」原则选取是用户决策行为）；**合规核验**由 [code-auditor 主责边界必查项](../../.github/agents/code-auditor.agent.md) + planning.md §3.1 强制，违规即 Reject；**经用户明确授权的清单外插队**按 [planning.md §3.1](./planning.md#31-新需求默认走评估--backlog原则hard-requirement)「**追加临时待办（不占阶段条目编号）**」标记口径处理（不分配编号、追加于阶段段落末尾、不占既有条目位置）。
+按 [planning.md §3.1](./planning.md#31-新需求默认走评估--backlog原则hard-requirement)：**新需求默认走「评估 → backlog」**——用户提出新需求后 AI 不直接进入 D 阶段，先评估（[requirement-analyst skill](../../.github/skills/requirement-analyst/SKILL.md)）→ 形成 [backlog.md §短期候选](../plan/backlog.md#短期--一次性候选任务上收后去重) 条目 → 等待用户明确决策阶段；**不默认赋予阶段编号**（backlog 候选不得自动获得 `Mxx` 编号，未经明确授权不得写入 `todo.md` 当前阶段）；**不默认最高优先级判断**（候选池按「类型平衡」原则选取是用户决策行为）；**合规核验**由 [code-auditor 主责边界必查项](../../.github/agents/code-auditor.agent.md) + planning.md §3.1 强制，违规即 Reject；**经用户明确授权的清单外插队**按 [planning.md §3.1](./planning.md#31-新需求默认走评估--backlog原则hard-requirement)「**追加临时待办（不占阶段条目编号）**」标记口径处理（标记形态、位置与编号规则以该条为唯一权威声明）。
 
 ## 2.2 验证分级矩阵
 
