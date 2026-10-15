@@ -264,7 +264,7 @@
 
 **审计 depth 预告**：M45.1 / M45.2 / M45.3 / M45.4 → `standard`；M45.5 → `quick`；M45.6 → `standard`（若含数据模型变更建议 2 分区并发）。
 
-**阶段期间插队批次（不占阶段编号，2026-10-16 用户授权）**：批量日志导出范围口径（默认导出当前页 + 保留「全部筛选结果」入口）——依据 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 插队例外清单第 3 类（用户报告的 blocker 级功能缺失）+ 用户明确授权；规则与检查点落 [development.md §5.1.43](../standards/development.md)，任务与闭环记录见 [todo.md](todo.md)，批次记录见 [archive/index.md §4](archive/index.md)。**不计入本阶段原子条目数与类型平衡**。
+**阶段期间追加临时待办（不占阶段条目编号，2026-10-16 用户授权）**：批量日志导出范围口径（默认导出当前页 + 保留「全部筛选结果」入口）——追加于 §M45 段落末尾（标记口径以 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 为唯一权威声明）；规则与检查点落 [development.md §5.1.43](../standards/development.md)，任务与闭环记录见 [todo.md](todo.md)，批次记录见 [archive/index.md §4](archive/index.md)。**不计入本阶段原子条目数与类型平衡**。
 
 **commits 状态**：阶段启动规划 commit 落地后按 [规划规范 §4.4 第 5 条](../standards/planning.md#44-大批量归档批次操作规范) 用 `git rev-list HEAD ^origin/master --count` 双向核验并动态描述，不写死数字。
 
