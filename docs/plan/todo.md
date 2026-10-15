@@ -145,10 +145,44 @@
 - **优先级**：P3
 - **范围**：`docs/guide/tech-stack.md:37,39,40,41`（`@lucide/vue` 文档写 `^1.48` 而 `apps/platform/package.json:44` 为 `^1.53.0`；`@vueuse/core` / `@vueuse/nuxt` / `@sentry/nuxt` / `@vite-pwa/nuxt` 四行声明在 `package.json` 与 `nuxt.config.ts` 模块列表中无对应）+ en-US 镜像 `docs/i18n/en-US/guide/tech-stack.md` + 表格口径决策（是否统一为「不写具体版本号，指向 `package.json`」）。
 - **验收标准**：
-  - [ ] ① **逐行核对清单**：表中每一行的「依赖名 → 引用位置」对照（引用位置取值：`package.json` / `nuxt.config.ts` / 源码 import）清单落进条目闭环记录，第三方可凭清单复现核对。
-  - [ ] ② **无引用行处置**：确认无引用的行**删除**（避免模板期占位残留）；若确为规划中能力，则补声明到 `package.json`（需在条目内说明依据）。
-  - [ ] ③ **版本口径**：`@lucide/vue` 等版本不一致行同步为准确值，或按 D 阶段选型统一为「不写具体版本号 + 指向 `package.json`」。
-  - [ ] ④ **双语与门禁**：en-US 镜像同步；`pnpm run docs:check:i18n` / `pnpm run check:docs` / `pnpm run lint:md:check` 通过。
+  - [x] ① **逐行核对清单**：表中每一行的「依赖名 → 引用位置」对照（引用位置取值：`package.json` / `nuxt.config.ts` / 源码 import）清单落进条目闭环记录，第三方可凭清单复现核对。（**清单见下方「逐行核对清单」段**；引用位置判定命令：声明面 `rg -c "<dep>" apps/platform/package.json apps/platform/nuxt.config.ts`、源码面 `rg -l "<dep>" apps/platform/{app,server,i18n}`（子串口径）。）
+  - [x] ② **无引用行处置**：确认无引用的行**删除**（避免模板期占位残留）；若确为规划中能力，则补声明到 `package.json`（需在条目内说明依据）。（**实测**：平台内零引用行 **8 行 / 11 个依赖包**全部删除（`@vueuse/core` + `@vueuse/nuxt` 合并一行、`@sentry/nuxt`、`@vite-pwa/nuxt`、`@better-auth/sso`、`better-auth-localization`、`class-transformer` + `class-validator` 合并一行、`dayjs`、`dompurify` + `sanitize-html` 合并一行）；「平台内零引用」口径 = `apps/platform` 的 `package.json` / `nuxt.config.ts` / 源码均无命中（`dayjs` 仅在 `packages/cli/package.json` 有声明，平台侧无）。**未向 `package.json` 补任何声明**：Sentry 属 [backlog T705「生产级部署」](../plan/backlog.md) 明确暂缓项（2026-08-12 用户指示暂缓排期），其余为未采用技术；补声明将引入无引用依赖，违反本项「不做什么」。）
+  - [x] ③ **版本口径**：`@lucide/vue` 等版本不一致行同步为准确值，或按 D 阶段选型统一为「不写具体版本号 + 指向 `package.json`」。（**选型**：统一为**不写具体版本号 + 指向 `package.json`**——表格删除「版本」列，表前加口径说明（`apps/platform/package.json` 为单一事实源、`nuxt.config.ts` 为模块接线位置）；`caomei-ui` 保留「精确锁定版本」这一**策略事实**与升级史（非版本号）。理由：dependabot 每次升级都会让写死版本号漂移，本项缺陷根因即此；口径单一化避免后续再次漂移（对应 R3 缓解）。）
+  - [x] ④ **双语与门禁**：en-US 镜像同步；`pnpm run docs:check:i18n` / `pnpm run check:docs` / `pnpm run lint:md:check` 通过。（**实测**：en 镜像新增 `## Platform dependencies (apps/platform)` 段（同口径：不写版本号 + 指向 `package.json`）；同步修正镜像内两处陈旧事实——`apps/platform` 运行时 `Node.js >= 20 (LTS)` → `>= 22 (LTS)`（对齐 `apps/platform/package.json` `engines.node`）、`pnpm >= 9` → `pnpm`（版本以 `package.json` `packageManager` 为准，实为 `pnpm@11.17.0`）。`check:docs` OK / `lint:md` Done / `docs:check:i18n` passed。）
+- **逐行核对清单（AC ①）**：
+
+| 表行 | 引用位置（实证） | 处置 |
+|:--|:--|:--|
+| nuxt | `package.json`（框架本体，无源码 import） | 保留 |
+| vue | `package.json` + 源码 import | 保留 |
+| vue-router | `package.json`（Nuxt 路由底层） | 保留 |
+| caomei-ui | `package.json`（精确锁定）+ `nuxt.config.ts` modules（`caomei-ui/nuxt`）+ 源码 import | 保留（版本号移出表格，保留精确锁定说明） |
+| @lucide/vue | `package.json` + 源码 import | 保留（原写 `^1.48` 与实际 `^1.53.0` 不一致 → 去版本号） |
+| @nuxtjs/i18n | `package.json` + `nuxt.config.ts` modules + 源码 import | 保留 |
+| @vueuse/core + @vueuse/nuxt | 平台内零引用 | **删除** |
+| @sentry/nuxt | 平台内零引用（backlog T705 暂缓项） | **删除** |
+| @vite-pwa/nuxt | 平台内零引用 | **删除** |
+| better-auth | `package.json` + 源码 import | 保留（SSO 能力并入用途说明） |
+| @better-auth/sso | 平台内零引用（SSO 由 `better-auth/plugins` 的 `genericOAuth` 提供，`server/utils/auth.ts:2`） | **删除**（能力信息合并） |
+| better-auth-localization | 平台内零引用 | **删除** |
+| typeorm | `package.json` + 源码 import | 保留 |
+| reflect-metadata | `package.json` + 源码 import | 保留 |
+| class-transformer + class-validator | 平台内零引用（校验走 zod） | **删除** |
+| better-sqlite3 | `package.json` + 源码 import | 保留 |
+| pg | `package.json` + 源码 import | 保留 |
+| mysql2 | `package.json` + 源码 import | 保留 |
+| bullmq | `package.json` + 源码 import | 保留 |
+| ioredis | `package.json` + 源码 import | 保留 |
+| zod | `package.json` + 源码 import | 保留 |
+| dayjs | 平台内零引用（`packages/cli` 另有声明） | **删除** |
+| lodash-es | `package.json`（声明行，源码无 import） | 保留 |
+| winston | `package.json` + 源码 import | 保留 |
+| nodemailer | `package.json` + 源码 import | 保留 |
+| dompurify + sanitize-html | 平台内零引用（无 `v-html` 使用面；`server/utils/sanitize.ts` 为敏感信息脱敏工具，非 XSS） | **删除** |
+
+- **批次进展（2026-10-15）**：`docs/guide/tech-stack.md` 平台依赖表按「不写版本号 + 指向 `package.json`」重写并删除 8 行零引用条目（11 个依赖包）；`docs/i18n/en-US/guide/tech-stack.md` 新增平台依赖段并修正两处陈旧事实；本条目登记闭环。
+- **实际交付**：`docs(guide)` 双语平台依赖表修正；`docs(plan)` 条目闭环登记。**质量门**：`check:docs` OK · `lint:md` Done · `check-doc-size` warning 0 · `docs:check:i18n` passed · `docs:build` 见闭环。
+- **残余 / 后续**：① `docs/design/governance/architecture.md` §技术选型表仍列「Sentry（@sentry/nuxt）」「PWA（@vite-pwa/nuxt）」等 momei 复用项（该表有「来源」列标注 momei，非「当前已采用」断言）——已登记 backlog §候选评估中 观察项；② `lodash-es`（平台）与 `dayjs`（`packages/cli`）在 `package.json` 有声明但源码零 import（未使用依赖，属依赖清理面，非本项范围）；③ 本项只改文档口径，未做依赖升级/降级。
 - **不做什么**：不做依赖实际升级或降级（仅文档口径）；不为「规划中能力」新增未确认的运行时依赖；不改 `apps/platform/package.json` 中已正确声明的依赖版本。
 - **依赖**：候选来源为 M43 归档前后的审计与复核衍生项（登记为「tech-stack 平台依赖表与 `apps/platform/package.json` 行级不一致」）；**实证**：`rg -n "pinia|@vueuse/core|@sentry/nuxt|@vite-pwa/nuxt" apps/platform/package.json` 零命中，`rg -n "@lucide/vue" apps/platform/package.json` 命中 `^1.53.0`；`docs/guide/tech-stack.md` 由 M40.6「平台环境变量文档完整性治理」批次同源形成。
 - **交付物**：预计 1-2 commits——① `docs(guide)` 表格逐行修正 + 双语同步；② 闭环登记（如需补声明则另计 `chore(platform)` commit）。预计 3-5 文件 / 40-120 行。
