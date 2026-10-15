@@ -60,7 +60,7 @@ dependfix fix-and-pr --repo owner/repo --github-token $GITHUB_TOKEN
 | `--create-pr` | — | Create Pull Request (auto-enabled in `fix-and-pr` mode) | `false` |
 | `--commit` | — | After fix, commit on local current branch (`fix` mode only; no push, no PR) | `false` |
 | `--max-alerts-per-repository` | — | Max alerts processed per repo | `20` |
-| `--commands` | — | Custom verification commands (comma-separated), override default `install/lint/build/typecheck/test` | — |
+| `--commands` | — | Custom verification commands (comma-separated); **replaces the whole default chain** `install/lint/build/typecheck/test` (no merging; default-chain additions do not carry over — keep the entries you need) | — |
 | `--override-protect` | — | Overrides protection list (per-repository, `repo-glob:pkg1,pkg2;...`); on a hit the override is not written | — |
 | `--verbose` | — | Verbose logging | `false` |
 

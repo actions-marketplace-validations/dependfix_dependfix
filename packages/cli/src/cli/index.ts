@@ -164,7 +164,7 @@ export const argsDef = {
     },
     commands: {
         type: 'string' as const,
-        description: '自定义验证命令（逗号分隔），覆盖默认的 install/lint/build/typecheck/test',
+        description: '自定义验证命令（逗号分隔），整链替换默认的 install/lint/build/typecheck/test（不做合并；默认链扩展不会自动跟随，默认链内的条目须显式保留）',
     },
     verbose: {
         type: 'boolean' as const,

@@ -60,7 +60,7 @@ dependfix fix-and-pr --repo owner/repo --github-token $GITHUB_TOKEN
 | `--create-pr` | — | 创建 Pull Request（`fix-and-pr` 模式自动启用） | `false` |
 | `--commit` | — | 修复完成后在本地当前分支直接提交（仅 `fix` 模式；不推送、不创建 PR） | `false` |
 | `--max-alerts-per-repository` | — | 每仓库最大告警处理数 | `20` |
-| `--commands` | — | 自定义验证命令（逗号分隔），覆盖默认的 `install/lint/build/typecheck/test` | — |
+| `--commands` | — | 自定义验证命令（逗号分隔），**整链替换**默认的 `install/lint/build/typecheck/test`（不做合并；默认链扩展不会自动跟随，须显式保留） | — |
 | `--override-protect` | — | overrides 保护名单（按仓库粒度，`repo-glob:pkg1,pkg2;...`）；命中则不写入该包 override | — |
 | `--verbose` | — | 详细日志输出 | `false` |
 
