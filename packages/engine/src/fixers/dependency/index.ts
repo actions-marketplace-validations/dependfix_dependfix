@@ -8,7 +8,7 @@ import {
     execPnpmInstall,
     failResult,
     formatInstallFailure,
-    getStderr,
+    describeInstallError,
     rollback,
     rollbackOverrideWrite,
     writeWorkspaceOverride,
@@ -178,7 +178,7 @@ export async function upgradeDependency(
             toVersion,
             isMajor,
             success: false,
-            error: formatInstallFailure(getStderr(installErr)),
+            error: formatInstallFailure(describeInstallError(installErr)),
         }
     }
 
@@ -306,14 +306,14 @@ export async function overrideTransitiveDependency(
             workspaceBackup,
         })
 
-        const stderr = getStderr(installErr)
+        const installFailure = describeInstallError(installErr)
         return {
             packageName,
             fromVersion,
             toVersion,
             isMajor,
             success: false,
-            error: formatInstallFailure(stderr),
+            error: formatInstallFailure(installFailure),
         }
     }
 
@@ -514,14 +514,14 @@ export async function applyVersionedOverrides(
         }
         cleanupBackups({ pkgBackup, lockBackup, workspaceBackup })
 
-        const stderr = getStderr(installErr)
+        const installFailure = describeInstallError(installErr)
         return {
             packageName,
             fromVersion: '',
             toVersion: entries.map((entry) => entry[1]).join(', '),
             isMajor: false,
             success: false,
-            error: formatInstallFailure(stderr),
+            error: formatInstallFailure(installFailure),
         }
     }
 

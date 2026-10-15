@@ -1,6 +1,13 @@
 import { execFileSync } from 'node:child_process'
 import { copyFileSync, existsSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
+import {
+    describeProcessSignals,
+    extractProcessSignals,
+    getRawStderrText,
+    getStderrText,
+    type ExecError,
+} from '../process-signals'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -162,60 +169,6 @@ function parseFailureCategory(stderr: string): LockfileFailureCategory {
 // ---------------------------------------------------------------------------
 // Repair Strategies
 // ---------------------------------------------------------------------------
-
-interface ExecError extends Error {
-    stderr?: Buffer | string
-    stdout?: Buffer | string
-    status?: number
-    /** 终止进程的信号（execFileSync 被 kill / 超时终止时设置） */
-    signal?: string
-    /** Node 错误码（超时时为 `ETIMEDOUT`；spawn 失败时为 `ENOENT` 等） */
-    code?: string
-}
-
-/** 读取原始 stderr 文本（不含 `err.message` 回退）；无 stderr 时返回空串。 */
-function getRawStderrText(err: ExecError): string {
-    if (!err.stderr) {
-        return ''
-    }
-    return typeof err.stderr === 'string' ? err.stderr : err.stderr.toString('utf-8')
-}
-
-/** 读取 stderr 文本（无 stderr 时回退 `err.message`，保持既有展示口径）。 */
-function getStderrText(err: ExecError): string {
-    return getRawStderrText(err) || ((err as Error).message ?? '')
-}
-
-/** 从 execFileSync 抛出的错误中提取进程级信号（退出码 / 信号 / 超时标记 / spawn errno）。 */
-function extractProcessSignals(err: ExecError): { exitCode: number | null, signal: string | null, timedOut: boolean, errno: string | null } {
-    return {
-        exitCode: typeof err.status === 'number' ? err.status : null,
-        signal: typeof err.signal === 'string' ? err.signal : null,
-        // execFileSync 超时：以 killSignal（默认 SIGTERM）终止进程并置 code='ETIMEDOUT'
-        timedOut: err.code === 'ETIMEDOUT',
-        // spawn 级 errno（ENOENT 等；超时的 ETIMEDOUT 已由 timedOut 表达，此处避免重复）
-        errno: typeof err.code === 'string' && err.code !== 'ETIMEDOUT' ? err.code : null,
-    }
-}
-
-/** 渲染进程级信号的简短描述（用于失败详情）；无可用信号时返回空串。 */
-function describeProcessSignals(
-    signals: { exitCode: number | null, signal: string | null, timedOut: boolean, errno: string | null },
-): string {
-    const parts: string[] = []
-    if (signals.signal !== null) {
-        parts.push(`signal ${signals.signal}`)
-    } else if (signals.exitCode !== null) {
-        parts.push(`exit code ${signals.exitCode}`)
-    } else if (signals.errno !== null) {
-        // spawn 失败（如工具链缺失）：无退出码 / 信号，errno 是唯一定位信息
-        parts.push(`spawn error ${signals.errno}`)
-    }
-    if (signals.timedOut) {
-        parts.push('timed out')
-    }
-    return parts.join(', ')
-}
 
 function execRepair(binary: string, args: string[], workDir: string, timeoutMs = 180_000): void {
     execFileSync(binary, args, { cwd: workDir, stdio: 'pipe', timeout: timeoutMs })

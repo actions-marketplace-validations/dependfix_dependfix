@@ -1,6 +1,7 @@
 import { execSync } from 'node:child_process'
 import { copyFileSync, existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import YAML from 'yaml'
+import { describeProcessSignals, extractProcessSignals, getStderrText } from '../process-signals'
 import type { DependencyFixResult, PackageJson } from './index'
 
 // ---------------------------------------------------------------------------
@@ -236,21 +237,22 @@ function rollbackOverrides(params: {
     }
 }
 
-export function getStderr(err: unknown): string {
-    if (err instanceof Error && 'stderr' in err) {
-        const stderr = (err as Error & { stderr: unknown }).stderr
-        if (typeof stderr === 'string') {
-            return stderr.trim()
-        }
-        if (Buffer.isBuffer(stderr)) {
-            return stderr.toString('utf-8').trim()
-        }
-        return typeof stderr === 'object' && stderr !== null ? JSON.stringify(stderr) : String(stderr)
+/**
+ * 组装 `pnpm install` 失败的证据文本：进程级信号在前，原始诊断在后。
+ *
+ * 为什么不能只取 stderr：超时（`ETIMEDOUT`）与被信号杀死（`SIGKILL`）时 pnpm 的进度写在
+ * stdout，stderr 常为空——只取 stderr 会得到空串，把「为什么失败」整段丢掉（日志与报告里
+ * 只剩 `pnpm install failed: `）。此时进程信号与 `err.message`
+ * （如 `spawnSync /bin/sh ETIMEDOUT`）是唯一能区分「超时 / 被杀 / 装不动」的证据，
+ * 口径与 lockfile 修复链的环境性安装失败同源。
+ */
+export function describeInstallError(err: unknown): string {
+    if (!(err instanceof Error)) {
+        return String(err).trim()
     }
-    if (err instanceof Error) {
-        return err.message
-    }
-    return typeof err === 'object' && err !== null ? JSON.stringify(err) : String(err)
+    const signals = describeProcessSignals(extractProcessSignals(err))
+    const detail = getStderrText(err).trim() || 'no error detail'
+    return signals ? `${signals}: ${detail}` : detail
 }
 
 // ---------------------------------------------------------------------------
