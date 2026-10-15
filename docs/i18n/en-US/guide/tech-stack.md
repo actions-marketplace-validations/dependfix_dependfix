@@ -38,10 +38,30 @@ dependfix is built on the Node.js runtime + TypeScript stack, with the following
 | `packages/cli` | TypeScript (strict) | Node.js >= 20 (LTS) | tsdown (ESM only since 0.2.0) |
 | `packages/mcp` | TypeScript (strict) | Node.js >= 20 (LTS) | tsdown |
 | `packages/skills` | Markdown + YAML frontmatter | N/A (Claude / Copilot / Cursor consumption) | N/A |
-| `apps/platform` | Vue 3 + TypeScript | Node.js >= 20 (LTS) | Nuxt 4 + Vite |
+| `apps/platform` | Vue 3 + TypeScript | Node.js >= 22 (LTS) | Nuxt 4 + Vite |
 | `apps/action` | TypeScript | Node.js 20 (GitHub Actions runner) | tsdown |
 
 > **Breaking change (since 0.2.0)**: `dependfix` / `@dependfix/core` are now **pure ESM** (CJS dual-format outputs removed). CLI commands and GitHub Action consumption are unaffected; programmatic consumers should use `import`; `require()` needs Node 22.12+ (native `require(ESM)`). Node 20.x CJS programmatic consumers need dynamic `import()`.
+
+## Platform dependencies (`apps/platform`)
+
+Versions are **not** duplicated here — [`apps/platform/package.json`](../../../../apps/platform/package.json) is the single source of truth; module-type dependencies are wired in `apps/platform/nuxt.config.ts` (`modules`).
+
+| Dependency | Purpose |
+|:-----------|:--------|
+| nuxt | Full-stack framework |
+| vue | UI framework |
+| vue-router | Routing |
+| caomei-ui | In-house UI component library (version pinned exactly; PrimeVue 4 migration completed in M31, upgraded to 0.5.0 in M34.2, then to 0.6.0 on 2026-10-11) |
+| @lucide/vue | Icon components (passed through `CaomeiIcon`) |
+| @nuxtjs/i18n | Internationalization |
+| better-auth | Authentication core (SSO / third-party login via `better-auth/plugins` → `genericOAuth`) |
+| typeorm / reflect-metadata | ORM framework + decorator runtime |
+| better-sqlite3 / pg / mysql2 | SQLite (dev/test) / PostgreSQL (production) / MySQL (alternative) |
+| bullmq / ioredis | Task queue + Redis client |
+| zod / lodash-es / winston / nodemailer | Validation / utilities / structured logging / email |
+
+> Only dependencies traceable to `package.json`, `nuxt.config.ts` or source imports are listed; entries without any reference have been removed (Sentry monitoring is deferred — see the Chinese backlog item T705 "production deployment"; PWA / VueUse / dayjs / class-validator / dompurify are not used).
 
 ## Build & release
 
@@ -83,7 +103,7 @@ Coverage reports are output to `coverage/` (lcov + html + json formats), uploade
 
 ## Dependency management
 
-- **Package manager**: pnpm >= 9 (monorepo workspace)
+- **Package manager**: pnpm (monorepo workspace; version pinned in `package.json` → `packageManager`)
 - **Lockfile**: `pnpm-lock.yaml` committed; CI uses `pnpm install --frozen-lockfile`
 - **Dependency updates**: dependabot auto-creates PRs; dependfix itself is used as the fix tool (self-referential loop with careful audit)
 - **Frozen lockfile handling**: see [Quick Start cross-major-upgrade](../guide/quick-start.md) and `pnpm i --frozen-lockfile` auto-fix design
