@@ -39,6 +39,10 @@ jobs:
         run: pnpm check:docs --only=vue-interp
       - name: Build with VitePress
         run: pnpm run docs:build
+      - name: Assert i18n fallback entries
+        # 未翻译页的语言切换目标必须可用（构建期生成的兜底入口页），
+        # 依据 [i18n 规范 §2.1](../../docs/standards/i18n.md) `source-only` 分层。
+        run: pnpm run docs:check:fallback
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v5
         with:

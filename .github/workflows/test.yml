@@ -95,6 +95,9 @@ jobs:
       # lint-md/check-docs 均不检查标签配对——docs 构建失败必须尽早暴露，不等 typecheck/test/build 跑完
       # （教训见经验归档 §三十三：release.md 裸 <path> 导致 Test/Pages 双 workflow 在末尾构建才失败）
       - run: pnpm run docs:build
+      # 未翻译页的语言切换目标必须可用（构建期生成的兜底入口页 + 目标标记 + 点击补丁）：
+      # 复用上一步同一份 dist，零额外构建成本；依据 [i18n 规范 §2.1](../../docs/standards/i18n.md)。
+      - run: pnpm run docs:check:fallback
       - run: pnpm run typecheck
       - run: pnpm run test
       # docs 已在前置步骤独立构建验证，此处排除避免重复构建
