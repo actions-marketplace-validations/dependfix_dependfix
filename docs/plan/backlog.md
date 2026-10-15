@@ -63,6 +63,11 @@
 - **PR Check 三源信号的 provider 原生日志富化（待评估）** —— 现象：M43.2 已完成三源（Checks + Commit Statuses + Deployments）归一化、聚合状态与失败源清单，但失败详情只到 provider / 信号层，**无 provider 原生 API 日志**（D2 裁定首批不做，留后续增量）。待评估点：是否接入 Vercel / Cloudflare / GitHub Actions 的原生失败日志拉取（需 provider 凭据承载面 + 配额控制 + 输出脱敏 + 单行 JSON 膨胀控制）。触发条件：用户报告「信号已失败但无日志可看」时。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
+- **`quick-start` 指南的 en-US 镜像为裁剪子集（行级漂移）（待评估）** —— 现象：`docs/guide/quick-start.md`（408 行 / 命令行参数表 25 行）与其镜像 `docs/i18n/en-US/guide/quick-start.md`（133 行 / 11 行）结构不同源——镜像缺 `--commands` / `--history` / `--verbose` / `--commit` 等多行（2026-10-15 核对 `rg -c '^\| \`--'` 实测 25 vs 11）。该漂移属既有状态（本轮改动 `--commands`行时发现镜像无对端），`docs:check:i18n`仅查重复页、`check:readme-i18n` 仅覆盖 README，故无机检。
+  - **待评估点**：① 是否补全镜像参数表（逐行对齐 zh，成本为一次性翻译同步）；② 或明确「en 侧为对外精简版」定位并在 i18n 新鲜度台账登记该差异（避免后续批次反复判定为遗漏）。
+  - **触发条件**：下次 i18n 新鲜度同步批次；或再次改动 `quick-start` 参数表时。
+  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
+
 - **`alerts.vue` 存在一处闲置的 `useFixNow()` 解构（待评估）** —— 现象：`apps/platform/app/pages/alerts.vue` 顶部解构 `{ fixingRunId, fixError, fixSuccess, triggerFix }` 但全文件未使用（真正的「立即修复此仓库」入口在子组件 `alert-run-sidebar.vue`），伴随的注释也仍在描述已抽走的流程；该孤立实例同样不消费后加的 `fixMerged`。
   - **待评估点**：① 直接删除该解构 + 收敛注释（零行为风险）；② 或反向确认是否存在未接线的预期入口（若存在则补齐而非删除）。
   - **触发条件**：下次改动 `alerts.vue` 时（该文件已处 max-lines warning 带，顺带减法更划算）。

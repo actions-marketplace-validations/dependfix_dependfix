@@ -31,21 +31,23 @@
 >
 > **条目容量**：6 原子符合 [规划规范 §1.1](../standards/planning.md#11-硬性约束) 的 5-6 项上限；**M45.6 预估 8-12 文件 / 200-380 行**，若 D 阶段裁定含数据模型变更则该条目内部拆「配置承载层 / 生效与展示层」两个可独立提交批次（拆分依据登记 M45.6 §交付物）；M45.4 / M45.5 预估在单条阈值内。
 
-### M45.1 [P2 🛠️] 自用 dependfix 验证链面差收口
+### M45.1 [P2 🛠️] 自用 dependfix 验证链面差收口（**已闭环** `16c6522` + `7f2e320` + `51af699` + `b3b2007` + `62d5672` + 本条登记）
 
 - **目标**：消除本仓库自用 `commands` 链与引擎默认链（`install → lint → build → typecheck → test`）的长期面差（自用链缺 `test`），并让「默认链扩展时自用链是否会跟随」这一语义在契约层显式可查，避免同类漂移再次静默复发。
 - **优先级**：P2
 - **范围**：`.github/workflows/security-auto-fix.yml:45-46`（`commands` 输入 description）+ `:90`（回退链）+ 同段注释；`action.yml:115`（输入定义）/`:179` / `:202`（透传 `--commands`）；`packages/cli/src/cli/index.ts` + `packages/cli/src/app/pipeline.ts`（`--commands` 解析与透传）+ `packages/cli/README`（双语）+ CLI help；`packages/engine/src/app/verify-project.ts:38`（`customCommands ?? DEFAULT_VERIFY_COMMANDS` 的整链替换语义）；`docs/design/governance/github-action-workflow.md:54`（`commands` 契约表）+ `docs/guide/*` 与 `docs/i18n/en-US/**`（同源口径）；backlog 条目清出。
 - **验收标准**：
-  - [ ] ① **面差归零或显式声明**：D 阶段裁定后，自用链与引擎默认链的差异项**全部为显式声明的必要差异**（当前唯一必要项 = `nuxt prepare`，理由 = run 31552922137 教训），其余差异为 0；判定命令可复现（列出两条链的逐项对比及每项生存理由）。
-  - [ ] ② **语义契约化**：`--commands`（整链替换 vs 追加 / 新增显式模式）语义在 `action.yml` description、`github-action-workflow.md` 契约表、CLI help 三处措辞一致，并显式写明「默认链扩展不会自动跟随自用链」。
-  - [ ] ③ **漂移防护**：新增断言或检查，锁定「自用链语义集合 ⊇ 引擎默认链必需项」口径（按语义项比对，不做字面串相等），使后续默认链扩展时该面差可被检出而非静默通过。
-  - [ ] ④ **门禁**：`pnpm lint` 0 error + `pnpm typecheck` 0 error + `pnpm run check:docs` exit 0 + `pnpm run lint:md:check` 通过（涉及 CLI 解析变更时另跑 `packages/cli` 定向 vitest）。
-- **D 阶段决策点**：**D1** 自用链是否补齐 `test`（容器内全量 vitest 耗时上升 vs 面差真实性；工作流 `timeout-minutes: 15` 与引擎单命令 10 分钟超时须一并评估）；**D2** `commands` 语义是否本批改为「追加」或引入显式模式（触及 CLI 公开契约与被平台 `verifyCommands` 引用面），或仅补链 + 注释登记。
+  - [x] ① **面差归零或显式声明**：D1 裁定补齐 `test` 段 → 自用链 = `install → nuxt prepare → lint → build → typecheck → test`，与引擎默认链差异**仅剩 `nuxt prepare`**（理由：本仓库 eslint 依赖 `.nuxt/tsconfig.json` 生成物；已在门禁脚本 `DECLARED_EXTRAS` 登记理由 + `before: lint` 位置约束）。可复现：`check:verify-chain` 输出逐项对比（`覆盖…（install → lint → build → typecheck → test）；已声明差异项 0 / 额外项 1`）。
+  - [x] ② **语义契约化**：D2 裁定**保持整链替换语义不变**（否决「追加 / 显式模式」：触及 CLI 公开契约与平台 `verifyCommands` 安全敏感面）→ `action.yml:116`、`github-action-workflow.md:54`、CLI help（`packages/cli/src/cli/index.ts:167`）三处均写明「整链替换 / 不做合并 / 默认链扩展不会自动跟随 / 默认链内条目须显式保留」（审计分区 B 逐处比对通过）；CLI help 实测渲染无 markdown 残留。
+  - [x] ③ **漂移防护**：新增零依赖门禁 `scripts/check-verify-chain.mjs`（+ `check:verify-chain` 入口 + CI Test job 阻断接线），按**语义项**比对（`install` / 脚本名 / 复合命令全文），判定四类：缺默认链语义项须登记 `DECLARED_GAPS`、额外项须登记 `DECLARED_EXTRAS`（含理由与可选 `before` 位置约束）、共有项相对顺序一致、声明陈旧同样报错；解析失败（非单引号字面量 / 数组未闭合）按不一致上报，不静默通过。单测 29 例（含真实仓库文本四个变异 + 子进程退出码与机读模式）；负例标定工件 `artifacts/m45.1/negcase-verify-chain.txt`（记录被审修订 HEAD + 脚本 md5，四个负例均 exit 1 且输出 `文件:行:明细`，还原后 md5 一致）。
+  - [x] ④ **门禁**：eslint（改动代码文件）0 error / 0 warning；root typecheck（7 包）全 Done 且无 `error TS`；`check:docs` / `check:doc-size` / `check:orphan-ids` / `check:standards-redundant:strict` / `check:experience-landing` / `docs:check:i18n` / `i18n:check:anchor` / `lint:md:check` / `check:verify-chain` 全 exit 0；`docs:build` exit 0；`packages/cli` 定向 vitest 163 passed；全量 `test:coverage` 四维均 ≥ 阈值（Statements 88.43 / Branches 83.14 / Functions 87.92 / Lines 88.57）。
+- **D 阶段定稿（2026-10-15 用户裁定）**：**D1 = 补齐 `test` 段并联动调整任务超时上限**（证据：自用链历史成功运行耗时区间远低于原上限，但补入测试段后有告警仓库需跑「修复前基线采样 + 修复后验证」两轮链，故上限由十五分钟提至二十五分钟，引擎单命令十分钟超时不变）；**D2 = 保持整链替换语义不变 + 新增一致性门禁做漂移防护**（否决「追加 / 显式模式」：`--commands` 为公开契约且平台 `verifyCommands` 属远程命令执行面，改动面远超本条目粒度）。
 - **不做什么**：不改引擎默认链的条数与顺序（`install → lint → build → typecheck → test` 冻结）；不改 `quickVerifyProject` 的 lint-only 定位；不改单命令超时与 corepack 版本替换语义；不把 `nuxt prepare` 注进引擎默认链（沿用 `--commands` 逃生舱）；不改平台侧 `verifyCommands` 配置项的既有默认值语义。
 - **依赖**：M44.1（`DEFAULT_VERIFY_COMMANDS` 扩为五段链；该批次用户裁定仅补 `typecheck`，面差即当时登记为 backlog 候选）；[github-action-workflow.md:54](../design/governance/github-action-workflow.md)（`commands` 契约与「整链替换」既有声明）；[经验归档 §三十六](../design/governance/experience-archive-§36-§40-toolchain.md)（`commands` 引入缘由：run 31552922137 的 `nuxt prepare` 缺失致 eslint Parsing error）；backlog §候选评估中条目「本仓库自用 dependfix 验证链与引擎默认链的面差」。
-- **交付物**：预计 2 commits——① `ci(workflows)` 自用链补齐 + 语义声明（若 D2 裁定含 CLI 语义变更则拆 `feat(cli)` / `test(cli)`）；② `docs` 同源口径同步 + 闭环登记。预计 4-8 文件 / 60-150 行。
+- **交付物**：预计 2 commits——① `ci(workflows)` 自用链补齐 + 语义声明（若 D2 裁定含 CLI 语义变更则拆 `feat(cli)` / `test(cli)`）；② `docs` 同源口径同步 + 闭环登记。预计 4-8 文件 / 60-150 行。**实际（回填）**：6 commits / 20 文件——`feat(scripts)` 门禁脚本 + `package.json` 入口 / `test(scripts)` 单测（29 例）/ `ci(workflows)` 自用链 + 超时上限 + CI 接线 / `docs` 工具契约与命令行帮助口径 / `docs` 门禁口径与脚本索引同步 / `docs(plan)` 闭环登记。**估算偏差说明**：原估算未计入「漂移防护」需要新增门禁脚本与单测（AC ③ 的落地载体，合计 607 行），其余改动与估算同量级。
 - **风险与缓解**：**R1 自用链补 `test` 后容器内耗时上升**（全量 vitest）→ 与 `timeout-minutes` / `EXECUTION_TIMEOUT_MS` 联动评估，超预算则改为定时巡检链路采样并登记观察项；**R2 「追加语义」触及 CLI 公开契约**（`--commands` 被 action、平台 `verifyCommands` 与多处文档引用）→ 改前做落点清单 + 三处声明一致（AC ②）+ README 双语与 en-US 镜像单独扫；**R3 断言形态脆弱**（字面串比对随措辞变更失效）→ AC ③ 明确按语义集合比对。
+- **闭环记录（2026-10-15）**：**审计** —— 分区 A（门禁脚本 + CI 接线）standard **R1 Pass**（0 blocker / 3 warning / 4 suggest）→ 收口（数组内非单引号字面量与数组未闭合改为解析失败上报；`before` 目标缺失报「位置约束失效」；补齐子进程退出码与机读模式用例）；分区 B（文档口径与契约面）standard **R1 Pass**（0 blocker / 3 warning / 5 suggest）→ 收口（任务超时上限口径改净；受改文件行尾统一 LF；脚本索引移入独立小节；技能参考表权威源与镜像同步；roadmap 承接段标注已闭环；`quick-start` en-US 镜像漂移登记候选）；合并复审 **quick R2 Pass**（7 个修复点全部 closed，无新增回归）。
+- **残余与观察项**：① 自用链六段 × 引擎单命令十分钟上限 > 任务二十五分钟上限（全挂场景由任务超时兜底，与改动前同族）；② 门禁语义分类未覆盖 `pnpm run <script>` / `corepack pnpm@<version>` / 内联 `&&` 形态（退化为全文比对，后果为保守误报，已在脚本头已知边界声明）；③ 数组项若写成「单引号字面量 + 行尾注释」会被判解析失败（同属保守方向，当前事实源无该形态）；④ `quick-start` 的 en-US 镜像为裁剪子集（既有漂移，已登记 backlog 候选，不在本条目范围）；⑤ 门禁说明在三处各一句指针（脚本索引 / 契约表 / 设计章节），符合单点声明原则，后续再增站点时收敛。
 
 ### M45.2 [P2 🛠️] 零告警仓库修复前基线采样成本
 
