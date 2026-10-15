@@ -43,7 +43,7 @@ on:
         required: false
         default: true
       commands:
-        description: "自定义验证命令（逗号分隔；留空使用本仓库默认链：install + nuxt prepare + lint + build + typecheck）"
+        description: "自定义验证命令（逗号分隔；留空使用本仓库自用链：install + nuxt prepare + lint + build + typecheck + test）"
         type: string
         required: false
         default: ""
@@ -64,7 +64,11 @@ jobs:
   dependfix:
     name: Dependfix Security Scan
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 超时预算依据（2026-10-15 实测）：本 workflow 历史成功运行耗时 298s / 496s（job 上限原为 900s）；
+    # 自用链补入 `pnpm test` 后，有告警仓库要跑两次链（修复前基线采样 + 修复后验证），
+    # 增量 ≈ 2 × 容器内全量 vitest（本机实测 51s）→ 故上限提至 1500s 留出余量。
+    # 单命令超时仍由引擎侧约束（10 分钟/条，见 packages/engine/src/runners/verification-runner.ts）。
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -85,6 +89,9 @@ jobs:
           # GITHUB_TOKEN 无法读取该 API。仓库 Settings → Secrets 配置 GH_PAT。
           dependabot-alerts-token: ${{ secrets.GH_PAT }}
           cleanup-branches-auto: ${{ inputs.cleanup-branches-auto || 'true' }}
-          # 自定义验证链：Nuxt 平台 lint 依赖 .nuxt/tsconfig.json（nuxt prepare 生成物），
-          # 引擎默认链无 prepare 前置步骤会导致 eslint Parsing error（教训：run 31552922137）
-          commands: ${{ inputs.commands || 'pnpm install --frozen-lockfile, pnpm --filter @dependfix/platform exec nuxt prepare, pnpm lint, pnpm build, pnpm typecheck' }}
+          # 自用验证链：与引擎默认链（install + lint + build + typecheck + test）保持语义一致，
+          # 仅多一步 `nuxt prepare`（本仓库 eslint 依赖 .nuxt/tsconfig.json 生成物，默认链无该步骤会
+          # 导致解析失败——教训见 docs/design/governance/experience-archive-§36-§40-toolchain.md）。
+          # `--commands` 是整链替换语义：默认链扩展不会自动跟随自用链，故本文件的链条由
+          # `pnpm run check:verify-chain` 做一致性门禁（缺项未声明即 CI 失败）。
+          commands: ${{ inputs.commands || 'pnpm install --frozen-lockfile, pnpm --filter @dependfix/platform exec nuxt prepare, pnpm lint, pnpm build, pnpm typecheck, pnpm test' }}

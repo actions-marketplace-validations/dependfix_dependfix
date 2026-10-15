@@ -91,6 +91,13 @@ jobs:
       # 自指面：本文件为 yml，不在脚本扫描面（仅 md）内，新增注释不参与扫描。
       # 阻断强度：workflow 级阻断信号（仓库未配置 required status checks，与 visual job 同口径）。
       - run: pnpm run check:experience-landing
+      # 自用验证链一致性门禁：本仓库 .github/workflows/security-auto-fix.yml 的自用 `commands` 链
+      # 必须覆盖引擎默认链（packages/engine/src/runners/verification-runner.ts）的全部语义项——
+      # CLI `--commands` 为整链替换语义，默认链扩展不会自动跟随自用链；差异项须在脚本声明表中显式登记。
+      # 负例标定：从自用链删去任一默认链语义项即 exit 1（本地已验），还原后 exit 0。
+      # 自指面：本文件为 yml，不在脚本比对的两处事实源内，新增注释不参与判定。
+      # 阻断强度：workflow 级阻断信号（仓库未配置 required status checks，与 visual job 同口径）。
+      - run: pnpm run check:verify-chain
       # docs 构建前置：VitePress 会把 markdown 中的裸 HTML 当作 Vue 模板编译（缺结束标签即失败），
       # lint-md/check-docs 均不检查标签配对——docs 构建失败必须尽早暴露，不等 typecheck/test/build 跑完
       # （教训见经验归档 §三十三：release.md 裸 <path> 导致 Test/Pages 双 workflow 在末尾构建才失败）
