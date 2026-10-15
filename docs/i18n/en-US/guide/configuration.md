@@ -38,7 +38,7 @@
 | `maxRetries` | `DEPENDFIX_MAX_RETRIES` | `number` | `3` | GitHub API rate-limit retries (0-10; 0=off). For 429 / primary rate limit (403 + remaining=0) / secondary rate limit (403/429 signatures), exponential backoff (reset header priority, max 30s); permission 403 does not retry |
 | `upgradeGroups` | `DEPENDFIX_UPGRADE_GROUPS` | `Record<string, string[]>` | — | User-explicit dependency groups (overrides auto-grouping), format `name1:pkg1,pkg2;name2:pkg3` (semicolon between groups, colon between group name and packages, comma between packages). Default: auto-grouping — `dependabot.yml groups` → `@types` merge → scope/prefix heuristic → single-package. See [dependency grouping design](https://github.com/dependfix/dependfix/blob/master/docs/design/governance/architecture) |
 | `verbose` | — | `boolean` | `false` | Verbose logging (CLI `--verbose` only) |
-| `commands` | — | `string[]` | — | Custom verification commands (CLI `--commands` only) |
+| `commands` | — | `string[]` | — | Custom verification commands (CLI `--commands` only); **replaces the whole default chain** (no merging) |
 | `history` | — (CLI `--history` only) | `string` | — | Query repo history run summary (read `dependfix-reports/index.json`, reverse chronological, repo-level count), **does not run scan**, no token/repo required; with run flags history takes precedence, others ignored |
 
 ## GitHub auth token permission mapping

@@ -34,6 +34,12 @@
 |---|---|---|
 | `pnpm check:orphan-ids` | `check-orphan-ids.mjs` | 检测非 `docs/` 源码 / 配置 / 脚本注释中的孤立规划编号（无文档指针即违规；判定口径与已知边界见脚本头注释 + [开发规范 §3](../docs/standards/development.md#3-注释规范)）；`--json` 机读；**已接入 CI Test job（命中即阻断）** |
 
+### 仓库自洽门禁
+
+| pnpm 命令 | 脚本 | 用途 |
+|---|---|---|
+| `pnpm check:verify-chain` | `check-verify-chain.mjs` | 校验本仓库自用验证链（`.github/workflows/security-auto-fix.yml` 的 `commands` 回退值）覆盖引擎默认链（`packages/engine/src/runners/verification-runner.ts`）的全部语义项（按语义项比对；额外项与缺失项须在脚本声明表中登记理由）；面差背景与整链替换语义见 [GitHub Action 工作流契约](../docs/design/governance/github-action-workflow.md)；**已接入 CI Test job（命中即阻断）** |
+
 ### i18n 审计
 
 > 平台 locale 资源位于 `apps/platform/i18n/locales/`（脚本已参数化 `--locale-root`，兼容单文件与模块化两种形态）；治理规范见 [i18n 规范](../docs/standards/i18n.md)。

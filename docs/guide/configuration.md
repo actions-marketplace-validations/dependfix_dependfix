@@ -38,7 +38,7 @@
 | `maxRetries` | `DEPENDFIX_MAX_RETRIES` | `number` | `3` | GitHub API 限流重试次数（0-10；0=关闭）。对 429 / primary rate limit（403 + remaining=0）/ secondary rate limit（403/429 特征）指数退避重试（reset 头优先，上限 30s）；权限类 403 不重试 |
 | `upgradeGroups` | `DEPENDFIX_UPGRADE_GROUPS` | `Record<string, string[]>` | — | 用户显式依赖分组（覆盖自动分组），格式 `name1:pkg1,pkg2;name2:pkg3`（分号分隔组、冒号分隔组名与包列表、逗号分隔包名）。缺省时使用自动分组：`dependabot.yml groups` → `@types` 归并 → scope/前缀启发式 → 单包。详见 [依赖分组设计](../design/modules/dependency-grouping.md) |
 | `verbose` | — | `boolean` | `false` | 详细日志输出（仅 CLI `--verbose`） |
-| `commands` | — | `string[]` | — | 自定义验证命令（仅 CLI `--commands`） |
+| `commands` | — | `string[]` | — | 自定义验证命令（仅 CLI `--commands`）；**整链替换**默认链，不做合并 |
 | `history` | —（仅 CLI `--history`） | `string` | — | 查询仓库历史运行摘要（读 `dependfix-reports/index.json`，倒序时间，计数为仓库级口径），**不执行扫描**、不要求 token/仓库配置；与运行参数并存时 history 优先、其余参数忽略 |
 
 ## GitHub 认证 Token 权限映射

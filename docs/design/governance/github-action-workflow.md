@@ -51,7 +51,7 @@ branding:
 | `code-scanning` | string | `false` | 同时拉取 Code Scanning alerts（与 Dependabot 并行源；需 token 具备 `security-events: read`） |
 | `ai-api-token` | string | `''` | AI API Token（M5 联调，经 GitHub Secrets 传入） |
 | `ai-api-base-url` | string | `''` | AI API Base URL（M5 联调，支持多 AI 提供商） |
-| `commands` | string | `''` | 自定义验证命令（逗号分隔，覆盖默认 `install + lint + build + typecheck + test` 链）。Nuxt 项目需先 `nuxt prepare`（lint 依赖 `.nuxt/tsconfig.json` 生成物），否则 eslint 解析失败——run 31552922137 教训。例：`pnpm install --frozen-lockfile, pnpm --filter @dependfix/platform exec nuxt prepare, pnpm lint, pnpm build, pnpm typecheck, pnpm test`。**注意**：`--commands` 是整链替换（逐条替换，不做合并），默认链内的 `typecheck` / `test` 需按该仓库实际验证面显式保留 |
+| `commands` | string | `''` | 自定义验证命令（逗号分隔，覆盖默认 `install + lint + build + typecheck + test` 链）。Nuxt 项目需先 `nuxt prepare`（lint 依赖 `.nuxt/tsconfig.json` 生成物），否则 eslint 解析失败——run 31552922137 教训。例：`pnpm install --frozen-lockfile, pnpm --filter @dependfix/platform exec nuxt prepare, pnpm lint, pnpm build, pnpm typecheck, pnpm test`。**注意**：`--commands` 是**整链替换**（逐条替换，不做合并），**默认链扩展不会自动跟随**——默认链内的 `typecheck` / `test` 需按该仓库实际验证面显式保留 |
 | `github-token` | string | **必填** | GitHub Token（需 security-events 权限） |
 
 > **M4 接入建议（2026-08-06）**：多仓库治理参数（`owner` / `repo-*` / `max-concurrency` / `max-retries`）已接入 Action 输入。**建议为每个仓库单独配置 action**（而非跨仓库 owner 发现）：
@@ -107,6 +107,8 @@ steps:
 ```
 
 > dogfooding 时 `uses: ./` 的 action_path 即 `$GITHUB_WORKSPACE`；action 内置的 checkout 步骤会再次 checkout 同一仓库（同 ref），行为与改动前一致。
+>
+> **自用链与引擎默认链的一致性门禁**：该 workflow 的 `commands` 回退值是一条自用链（引擎默认链 + `nuxt prepare` 前置）。因 `--commands` 为整链替换，引擎默认链扩展时自用链不会自动跟随，故由 `pnpm run check:verify-chain`（CI Test job 阻断）校验「自用链覆盖默认链全部语义项，差异项须在脚本声明表中登记理由」；判定口径与声明表见 `scripts/check-verify-chain.mjs` 头注释。
 
 ---
 
@@ -200,7 +202,7 @@ permissions:
 | `GITHUB_TOKEN` 访问 Dependabot alerts | ⚠️ **恒 403 `Resource not accessible by integration`**：Actions App 无 Dependabot alerts 权限，`permissions: security-events` 无法授予（与官方文档矛盾，社区 #60612 未修复）。必须使用带 `security_events`（classic PAT）/ `Dependabot alerts: read`（fine-grained PAT）或 GitHub App token。详见 [G2](../../plan/archive/todo-archive-phases-m2-m55.md#g2-处置记录-github_token-无法访问-dependabot-alerts) |
 | 其他 fetch 权限错误（401/403，非 GITHUB_TOKEN 固有限制） | ✅ 已修复（T-G2-1）：CLI 硬失败退出（无成功 → exit 2），错误信息附 token 指引 |
 | pnpm 构建失败 | workflow 在 build 步骤失败，不执行 CLI |
-| CLI 运行超时 | `timeout-minutes: 15` 触发，workflow 被取消 |
+| CLI 运行超时 | `timeout-minutes: 25`（自举验证链含测试段后由 15 提高，见 `.github/workflows/security-auto-fix.yml`）触发，workflow 被取消 |
 | `fix-and-pr` 模式 | M2 stub：输出提示 "not implemented in M1"，exit 0 |
 | `dry-run=true` | 打印计划操作，不修改文件，报告包含 dry-run 标记 |
 
