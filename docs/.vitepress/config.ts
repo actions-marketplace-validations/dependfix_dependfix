@@ -1,4 +1,10 @@
 import { defineConfig } from 'vitepress'
+import {
+    CLICK_HANDLER_MARKER,
+    injectFallbackTargetMeta,
+    LANGUAGE_SWITCH_CLICK_HANDLER,
+    writeFallbackEntries,
+} from './i18n-fallback.mjs'
 
 // VitePress 多语言配置（[archive/todo-archive-phases-m26.md §M26.3](https://github.com/dependfix/dependfix/blob/master/docs/plan/archive/todo-archive-phases-m26.md#m263-p2--治理--ux-c69-文档站--包-readme-多语言-en-us-p07-commits--860-行--standard-depth-audit) + [docs-and-readme-i18n.md §6.1](../design/governance/docs-and-readme-i18n.md)）。
 //
@@ -149,10 +155,24 @@ export default defineConfig({
     // 复制而非符号链接，避免 Windows + WSL 跨平台 symlink 兼容问题）
     head: [
         ['link', { rel: 'icon', type: 'image/svg+xml', href: '/brand/favicon.svg' }],
+        // 未翻译页语言菜单走整页导航的客户端补丁（捕获阶段先于 VitePress 路由处理器）；
+        // 标记用 data 属性（内联脚本的注释会被构建期压缩移除）
+        ['script', { 'data-i18n-fallback-handler': CLICK_HANDLER_MARKER }, LANGUAGE_SWITCH_CLICK_HANDLER],
     ],
 
     rewrites(id) {
         return id.replace(translatedDocSourcePattern, '$1/')
+    },
+
+    // 语言切换兜底入口页：未翻译页的 `/en-US/<同路径>` 在构建产物中补一个可用入口页，
+    // 避免语言菜单落到 404（依据 [i18n 规范 §2.1](../standards/i18n.md) `source-only` 分层）。
+    // 入口页不在客户端路由表中，故注入「目标标记 + 捕获阶段点击补丁」让语言切换走整页导航。
+    transformPageData(pageData, ctx) {
+        return injectFallbackTargetMeta(pageData, ctx)
+    },
+
+    async buildEnd(siteConfig) {
+        await writeFallbackEntries(siteConfig)
     },
 
     locales: {
