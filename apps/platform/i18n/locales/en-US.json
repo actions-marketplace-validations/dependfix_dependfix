@@ -801,7 +801,10 @@
             "filterAll": "All",
             "clearFilters": "Clear filters",
             "failureStageSummary": "Failure stage distribution:",
-            "exportLogs": "Export filtered logs",
+            "exportLogs": "Export current page",
+            "exportMenuLabel": "Export scope",
+            "exportAllLogs": "Export all filtered logs ({total} total)",
+            "exportAllLogsOverLimit": "Export all filtered logs ({total} total; over the {limit}-run limit)",
             "errors": {
                 "loadFailed": "Failed to load: {message}",
                 "summaryFailed": "Failed to load summary: {message}",
@@ -854,8 +857,8 @@
             "en": "No exportable execution logs"
         },
         "RUN_LOGS_EXPORT_TOO_LARGE": {
-            "zh-CN": "导出内容超出上限，请缩小筛选范围后重试",
-            "en": "Export exceeds the size limit; narrow the filters and retry"
+            "zh-CN": "导出内容超出上限，请缩小筛选范围或减少单次导出的运行数",
+            "en": "Export exceeds the limit; narrow the filters or reduce the number of runs per export"
         },
         "RUNS_VALIDATION_FAILED": {
             "zh-CN": "查询参数校验失败",

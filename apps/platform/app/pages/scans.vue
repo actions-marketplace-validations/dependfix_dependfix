@@ -17,9 +17,10 @@
 // - 不引入多组织；不重写后端聚合；不动 dashboard.vue；不动 batch-runs 跨仓库视图
 // - 不破坏既有 alerts-rowgroup / history-dialog / 视图切换 / dedupe 行为
 import { Download, Eye, Funnel, RefreshCw, X } from '@lucide/vue'
-import type { DataTableColumn, DataTablePageEvent } from 'caomei-ui'
+import type { DataTableColumn, DataTablePageEvent, SplitButtonMenuItem } from 'caomei-ui'
 import {
     alertsFound,
+    buildExportScopeItems,
     failureKindLabel,
     failureStageLabel,
     RUN_FAILURE_KIND_OPTIONS,
@@ -179,10 +180,17 @@ const clearRunFilters = () => {
 }
 
 /**
- * 批量导出当前筛选条件下的执行日志（合并单 txt 附件）。
- * 筛选口径与 runs 列表一致（repositoryId + 失败分类三维度）；服务端对超限返回 413。
+ * 批量导出执行日志（合并单 txt 附件）。
+ *
+ * 范围两档（服务端同口径，见 `server/api/runs/logs-export.get.ts`）：
+ * - `page`（主按钮）：导出**当前页**——传列表同一 `page` / `pageSize`，服务端按该窗口取数，
+ *   与屏幕上看到的行一致；窗口自身有界，不会被全量运行数上限拦截。
+ * - `all`（菜单项）：导出当前筛选命中的全部 run（不传分页参数）；命中数 > `EXPORT_RUNS_LIMIT`
+ *   时服务端返回 413，菜单项在超限时已禁用并标注原因。
+ *
+ * 范围参数**必须显式传入**（不给缺省值）：模板 `@click` 直绑会把 `MouseEvent` 当范围传进来。
  */
-const exportLogs = async () => {
+const exportLogs = async (scope: 'page' | 'all') => {
     exporting.value = true
     error.value = ''
     try {
@@ -198,6 +206,10 @@ const exportLogs = async () => {
         }
         if (filters.failureKind !== FILTER_ALL) {
             query.set('failureKind', filters.failureKind)
+        }
+        if (scope === 'page') {
+            query.set('page', String(page.value))
+            query.set('pageSize', String(pageSize.value))
         }
         const suffix = query.toString()
         await downloadFile(`/api/runs/logs-export${suffix ? `?${suffix}` : ''}`, 'runs-logs.txt')
@@ -221,6 +233,17 @@ const first = ref(0)
  * `pageSize` / `first` 的语义与下游 `fetchRuns` 用法保持不变。
  */
 const page = computed(() => Math.floor(first.value / pageSize.value) + 1)
+
+/**
+ * 导出范围菜单项（SplitButton 二级入口）：仅「全部筛选结果」一档——主按钮已覆盖「当前页」。
+ * 文案与禁用态由 `buildExportScopeItems` 决定（纯函数，两档均有单测）。
+ */
+const exportScopeItems = computed<SplitButtonMenuItem[]>(() => buildExportScopeItems(total.value, t).map((item) => ({
+    ...item,
+    command: () => {
+        void exportLogs('all')
+    },
+})))
 
 // query ?repository= 与 query ?run= 解析（scans 页面三态入口）
 const repositoryIdQuery = computed(() => {
@@ -677,18 +700,21 @@ onMounted(refresh)
                             </CaomeiButton>
                         </div>
                         <div class="scans__run-filter-field scans__run-filter-field--action">
-                            <CaomeiButton
+                            <CaomeiSplitButton
                                 tone="neutral"
                                 variant="ghost"
                                 size="sm"
+                                :model="exportScopeItems"
+                                :disabled="total === 0 || exporting"
                                 :loading="exporting"
-                                @click="exportLogs"
+                                :menu-label="t('scans.runList.exportMenuLabel')"
+                                @click="exportLogs('page')"
                             >
                                 <template #icon>
                                     <CaomeiIcon :icon="Download" />
                                 </template>
                                 {{ t('scans.runList.exportLogs') }}
-                            </CaomeiButton>
+                            </CaomeiSplitButton>
                         </div>
                     </div>
                     <div v-if="failureStageCounts.length > 0" class="scans__failure-summary">

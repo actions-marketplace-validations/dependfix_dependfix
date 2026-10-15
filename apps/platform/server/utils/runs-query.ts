@@ -4,10 +4,11 @@ import { ScanRun, SCAN_RUN_STATUSES, type ScanRunStatus } from '#server/entities
 import { RUN_FAILURE_KINDS, RUN_FAILURE_STAGES, type RunFailureKind, type RunFailureStage } from '#server/services/run-failure-classify'
 
 /**
- * runs 列表（GET /api/runs）与日志导出（GET /api/runs/logs-export）共用的筛选解析。
+ * runs 列表（GET /api/runs）与日志导出（GET /api/runs/logs-export）共用的筛选与分页解析。
  *
  * 抽出的动机：两处必须使用同一套白名单与多值解析口径，避免「列表能筛、导出不能筛」
- * 或白名单漂移；导出端点不引入分页（见各端点自身）。
+ * 或白名单漂移；分页参数由 `runsPaginationShape` 共用（导出侧仅在**显式传入**时按窗口取数，
+ * 判定见各端点自身）。
  */
 
 /**
@@ -42,6 +43,26 @@ export const runsFilterSchema = z.object({
 })
 
 export type RunsFilterInput = z.infer<typeof runsFilterSchema>
+
+/**
+ * runs 分页参数（列表 `GET /api/runs` 与日志导出共用，单一事实源）。
+ *
+ * - `page`：默认 1，最小 1
+ * - `pageSize`：默认 `RUNS_PAGE_SIZE_DEFAULT`，上限 `RUNS_PAGE_SIZE_MAX`（超出静默钳制，不抛错）
+ *
+ * **必须同源**：窗口导出的 `skip` / `take` 与列表页宽取自同一常量——任一侧单独改，会让
+ * 「导出当前页」与屏幕所见**取数错位**（不止是提示不一致）。故两侧共用本片段，禁止在端点内
+ * 各自复制一份。
+ */
+export const RUNS_PAGE_SIZE_DEFAULT = 100
+export const RUNS_PAGE_SIZE_MAX = 200
+
+/** 分页参数 schema 片段（端点 `.extend({ ...runsPaginationShape })` 复用） */
+export const runsPaginationShape = {
+    page: z.coerce.number().int().min(1).default(1),
+    pageSize: z.coerce.number().int().min(1).default(RUNS_PAGE_SIZE_DEFAULT)
+        .transform((v) => Math.min(v, RUNS_PAGE_SIZE_MAX)),
+}
 
 /**
  * 按筛选 + 组织隔离构建 where。

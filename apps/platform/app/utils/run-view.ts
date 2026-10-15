@@ -46,6 +46,39 @@ export const RUN_FAILURE_STAGE_OPTIONS = [
 /** 处置建议下拉选项顺序（同上） */
 export const RUN_FAILURE_KIND_OPTIONS = ['transient', 'deterministic', 'unknown'] as const
 
+/**
+ * 批量日志导出的**全量导出**运行数上限（前端镜像，仅用于预判「导出全部筛选结果」是否可用）。
+ *
+ * 权威值在服务端 `server/api/runs/logs-export.get.ts` 的 `MAX_EXPORT_RUNS`（超限 413 兜底）；
+ * 前端镜像只决定菜单项的可点状态与文案，两类漂移后果均为「提示与 413 不一致」而不会放行越权导出。
+ * 两侧等值由 `server/api/runs/runs-logs.test.ts` 的断言锁定。
+ */
+export const EXPORT_RUNS_LIMIT = 100
+
+/** 导出范围菜单项（纯渲染数据；`command` 由页面注入，便于单测覆盖两档文案与禁用态） */
+export interface ExportScopeItem {
+    label: string
+    disabled: boolean
+}
+
+/**
+ * 「导出全部筛选结果」菜单项（SplitButton 二级入口）。
+ *
+ * 主按钮已覆盖「当前页」，菜单只承载全量一档：命中数 > `EXPORT_RUNS_LIMIT` 时禁用并标注原因
+ * （超限点按只会拿到 413，禁用可免去一次必然失败的操作）。
+ */
+export const buildExportScopeItems = (total: number, t: Translator): ExportScopeItem[] => {
+    const overLimit = total > EXPORT_RUNS_LIMIT
+    return [
+        {
+            label: overLimit
+                ? t('scans.runList.exportAllLogsOverLimit', { total, limit: EXPORT_RUNS_LIMIT })
+                : t('scans.runList.exportAllLogs', { total }),
+            disabled: overLimit,
+        },
+    ]
+}
+
 /** 失败阶段 i18n 标签（null → null；未知阶段原样返回） */
 export const failureStageLabel = (stage: string | null | undefined, t: Translator): string | null => {
     if (!stage) {

@@ -5,18 +5,15 @@ import { ensureDatabaseInitialized } from '#server/database'
 import { requireAuth } from '#server/utils/guard'
 import { createLocalizedError } from '#server/utils/localized-error'
 import { resolveOrganizationId } from '#server/utils/organization'
-import { buildRunsWhere, runsFilterSchema } from '#server/utils/runs-query'
-
-const PAGE_SIZE_DEFAULT = 100
-const PAGE_SIZE_MAX = 200
+import { buildRunsWhere, runsFilterSchema, runsPaginationShape } from '#server/utils/runs-query'
 
 /**
  * 查询参数 schema（todo.md §M14.2 UX-R1 + §M16.1）：
  * - repositoryId / status / failureStage / failureKind：共用筛选（`runsFilterSchema`，列表与日志导出同口径）
  * - ids：可选，逗号分隔 run id 列表（alerts.vue §openRunSidebar 复用，todo.md §T1306）
  *   —— 修复 silent bug：原 server 不识别 `ids`，alerts sidebar 实际拿到全量 run 而非该告警 affected runs
- * - page：默认 1，最小 1
- * - pageSize：默认 100，上限 200（超出自动钳制，不抛错；防止单次拉取过大影响性能）
+ * - page / pageSize：共用分页片段（`runsPaginationShape`，默认 1 / 100，`pageSize` 超上限静默钳制；
+ *   与日志导出的窗口取数同源——两侧各改一份会让「导出当前页」与屏幕所见错位）
  *
  * organizationId 不暴露为 query 参数：服务端隐式从默认组织注入（单组织模型），
  * 与 batch-runs/schedules/repos 列表 handler 风格一致（todo.md §M16.1 组织隔离）。
@@ -24,9 +21,7 @@ const PAGE_SIZE_MAX = 200
 const querySchema = runsFilterSchema.extend({
     ids: z.string().optional()
         .transform((v) => (v && v.length > 0 ? v : undefined)),
-    page: z.coerce.number().int().min(1).default(1),
-    pageSize: z.coerce.number().int().min(1).default(PAGE_SIZE_DEFAULT)
-        .transform((v) => Math.min(v, PAGE_SIZE_MAX)),
+    ...runsPaginationShape,
 })
 
 const toView = (r: ScanRun) => ({
