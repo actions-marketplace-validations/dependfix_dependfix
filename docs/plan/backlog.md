@@ -63,25 +63,12 @@
 - **PR Check 三源信号的 provider 原生日志富化（待评估）** —— 现象：M43.2 已完成三源（Checks + Commit Statuses + Deployments）归一化、聚合状态与失败源清单，但失败详情只到 provider / 信号层，**无 provider 原生 API 日志**（D2 裁定首批不做，留后续增量）。待评估点：是否接入 Vercel / Cloudflare / GitHub Actions 的原生失败日志拉取（需 provider 凭据承载面 + 配额控制 + 输出脱敏 + 单行 JSON 膨胀控制）。触发条件：用户报告「信号已失败但无日志可看」时。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
-- **零告警仓库的修复前基线采样成本（待评估）** —— 现象：M43.3 已使零告警仓库跳过 lockfile repair，但**修复前基线采样**仍执行一次完整验证链（其时机须早于修复动作写盘、无法后移），零告警仓库因此仍承担一次 install / verify 成本；同时该仓库的「处理成功」信号依赖修复后验证链的 `verificationPassed`（跳过会使多仓出口码判定退化）。待评估点：① 拆分 `prepareRepoFix` 的只读抓取与写盘两段，把「取告警」前移到基线采样之前，使零告警仓库完全不采样；② 或为零告警仓库引入显式「处理成功」信号以取代 `verificationPassed`。触发条件：零告警仓库占比高、install / verify 成为运行时长瓶颈时。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
-
-- **PR Check 告警关注集（可配置面）（待评估）** —— 现象：M43.2 的 D3 裁定为「全量只报警不阻断」（不引入配置面），因此任一非关注 check（如 provider 的 lint-only / preview 构建）失败都会进入告警面，长期可能产生噪音。待评估点：是否引入仓库级关注集（按 check 名 / provider / 状态过滤）以降低噪音，以及与「只报警不阻断」语义的兼容边界。触发条件：出现「告警噪音」反馈时。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
-
 - **`alerts.vue` 存在一处闲置的 `useFixNow()` 解构（待评估）** —— 现象：`apps/platform/app/pages/alerts.vue` 顶部解构 `{ fixingRunId, fixError, fixSuccess, triggerFix }` 但全文件未使用（真正的「立即修复此仓库」入口在子组件 `alert-run-sidebar.vue`），伴随的注释也仍在描述已抽走的流程；该孤立实例同样不消费后加的 `fixMerged`。
   - **待评估点**：① 直接删除该解构 + 收敛注释（零行为风险）；② 或反向确认是否存在未接线的预期入口（若存在则补齐而非删除）。
   - **触发条件**：下次改动 `alerts.vue` 时（该文件已处 max-lines warning 带，顺带减法更划算）。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
-- **运行失败「受约束重试入口」（延后，保留待评估）** —— 「分类 + 筛选 + 展示」（`failure_code` / `failure_stage` / `failure_kind` 三列 + 三维筛选 + 阶段展示）已落地；设计稿 §5.5 的「仅 `transient` 可一键重试」入口（含非终态守卫 / 同仓库去重 / `retriedFromRunId` 审计来源）按用户 2026-10-06 决策延后。**现状锚点**：[run-failure-taxonomy.md §5.5](../design/governance/run-failure-taxonomy.md)。触发条件：① 分类 + 筛选上线后确认重试诉求；② 用户明确要求受约束重试。
-
 - **扫描偏好服务端跨设备默认（延后，保留待评估）** —— 设备级方案 C 混合（localStorage：上次选择 + 可选配置化默认 + 重置）已落地；服务端用户 / 组织级默认偏好（跨设备、可管理，需实体 / API / 设置页，预计触发 governance 文档）按用户 2026-10-06 决策延后。**现状锚点**：`apps/platform/app/composables/use-scan-preferences.ts`。触发条件：① 用户实测多设备切换痛点；② 组织级统一默认诉求。
-
-- **队列 worker 进程按 role 跳过周期插件（待评估）** —— 独立 worker 进程形态的已知边界：worker 与 HTTP 进程共享同一 Nitro 产物，会重复启动 `stale-cleanup` / 启动期备份等周期插件（均幂等，代价为重复 DB 查询与日志）。
-  - **待评估点**：引入 `DEPENDFIX_ROLE`（server / worker）让 worker 跳过 HTTP-only 插件；或按 `inProcessWorker` 条件跳过（注意单进程形态下该值为 true，不能跳过）。
-  - **触发条件**：周期插件重复造成可观测噪声或资源浪费时；或用户要求。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
 - **`repo-history-dialog` history 模式与 legacy `/repos/[id]/runs` 页疑似无入口死代码（待评估）** —— 现象：全仓仅 `scans.vue` 以 `:query-key="'run'"` 挂载 `repo-history-dialog`；`repos.vue` 的历史入口已改为跳 `/scans?repository=`，故组件的 history 模式（list 视图 / 「返回列表」分支 / `queryKey='history'` 默认值）当前**不可达**；legacy 页 `app/pages/repos/[id]/runs.vue` 亦无站内链接（其注释引用的 backlog 删除候选已不存在）。
   - **待评估点**：① 删除 history 模式分支 + 收敛组件为单一 run 模式（减法）；② 或恢复 history 挂载点（若确有按仓库浏览历史的需求，可复用扫描页 `/scans?repository=` 路径）；③ legacy `/repos/[id]/runs` 页是否随 history 模式一并删除。
@@ -113,11 +100,6 @@
   - **触发条件**：出现企业私服 CDN 域被拦的实例；或用户要求自动化。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
-- **浮层类组件视觉覆盖扩面（`Drawer` / `Tabs` / `Popover` / `Toast` 落点页）（待评估）** —— 现象：caomei-ui `0.6.0` 的浮层类语义变更（`drawer` / `popover-content` / `tabs-list` / `toast` / `color-picker` / `date-picker` / `multi-select` / `auto-complete` / `dropdown-menu-content` 背景改 `bg-elevated`、`popover` 圆角 `radius-lg`、`tabs` 列表 overflow 与分隔线重写）落在 `schedules.vue` / `scans.vue` / `alert-run-sidebar.vue` 等页面，而视觉回归最小集（M32.5 既定边界：alerts / repos / pr-checks / dialog-import-repos / login + `dialog-select-open-<theme>`）**不覆盖**这些落点页 → 该类变更当前只靠 e2e 行为断言兜底，无像素守卫。依据 [caomei-ui-migration.md §15.15](../design/governance/caomei-ui-migration.md#1515-caomei-ui-060-升级回归实证插队热修2026-10-12)。
-  - **待评估点**：① 是否把这些落点页纳入视觉基线（页面级 vs 元素级；门户面板须视口级截图，模式见 [迁移评估 §15.14](../design/governance/caomei-ui-migration.md#1514-caomei-ui-050-升级实证m3422026-10-01) + `tests/visual/dialog-select-layer.visual.test.ts`）；② 覆盖优先级（`schedules` 表单浮层 > `scans` 弹窗 > `alert-run-sidebar`）；③ 基线数量与 CI 时长预算。
-  - **触发条件**：再次出现组件库浮层类视觉变更未被门禁捕获；或用户要求扩面视觉覆盖。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
-
 - **`check-orphan-ids` 对「子任务字母后缀」形态编号的覆盖缺口（待评估）** —— 现象：`scripts/check-orphan-ids.mjs` 的 `PLANNING_ID_RE` 覆盖 `M\d{1,2}(\.(\d{1,2}|x))?`，**不含**子任务字母后缀形态（如 `M43.2a` / `M43.2b`）；源码注释或测试名写入该类编号时门禁报 0 命中（A 阶段审计实测：`M43.2b` 多处无文档指针仍通过）。
   - **待评估点**：① 扩展正则至 `M\d{1,2}(\.(\d{1,2}|x)[a-z]?)?` 并评估误报面（既有真常量白名单是否需同步）；② 或明确该类形态属「文档指针可省」并在注释规范中登记边界。
   - **触发条件**：再次出现源码注释引入子任务字母后缀编号而未被门禁捕获；或加固编号门禁时。
@@ -126,11 +108,6 @@
 - **`dialog-select-open-dark` 视觉基线的运行间非确定性（待评估）** —— 现象：`--update-snapshots=all` 重建时该基线多次产出与上一次不同但极接近的字节（实测差异约 28px / ratio 0.002% / maxΔ 35，集中在弹窗内 Select 面板的一小块区域），不带 update 复跑则稳定通过（差异远低于 `maxDiffPixels: 100` 预算）。2026-10-12~13 三次重建各复现一次（M43.1 / M43.2b / M43.2c 批次），均已还原为已提交版本。
   - **待评估点**：① 是否为暗色浮层阴影 / 抗锯齿在门户面板上的舍入抖动（需定位具体像素来源）；② 是否需扩大该基线的 `data-visual-mask` 覆盖区或改元素级截图；③ 是否接受为已知边界（当前不影响门禁判定）。
   - **触发条件**：该基线在**不带 update** 的复跑中失败（即超出容差）；或用户要求清理视觉基线噪声。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
-
-- **本仓库自用 dependfix 验证链与引擎默认链的面差（待评估）** —— 现象：`.github/workflows/security-auto-fix.yml` 的 `commands` 回退链为 `install → nuxt prepare → lint → build → typecheck`（2026-10-14 随 M44.1 补入 `typecheck`），而引擎默认链为 `install → lint → build → typecheck → test`——自用链**未含 `test`**。该项自 [M29.3 归档段](archive/todo-archive-phases-m29.md) 将 `test` 纳入引擎默认链（2026-09-21）后即成面差；本文件的自定义链自 2026-08-12 引入（run 31552922137 的 prepare 修复）起即固定为「install + prepare + lint + build」，属既有状态、非 M44.1 引入（该批次用户裁定仅补 `typecheck`）。
-  - **待评估点**：① 自用链是否补齐 `test`（`pnpm test` ≈ 全量 vitest 运行，容器内耗时上升）；② 或维持面差并以注释显式登记理由（该修复 PR 仍由本仓库 Test job 兜底）；③ 是否改 `commands` 的语义（当前为**整链替换**，追加语义可避免每次默认链扩展时自用链接口漂移）。
-  - **触发条件**：自用链放行的坏修复被本仓库 Test job 拦下时；或 `commands`（整链替换 vs 追加）被重新设计时。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
 - **归档索引表格行的成对错位强调（`**；**` 形态，待评估）** —— 现象：`docs/plan/archive/index.md` 的 M16 / M17 等历史归档行内含 `` `**；**` ``（成对但无强调语义，渲染为加粗分号），系早期批次书写惯例遗留；此类 `**` 计数为**偶数**，`check-docs` 的 `emphasis` 规则按定义只覆盖**未配对**（奇数计数）形态（[文档规范 §2](../standards/documentation.md) 已把「成对但语义错位」声明为显式盲区）。
@@ -167,6 +144,7 @@
 
 - **归档链接使用 `--`（双连字符）锚点形态在浏览器侧为死锚（待评估）** —— 现象：`docs/plan/**` 中 M4x 归档链接普遍写作 `#m43-pr-check-…--2026-10-14-归档`（双连字符），而 VitePress 构建产物 id 收敛为**单连字符**（实测 `id="m43-pr-check-能力补强-运行时可靠性与工程治理-2026-10-12-用户决策方案-a-2026-10-14-归档"`）；客户端路由 `getElementById(decodeURIComponent(hash).slice(1))` 不做归一化 → 点击锚点无法滚动到目标段（页面可正常加载）。`check:docs` 的 `normAnchor` 剥离全部标点（含 `-`）→ 门禁不报。**该形态在 HEAD 已普遍存在（M41/M42/M43 等），非 M44 归档批次引入**。
   - **待评估点**：① 批量把归档链接的 `--` 收敛为单连字符（并核对构建 id）；② 或在 `check-docs.mjs` 增加「锚点归一化后仍需与产物 id 一致」的规则（可机检子集 + 白名单）。
+  - **2026-10-15 M45 规划批次实测补充**：以 `docs:build` 产物 id 为权威复扫后，文档侧锚点与产物 id 存在**两类**系统性差异——(a) 非词字符（`:` / `/` / `（` / `.` / `~`）在产物侧转为单连字符（`M45: 收口（2026…A / 进行中）` → `m45-收口-2026…-a-进行中`），文档侧「去标点 + 空格转连字符」写法（含 `--`）与之不符；(b) **数字开头的章节号在产物侧带 `_` 前缀**（`### 1.1 硬性约束` → `_1-1-硬性约束`，文档侧普遍写 `#11-硬性约束`）。同批复扫另发现**存量缺段锚点 2 处**（`roadmap.md:41` 与 `archive/index.md` 指向 M31 归档段，缺段产物 id 为 `m31-apps-platform-ui-组件库迁移-primevue-→-caomei-ui-m31-1-m31-6-全部已闭环-2026-09-29-归档`）。**本批处置**：新增的 **M45 目标锚点**按产物 id 实证形态书写（如 `#m45-…-2026-10-15-用户决策方案-a`），不新增同类死锚；本批新增行中**沿用存量家族形态**的链接（指向 `planning.md` / `platform.md` / `caomei-ui-migration.md` / `todo-archive.md` 的 11 处，均为既有写法的复用）**不随本批改写法**——统一迁移归本候选（含上述 2 处缺段），以免在单批内制造同文件双形态。复现命令：`pnpm run docs:build` 后 `rg -o 'id="[^"]*"' docs/.vitepress/dist/plan/todo.html`。
   - **触发条件**：下次归档批次或文档门禁扩面时。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
@@ -324,9 +302,9 @@
 
 | 内容类型 | 位置 |
 |:--|:--|
-| 当前阶段活跃任务 | **无**——M44「验证链治本 + 文档门禁可信度收口」6 原子条目已于 2026-10-15 闭环并归档，见 [todo-archive.md §M44](todo-archive.md#m44-验证链治本--文档门禁可信度收口m441m446-全部已闭环--2026-10-15-归档) + [roadmap.md §M44](roadmap.md#m44-验证链治本--文档门禁可信度收口2026-10-14-用户决策方案-a--2026-10-15-已闭环--归档) |
-| 下一阶段（未授权） | 无——阶段归档完成后按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 评估本文件候选池后由用户决策 |
+| 当前阶段活跃任务 | **M45 进行中**——运行可靠性与交付链收口（6 原子条目，见 [todo.md §M45](todo.md#m45-运行可靠性与交付链收口-2026-10-15-用户决策方案-a) + [roadmap.md §M45](roadmap.md#m45-运行可靠性与交付链收口-2026-10-15-用户决策方案-a-进行中)） |
+| 下一阶段（未授权） | 无——本阶段闭环后按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 评估本文件候选池后由用户决策 |
 | 已完成阶段归档 | [todo-archive.md](todo-archive.md)（主窗口 + [archive/](archive/) 分片） |
-| 里程碑与阶段交付 | [roadmap.md](roadmap.md)（M0-M44 已归档） |
+| 里程碑与阶段交付 | [roadmap.md](roadmap.md)（M0-M44 已归档 + M45 进行中） |
 | 长期主线 / 候选 / 待人工验收 / 已知边界 | 本文档（按四象限结构） |
 | 历史归档索引 | [archive/index.md](archive/index.md) |
