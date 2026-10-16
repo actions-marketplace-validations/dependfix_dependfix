@@ -86,7 +86,7 @@ describe('fixDependency（fix_type 分发）', () => {
     })
 
     it('lockfile: maps success result (strategy/diff/lockfileVersion)', async () => {
-        repairMock.mockReturnValue({
+        repairMock.mockResolvedValue({
             success: true,
             strategy: 'REGENERATE',
             diff: { linesChanged: 12, packagesChanged: 3, summary: 'lockfile updated' },
@@ -108,7 +108,7 @@ describe('fixDependency（fix_type 分发）', () => {
     })
 
     it('lockfile: maps failure result (failureDetail as error)', async () => {
-        repairMock.mockReturnValue({
+        repairMock.mockResolvedValue({
             success: false,
             failureCategory: 'MANIFEST_MISMATCH',
             failureDetail: 'out of sync',
