@@ -464,24 +464,25 @@ describe('ContainerExecutor.execute - error paths', () => {
         expect(result.error?.code).toBe('execution_failed')
     })
 
-    it('returns execution_timeout when withTimeout triggers', async () => {
-        // 让 DependfixApp.run 返回永不解决的 promise → withTimeout 在 timeoutMs 后抛 ExecutionTimeoutError
+    it('returns execution_timeout, requests cancellation and waits out the grace period', async () => {
+        // 引擎永不主动结束；abort 后**异步**落定（超时错误先交付 → 覆盖"已落定"宽限期分支，
+        // 同步 resolve 会让 race 由引擎结果胜出、测不到该分支）
         const abort = vi.fn()
         dependfixAppMock.mockImplementation(function (this: { run: ReturnType<typeof vi.fn>, abort: ReturnType<typeof vi.fn> }) {
-            this.run = vi.fn().mockImplementation(() => new Promise(() => { /* never resolves */ }))
             this.abort = abort
+            this.run = vi.fn().mockImplementation(() => new Promise((resolve) => {
+                abort.mockImplementation(() => setTimeout(() => resolve(fakeDependfixRunResult(makeRunResult(), 1)), 20))
+            }))
         } as never)
-
-        // abortGraceMs 收窄：宽限期等待属设计内行为，用例不必真等 10s
-        const executor = new ContainerExecutor({ workRoot: tempRoot, timeoutMs: 50, abortGraceMs: 10 })
+        const executor = new ContainerExecutor({ workRoot: tempRoot, timeoutMs: 30, abortGraceMs: 2_000 })
         const ctx = makeCtx({ config: { ...baseConfig, mode: 'report-only' } })
         const result = await executor.execute(ctx)
 
         expect(result.exitCode).toBe(2)
         expect(result.error?.code).toBe('execution_timeout')
-        // 超时不再只是"放弃等待"：必须请求运行级取消（终止子进程树 + 停止启动新工作 +
-        // 放弃交付），否则引擎继续跑并与后续仓库争抢资源（2026-10-16 内核 OOM 级联）
+        // 超时不再只是"放弃等待"：必须请求运行级取消，且在清理工作目录前等引擎落定并留痕
         expect(abort).toHaveBeenCalledWith(expect.stringContaining('execution timeout'))
+        expect(result.logsJson).toContain('已在宽限期内落定')
     })
 
     it('does not leak workDir after execution (cleanup)', async () => {
