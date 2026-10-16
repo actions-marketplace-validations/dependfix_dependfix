@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
     applyFailureClassification,
@@ -63,6 +65,7 @@ const EXPECTED_MAPPINGS: Record<string, { stage: RunFailureStage, kind: RunFailu
     container_unavailable: { stage: 'runtime', kind: 'transient' },
     orchestration_failed: { stage: 'runtime', kind: 'unknown' },
     engine_exit_2: { stage: 'runtime', kind: 'deterministic' },
+    ABORTED: { stage: 'runtime', kind: 'transient' },
     FATAL: { stage: 'runtime', kind: 'unknown' },
     result_fetch_failed: { stage: 'runtime', kind: 'transient' },
     run_url_not_resolved: { stage: 'runtime', kind: 'transient' },
@@ -81,6 +84,15 @@ describe('run-failure-classify 常量集', () => {
             'source', 'clone', 'install', 'fix', 'verify', 'deliver', 'runtime', 'cleanup', 'unknown',
         ])
         expect(RUN_FAILURE_KINDS).toEqual(['transient', 'deterministic', 'unknown'])
+    })
+
+    it('测试清单与实现映射表键集完全一致（新增未同步即失败）', () => {
+        // 正向迭代（it.each）无法发现"实现有、用例无"——本断言补上反向集合核验，
+        // 使映射表新增 / 删除键位时必须同步 EXPECTED_MAPPINGS
+        const source = readFileSync(fileURLToPath(new URL('./run-failure-classify.ts', import.meta.url)), 'utf-8')
+        const implemented = [...source.matchAll(/^ {4}([A-Za-z_][A-Za-z0-9_]*): \{ stage:/gm)].map((m) => m[1])
+
+        expect(implemented.sort()).toEqual(Object.keys(EXPECTED_MAPPINGS).sort())
     })
 
     it('映射表所有 stage / kind 取值都在常量集内', () => {
