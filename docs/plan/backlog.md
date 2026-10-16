@@ -90,11 +90,6 @@
   - **触发条件**：两页继续增长致 warning 逼近上限；或用户要求清理。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
-- **`repo-fix.ts` 触及 `max-lines` 上限（800/800）的拆分候选（待评估）** —— 现象：`packages/engine/src/app/repo-fix.ts` 在 2026-10-16 取证留痕批次后达 800/800（eslint `max-lines: 800`，**注释与空行均计入**），该批次为不越线采用「替换既有语句（`progress.failed++` → `recordUpgradeFailure`）」而非新增语句的写法；此后任何新增语句都会触发新的 `max-lines` warning（lint 以 `--max-warnings 10` 通过，未阻断；该文件原本已 799/800 零余量）。
-  - **待评估点**：① 按既有先例拆出一个 step 函数（`applyMemberUpgrades` / `applyGroupUpgrades`，各约 130 行）为独立模块；② 或为该文件引入 `max-lines` per-file 例外并说明理由。
-  - **触发条件**：再次改动 `repo-fix.ts` 需要新增语句时（先拆分再改）。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
-
 - **列表页筛选 / 分页能力的共享抽取（待评估）** —— 现象：`repos.vue` 与 `batch-runs.vue` 各自实现客户端筛选 + 重置 + 内建分页（形态相近但字段与语义不同），`scans.vue` 另有按仓库客户端分页实现；三处筛选 / 分页样板重复。展示口径统一批次（M42.5）判定两页形态尚未完全一致，故先页面内实现。
   - **待评估点**：① 抽取 `useClientTableFilter`（搜索关键字 + 筛选态 + 重置 + 过滤结果）的收益与形态约束；② 或仅抽「搜索 + 重置」最小面；③ 与组件内建分页的边界（分页本身不抽）。
   - **触发条件**：第四处列表页需要同类能力时；或筛选逻辑变更需多处同步时。
