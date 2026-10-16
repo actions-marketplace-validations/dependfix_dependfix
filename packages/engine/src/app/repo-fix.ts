@@ -39,6 +39,7 @@ import {
     type AppContext,
 } from './helpers'
 import { verifyProject } from './verify-project'
+import { tryBatchVersionedOverrides, type VersionedOverrideBatchItem } from './repo-fix-batch'
 import { fetchDefaultBranch, fetchRepoAlerts, truncatedWarning } from './repo-alerts'
 import { alertsFetchTokenHint } from './token-hints'
 import { recordUpgradeFailure } from './upgrade-failure'
@@ -289,6 +290,7 @@ async function applyLockfileFixes(
     )
 
     const upgradedMultiVersion = new Set<string>()
+    const batchItems: VersionedOverrideBatchItem[] = []
     for (const alert of multiVersionAlerts) {
         if (upgradedMultiVersion.has(alert.packageName)) {
             continue
@@ -330,6 +332,14 @@ async function applyLockfileFixes(
             ctx.summary.alertsConverged++
             continue
         }
+        batchItems.push({ alert, versionedOverrides, targets })
+    }
+
+    // 合批快路径（≥2 个包）：把 K 次完整安装压到 1 次；失败则回滚并由下方逐包路径重试
+    const batched = batchItems.length > 1
+        && await tryBatchVersionedOverrides(ctx, repo, progress, batchItems)
+
+    for (const { alert, versionedOverrides } of batched ? [] : batchItems) {
         const snapshot = snapshotTrackedFiles(ctx.workDir)
         ctx.logger.info(`[multi-version] ${alert.packageName}: applying versioned overrides`, { overrides: versionedOverrides })
         const result = await applyVersionedOverrides({

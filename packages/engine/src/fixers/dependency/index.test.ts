@@ -40,6 +40,7 @@ function okInstallOutcome(): import('../../runners/process-control').TrackedComm
 import { classifyInstallFailure, formatInstallFailure } from './overrides-io'
 import {
     applyVersionedOverrides,
+    applyVersionedOverridesBatch,
     extractPrefix,
     parseMajorVersion,
     compareSemver,
@@ -754,6 +755,89 @@ describe('applyVersionedOverrides', () => {
 // ===========================================================================
 // ensurePnpmOverrides
 // ===========================================================================
+
+describe('applyVersionedOverridesBatch', () => {
+    let dir: string
+    let pkgPath: string
+    let lockfilePath: string
+    let workspaceYamlPath: string
+
+    beforeEach(() => {
+        dir = mkdtempSync(join(tmpdir(), 'dependfix-test-vo-batch-'))
+        pkgPath = join(dir, 'package.json')
+        lockfilePath = join(dir, 'pnpm-lock.yaml')
+        workspaceYamlPath = join(dir, 'pnpm-workspace.yaml')
+        writeFileSync(pkgPath, JSON.stringify({ name: 'test-project', version: '1.0.0' }, null, 2))
+        writeFileSync(lockfilePath, 'lockfileVersion: \'9.0\'\n')
+        writeFileSync(workspaceYamlPath, 'packages:\n  - \'.\'\n')
+        mockRunTrackedCommand.mockReset()
+        mockRunTrackedCommand.mockResolvedValue(okInstallOutcome())
+    })
+
+    afterEach(() => {
+        rmSync(dir, { recursive: true, force: true })
+    })
+
+    it('writes all packages into one overrides block and installs once', async () => {
+        const result = await applyVersionedOverridesBatch({
+            workDir: dir,
+            plans: [
+                { packageName: 'brace-expansion', overrides: { 'brace-expansion@1': '^1.1.21', 'brace-expansion@2': '^2.1.7' } },
+                { packageName: 'js-yaml', overrides: { 'js-yaml@3': '^3.14.2', 'js-yaml@4': '^4.3.2' } },
+            ],
+        })
+
+        expect(result.success).toBe(true)
+        // 单次安装（合批的全部意义所在）
+        expect(mockRunTrackedCommand).toHaveBeenCalledTimes(1)
+        const yamlContent = readFileSync(workspaceYamlPath, 'utf-8')
+        expect(yamlContent).toContain('brace-expansion@1: ^1.1.21')
+        expect(yamlContent).toContain('brace-expansion@2: ^2.1.7')
+        expect(yamlContent).toContain('js-yaml@3: ^3.14.2')
+        expect(yamlContent).toContain('js-yaml@4: ^4.3.2')
+        // 既有 packages 段保留
+        expect(yamlContent).toContain('packages:')
+    })
+
+    it('rolls back every package (and lockfile) when the single install fails', async () => {
+        const originalPkg = readFileSync(pkgPath, 'utf-8')
+        const originalLock = readFileSync(lockfilePath, 'utf-8')
+        const originalWorkspace = [
+            'packages:',
+            '  - \'.\'',
+            'overrides:',
+            '  existing-pkg: ^1.0.0',
+            '',
+        ].join('\n')
+        writeFileSync(workspaceYamlPath, originalWorkspace)
+        mockRunTrackedCommand.mockRejectedValue(new Error('ERESOLVE batch'))
+
+        const result = await applyVersionedOverridesBatch({
+            workDir: dir,
+            plans: [
+                { packageName: 'brace-expansion', overrides: { 'brace-expansion@1': '^1.1.21' } },
+                { packageName: 'js-yaml', overrides: { 'js-yaml@4': '^4.3.2' } },
+            ],
+        })
+
+        expect(result.success).toBe(false)
+        expect(result.error).toContain('ERESOLVE batch')
+        // 两个包的新增条目均被回滚，既有条目保留，lockfile 复原
+        const yamlContent = readFileSync(workspaceYamlPath, 'utf-8')
+        expect(yamlContent).not.toContain('brace-expansion')
+        expect(yamlContent).not.toContain('js-yaml')
+        expect(yamlContent).toContain('existing-pkg')
+        expect(readFileSync(lockfilePath, 'utf-8')).toBe(originalLock)
+        expect(readFileSync(pkgPath, 'utf-8')).toBe(originalPkg)
+    })
+
+    it('rejects an empty plan list without touching files', async () => {
+        const result = await applyVersionedOverridesBatch({ workDir: dir, plans: [] })
+
+        expect(result).toEqual({ success: false, error: 'no versioned overrides provided' })
+        expect(mockRunTrackedCommand).not.toHaveBeenCalled()
+    })
+})
 
 describe('ensurePnpmOverrides', () => {
     it('creates pnpm.overrides when pnpm field is missing', () => {

@@ -384,17 +384,37 @@ export async function overrideTransitiveDependency(
  * @param params - 包名、overrides 映射（`pkg@major` 或 `pkg` → `^target`）、工作目录
  * @returns 修复结果（fromVersion 为空字符串，表示多实例无单一来源版本）
  */
-export async function applyVersionedOverrides(
+/** 版本化 overrides 批量应用条目（一条 = 一个包的多 key overrides）。 */
+export interface VersionedOverridesPlan {
+    packageName: string
+    overrides: Record<string, string>
+}
+
+/** 批量应用结果（不抛错：失败经 `error` 文本暴露，成功可带 `warning`）。 */
+export interface VersionedOverridesApplyResult {
+    success: boolean
+    warning?: string
+    error?: string
+}
+
+/**
+ * 批量应用版本化 overrides：**一次写盘 + 一次安装**，失败整体回滚（含 lockfile）。
+ *
+ * 动机（2026-10-16 生产复盘）：逐包应用使单仓安装次数 = 可修包数（大仓实测 7–8 次），
+ * 每次安装都是完整依赖解析，是资源受限主机上内核 OOM 级联的放大器之一。
+ * [applyVersionedOverrides] 为单包薄包装，与本函数共用实现。
+ *
+ * 调用方应过滤掉 `overrides` 为空的条目；`error` 已按既有口径格式化（含冷却期等提示）。
+ */
+export async function applyVersionedOverridesBatch(
     params: {
-        packageName: string
-        versionedOverrides: Record<string, string>
         workDir: string
+        plans: VersionedOverridesPlan[]
     },
-): Promise<DependencyFixResult> {
-    const { packageName, versionedOverrides, workDir } = params
-    const entries = Object.entries(versionedOverrides)
-    if (entries.length === 0) {
-        return failResult(packageName, '', '', 'no versioned overrides provided')
+): Promise<VersionedOverridesApplyResult> {
+    const { workDir, plans } = params
+    if (plans.length === 0) {
+        return { success: false, error: 'no versioned overrides provided' }
     }
 
     const pkgPath = join(workDir, 'package.json')
@@ -405,14 +425,14 @@ export async function applyVersionedOverrides(
 
     // ---- 1. 读取 package.json ----
     if (!existsSync(pkgPath)) {
-        return failResult(packageName, '', '', `${pkgPath}: file not found`)
+        return { success: false, error: `${pkgPath}: file not found` }
     }
 
     let pkg: PackageJson
     try {
         pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as PackageJson
     } catch {
-        return failResult(packageName, '', '', `${pkgPath}: invalid JSON`)
+        return { success: false, error: `${pkgPath}: invalid JSON` }
     }
 
     // ---- 2. 备份 ----
@@ -429,7 +449,7 @@ export async function applyVersionedOverrides(
             copyFileSync(lockfilePath, lockBackup)
         }
     } catch {
-        return failResult(packageName, '', '', 'failed to create backup files')
+        return { success: false, error: 'failed to create backup files' }
     }
 
     // ---- 3. 记录旧值并写入版本化 overrides ----
@@ -447,13 +467,15 @@ export async function applyVersionedOverrides(
             doc = {}
         }
         const overrides = (doc.overrides ?? {}) as Record<string, string>
-        for (const [key, target] of entries) {
-            const { key: actualKey, oldValue } = upsertOverride(overrides, key, target)
-            // 同一批内多 key 归一化到同一 actualKey 时保留首次旧值（回滚依据）
-            if (!oldValues.has(actualKey)) {
-                oldValues.set(actualKey, oldValue)
+        for (const plan of plans) {
+            for (const [key, target] of Object.entries(plan.overrides)) {
+                const { key: actualKey, oldValue } = upsertOverride(overrides, key, target)
+                // 同一批内多 key 归一化到同一 actualKey 时保留首次旧值（回滚依据）
+                if (!oldValues.has(actualKey)) {
+                    oldValues.set(actualKey, oldValue)
+                }
+                writtenKeys.add(actualKey)
             }
-            writtenKeys.add(actualKey)
         }
         doc.overrides = overrides
         writeFileSync(workspaceYamlPath, YAML.stringify(doc), 'utf-8')
@@ -463,17 +485,19 @@ export async function applyVersionedOverrides(
             pkgJsonOverrideWarning = `pnpm v${pnpmMajor} may ignore package.json#pnpm.overrides without pnpm-workspace.yaml — verify the lockfile actually updated; create pnpm-workspace.yaml with the overrides if not`
         }
         const overrides = ensurePnpmOverrides(pkg)
-        for (const [key, target] of entries) {
-            const { key: actualKey, oldValue } = upsertOverride(overrides, key, target)
-            if (!oldValues.has(actualKey)) {
-                oldValues.set(actualKey, oldValue)
+        for (const plan of plans) {
+            for (const [key, target] of Object.entries(plan.overrides)) {
+                const { key: actualKey, oldValue } = upsertOverride(overrides, key, target)
+                if (!oldValues.has(actualKey)) {
+                    oldValues.set(actualKey, oldValue)
+                }
+                writtenKeys.add(actualKey)
             }
-            writtenKeys.add(actualKey)
         }
         writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`, 'utf-8')
     }
 
-    // ---- 4. 执行 pnpm install ----
+    // ---- 4. 执行 pnpm install（单次；失败整体回滚） ----
     try {
         await execPnpmInstall(workDir)
     } catch (installErr: unknown) {
@@ -514,27 +538,48 @@ export async function applyVersionedOverrides(
         }
         cleanupBackups({ pkgBackup, lockBackup, workspaceBackup })
 
-        const installFailure = describeInstallError(installErr)
-        return {
-            packageName,
-            fromVersion: '',
-            toVersion: entries.map((entry) => entry[1]).join(', '),
-            isMajor: false,
-            success: false,
-            error: formatInstallFailure(installFailure),
-        }
+        return { success: false, error: formatInstallFailure(describeInstallError(installErr)) }
     }
 
     // 成功 — 清理备份文件
     cleanupBackups({ pkgBackup, lockBackup, workspaceBackup })
+
+    return { success: true, warning: pkgJsonOverrideWarning }
+}
+
+/**
+ * 应用单个包的版本化 overrides（内部委托 [applyVersionedOverridesBatch]）。
+ *
+ * 写入位置：有 `pnpm-workspace.yaml` 时写其 `overrides`，否则写 `package.json#pnpm.overrides`。
+ * 失败自动回滚（含 lockfile）；不执行验证（由上层负责）。`fromVersion` 恒为空字符串——
+ * 多实例共存无单一来源版本。
+ */
+export async function applyVersionedOverrides(
+    params: {
+        packageName: string
+        versionedOverrides: Record<string, string>
+        workDir: string
+    },
+): Promise<DependencyFixResult> {
+    const { packageName, versionedOverrides, workDir } = params
+    const entries = Object.entries(versionedOverrides)
+    if (entries.length === 0) {
+        return failResult(packageName, '', '', 'no versioned overrides provided')
+    }
+
+    const result = await applyVersionedOverridesBatch({
+        workDir,
+        plans: [{ packageName, overrides: versionedOverrides }],
+    })
 
     return {
         packageName,
         fromVersion: '',
         toVersion: entries.map((entry) => entry[1]).join(', '),
         isMajor: false,
-        success: true,
-        warning: pkgJsonOverrideWarning,
+        success: result.success,
+        ...(result.error !== undefined ? { error: result.error } : {}),
+        ...(result.warning !== undefined ? { warning: result.warning } : {}),
     }
 }
 
