@@ -5,12 +5,13 @@ import { promisify } from 'node:util'
 import type { RunResult } from '@dependfix/core'
 import {
     DependfixApp,
+    type DependfixRunResult,
     type RuntimeConfig,
     computeFixFingerprint,
     createFixBranch,
     GIT_PUSH_HOOKS_ISOLATION_ARGS,
     GIT_PUSH_SIGNING_ISOLATION_ARGS,
-    DependfixRunResult } from '@dependfix/engine'
+} from '@dependfix/engine'
 import type { AuthProvider } from '@dependfix/engine/auth'
 import type { ScanExecutor, ScanExecutorContext, ScanExecutorResult } from './types'
 import {
