@@ -122,12 +122,9 @@ export async function classifyLockfileFailure(workDir: string): Promise<Classifi
         timeoutMs: resolveInstallTimeoutMs(),
     })
 
-    if (outcome.exitCode === 0 && !outcome.timedOut) {
-        return { ok: true, exitCode: 0, signal: null, timedOut: false, errno: null, noStderrDiagnostics: false, environmental: false }
-    }
-
     // 取消前置守卫命中（未启动子进程）：作为独立类别返回，不伪装成环境性失败
-    // （环境性 = 「不归因目标仓库」，与「本次运行被中止」语义不同，混用会掩盖中止事实）
+    // （环境性 = 「不归因目标仓库」，与「本次运行被中止」语义不同，混用会掩盖中止事实）。
+    // 判定前置：未启动时退出码为占位值，不应参与 ok 判定
     if (!outcome.started) {
         return {
             ok: false,
@@ -140,6 +137,10 @@ export async function classifyLockfileFailure(workDir: string): Promise<Classifi
             noStderrDiagnostics: false,
             environmental: false,
         }
+    }
+
+    if (outcome.exitCode === 0 && !outcome.timedOut) {
+        return { ok: true, exitCode: 0, signal: null, timedOut: false, errno: null, noStderrDiagnostics: false, environmental: false }
     }
 
     // 直接映射受管执行结果（不经 execSync 形态错误往返，避免口径间接化）：

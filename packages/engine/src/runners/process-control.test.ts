@@ -11,6 +11,7 @@ import {
     killAllTrackedChildProcesses,
     requestAbort,
     resetProcessControlState,
+    resolveShellOption,
     runTrackedCommand,
     trackChildProcess,
     trackedChildProcessCount,
@@ -76,6 +77,27 @@ describe('运行级取消状态', () => {
 
     it('无登记子进程时 killAllTrackedChildProcesses 返回 0', () => {
         expect(killAllTrackedChildProcesses()).toBe(0)
+    })
+})
+
+describe('平台分支（Windows 的 .cmd 包裹须经 shell）', () => {
+    it('仅 Windows 经 shell 执行（其余平台保持直接 spawn）', () => {
+        expect(resolveShellOption('win32')).toBe(true)
+        expect(resolveShellOption('linux')).toBe(false)
+        expect(resolveShellOption('darwin')).toBe(false)
+    })
+
+    it('显式 shell 覆盖优先于平台判定', async () => {
+        const result = await runTrackedCommand({
+            binary: process.execPath,
+            args: ['-e', 'process.stdout.write(String(process.pid > 0))'],
+            cwd: process.cwd(),
+            timeoutMs: 30_000,
+            shell: false,
+        })
+
+        expect(result.started).toBe(true)
+        expect(result.exitCode).toBe(0)
     })
 })
 
@@ -147,6 +169,25 @@ describe('runTrackedCommand', () => {
         expect(result.aborted).toBe(true)
         expect(result.exitCode).not.toBe(0)
         expect(result.durationMs).toBeLessThan(30_000)
+        expect(trackedChildProcessCount()).toBe(0)
+    })
+
+    it('已请求取消：不启动子进程（started=false 且登记表为空）', async () => {
+        requestAbort('execution timeout')
+
+        const sleep = sleepCommand(30_000)
+        const result = await runTrackedCommand({
+            binary: sleep.binary,
+            args: sleep.args,
+            cwd: process.cwd(),
+            timeoutMs: 30_000,
+        })
+
+        // 取消是"单一入口"守卫：返回占位结果而非抛错，且**不产生任何子进程**
+        expect(result.started).toBe(false)
+        expect(result.aborted).toBe(true)
+        expect(result.exitCode).toBeNull()
+        expect(result.timedOut).toBe(false)
         expect(trackedChildProcessCount()).toBe(0)
     })
 

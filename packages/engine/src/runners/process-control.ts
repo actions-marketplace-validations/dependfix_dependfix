@@ -12,6 +12,10 @@
 //    超时或 abort 时按**进程树**终止（POSIX 杀进程组，Windows `taskkill /T /F`），避免
 //    "杀掉 shell 而 pnpm 子进程存活并继续占用内存 / 持有管道"。
 //
+// 平台差异：Windows 上 npm 系 CLI（`pnpm` / `npx`）是 `.cmd` 包裹，**不能**直接
+// `spawn`（Node 官方口径：`.cmd` / `.bat` 须经 shell 或 cmd.exe 执行）；POSIX 上直接 `spawn`
+// 与旧 `execSync` 一样经 PATH 解析，行为等价。故 `shell` 缺省由 `resolveShellOption()` 按平台决定。
+//
 // 生命周期：模块级单例，由 `DependfixApp` 构造期 `resetProcessControlState()` 复位
 // （与 `resetActiveRulesConfig()` 同族的进程级状态口径——同一进程多次运行不得互相污染）。
 //
@@ -143,6 +147,16 @@ export interface TrackedCommandResult {
     durationMs: number
 }
 
+/**
+ * 是否经 shell 执行（Windows 需要；见模块头「平台差异」）。
+ *
+ * 抽成纯函数以便用例锁定平台分支：仅 `win32` 返回 true，其余平台 false
+ * （POSIX 保持直接 `spawn`，与改造前行为一致）。
+ */
+export function resolveShellOption(platform: NodeJS.Platform = process.platform): boolean {
+    return platform === 'win32'
+}
+
 /** `runTrackedCommand` 入参。 */
 export interface TrackedCommandParams {
     binary: string
@@ -151,6 +165,8 @@ export interface TrackedCommandParams {
     timeoutMs: number
     /** 显式 env（缺省继承父进程环境——与既有 `execFileSync` 语义一致） */
     env?: NodeJS.ProcessEnv
+    /** 显式覆盖 shell 行为（缺省按平台：Windows 经 shell，其余平台直接 spawn） */
+    shell?: boolean
 }
 
 /**
@@ -192,6 +208,8 @@ export function runTrackedCommand(params: TrackedCommandParams): Promise<Tracked
         const cp = spawn(params.binary, params.args, {
             cwd: params.cwd,
             stdio: 'pipe',
+            // Windows 经 shell（`.cmd` 包裹不可直接 spawn）；其余平台保持直接 spawn
+            shell: params.shell ?? resolveShellOption(),
             // POSIX 下创建独立进程组，超时 / abort 时可终止整个进程树
             detached: process.platform !== 'win32',
             ...(params.env ? { env: params.env } : {}),

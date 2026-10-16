@@ -79,6 +79,8 @@ export interface CommandOutcomeLike {
     exitCode: number | null
     signal: string | null
     timedOut: boolean
+    /** 执行期间是否处于"已请求取消"状态（用于把中止与普通信号终止区分开） */
+    aborted?: boolean
     errno: string | null
     stdout: string
     stderr: string
@@ -94,7 +96,11 @@ export interface CommandOutcomeLike {
  */
 export function toExecLikeError(command: string, outcome: CommandOutcomeLike): ExecError {
     let message = `Command failed: ${command}`
-    if (outcome.timedOut) {
+    // 运行级取消导致的终止与「被内核杀死 / 环境异常」外观同形（都是 signal），故显式前置取消标识——
+    // 否则证据文本会把「本次运行被中止」读成目标仓库 / 环境问题（与独立类别上报口径同源）
+    if (outcome.aborted) {
+        message = `run aborted — command terminated by cancellation: ${command}`
+    } else if (outcome.timedOut) {
         message = `spawnSync ${command} ETIMEDOUT`
     } else if (outcome.errno) {
         message = `spawn ${command} ${outcome.errno}`

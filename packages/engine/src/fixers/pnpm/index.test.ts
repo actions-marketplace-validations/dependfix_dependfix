@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { describe, expect, it, afterEach, beforeEach, vi } from 'vitest'
@@ -16,6 +16,7 @@ vi.mock('../../runners/process-control', async (importOriginal) => {
 })
 
 import { DEFAULT_INSTALL_TIMEOUT_MS, INSTALL_TIMEOUT_ENV } from '../install-timeouts'
+import { resetProcessControlState, requestAbort } from '../../runners/process-control'
 import {
     classifyLockfileFailure,
     computeLockfileDiff,
@@ -174,6 +175,23 @@ describe('classifyLockfileFailure', () => {
             noStderrDiagnostics: false,
             environmental: false,
         })
+    })
+
+    // 运行级取消：未启动子进程 → 独立类别 ABORTED，不伪装成环境性失败
+    it('classifies as ABORTED (not environmental) when the run was cancelled', async () => {
+        // 真实受管执行在取消态返回 started=false 且退出码为占位值；替身须复刻该形态
+        mockRunTrackedCommand.mockResolvedValue(okOutcome({ started: false, exitCode: null, aborted: true }))
+        requestAbort('execution timeout')
+        try {
+            const result = await classifyLockfileFailure('/tmp/test')
+
+            expect(result.category).toBe('ABORTED')
+            expect(result.environmental).toBe(false)
+            expect(result.noStderrDiagnostics).toBe(false)
+            expect(result.stderr).toContain('run aborted before diagnosis')
+        } finally {
+            resetProcessControlState()
+        }
     })
 
     // 2026-10-17 超时口径收敛：诊断 install 与 install / 策略链共用同一解析器（默认 300s、env 可覆盖）
@@ -564,6 +582,24 @@ describe('repairLockfile', () => {
 
         const timeouts = mockRunTrackedCommand.mock.calls.map((call) => (call[0] as { timeoutMs: number }).timeoutMs)
         expect(timeouts).toEqual([DEFAULT_INSTALL_TIMEOUT_MS, DEFAULT_INSTALL_TIMEOUT_MS, DEFAULT_INSTALL_TIMEOUT_MS])
+    })
+
+    it('skips the repair chain entirely when the run was cancelled (ABORTED)', async () => {
+        requestAbort('execution timeout')
+        try {
+            const result = await repairLockfile({ workDir: proj.dir })
+
+            expect(result.success).toBe(false)
+            expect(result.failureCategory).toBe('ABORTED')
+            expect(result.strategy).toBe('SKIP')
+            expect(result.attemptHistory).toHaveLength(0)
+            // 未启动任何安装命令（取消态不做备份 / 诊断 / 策略）
+            expect(mockRunTrackedCommand).not.toHaveBeenCalled()
+            // lockfile 备份未残留
+            expect(existsSync(`${proj.lockfilePath}.bak`)).toBe(false)
+        } finally {
+            resetProcessControlState()
+        }
     })
 
     it('LOCKFILE_NOT_FOUND → REGENERATE succeeds', async () => {

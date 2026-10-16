@@ -178,6 +178,30 @@ describe('execPnpmInstall', () => {
         expect(described).toContain('timed out')
     })
 
+    it('reports the cancellation explicitly when the command was not started', async () => {
+        mockRunTrackedCommand.mockResolvedValue(outcome({
+            started: false,
+            aborted: true,
+        }))
+
+        const err = await execPnpmInstall('/tmp/work').catch((error: unknown) => error)
+
+        // 未启动（取消守卫命中）与"启动后被信号杀死"必须可区分（后者见下一例）
+        expect((err as Error).message).toContain('run aborted — install not started')
+    })
+
+    it('marks aborted terminations in the evidence text (distinct from OOM kill)', async () => {
+        mockRunTrackedCommand.mockResolvedValue(outcome({
+            exitCode: null,
+            signal: 'SIGKILL',
+            aborted: true,
+        }))
+
+        const err = await execPnpmInstall('/tmp/work').catch((error: unknown) => error)
+
+        expect(describeInstallError(err)).toContain('run aborted — command terminated by cancellation')
+    })
+
     it('renders spawn errno when the pnpm toolchain is missing', async () => {
         mockRunTrackedCommand.mockResolvedValue(outcome({
             exitCode: null,
