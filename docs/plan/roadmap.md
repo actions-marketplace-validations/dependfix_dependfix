@@ -266,6 +266,8 @@
 
 **阶段期间追加临时待办（不占阶段条目编号，2026-10-16 用户授权）**：批量日志导出范围口径（默认导出当前页 + 保留「全部筛选结果」入口）——追加于 §M45 段落末尾（标记口径以 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 为唯一权威声明）；规则与检查点落 [development.md §5.1.43](../standards/development.md)，任务与闭环记录见 [todo.md](todo.md)，批次记录见 [archive/index.md §4](archive/index.md)。**不计入本阶段原子条目数与类型平衡**。
 
+**阶段期间追加临时待办（不占阶段条目编号，2026-10-16 用户授权）**：CI 双红收口（视觉基线连带失配重建 + 自验链代理 env 假红修复 + `quick-verify` 失败留痕）——同为追加于 §M45 段落末尾（标记口径同上）；规则落 [testing.md §6.7](../standards/testing.md)（文案类改动连带失配 + update 落盘帧须由 no-update 连跑复核）与 [dependency-fixer-records.md §12.9](../design/modules/dependency-fixer-records.md)（验证链注入 env 与目标仓库测试断言的冲突面），任务与闭环记录见 [todo.md](todo.md)，批次记录见 [archive/index.md §4](archive/index.md)。**不计入本阶段原子条目数与类型平衡**。
+
 **commits 状态**：阶段启动规划 commit 落地后按 [规划规范 §4.4 第 5 条](../standards/planning.md#44-大批量归档批次操作规范) 用 `git rev-list HEAD ^origin/master --count` 双向核验并动态描述，不写死数字。
 
 > 详细任务与 8 要素见 [todo.md §M45](todo.md#m45-运行可靠性与交付链收口-2026-10-15-用户决策方案-a)；上一阶段（M44）见 [todo-archive.md §M44](todo-archive.md#m44-验证链治本--文档门禁可信度收口m441m446-全部已闭环--2026-10-15-归档)。
