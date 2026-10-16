@@ -70,3 +70,49 @@ export function describeProcessSignals(signals: ProcessSignals): string {
     }
     return parts.join(', ')
 }
+
+/**
+ * 受管命令执行结果的最小结构（与 `runners/process-control.ts` 的 `TrackedCommandResult`
+ * 结构兼容；此处以结构类型声明，避免 fixers → runners 的模块方向耦合）。
+ */
+export interface CommandOutcomeLike {
+    exitCode: number | null
+    signal: string | null
+    timedOut: boolean
+    errno: string | null
+    stdout: string
+    stderr: string
+}
+
+/**
+ * 把受管命令（异步 `spawn`）的结果适配为既有 `execSync` / `execFileSync` 形态的错误对象。
+ *
+ * 目的：安装类调用从同步 `execFileSync` 迁到 `runTrackedCommand` 后，
+ * `extractProcessSignals` / `getRawStderrText` / `describeInstallError` 的读取口径**零漂移**
+ * ——`status` / `signal` / `code` / `stderr` 字段与 Node 抛出的形态一致（`status` 仅在有退出码时
+ * 设置，`code` 在超时时为 `ETIMEDOUT`、spawn 失败时为 `errno`）。
+ */
+export function toExecLikeError(command: string, outcome: CommandOutcomeLike): ExecError {
+    let message = `Command failed: ${command}`
+    if (outcome.timedOut) {
+        message = `spawnSync ${command} ETIMEDOUT`
+    } else if (outcome.errno) {
+        message = `spawn ${command} ${outcome.errno}`
+    }
+    const err = new Error(message) as ExecError
+    if (outcome.stderr) {
+        err.stderr = outcome.stderr
+    }
+    if (outcome.exitCode !== null) {
+        err.status = outcome.exitCode
+    }
+    if (outcome.signal !== null) {
+        err.signal = outcome.signal
+    }
+    if (outcome.timedOut) {
+        err.code = 'ETIMEDOUT'
+    } else if (outcome.errno !== null) {
+        err.code = outcome.errno
+    }
+    return err
+}
