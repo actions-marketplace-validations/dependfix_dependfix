@@ -184,6 +184,11 @@
   - **触发条件**：弱网 / 大仓场景下再次出现「超时定时器延迟触发」或推送期间平台无响应。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
+- **lint-staged 配置内的裸 `git add` 任务会全量暂存工作区（待评估，P2 🛠️）** —— 现象（2026-10-17 本批实证 3 次）：`package.json` 的 `lint-staged` 任务里 `*.{js,ts}` / `*.{css,scss,vue}` / `*.md` 三条均以裸 `git add`（无路径参数）收尾，lint-staged 自身已会重暂存其修改过的文件，该任务**额外把整个工作区未暂存改动一并入索引** ⇒ 同一工作区里的下一篇文档 / 下一个提交的文件的改动被"抢先"混入当前 commit（本批实测：引擎修复提交混入 `backlog.md`、规范文档提交混入 `todo.md`），原子提交边界失效；husky 另会打印「tasks use `git add`」告警。审计侧核对「commit 与内容归属」时表现为归属不符。
+  - **待评估点**：① 直接移除三条任务里的裸 `git add`（lint-staged 自动重暂存已覆盖）；② 或改为带路径的形式（`git add -- <匹配文件>` 无意义，因为 lint-staged 已做）；③ 是否同时收紧 `packages/skills/**` 那条（该条带路径参数，属正确形态，可作为对照）。
+  - **触发条件**：再次出现「提交内容与 commit 主题不符」或审计标记归属问题；或整理提交钩子配置时。
+  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
+
 ### 待上收候选（评估完成，等待用户决策）
 
 > 本节为「评估完成、等待用户决策」候选的暂存区；候选**不含 `M\d+` 阶段编号**（[规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement)）。
