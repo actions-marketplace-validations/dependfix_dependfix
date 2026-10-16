@@ -1,6 +1,6 @@
 # 运行失败分类与筛选设计（设计先行稿）
 
-> 状态：✅ 已落地（2026-10-07 —— 分类模型 + 落库回填 + API 筛选 + UI 展示全部实现；§5.5 受约束重试入口仍延后并登记 backlog）
+> 状态：✅ 已落地（2026-10-07 —— 分类模型 + 落库回填 + API 筛选 + UI 展示全部实现；**§5.5 受约束重试入口已于 2026-10-16 落地**）
 > 提出：2026-10-02（用户报告 —— 运行列表只显示「失败」，无法区分失败阶段；网络类失败可考虑重试，验证类失败需重点研判）
 > 范围：`apps/platform`（实体 / API / UI）+ 可选 `packages/core` 分类常量；不改引擎修复逻辑
 > 关联：[executor-sandbox.md §7.8 降级状态机契约](./executor-sandbox-implementation.md)、[platform.md](../../standards/platform.md)、`apps/platform/server/services/scan-run-state.ts`、`apps/platform/server/entities/scan-run.ts`
@@ -72,7 +72,7 @@
 
 - 统一失败分类模型：`failureStage`（阶段）+ `failureKind`（处置建议：可重试 / 需研判 / 未知）。
 - 列表支持按状态 / 失败阶段筛选；状态列呈现失败阶段；汇总计数扩展到阶段维度。
-- 失败记录可提供受约束的**重试**入口（仅 transient）——**本阶段延后**（见 §5.5）。
+- 失败记录可提供受约束的**重试**入口（仅 transient）——**已落地**（2026-10-16，见 §5.5：端点 / 守卫 / 入口与二次确认）。
 - 分类逻辑单一事实源 + 可单测；历史记录可回填（无法判定则 `unknown`）。
 
 **非目标**
@@ -156,8 +156,24 @@
 ### 5.5 重试语义与安全边界
 
 - **仅 `transient`** 提供一键重试；`deterministic`（尤其 `verify` / `deliver`）不提供，必须进详情人工研判。
-- 重试 = 复用 `POST /api/repos/[id]/scan` 以原参数重新入队，并记录来源（如 `retriedFromRunId`）以便审计。
-- 守卫：非终态（`running` / `pending`）不允许重试；同仓库并发去重；凭据仍走原有 credential service。
+- **端点（2026-10-16 落地，取代本段原「复用 scan 端点」设想）**：`POST /api/runs/[id]/retry`（写操作限 admin/org_admin）。
+  前端**只传 runId**：新运行的 `mode` / `severityThreshold` / `executorKind` 由服务端按来源运行派生，
+  来源 run id 写入新列的 `retriedFromRunId`（`scan_run.retried_from_run_id` varchar(64) NULL，迁移 `2400000000000-AddScanRunRetriedFromRunId`，
+  已登记进 DataSource `migrations` 数组）；入队 / 同仓库去重合并 / 入队失败降级同步复用
+  `services/scan-trigger.service`（与 `POST /api/repos/[id]/scan` 同一路径，避免两条触发链漂移）。
+- **守卫（前端不可见 ≠ 后端可绕过）**：来源运行须已终态（`pending` / `running` → 409 `RUN_RETRY_SOURCE_RUNNING`）
+  且 `failureKind === 'transient'`（`deterministic` / `unknown` / 成功态 → 409 `RUN_RETRY_NOT_ALLOWED`）；
+  同仓库存在进行中任务时按既有「已合并」语义回应（响应顶层 `merged`，前端提示合并且不跳转）；
+  来源运行的持久化参数无法通过请求校验（历史脏值）时同样 409 拒绝并落 warn 留痕（不静默降级、不 500）。
+  凭据仍走原有 credential service（重试不新增凭据通道）。
+- **入口与二次确认（2026-10-16 落地）**：入口落在**运行详情弹窗**（`app/components/run-detail-dialog.vue`），
+  仅 `failureKind === 'transient'` 呈现；点击后二次确认（文案提示将按原参数重新入队、占用扫描队列与容器资源）。
+  弹窗内同屏展示失败归因（失败阶段 / 处置建议 / 失败码）与来源链（`retriedFromRunId`）。
+  前端状态机与合并感知见 `app/composables/use-run-retry.ts`（与 `use-fix-now` 同模式：四态分离 + 5s 自动清除）。
+- **不做**：批量重试；非 `transient` 的「强制重试」逃生舱；自动 / 定时重试。
+- **已知边界**：① AI 研判 override 不随 `ScanRun` 落库（仅落 `ai_config_snapshot`），故重试时按仓库 / 组织默认重新解析
+  （与「以原持久化参数重新入队」的边界一致）；② 入口当前仅在运行详情弹窗——`/scans` 失败历史视图的详情由
+  `repo-history-dialog.vue` 自带实现，若要在该视图加入口需先统一详情组件（登记为后续候选）；③ 来源链当前**仅展示一跳**（`retriedFromRunId` 显示上一跳短 id，不做 A→B→C 链式溯源与跳转）。
 
 ### 5.6 迁移与回填
 
@@ -170,7 +186,7 @@
 - [x] 迁移 + 回填（幂等 + dry-run）；存量 `failed` / `dispatched` 行尽力回填——`2200000000000-AddScanRunFailureColumns.ts` + `scripts/backfill-run-failure.ts`（默认 dry-run、`--apply` + y/N、无法判定写 `unknown`）。
 - [x] `/api/runs` 过滤参数生效且与分页组合正确；组织隔离不回退——`status` / `failureStage` / `failureKind` 多值 query（白名单校验，非法值 400）。
 - [x] `scans.vue` 筛选控件 + 状态列阶段展示 + 汇总计数；i18n 双侧一致——`scans.runList.filter*` + `runs.failureStage.*` / `runs.failureKind.*`（zh-CN / en-US）。
-- [ ] （本阶段延后）重试入口仅对 `transient` 可见可用；非终态不可重试——登记 backlog §候选评估中。
+- [x] 重试入口仅对 `transient` 可见可用；非终态不可重试——**已落地**（2026-10-16）：`POST /api/runs/[id]/retry` + 详情弹窗入口 + 后端三重守卫，见 §5.5。
 - [x] 文档同步 + Review Gate Pass。
 
 ## 7. 风险与开放问题
@@ -181,11 +197,11 @@
 - **已决策（M37.1 实现期）**：`dispatched`（PR 创建失败 / 结果未就绪）纳入失败分类——`pr_creation_failed` → `deliver` + `deterministic`；`result_fetch_failed` / `run_url_not_resolved` → `runtime` + `transient`。`degraded`（业务完成 + 路径偏离）**不**参与失败分类；`dispatched` 且**无任何错误码**（B 模式已受理待回执）亦不分类，避免把进行中的派发记录混入 `byFailureStage.unknown`。
 - **风险**：分类漂移（新错误码未纳入映射）→ 用集中映射表 + `unknown` 兜底 + 单测守护；未映射码保留 `code` 供审计。
 - **风险**：回填误判 → 仅做保守推断，无法判定一律 `unknown`（引擎 `result.errors` 未落库，细分依赖 `engine_delivery_failed` message 回读）。
-- **风险**：重试被滥用 → 仅 transient + 审计来源 + 非终态守卫（入口延后，风险当前不适用）。
+- **风险**：重试被滥用 → 仅 transient + 审计来源 + 非终态守卫（**入口已落地，缓解措施随之生效**，见 §5.5）。
 
 ## 8. 关联文档
 
 - [executor-sandbox.md §7.8 降级状态机契约](./executor-sandbox-implementation.md)
 - [platform.md](../../standards/platform.md)
-- [backlog.md](../../plan/backlog.md)（受约束重试入口延后登记）
+- [todo.md §M45.4](../../plan/todo.md)（受约束重试入口落地条目）
 - [todo-archive.md §M37](../../plan/archive/todo-archive-phases-m37.md#m37-运行可观测性与体验记忆m371m376-全部已闭环--2026-10-08-归档)（M37.1 已闭环归档）

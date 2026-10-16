@@ -28,7 +28,7 @@
 | [C22 PAT 无感升级评估](./c22-pat-backward-compat.md) | 评估报告（M18.0 P0 docs only 子阶段） | ✅ 已落地（2026-08-29，Review Gate Pass） |
 | [规范与文档治理设计](./spec-and-doc-governance.md) | 专项设计（文档治理边界 + modules/governance 分流依据 + 写作规范 + 实施计划） | ✅ 已落地（2026-09-09，G1 P 阶段产出；v2 重构见下条） |
 | [规范与经验管理体系重构设计](./standards-experience-refactor.md) | 专项设计（规范方法论层化 + 经验三层收敛 + 导航分层 + 阈值/门禁统一；承接 spec-and-doc-governance v2） | ✅ 已落地（2026-10-10：M41.1~M41.5 全部闭环归档，见 [todo-archive.md §M41](../../plan/todo-archive.md#m41-规范与经验管理体系重构m411m415-全部已闭环--2026-10-10-归档)） |
-| [运行失败分类与筛选设计](./run-failure-taxonomy.md) | 专项设计（运行失败阶段分类 + 可重试判定 + 筛选 / 重试入口） | ✅ 已落地（2026-10-07：分类 + 落库回填 + 筛选 + 展示；重试入口延后） |
+| [运行失败分类与筛选设计](./run-failure-taxonomy.md) | 专项设计（运行失败阶段分类 + 可重试判定 + 筛选 / 重试入口） | ✅ 已落地（2026-10-07：分类 + 落库回填 + 筛选 + 展示；2026-10-16 补受约束重试入口） |
 | [扫描偏好（设备级）设计](./scan-preferences.md) | 专项设计（设备级 localStorage 偏好：优先级 / 写入时机 / SSR 与可测性） | ✅ 已落地（2026-10-07，M37.2） |
 | [平台执行模型隔离设计](./executor-process-isolation.md) | 专项设计（M38 设计先行：BullMQ 锁续期失败根因 + 三方案选型） | ✅ 已落地（2026-10-09 M38 闭环归档，选型 ①′ 独立 worker 进程） |
 | [PR 构建与部署信号采集设计](./pr-build-deploy-signals.md) | 专项设计（PR 构建 / 部署多源聚合：GitHub Checks + Commit Statuses + Deployments，可选 provider 日志富化） | 🔶 设计先行稿（backlog 候选，2026-10-10） |
