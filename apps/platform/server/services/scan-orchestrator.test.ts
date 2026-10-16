@@ -183,6 +183,28 @@ describe('scan-orchestrator.service', () => {
             const run = await createPendingScanRun(repositoryId, { mode: 'fix', severityThreshold: 'high', executorKind: 'sandbox' })
             expect(run.executorKind).toBe('sandbox')
         })
+
+        // 「受约束重试入口」来源落库（口径见 docs/design/governance/run-failure-taxonomy.md §5.5）：
+        // 断言到 DB 列，避免只钉住调用参数而漏掉「服务层是否真的写库」
+        it('persists retriedFromRunId when provided', async () => {
+            const run = await createPendingScanRun(
+                repositoryId,
+                { mode: 'fix', severityThreshold: 'high' },
+                { retriedFromRunId: 'source-run-1' },
+            )
+
+            const ds = await ensureDatabaseInitialized()
+            const persisted = await ds.getRepository(ScanRun).findOne({ where: { id: run.id } })
+            expect(persisted?.retriedFromRunId).toBe('source-run-1')
+        })
+
+        it('leaves retriedFromRunId null for non-retry triggers', async () => {
+            const run = await createPendingScanRun(repositoryId, { mode: 'fix', severityThreshold: 'high' })
+
+            const ds = await ensureDatabaseInitialized()
+            const persisted = await ds.getRepository(ScanRun).findOne({ where: { id: run.id } })
+            expect(persisted?.retriedFromRunId ?? null).toBeNull()
+        })
     })
 
     describe('runScanForRepository (container executor)', () => {
@@ -213,6 +235,36 @@ describe('scan-orchestrator.service', () => {
 
             const repo = await ds.getRepository(Repository).findOne({ where: { id: repositoryId } })
             expect(repo?.lastScanAt).toBeTruthy()
+        })
+
+        // 同步新建路径同样落「重试来源」；runId 续用（worker / 队列续跑）不得覆写历史来源
+        it('persists retriedFromRunId on the synchronously created run', async () => {
+            containerExecute.mockResolvedValue({ result: makeResult(), error: undefined })
+
+            const run = await runScanForRepository(
+                repositoryId,
+                { mode: 'fix', severityThreshold: 'high' },
+                { retriedFromRunId: 'source-run-2' },
+            )
+
+            const ds = await ensureDatabaseInitialized()
+            const persisted = await ds.getRepository(ScanRun).findOne({ where: { id: run.id } })
+            expect(persisted?.retriedFromRunId).toBe('source-run-2')
+        })
+
+        it('does not overwrite the existing retry source when continuing an existing run', async () => {
+            containerExecute.mockResolvedValue({ result: makeResult(), error: undefined })
+            const created = await createPendingScanRun(
+                repositoryId,
+                { mode: 'fix', severityThreshold: 'high' },
+                { retriedFromRunId: 'source-run-3' },
+            )
+
+            await runScanForRepository(repositoryId, { mode: 'fix', severityThreshold: 'high' }, { runId: created.id })
+
+            const ds = await ensureDatabaseInitialized()
+            const persisted = await ds.getRepository(ScanRun).findOne({ where: { id: created.id } })
+            expect(persisted?.retriedFromRunId).toBe('source-run-3')
         })
 
         it('passes repository verifyCommands into executor context', async () => {

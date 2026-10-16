@@ -760,6 +760,17 @@
         "logsCopy": "复制日志",
         "logsDownload": "下载日志",
         "logsEmpty": "暂无执行日志",
+        "retry": {
+            "action": "重试",
+            "confirmTitle": "确认重试该运行？",
+            "confirmBody": "将按原参数（{mode} / {threshold}）重新入队扫描，占用扫描队列与容器资源；来源运行记录保持不变。",
+            "success": "已重新入队（运行 {runId}）",
+            "failed": "重试失败：{message}",
+            "source": "重试来源",
+            "hint": "该失败为「可重试」类（网络 / 超时等暂时性原因），可按原参数重跑",
+            "failureDetail": "失败归因",
+            "failureCodeLabel": "失败码"
+        },
         "errors": {
             "loadFailed": "加载失败：{message}",
             "detailLoadFailed": "详情加载失败：{message}",
@@ -883,6 +894,18 @@
         "SCAN_ALREADY_COMPLETED": {
             "zh-CN": "扫描已完成，请在扫描历史中查看",
             "en": "Scan already completed, please check scan history"
+        },
+        "RUN_RETRY_NOT_ALLOWED": {
+            "zh-CN": "该运行不属于可重试的暂时性失败（仅「可重试」类失败支持重试）",
+            "en": "This run is not a retryable transient failure (only transient failures can be retried)"
+        },
+        "RUN_RETRY_SOURCE_RUNNING": {
+            "zh-CN": "该运行尚未结束，无法作为重试来源",
+            "en": "This run has not finished yet and cannot be used as a retry source"
+        },
+        "RUN_RETRY_PARAMS_INVALID": {
+            "zh-CN": "该运行记录的参数无法用于重试（模式 / 阈值 / 执行器取值异常）",
+            "en": "The stored parameters of this run cannot be reused for a retry (invalid mode / threshold / executor)"
         },
         "CREDENTIAL_NOT_FOUND": {
             "zh-CN": "凭据不存在",

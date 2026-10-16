@@ -49,6 +49,12 @@ export default defineEventHandler(async (event) => {
         runUrl: run.runUrl,
         summary: run.summaryJson ? JSON.parse(run.summaryJson) as Record<string, unknown> : null,
         error: run.errorJson ? JSON.parse(run.errorJson) as { code: string, message: string } : null,
+        // 失败分类三列 + 重试来源：详情视图据此展示失败归因与「重试入口 / 来源链」
+        // （口径见 docs/design/governance/run-failure-taxonomy.md §5.5）
+        failureCode: run.failureCode,
+        failureStage: run.failureStage,
+        failureKind: run.failureKind,
+        retriedFromRunId: run.retriedFromRunId ?? null,
         results: results.map((r) => ({
             id: r.id,
             source: r.source,

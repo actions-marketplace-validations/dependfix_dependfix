@@ -71,6 +71,29 @@ describe('GET /api/runs/[id]', () => {
         vi.clearAllMocks()
     })
 
+    it('returns failure classification and retry source columns', async () => {
+        const ds = await ensureDatabaseInitialized()
+        const source = await ds.getRepository(ScanRun).save(ds.getRepository(ScanRun).create({
+            repositoryId,
+            mode: 'fix',
+            severityThreshold: 'high',
+            executorKind: 'container',
+            status: 'failed',
+            failureCode: 'ETIMEDOUT',
+            failureStage: 'clone',
+            failureKind: 'transient',
+            retriedFromRunId: 'source-run-9',
+        }))
+
+        const detail = await call('GET', `/api/runs/${source.id}`, { id: source.id }) as Record<string, unknown>
+        expect(detail).toMatchObject({
+            failureCode: 'ETIMEDOUT',
+            failureStage: 'clone',
+            failureKind: 'transient',
+            retriedFromRunId: 'source-run-9',
+        })
+    })
+
     it('returns run detail with results', async () => {
         const detail = await call('GET', `/api/runs/${runId}`, { id: runId }) as Record<string, unknown>
         expect(detail).toMatchObject({

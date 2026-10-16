@@ -760,6 +760,17 @@
         "logsCopy": "Copy Logs",
         "logsDownload": "Download logs",
         "logsEmpty": "No execution logs",
+        "retry": {
+            "action": "Retry",
+            "confirmTitle": "Retry this run?",
+            "confirmBody": "The scan will be re-queued with the original parameters ({mode} / {threshold}), consuming scan queue and container resources; the source run record is preserved.",
+            "success": "Re-queued as run {runId}",
+            "failed": "Retry failed: {message}",
+            "source": "Retried from",
+            "hint": "This is a retryable (transient) failure such as a network or timeout issue",
+            "failureDetail": "Failure attribution",
+            "failureCodeLabel": "Failure code"
+        },
         "errors": {
             "loadFailed": "Failed to load: {message}",
             "detailLoadFailed": "Failed to load details: {message}",
@@ -883,6 +894,18 @@
         "SCAN_ALREADY_COMPLETED": {
             "zh-CN": "扫描已完成，请在扫描历史中查看",
             "en": "Scan already completed, please check scan history"
+        },
+        "RUN_RETRY_NOT_ALLOWED": {
+            "zh-CN": "该运行不属于可重试的暂时性失败（仅「可重试」类失败支持重试）",
+            "en": "This run is not a retryable transient failure (only transient failures can be retried)"
+        },
+        "RUN_RETRY_SOURCE_RUNNING": {
+            "zh-CN": "该运行尚未结束，无法作为重试来源",
+            "en": "This run has not finished yet and cannot be used as a retry source"
+        },
+        "RUN_RETRY_PARAMS_INVALID": {
+            "zh-CN": "该运行记录的参数无法用于重试（模式 / 阈值 / 执行器取值异常）",
+            "en": "The stored parameters of this run cannot be reused for a retry (invalid mode / threshold / executor)"
         },
         "CREDENTIAL_NOT_FOUND": {
             "zh-CN": "凭据不存在",

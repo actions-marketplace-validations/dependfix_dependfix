@@ -64,6 +64,11 @@ export interface ScanRunOptions {
      * - reuse=true：terminal 也允许（用户主动复用，例如 report-only → fix）
      */
     reuse?: boolean
+    /**
+     * 「受约束重试入口」的来源 run id（同步新建 run 时写入；见 run-failure-taxonomy.md §5.5）。
+     * 仅新建路径生效；runId 续用 / reuse 路径不覆写既有 record 的来源字段。
+     */
+    retriedFromRunId?: string
 }
 
 /** 执行器选择：请求显式指定优先 > 仓库 executorKind 字段 > actionWorkflowFile 自动（B 模式） > 默认 container */
@@ -88,7 +93,7 @@ const resolveExecutorKind = (
 export const createPendingScanRun = async (
     repositoryId: string,
     request: ScanRequest,
-    options?: { batchRunId?: string },
+    options?: { batchRunId?: string, retriedFromRunId?: string },
 ): Promise<ScanRun> => {
     const ds = await ensureDatabaseInitialized()
     const repoRepo = ds.getRepository(Repository)
@@ -107,6 +112,7 @@ export const createPendingScanRun = async (
         status: 'pending',
         startedAt: null,
         batchRunId: options?.batchRunId ?? null,
+        retriedFromRunId: options?.retriedFromRunId ?? null,
     })
     return runRepo.save(run)
 }
@@ -214,6 +220,7 @@ const runScanInternal = async (
             status: 'running',
             startedAt: new Date(),
             batchRunId: options?.batchRunId ?? null,
+            retriedFromRunId: options?.retriedFromRunId ?? null,
             // AI 配置快照（apiKey 不写入；hasApiKey 标记替代）；见 resolveAiConfig
             aiConfigSnapshot: aiConfigResolution.snapshot
                 ? JSON.stringify(aiConfigResolution.snapshot)

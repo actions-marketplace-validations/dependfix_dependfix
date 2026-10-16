@@ -78,6 +78,17 @@ export class ScanRun extends BaseEntity {
     @Column({ type: 'varchar', length: 16, nullable: true })
     failureKind!: RunFailureKind | null
 
+    /**
+     * 重试来源 run id（`retried_from_run_id`）：本 run 由「受约束重试入口」触发时记录来源 run id，
+     * 供审计与详情视图的「来源链」追溯；非重试触发为 null。口径见
+     * [run-failure-taxonomy.md §5.5](../design/governance/run-failure-taxonomy.md)。
+     *
+     * 不加索引：当前唯一消费面是按 id 读取的来源展示，与「失败三列不建索引」同族判断；
+     * 后续若出现按来源反查的列表 / 统计需求，再单独加索引迁移。
+     */
+    @Column({ type: 'varchar', length: 64, nullable: true })
+    retriedFromRunId!: string | null
+
     /** 执行日志（JSON 数组：[{timestamp, level, message, context}]） */
     @Column({ type: 'text', nullable: true })
     logsJson!: string | null
