@@ -226,3 +226,4 @@ T108 (报告生成器)
 - **执行方式**：安装 / 锁文件修复 / 验证类命令统一走受管异步执行（`runners/process-control.ts`），命令启动前检查运行级取消（已取消则不启动），登记 PID 以便按进程树终止（见 [executor-process-isolation.md §8](../governance/executor-process-isolation.md#_8-执行超时与运行级取消-2026-10-17) 的契约）。
 - **版本化 overrides 合批**：可修包 ≥ 2 时，先尝试**一次写盘 + 单次安装 + 组级验证**（`applyVersionedOverridesBatch` + `app/repo-fix-batch.ts`）；失败（安装失败或组级验证失败）→ 回滚到合批前快照 → 回退**逐包**路径。**合批只做加速**：成功时为每包各产出一条版本化 override 动作（报告表 / PR 正文 / 内容指纹 / 提交信息口径与逐包路径逐字一致）；失败时不产出动作、不计数、不写审计条目——真实归因交由逐包路径给出，故 `alertsFixed` / `alertsFailed` / 出口码在两种路径下语义等价。
 - **单包不启用合批**：条目数 = 1 时行为与改动前完全一致（避免为优化引入无谓分支）。
+- **公开 API 面变化（明示）**：`applyVersionedOverridesBatch` / `VersionedOverridesPlan` / `VersionedOverridesApplyResult` 经 `fixers/dependency` 出口对 `@dependfix/engine` 消费者可见（新增，非破坏性）；`LockfileFailureCategory` 联合类型新增 `'ABORTED'`（破坏性：穷举 switch 的消费者需补分支）；`repairLockfile` / `classifyLockfileFailure` 由同步改异步（破坏性，仓库内消费方已同批适配）。
