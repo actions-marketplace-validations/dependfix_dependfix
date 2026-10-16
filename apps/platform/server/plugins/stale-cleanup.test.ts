@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 /**
  * stale-cleanup 插件单测：覆盖 runStaleCleanupOnce 的三类任务编排、队列模式接线
@@ -20,7 +20,7 @@ vi.mock('#server/services/batch/batch-reconciler', () => ({ reconcileRunningBatc
 vi.mock('#server/services/batch/cleanup-pending-workdirs', () => ({ cleanupPendingWorkdirs: pendingMock }))
 vi.mock('#server/services/queue/queue.service', () => ({ getQueueService: getQueueServiceMock }))
 
-import { runStaleCleanupOnce } from './stale-cleanup'
+import staleCleanupPlugin, { runStaleCleanupOnce } from './stale-cleanup'
 import { resolveExecutionTimeoutMs } from '#server/services/executor/container-executor'
 
 const syncQueueService = () => ({ mode: 'sync', queue: null, close: vi.fn() })
@@ -138,5 +138,52 @@ describe('stale-cleanup 插件 runStaleCleanupOnce', () => {
         } finally {
             delete process.env.EXECUTION_TIMEOUT_MS
         }
+    })
+})
+
+/**
+ * 插件注册守卫：worker 角色不注册周期定时器（无 timer / 无 close 钩子）；
+ * server 与未设置照常注册（单进程形态行为不变）。口径见 docs/standards/platform.md §10.6。
+ */
+describe('stale-cleanup 插件注册守卫', () => {
+    const makeNitroApp = () => ({ hooks: { hook: vi.fn() } })
+
+    const runPlugin = (): ReturnType<typeof makeNitroApp> => {
+        const nitroApp = makeNitroApp()
+        ;(staleCleanupPlugin as unknown as (app: unknown) => void)(nitroApp)
+        return nitroApp
+    }
+
+    beforeEach(() => {
+        vi.useFakeTimers()
+        vi.clearAllMocks()
+    })
+
+    afterEach(() => {
+        vi.useRealTimers()
+        // console spy 兜底清理（用例中途失败时不残留）
+        vi.restoreAllMocks()
+        delete process.env.DEPENDFIX_ROLE
+    })
+
+    it('worker 角色：不注册周期定时器与 close 钩子，并输出跳过日志', () => {
+        process.env.DEPENDFIX_ROLE = 'worker'
+        const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => undefined)
+        const nitroApp = runPlugin()
+
+        expect(nitroApp.hooks.hook).not.toHaveBeenCalled()
+        expect(vi.getTimerCount()).toBe(0)
+        expect(infoSpy).toHaveBeenCalled()
+        infoSpy.mockRestore()
+    })
+
+    it('未设置角色：照常注册（单进程形态行为不变）', () => {
+        const nitroApp = runPlugin()
+
+        expect(nitroApp.hooks.hook).toHaveBeenCalledWith('close', expect.any(Function))
+        expect(vi.getTimerCount()).toBeGreaterThan(0)
+        // 触发 close 钩子清理 timer，避免句柄泄漏
+        const closeHandler = nitroApp.hooks.hook.mock.calls[0]![1] as () => void
+        closeHandler()
     })
 })

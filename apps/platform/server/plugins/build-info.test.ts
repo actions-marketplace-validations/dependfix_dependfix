@@ -23,6 +23,7 @@ const runPlugin = (config: Record<string, unknown>): string[] => {
 
 describe('build-info 插件', () => {
     afterEach(() => {
+        vi.restoreAllMocks()
         vi.unstubAllGlobals()
     })
 
@@ -36,5 +37,26 @@ describe('build-info 插件', () => {
         const lines = runPlugin({})
         expect(lines).toHaveLength(1)
         expect(lines[0]).toContain('version=unknown commit=unknown')
+    })
+
+    it('worker 角色：跳过版本戳（只留一行跳过日志），HTTP 主进程行为不变', () => {
+        process.env.DEPENDFIX_ROLE = 'worker'
+        try {
+            const lines = runPlugin({ buildVersion: '1.2.3', buildCommit: 'abcdef0' })
+            expect(lines.some((line) => line.startsWith('[build]'))).toBe(false)
+            expect(lines.some((line) => line.includes('跳过 HTTP-only 插件'))).toBe(true)
+        } finally {
+            delete process.env.DEPENDFIX_ROLE
+        }
+    })
+
+    it('server 角色与未设置：正常打印版本戳', () => {
+        process.env.DEPENDFIX_ROLE = 'server'
+        try {
+            expect(runPlugin({ buildVersion: '1.2.3', buildCommit: 'abcdef0' })[0]).toMatch(/^\[build\] /)
+        } finally {
+            delete process.env.DEPENDFIX_ROLE
+        }
+        expect(runPlugin({ buildVersion: '1.2.3', buildCommit: 'abcdef0' })[0]).toMatch(/^\[build\] /)
     })
 })

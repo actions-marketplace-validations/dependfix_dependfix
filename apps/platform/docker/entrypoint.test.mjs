@@ -79,6 +79,8 @@ const start = ({ stub, env = {}, dateShim = false }) => {
     const baseEnv = { ...process.env }
     delete baseEnv.DEPENDFIX_QUEUE_WORKER
     delete baseEnv.NUXT_QUEUE_ENABLED
+    // 角色由入口注入（单进程形态不注入）：清理宿主环境残留，保证三态断言确定性
+    delete baseEnv.DEPENDFIX_ROLE
 
     const child = spawn('sh', [entrypointPath, stubPath], {
         env: {
@@ -197,6 +199,53 @@ describe.skipIf(skipOnWindows)('entrypoint.sh 队列 worker 看护', () => {
         await waitFor(() => !alive(supervisorPid))
         await waitFor(() => !alive(workerPid))
         expect(handle.output()).not.toContain('次重启')
+    })
+
+    it('角色注入：父进程未预置角色时，worker 子进程收到 worker、HTTP 主进程收到 server', async () => {
+        const handle = start({
+            stub: 'if [ "$NUXT_IN_PROCESS_WORKER" = "true" ]; then\n    echo "role-marker worker=[$DEPENDFIX_ROLE]"\n    exec tail -f /dev/null\nfi\necho "role-marker http=[$DEPENDFIX_ROLE]"\nexec tail -f /dev/null',
+            // 不预置 DEPENDFIX_ROLE（start() 已清理宿主残留）：worker 侧取值只可能来自入口注入
+            env: { DEPENDFIX_QUEUE_WORKER: '1', NUXT_QUEUE_ENABLED: 'true' },
+        })
+        await waitFor(() => handle.output().includes('role-marker worker=[worker]'))
+        await waitFor(() => handle.output().includes('role-marker http=[server]'))
+        const output = handle.output()
+        expect(output).toContain('role-marker worker=[worker]')
+        expect(output).toContain('role-marker http=[server]')
+        await terminate(handle)
+    })
+
+    it('角色归一化：父进程预置未识别值时两进程均被入口归一化（注入点唯一）', async () => {
+        const handle = start({
+            stub: 'if [ "$NUXT_IN_PROCESS_WORKER" = "true" ]; then\n    echo "role-marker worker=[$DEPENDFIX_ROLE]"\n    exec tail -f /dev/null\nfi\necho "role-marker http=[$DEPENDFIX_ROLE]"\nexec tail -f /dev/null',
+            env: { DEPENDFIX_QUEUE_WORKER: '1', NUXT_QUEUE_ENABLED: 'true', DEPENDFIX_ROLE: 'queue' },
+        })
+        await waitFor(() => handle.output().includes('role-marker http=[server]'))
+        const output = handle.output()
+        expect(output).toContain('role-marker worker=[worker]')
+        expect(output).toContain('role-marker http=[server]')
+        expect(output).not.toContain('role-marker http=[queue]')
+        await terminate(handle)
+    })
+
+    it('单进程形态：入口归一化为 server（外部误设 worker 不生效，不跳过任何插件）', async () => {
+        const handle = start({
+            stub: 'echo "single-role=[$DEPENDFIX_ROLE]"\nexit 0',
+            env: { DEPENDFIX_QUEUE_WORKER: '0', DEPENDFIX_ROLE: 'worker' },
+        })
+        const { code } = await waitExit(handle)
+        expect(code).toBe(0)
+        expect(handle.output()).toContain('single-role=[server]')
+    })
+
+    it('单进程形态：未预置角色时同样归一化为 server', async () => {
+        const handle = start({
+            stub: 'echo "single-role=[$DEPENDFIX_ROLE]"\nexit 0',
+            env: { DEPENDFIX_QUEUE_WORKER: '0' },
+        })
+        const { code } = await waitExit(handle)
+        expect(code).toBe(0)
+        expect(handle.output()).toContain('single-role=[server]')
     })
 
     it('worker 崩溃：自动重启并记录退出码 / 次数 / 时间', async () => {
