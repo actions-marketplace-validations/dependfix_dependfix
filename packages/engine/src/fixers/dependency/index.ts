@@ -395,16 +395,14 @@ export interface VersionedOverridesApplyResult {
     success: boolean
     warning?: string
     error?: string
+    /** 失败阶段：`precheck`（未写盘）/ `install`（已写盘且安装失败）——供单包包装保持既有 `toVersion` 口径 */
+    failurePhase?: 'precheck' | 'install'
 }
 
 /**
  * 批量应用版本化 overrides：**一次写盘 + 一次安装**，失败整体回滚（含 lockfile）。
- *
- * 动机（2026-10-16 生产复盘）：逐包应用使单仓安装次数 = 可修包数（大仓实测 7–8 次），
- * 每次安装都是完整依赖解析，是资源受限主机上内核 OOM 级联的放大器之一。
- * [applyVersionedOverrides] 为单包薄包装，与本函数共用实现。
- *
- * 调用方应过滤掉 `overrides` 为空的条目；`error` 已按既有口径格式化（含冷却期等提示）。
+ * 动机：逐包应用使单仓安装次数 = 可修包数（实测大仓 7–8 次），是资源受限主机 OOM 的放大器之一；
+ * [applyVersionedOverrides] 为单包薄包装，与本函数共用实现。调用方应过滤 `overrides` 为空的条目。
  */
 export async function applyVersionedOverridesBatch(
     params: {
@@ -414,7 +412,7 @@ export async function applyVersionedOverridesBatch(
 ): Promise<VersionedOverridesApplyResult> {
     const { workDir, plans } = params
     if (plans.length === 0) {
-        return { success: false, error: 'no versioned overrides provided' }
+        return { success: false, error: 'no versioned overrides provided', failurePhase: 'precheck' }
     }
 
     const pkgPath = join(workDir, 'package.json')
@@ -425,14 +423,14 @@ export async function applyVersionedOverridesBatch(
 
     // ---- 1. 读取 package.json ----
     if (!existsSync(pkgPath)) {
-        return { success: false, error: `${pkgPath}: file not found` }
+        return { success: false, error: `${pkgPath}: file not found`, failurePhase: 'precheck' }
     }
 
     let pkg: PackageJson
     try {
         pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as PackageJson
     } catch {
-        return { success: false, error: `${pkgPath}: invalid JSON` }
+        return { success: false, error: `${pkgPath}: invalid JSON`, failurePhase: 'precheck' }
     }
 
     // ---- 2. 备份 ----
@@ -449,7 +447,7 @@ export async function applyVersionedOverridesBatch(
             copyFileSync(lockfilePath, lockBackup)
         }
     } catch {
-        return { success: false, error: 'failed to create backup files' }
+        return { success: false, error: 'failed to create backup files', failurePhase: 'precheck' }
     }
 
     // ---- 3. 记录旧值并写入版本化 overrides ----
@@ -538,7 +536,7 @@ export async function applyVersionedOverridesBatch(
         }
         cleanupBackups({ pkgBackup, lockBackup, workspaceBackup })
 
-        return { success: false, error: formatInstallFailure(describeInstallError(installErr)) }
+        return { success: false, error: formatInstallFailure(describeInstallError(installErr)), failurePhase: 'install' }
     }
 
     // 成功 — 清理备份文件
@@ -549,10 +547,8 @@ export async function applyVersionedOverridesBatch(
 
 /**
  * 应用单个包的版本化 overrides（内部委托 [applyVersionedOverridesBatch]）。
- *
- * 写入位置：有 `pnpm-workspace.yaml` 时写其 `overrides`，否则写 `package.json#pnpm.overrides`。
- * 失败自动回滚（含 lockfile）；不执行验证（由上层负责）。`fromVersion` 恒为空字符串——
- * 多实例共存无单一来源版本。
+ * 写入位置：有 `pnpm-workspace.yaml` 时写其 `overrides`，否则写 `package.json#pnpm.overrides`；
+ * 失败自动回滚（含 lockfile），不执行验证（由上层负责）。
  */
 export async function applyVersionedOverrides(
     params: {
@@ -572,10 +568,15 @@ export async function applyVersionedOverrides(
         plans: [{ packageName, overrides: versionedOverrides }],
     })
 
+    // toVersion 口径保持既有语义：校验 / 备份类早退（未写盘）为空串，安装失败与成功为目标版本串
+    const toVersion = result.success || result.failurePhase === 'install'
+        ? entries.map((entry) => entry[1]).join(', ')
+        : ''
+
     return {
         packageName,
         fromVersion: '',
-        toVersion: entries.map((entry) => entry[1]).join(', '),
+        toVersion,
         isMajor: false,
         success: result.success,
         ...(result.error !== undefined ? { error: result.error } : {}),

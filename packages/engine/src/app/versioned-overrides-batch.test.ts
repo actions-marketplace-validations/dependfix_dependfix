@@ -11,6 +11,7 @@ import { join } from 'node:path'
 import nock from 'nock'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Logger } from '@dependfix/core'
+import { resetProcessControlState } from '../runners/process-control'
 import { resolveRuntimeConfig } from '../config'
 import { DependfixApp } from './index'
 
@@ -141,6 +142,7 @@ describe('DependfixApp 版本化 overrides 合批', () => {
     let workDir: string
 
     beforeEach(() => {
+        resetProcessControlState()
         workDir = mkdtempSync(join(tmpdir(), 'dependfix-vo-batch-'))
         mockRunVerification.mockReset().mockResolvedValue(verificationResult(true))
         mockApplyVersionedOverrides.mockReset()
@@ -247,6 +249,31 @@ describe('DependfixApp 版本化 overrides 合批', () => {
         const workspace = readFileSync(join(workDir, 'pnpm-workspace.yaml'), 'utf-8')
         expect(workspace).not.toContain('batch-sentinel')
         expect(result.summary.alertsFixed).toBe(2)
+    })
+
+    it('short-circuits the per-package fallback when the run was cancelled mid-batch', async () => {
+        perPackageMockSuccess()
+        nockTwoPackageAlerts()
+        const config = resolveRuntimeConfig({
+            env: { GITHUB_TOKEN: 'token', DEPENDFIX_MODE: 'fix', DEPENDFIX_REPOSITORIES: 'foo/bar' },
+        })
+        const app = new DependfixApp({ config, workDir, reportOutputDir: join(workDir, 'reports') })
+        // 合批期间发生运行级取消（平台执行超时）：回退逐包只会产出 K 条同一原因的失败动作，应短路
+        mockApplyVersionedOverridesBatch.mockImplementation(async ({ workDir: dir }: { workDir: string }) => {
+            writeFileSync(join(dir, 'pnpm-workspace.yaml'), 'overrides:\n  batch-sentinel: ^9.9.9\n')
+            app.abort('execution timeout')
+            return { success: false, error: 'run aborted — install not started' }
+        })
+
+        const { result } = await app.run()
+
+        expect(mockApplyVersionedOverridesBatch).toHaveBeenCalledTimes(1)
+        // 取消态下不再逐包试装（无失败动作噪音）
+        expect(mockApplyVersionedOverrides).not.toHaveBeenCalled()
+        expect(result.actions.filter((a) => a.strategy === 'versioned-override')).toHaveLength(0)
+        // 合批残留仍被快照恢复清除
+        expect(readFileSync(join(workDir, 'pnpm-workspace.yaml'), 'utf-8')).not.toContain('batch-sentinel')
+        expect(result.errors.some((e) => e.category === 'ABORTED')).toBe(true)
     })
 
     it('does not enable batching for a single package (behavior unchanged)', async () => {

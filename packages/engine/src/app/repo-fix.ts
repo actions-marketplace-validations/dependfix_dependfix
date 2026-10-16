@@ -30,6 +30,7 @@ import {
 } from '../helpers'
 import { buildUpgradeGroups } from '../grouping'
 import type { CommandResult } from '../runners/verification-runner'
+import { isAbortRequested } from '../runners/process-control'
 import { handleOverrideProtection } from './override-protect'
 import {
     buildVersionedOverrides,
@@ -340,6 +341,11 @@ async function applyLockfileFixes(
         && await tryBatchVersionedOverrides(ctx, repo, progress, batchItems)
 
     for (const { alert, versionedOverrides } of batched ? [] : batchItems) {
+        // 运行级取消（合批失败后的回退路径可能在中止后才走到）：不再逐个试装——
+        // 取消态下每条都会以同一原因失败，产出 K 条「失败动作」只污染报告且无归因价值
+        if (isAbortRequested()) {
+            break
+        }
         const snapshot = snapshotTrackedFiles(ctx.workDir)
         ctx.logger.info(`[multi-version] ${alert.packageName}: applying versioned overrides`, { overrides: versionedOverrides })
         const result = await applyVersionedOverrides({

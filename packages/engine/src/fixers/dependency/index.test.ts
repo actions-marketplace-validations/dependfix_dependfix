@@ -831,10 +831,39 @@ describe('applyVersionedOverridesBatch', () => {
         expect(readFileSync(pkgPath, 'utf-8')).toBe(originalPkg)
     })
 
+    it('keeps the legacy toVersion contract for single-package precheck failures (empty string)', async () => {
+        // 单包包装的早退失败（未写盘）→ toVersion 保持空串（报告 / PR 正文的 Target 列口径）
+        rmSync(pkgPath, { force: true })
+
+        const result = await applyVersionedOverrides({
+            packageName: 'vite',
+            versionedOverrides: { vite: '^2.0.5' },
+            workDir: dir,
+        })
+
+        expect(result.success).toBe(false)
+        expect(result.toVersion).toBe('')
+        expect(result.error).toContain('file not found')
+    })
+
+    it('keeps the legacy toVersion contract for single-package install failures (target string)', async () => {
+        mockRunTrackedCommand.mockRejectedValue(new Error('ERESOLVE'))
+
+        const result = await applyVersionedOverrides({
+            packageName: 'vite',
+            versionedOverrides: { vite: '^2.0.5' },
+            workDir: dir,
+        })
+
+        expect(result.success).toBe(false)
+        // 安装失败发生在写盘之后 → 目标版本串（与改动前的安装失败路径一致）
+        expect(result.toVersion).toBe('^2.0.5')
+    })
+
     it('rejects an empty plan list without touching files', async () => {
         const result = await applyVersionedOverridesBatch({ workDir: dir, plans: [] })
 
-        expect(result).toEqual({ success: false, error: 'no versioned overrides provided' })
+        expect(result).toEqual({ success: false, error: 'no versioned overrides provided', failurePhase: 'precheck' })
         expect(mockRunTrackedCommand).not.toHaveBeenCalled()
     })
 })
