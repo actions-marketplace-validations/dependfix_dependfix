@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import type { DataTableColumn } from 'caomei-ui'
-import { Copy, Download } from '@lucide/vue'
+import { Copy, Download, RefreshCw } from '@lucide/vue'
 import {
     alertsFound,
+    failureKindLabel,
+    failureStageLabel,
     formatRunDuration,
     runExecutorLabel,
     runModeLabel,
@@ -35,6 +37,12 @@ interface RunDetailView {
     runUrl: string | null
     summary: Record<string, unknown> | null
     error: { code: string, message: string } | null
+    /** 失败分类三列（口径见 docs/design/governance/run-failure-taxonomy.md §5.5）：非失败终态为 null */
+    failureCode: string | null
+    failureStage: string | null
+    failureKind: string | null
+    /** 重试来源 run id（由服务端写入；非重试触发为 null） */
+    retriedFromRunId: string | null
     results: RunResultView[]
     /**
      * AI 研判用量聚合（设计见 [platform-ai-integration.md §RunDetailDialog AI 用量 section](../design/governance/platform-ai-integration.md)）。
@@ -59,6 +67,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
     'update:visible': [value: boolean]
+    /** 重试触发成功（未合并）后发出：携带新运行 id 与仓库 id，供父级跳转扫描历史（与「立即修复」同去向口径） */
+    retried: [payload: { repositoryId: string, runId: string }]
 }>()
 
 const { t, d } = useI18n()
@@ -83,6 +93,40 @@ const visible = computed({
     get: () => props.visible,
     set: (value: boolean) => emit('update:visible', value),
 })
+
+/** 重试入口状态机（四态分离；口径见 docs/design/governance/run-failure-taxonomy.md §5.5） */
+const confirm = useConfirm()
+const { retryingRunId, retryError, retryMerged, retrySuccess, retryRun, resetMessages } = useRunRetry({
+    onRetried: (response) => {
+        const repositoryId = detail.value?.repositoryId
+        if (repositoryId) {
+            emit('retried', { repositoryId, runId: response.id })
+        }
+    },
+})
+
+/** 仅「可重试」类失败呈现入口（与后端守卫同一判据；前端不可见 ≠ 后端可绕过） */
+const canRetry = computed(() => detail.value?.failureKind === 'transient')
+
+/** 二次确认后触发重试：参数与来源均由服务端按来源运行派生，前端只传 runId */
+const requestRetry = async () => {
+    const run = detail.value
+    if (!run) {
+        return
+    }
+    const confirmed = await confirm.open({
+        title: t('runs.retry.confirmTitle'),
+        description: t('runs.retry.confirmBody', {
+            mode: modeLabel(run.mode),
+            threshold: thresholdLabel(run.severityThreshold),
+        }),
+        tone: 'neutral',
+    })
+    if (!confirmed) {
+        return
+    }
+    await retryRun(run.id)
+}
 
 const modeLabel = (mode: string) => runModeLabel(mode, t)
 const executorLabel = (executorKind: string) => runExecutorLabel(executorKind, t)
@@ -164,6 +208,8 @@ const reset = () => {
     detail.value = null
     loading.value = false
     error.value = ''
+    // 重试三态随详情生命周期清理（避免 5s 窗口内切换运行看到上一运行的提示）
+    resetMessages()
 }
 
 const loadDetail = async (runId: string) => {
@@ -306,6 +352,73 @@ watch(() => props.runId, (runId) => {
                     {{ t('runs.errorNoDetail') }}
                 </p>
             </CaomeiMessage>
+            <div
+                v-if="detail.status === 'failed'"
+                class="run-detail__failure"
+            >
+                <div class="run-detail__failure-header">
+                    <h4 class="run-detail__failure-title">
+                        {{ t('runs.retry.failureDetail') }}
+                    </h4>
+                    <CaomeiButton
+                        v-if="canRetry"
+                        variant="primary"
+                        size="sm"
+                        :loading="retryingRunId === detail.id"
+                        @click="requestRetry"
+                    >
+                        <template #icon>
+                            <CaomeiIcon :icon="RefreshCw" />
+                        </template>
+                        {{ t('runs.retry.action') }}
+                    </CaomeiButton>
+                </div>
+                <div class="run-detail__meta">
+                    <div class="run-detail__meta-item">
+                        <span class="run-detail__meta-label">{{ t('scans.runList.filterFailureStage') }}</span>
+                        <strong>{{ failureStageLabel(detail.failureStage, t) ?? '—' }}</strong>
+                    </div>
+                    <div class="run-detail__meta-item">
+                        <span class="run-detail__meta-label">{{ t('scans.runList.filterFailureKind') }}</span>
+                        <strong>{{ failureKindLabel(detail.failureKind, t) ?? '—' }}</strong>
+                    </div>
+                    <div class="run-detail__meta-item">
+                        <span class="run-detail__meta-label">{{ t('runs.retry.failureCodeLabel') }}</span>
+                        <strong>{{ detail.failureCode ?? '—' }}</strong>
+                    </div>
+                    <div v-if="detail.retriedFromRunId" class="run-detail__meta-item">
+                        <span class="run-detail__meta-label">{{ t('runs.retry.source') }}</span>
+                        <strong>{{ shortRunId(detail.retriedFromRunId) }}</strong>
+                    </div>
+                </div>
+                <p v-if="canRetry" class="run-detail__failure-hint">
+                    {{ t('runs.retry.hint') }}
+                </p>
+                <CaomeiMessage
+                    v-if="retryError"
+                    tone="danger"
+                    closable
+                    @close="resetMessages"
+                >
+                    {{ retryError }}
+                </CaomeiMessage>
+                <CaomeiMessage
+                    v-if="retryMerged"
+                    tone="warning"
+                    closable
+                    @close="resetMessages"
+                >
+                    {{ retryMerged }}
+                </CaomeiMessage>
+                <CaomeiMessage
+                    v-if="retrySuccess"
+                    tone="success"
+                    closable
+                    @close="resetMessages"
+                >
+                    {{ retrySuccess }}
+                </CaomeiMessage>
+            </div>
             <div v-if="detail.logs && detail.logs.length > 0" class="run-detail__logs">
                 <div class="run-detail__logs-header">
                     <span class="run-detail__logs-title">{{ t('runs.logsTitle') }}</span>
@@ -428,6 +541,33 @@ watch(() => props.runId, (runId) => {
     &__error-message {
         margin: $space-2 0 0;
         overflow-wrap: anywhere;
+    }
+
+    &__failure {
+        margin: $space-3 0;
+        padding: $space-3;
+        border: 1px solid $color-border;
+        border-radius: $radius-md;
+    }
+
+    &__failure-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: $space-2;
+        margin-bottom: $space-2;
+    }
+
+    &__failure-title {
+        margin: 0;
+        font-weight: 600;
+        font-size: $font-size-sm;
+    }
+
+    &__failure-hint {
+        margin: 0 0 $space-2;
+        color: $color-text-muted;
+        font-size: $font-size-sm;
     }
 
     &__logs {

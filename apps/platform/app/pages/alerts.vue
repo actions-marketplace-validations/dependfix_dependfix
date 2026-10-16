@@ -304,6 +304,15 @@ const openRunDetail = (run: RunDetailView) => {
     runDetailVisible.value = true
 }
 
+/**
+ * 重试成功后的去向：跳转扫描历史并直接打开新运行（与「立即修复」同口径
+ * `/scans?repository=xxx&run=xxx`；口径见 docs/design/governance/run-failure-taxonomy.md §5.5）。
+ */
+const goToRetriedRun = async (payload: { repositoryId: string, runId: string }) => {
+    runDetailVisible.value = false
+    await navigateTo(`/scans?repository=${payload.repositoryId}&run=${payload.runId}`)
+}
+
 const closeSidebar = () => {
     sidebarVisible.value = false
     sidebarAlert.value = null
@@ -774,6 +783,7 @@ const alertCveUrl = (cveId: string): string => `https://nvd.nist.gov/vuln/detail
         <run-detail-dialog
             v-model:visible="runDetailVisible"
             :run-id="selectedRunId"
+            @retried="goToRetriedRun"
         />
     </div>
 </template>
