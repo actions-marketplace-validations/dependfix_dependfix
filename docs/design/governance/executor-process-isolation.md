@@ -178,7 +178,7 @@ scan-queue.add(jobId = scan-<repositoryId>)   [scan-queue.ts]
 **残余边界（登记，不阻断）**：
 
 - 两进程共享 SQLite（多进程写）——依赖既有 WAL + `busy_timeout`（M23.1 落地）；需运行期验证。
-- worker 进程会重复启动周期插件（`stale-cleanup` / 启动期备份），均为幂等操作，代价为重复查询。
+- worker 进程会重复启动周期插件（`stale-cleanup` / 启动期备份），均为幂等操作，代价为重复查询。**实施结果（2026-10-16）**：周期清理与部署产物版本戳已按进程角色收敛为 HTTP 主进程单点执行——入口向两进程分别注入 `DEPENDFIX_ROLE`（worker / server），worker 侧据此跳过 HTTP-only 插件；worker 侧仅保留两进程共用的启动期数据源引导；启动期备份的双份副作用（保留窗口减半）登记为已知边界。口径见 [platform.md §10.6](../../standards/platform.md#106-队列执行进程隔离独立-worker-进程)。
 - worker 进程崩溃后由 entrypoint 看护循环自动重启（M40.4 落地，指数退避 + 连续重启上限，口径见 [platform.md §10.6](../../standards/platform.md#106-队列执行进程隔离独立-worker-进程)）；连续重启超上限后由 `stale-cleanup` 兜底。
 
 ## 4. 决策点（待用户裁定）

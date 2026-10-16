@@ -303,6 +303,7 @@ export DEPENDFIX_ALERTS_SOURCE=pnpm-audit
 | `QUEUE_JOB_RETRIES` / `QUEUE_BACKOFF_MS` | — | 空 | 队列任务重试次数 / 退避毫秒（compose 白名单内 → `NUXT_*`） |
 | `QUEUE_WORKER` → `DEPENDFIX_QUEUE_WORKER` | — | compose `1` / 入口 `0` | 独立 worker 进程消费队列（消除 BullMQ 锁续期失败）；`0` 回退单进程。⚠️ **compose 侧名为 `QUEUE_WORKER`** |
 | `DEPENDFIX_QUEUE_WORKER_SOCKET` | — | `/tmp/dependfix-queue-worker.sock` | worker 内部 socket 路径（白名单外，容器内名） |
+| `DEPENDFIX_ROLE` | — | 入口按进程注入（worker / server） | 进程角色：`worker` 跳过 HTTP-only 插件（周期清理 / 版本戳），避免重复 DB 查询与日志噪声；单进程形态由入口归一化为 `server`（等价于未设置：不跳过任何插件）；直连进程不设置。白名单外，容器内名；口径见 [platform.md §10.6](../standards/platform.md#106-队列执行进程隔离独立-worker-进程) |
 | `IN_PROCESS_WORKER` → `NUXT_IN_PROCESS_WORKER` | — | `true`（compose）/ `false`（直连进程） | 进程内 worker（单进程部署唯一消费者）；默认值以 compose 转发为准 |
 | `STALE_CLEANUP_INTERVAL_MS` | — | `300000` | 孤儿任务清理节拍（毫秒） |
 
