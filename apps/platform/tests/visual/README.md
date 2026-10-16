@@ -14,6 +14,25 @@
 - 端口：config 使用 `reuseExistingServer: false`，端口 3102 被残留进程占用时（如上次会话被强行中断）会直接报
   `http://127.0.0.1:3102 is already used` —— 结束残留的 `.output/server/index.mjs` 进程后重跑即可。
 
+### 更新基线的正确形态（三步，缺一步不算完成）
+
+1. `pnpm --filter @dependfix/platform build`（前置，见上）；
+2. `pnpm --filter @dependfix/platform test:visual:update`；
+3. **不带 update** 连跑两遍 `test:visual`。
+
+第 3 步不是保险而是判据：`--update-snapshots` 的落盘帧可能不是稳定帧——2026-10-16 观察，构建后**首次** update 落盘的
+`dialog-select-open-{light,dark}` 与随后连续三次 no-update 帧在弹窗遮罩下的表格区（y 298-419，约 4k 像素）不一致，而
+**二次** update 与 no-update 帧逐字节一致。
+
+### 连带失配与归因顺序
+
+以某页为取景底图的基线在该页**文案**变更后同样失配（不只是结构 / 样式）。2026-10-16 案例：repos 表单提示语补入
+`typecheck` 使 `dialog-select-open-{light,dark}` 失配 2080 / 2403 px，且**跨 5 次运行像素数逐字相同**（确定性变更，
+不是运行间抖动）。
+
+归因顺序：先比对失败谱在多次运行间是否一致 → 一致即查该页可见文本 / 结构的最近变更 → 确认为有意的内容变更后重建基线。
+**不要**用 `data-visual-mask` 或元素级截图掩盖**这类内容变更的连带失配**（遮蔽与元素级补拍是「运行时动态区域」与「视口外溢出区域」的既定手法，不适用于掩盖可见文案差异）——那会永久丢失「文案是否已同步」这一可检信号。
+
 ## 已裁定的既有视觉差异（不要误判为新回归）
 
 下列差异是 M31（PrimeVue → caomei-ui 迁移）收尾时**已逐项裁定**的既有形态。基线快照会如实包含它们；
