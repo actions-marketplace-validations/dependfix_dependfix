@@ -129,6 +129,12 @@ const FAILURE_CODE_MAP: Readonly<Record<string, FailureCodeMapping>> = {
     SCRIPT_NOT_FOUND: { stage: 'verify', kind: 'deterministic' },
     network_violation: { stage: 'verify', kind: 'deterministic' },
 
+    // runtime — 运行级取消（引擎 `ABORTED` 类别：平台执行超时 / 运维中止后引擎协作式收尾）。
+    // 当前编排路径上超时由执行器以 `execution_timeout` 记录（`errorJson` 优先），本项为
+    // **防御性映射**：一旦某条回退路径改读引擎类别，该信号应落 `runtime` + 可重试，
+    // 而非 `engine_exit_2`（后者是"所有仓库失败"的笼统码，会掩盖"被中止"这一事实）。
+    ABORTED: { stage: 'runtime', kind: 'transient' },
+
     // deliver — commit / push / PR 交付
     COMMIT_FAILED: { stage: 'deliver', kind: 'deterministic' },
     push_failed: { stage: 'deliver', kind: 'unknown' },

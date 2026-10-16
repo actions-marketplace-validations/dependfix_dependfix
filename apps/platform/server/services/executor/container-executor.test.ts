@@ -466,16 +466,22 @@ describe('ContainerExecutor.execute - error paths', () => {
 
     it('returns execution_timeout when withTimeout triggers', async () => {
         // 让 DependfixApp.run 返回永不解决的 promise → withTimeout 在 timeoutMs 后抛 ExecutionTimeoutError
-        dependfixAppMock.mockImplementation(function (this: { run: ReturnType<typeof vi.fn> }) {
+        const abort = vi.fn()
+        dependfixAppMock.mockImplementation(function (this: { run: ReturnType<typeof vi.fn>, abort: ReturnType<typeof vi.fn> }) {
             this.run = vi.fn().mockImplementation(() => new Promise(() => { /* never resolves */ }))
+            this.abort = abort
         } as never)
 
-        const executor = new ContainerExecutor({ workRoot: tempRoot, timeoutMs: 50 })
+        // abortGraceMs 收窄：宽限期等待属设计内行为，用例不必真等 10s
+        const executor = new ContainerExecutor({ workRoot: tempRoot, timeoutMs: 50, abortGraceMs: 10 })
         const ctx = makeCtx({ config: { ...baseConfig, mode: 'report-only' } })
         const result = await executor.execute(ctx)
 
         expect(result.exitCode).toBe(2)
         expect(result.error?.code).toBe('execution_timeout')
+        // 超时不再只是"放弃等待"：必须请求运行级取消（终止子进程树 + 停止启动新工作 +
+        // 放弃交付），否则引擎继续跑并与后续仓库争抢资源（2026-10-16 内核 OOM 级联）
+        expect(abort).toHaveBeenCalledWith(expect.stringContaining('execution timeout'))
     })
 
     it('does not leak workDir after execution (cleanup)', async () => {

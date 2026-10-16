@@ -10,7 +10,7 @@ import {
     createFixBranch,
     GIT_PUSH_HOOKS_ISOLATION_ARGS,
     GIT_PUSH_SIGNING_ISOLATION_ARGS,
-} from '@dependfix/engine'
+    DependfixRunResult } from '@dependfix/engine'
 import type { AuthProvider } from '@dependfix/engine/auth'
 import type { ScanExecutor, ScanExecutorContext, ScanExecutorResult } from './types'
 import {
@@ -19,6 +19,7 @@ import {
     PlatformDeliveryError,
     createPlatformOctokit,
 } from './platform-delivery'
+import { ABORT_GRACE_MS, ExecutionTimeoutError, settleWithin, withTimeout } from './engine-run'
 import { MemoryLogger } from '#server/utils/memory-logger'
 import { sanitizeString } from '#server/utils/sanitize'
 
@@ -238,8 +239,10 @@ export class ContainerExecutor implements ScanExecutor {
     private readonly timeoutMs: number
     private readonly cloneTimeoutMs: number
     private readonly cloneMaxRetries: number
+    /** 超时取消后等待引擎落定的宽限期（见 `engine-run.ts` 的 `ABORT_GRACE_MS`）。 */
+    private readonly abortGraceMs: number
 
-    constructor(options: { workRoot: string, timeoutMs?: number, cloneTimeoutMs?: number, cloneMaxRetries?: number } = { workRoot: process.env.DATABASE_PATH ? join(process.env.DATABASE_PATH, '..', 'runs') : 'data/runs' }) {
+    constructor(options: { workRoot: string, timeoutMs?: number, cloneTimeoutMs?: number, cloneMaxRetries?: number, abortGraceMs?: number } = { workRoot: process.env.DATABASE_PATH ? join(process.env.DATABASE_PATH, '..', 'runs') : 'data/runs' }) {
         this.workRoot = options.workRoot
         this.timeoutMs = options.timeoutMs ?? resolveExecutionTimeoutMs()
         // clone 超时：优先构造参数 > 环境变量 > 默认值
@@ -248,6 +251,7 @@ export class ContainerExecutor implements ScanExecutor {
         // clone 重试次数：优先构造参数 > 环境变量 > 默认值
         this.cloneMaxRetries = options.cloneMaxRetries
             ?? parsePositiveInt(process.env.CLONE_MAX_RETRIES, DEFAULT_CLONE_MAX_RETRIES)
+        this.abortGraceMs = options.abortGraceMs ?? ABORT_GRACE_MS
     }
 
     async isAvailable(): Promise<boolean> {
@@ -284,6 +288,9 @@ export class ContainerExecutor implements ScanExecutor {
             console: true,
             maxEntries: 1000,
         })
+
+        // 引擎运行 promise 提升到 try 外：超时路径需要据它等待宽限期（避免与引擎落盘互相踩）
+        let engineRun: Promise<DependfixRunResult> | undefined
 
         try {
             await mkdir(workDir, { recursive: true })
@@ -328,7 +335,12 @@ export class ContainerExecutor implements ScanExecutor {
                 memLogger.info(`[verify] ${owner}/${name} 使用仓库级自定义验证命令（${ctx.repository.verifyCommands.length} 条），已覆盖引擎默认验证链`)
             }
 
-            const { result, exitCode } = await withTimeout(app.run(), this.timeoutMs)
+            engineRun = app.run()
+            const { result, exitCode } = await withTimeout(engineRun, this.timeoutMs, {
+                // 超时不再只是"放弃等待"：请求运行级取消（终止在跑子进程树 + 停止启动新工作 +
+                // 放弃交付），使引擎不再与后续仓库争抢资源（2026-10-16 内核 OOM 级联的成因）
+                onTimeout: (ms) => app.abort(`execution timeout (${ms / 60000} 分钟上限)`),
+            })
 
             // 平台接管交付：仅当引擎 commit 产生新提交时触发（no-op 扫描不产生空 push）
             // 触发条件比原 `exitCode === 0` 更严格：exitCode 1 也算"有部分成功"，但只有真产生 commit 才推
@@ -425,6 +437,15 @@ export class ContainerExecutor implements ScanExecutor {
                     ? `git clone 超时（${this.cloneTimeoutMs / 1000} 秒上限，可通过 CLONE_TIMEOUT_MS 调整）`
                     : `执行超时（${this.timeoutMs / 60000} 分钟上限）`
             }
+            // 超时路径：取消已请求（终止子进程树），再给引擎一段宽限期落定后才清理工作目录——
+            // 否则会在引擎仍写盘时删除目录，且无法区分"已停止"与"仍在跑"
+            if (isTimeout && engineRun) {
+                const settled = await settleWithin(engineRun, this.abortGraceMs)
+                memLogger.warn(
+                    `[executor] ${owner}/${name}: 超时后已请求运行级取消；引擎${settled ? '已在宽限期内落定' : `在 ${this.abortGraceMs}ms 宽限期内未落定（不再等待）`}`,
+                )
+            }
+
             const executorFailMsg = `[executor] ${owner}/${name} failed: ${errorSource} - ${message}`
             memLogger.error(executorFailMsg)
             console.error(executorFailMsg)
@@ -551,28 +572,6 @@ export class ContainerExecutor implements ScanExecutor {
 
         // 理论上不会到这里，但防御性抛出
         throw lastError ?? new Error(`git clone 失败：未知错误`)
-    }
-}
-
-/** 带超时的 Promise 包装（超时抛专属错误类供识别，避免字符串匹配误判） */
-class ExecutionTimeoutError extends Error {
-    readonly source: 'clone' | 'execution'
-    constructor(ms: number, source: 'clone' | 'execution' = 'execution') {
-        super(`operation timeout after ${ms}ms`)
-        this.name = 'ExecutionTimeoutError'
-        this.source = source
-    }
-}
-
-async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-    let timer: NodeJS.Timeout | undefined
-    const timeoutPromise = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new ExecutionTimeoutError(ms)), ms)
-    })
-    try {
-        return await Promise.race([promise, timeoutPromise])
-    } finally {
-        clearTimeout(timer)
     }
 }
 
