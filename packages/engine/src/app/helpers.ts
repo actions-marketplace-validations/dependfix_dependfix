@@ -536,10 +536,10 @@ export async function runCodeScanningFixes(
 const DEFAULT_CS_BATCH_SIZE = 10
 
 /** 尝试修复 pnpm-lock.yaml（dry-run 仅记录）。 */
-export function tryLockfileRepair(
+export async function tryLockfileRepair(
     ctx: Pick<AppContext, 'config' | 'logger' | 'workDir' | 'allErrors'>,
     repo: string,
-): FixAction {
+): Promise<FixAction> {
     const { config, logger, workDir, allErrors } = ctx
     const startMs = Date.now()
 
@@ -555,7 +555,7 @@ export function tryLockfileRepair(
     }
 
     try {
-        const result: LockfileRepairResult = repairLockfile({
+        const result: LockfileRepairResult = await repairLockfile({
             workDir,
             // 未配置 toolchainPnpmVersion 时省略（缺省从 packageManager 解析）
             ...(config.toolchainPnpmVersion ? { toolchain: { pnpmVersion: config.toolchainPnpmVersion } } : {}),

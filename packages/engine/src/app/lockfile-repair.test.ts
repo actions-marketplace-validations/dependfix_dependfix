@@ -24,14 +24,14 @@ describe('tryLockfileRepair', () => {
         vi.clearAllMocks()
     })
 
-    it('passes toolchain pnpm version from config to repairLockfile', () => {
-        pnpmFixerMock.repairLockfile.mockReturnValue({
+    it('passes toolchain pnpm version from config to repairLockfile', async () => {
+        pnpmFixerMock.repairLockfile.mockResolvedValue({
             success: true,
             diff: { summary: 'lockfile updated: +10 lines' },
             attemptHistory: [],
         })
 
-        const action = tryLockfileRepair({
+        const action = await tryLockfileRepair({
             config: { dryRun: false, toolchainPnpmVersion: '10.5.2' } as AppContext['config'],
             logger,
             workDir: '/tmp/work',
@@ -47,8 +47,8 @@ describe('tryLockfileRepair', () => {
         expect(action.environmentalFailure).toBeUndefined()
     })
 
-    it('annotates diff when lockfileVersion changed (format drift guard)', () => {
-        pnpmFixerMock.repairLockfile.mockReturnValue({
+    it('annotates diff when lockfileVersion changed (format drift guard)', async () => {
+        pnpmFixerMock.repairLockfile.mockResolvedValue({
             success: true,
             diff: { summary: 'lockfile updated: +10 lines' },
             attemptHistory: [],
@@ -56,7 +56,7 @@ describe('tryLockfileRepair', () => {
             lockfileVersionChanged: true,
         })
 
-        const action = tryLockfileRepair({
+        const action = await tryLockfileRepair({
             config: { dryRun: false } as AppContext['config'],
             logger,
             workDir: '/tmp/work',
@@ -66,8 +66,8 @@ describe('tryLockfileRepair', () => {
         expect(action.diff).toBe('lockfile updated: +10 lines (lockfileVersion changed)')
     })
 
-    it('returns early success record in dry-run mode', () => {
-        const action = tryLockfileRepair({
+    it('returns early success record in dry-run mode', async () => {
+        const action = await tryLockfileRepair({
             config: { dryRun: true } as AppContext['config'],
             logger,
             workDir: '/tmp/work',
@@ -79,8 +79,8 @@ describe('tryLockfileRepair', () => {
     })
 
     // 环境性安装失败（无 stderr 诊断）：标记 environmentalFailure + 记非归因审计条目
-    it('marks environmentalFailure and records a non-attributed audit entry', () => {
-        pnpmFixerMock.repairLockfile.mockReturnValue({
+    it('marks environmentalFailure and records a non-attributed audit entry', async () => {
+        pnpmFixerMock.repairLockfile.mockResolvedValue({
             success: false,
             failureCategory: 'ENVIRONMENT_ERROR',
             failureDetail: 'environmental install failure (exit code 1): no stderr diagnostics',
@@ -89,7 +89,7 @@ describe('tryLockfileRepair', () => {
         })
         const allErrors: FixError[] = []
 
-        const action = tryLockfileRepair({
+        const action = await tryLockfileRepair({
             config: { dryRun: false } as AppContext['config'],
             logger,
             workDir: '/tmp/work',
@@ -104,8 +104,8 @@ describe('tryLockfileRepair', () => {
     })
 
     // 非环境性失败（无 environmental 标记）：不记审计条目、不标记环境性
-    it('records no audit entry for a plain (non-environmental) repair failure', () => {
-        pnpmFixerMock.repairLockfile.mockReturnValue({
+    it('records no audit entry for a plain (non-environmental) repair failure', async () => {
+        pnpmFixerMock.repairLockfile.mockResolvedValue({
             success: false,
             failureCategory: 'MANIFEST_MISMATCH',
             failureDetail: 'lockfile out of sync',
@@ -113,7 +113,7 @@ describe('tryLockfileRepair', () => {
         })
         const allErrors: FixError[] = []
 
-        const action = tryLockfileRepair({
+        const action = await tryLockfileRepair({
             config: { dryRun: false } as AppContext['config'],
             logger,
             workDir: '/tmp/work',

@@ -59,7 +59,7 @@ export async function finalizeRepoFix(
     options: { exemptAttribution?: boolean } = {},
 ): Promise<void> {
     if (progress.alertsCount > 0) {
-        const repairAction = tryLockfileRepair(ctx, repo)
+        const repairAction = await tryLockfileRepair(ctx, repo)
         ctx.allActions.push(repairAction)
         if (repairAction.success) {
             progress.lockfileRepaired = true

@@ -47,7 +47,7 @@ export const fixDependency = async (input: {
     try {
         switch (fixType) {
             case 'lockfile': {
-                const result = repairLockfile({ workDir: input.workDir })
+                const result = await repairLockfile({ workDir: input.workDir })
                 if (result.success) {
                     return {
                         ok: true,
