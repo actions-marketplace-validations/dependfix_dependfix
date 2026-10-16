@@ -263,8 +263,33 @@ describe('verifyProject', () => {
         expect(ctx.allErrors).toEqual([])
     })
 
+    it('noChanges（本次运行对该仓库无写操作）→ 失败一律豁免，类别与既有基线一致、文案标明来源', async () => {
+        writePkg({ lint: 'eslint .', build: 'tsc', typecheck: 'tsc --noEmit', test: 'vitest run' })
+        mockTestFailureAtEnd()
+        const ctx = makeVerifyCtx(undefined)
+        const actions = await verifyProject(ctx, 'foo/bar', { noChanges: true })
+
+        const testAction = actions.find((a) => a.target === 'pnpm test')
+        expect(testAction?.success).toBe(false)
+        expect(testAction?.preExisting).toBe(true)
+        // 类别与「基线命中」同源（出口码 / 门禁谓词零退化），仅文案区分来源
+        expect(ctx.allErrors).toEqual([expect.objectContaining({
+            repository: 'foo/bar', stage: 'verify', category: 'PRE_EXISTING_FAILURE', target: 'pnpm test',
+        })])
+        expect(ctx.allErrors[0]!.message).toContain('no alerts or pending fixes')
+    })
+
+    it('基线命中与 noChanges 并存 → 文案取基线来源（基线判定优先）', async () => {
+        writePkg({ lint: 'eslint .', build: 'tsc', typecheck: 'tsc --noEmit', test: 'vitest run' })
+        mockTestFailureAtEnd()
+        const ctx = makeVerifyCtx(undefined)
+        await verifyProject(ctx, 'foo/bar', { baseline: baselineWithTestFailure(), noChanges: true })
+
+        expect(ctx.allErrors[0]!.message).toContain('already failing before this run')
+    })
+
     // -----------------------------------------------------------------------
-    // sampleVerificationBaseline（修复前一次性采样）
+    // sampleVerificationBaseline（修复前按需采样）
     // -----------------------------------------------------------------------
 
     it('基线采样只测量：逐命令结果返回、失败只记日志不写 allErrors', async () => {
