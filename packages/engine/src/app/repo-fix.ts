@@ -792,7 +792,7 @@ async function applyGroupUpgrades(
             if (!quickOk) {
                 restoreTrackedFiles(ctx.workDir, snapshot)
                 ctx.logger.warn(
-                    `Rolled back ${alert.packageName} upgrade: lint failed after upgrade (per-package verification)`,
+                    `Rolled back ${alert.packageName} upgrade: per-package verification failed (see the [quick-verify] log for the failing command)`,
                 )
                 action.success = false
                 action.error = 'lint failed after upgrade; per-package verification failed, changes rolled back'

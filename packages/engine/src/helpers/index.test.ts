@@ -219,6 +219,83 @@ describe('quickVerifyProject', () => {
         await expect(quickVerifyProject({ logger, workDir, customCommands } as never, 'foo/bar')).resolves.toBe(true)
         expect(mockRunVerification).toHaveBeenCalledWith({ workDir, commands: customCommands })
     })
+
+    it('reports the failing command and its reason instead of a generic lint message', async () => {
+        // 自定义链是**整链**：失败点可以落在任意一段，日志必须写清「哪条命令 + 为什么」——
+        // 只写「lint failed」会把 test 段的失败误报成 lint 失败（2026-10-16 定时 run 实证）。
+        workDir = mkdtempSync(join(tmpdir(), 'dependfix-quick-'))
+        writeFileSync(join(workDir, 'package.json'), JSON.stringify({
+            scripts: { lint: 'eslint .', test: 'vitest run' },
+        }))
+        const customCommands = ['pnpm install --frozen-lockfile', 'pnpm lint', 'pnpm test']
+        const warnSpy = vi.fn()
+        mockRunVerification.mockResolvedValue({
+            success: false,
+            failedCommand: 'pnpm test',
+            commandResults: [
+                { command: 'pnpm install --frozen-lockfile', exitCode: 0, durationMs: 1, stdout: '', stderr: '' },
+                { command: 'pnpm lint', exitCode: 0, durationMs: 1, stdout: '', stderr: '' },
+                {
+                    command: 'pnpm test', exitCode: 1, durationMs: 1, stdout: '', stderr: '2 failed (47 tests)',
+                },
+            ],
+        })
+
+        const result = await quickVerifyProject({
+            logger: { info: vi.fn(), warn: warnSpy, error: vi.fn() } as never,
+            workDir,
+            customCommands,
+        } as never, 'foo/bar')
+
+        expect(result).toBe(false)
+        const message = warnSpy.mock.calls.at(-1)?.[0] as string
+        expect(message).toContain('pnpm test failed after upgrade')
+        expect(message).toContain('exit code 1')
+        expect(message).toContain('2 failed (47 tests)')
+        expect(message).not.toContain('lint failed')
+    })
+
+    it('falls back to the result failure text when no command result is available', async () => {
+        // 防御性兜底（生产路径当前不可达：`runVerification` 的失败返回点必然带 ≥1 条命令结果）——
+        // 锁语义：即便形态变化，日志也不得退化为空条目
+        workDir = mkdtempSync(join(tmpdir(), 'dependfix-quick-'))
+        writeFileSync(join(workDir, 'package.json'), JSON.stringify({ scripts: { lint: 'eslint .' } }))
+        const warnSpy = vi.fn()
+        mockRunVerification.mockResolvedValue({ success: false, commandResults: [], failure: 'audit proxy refused CONNECT' })
+
+        const result = await quickVerifyProject({
+            logger: { info: vi.fn(), warn: warnSpy, error: vi.fn() } as never,
+            workDir,
+        } as never, 'foo/bar')
+
+        expect(result).toBe(false)
+        const message = warnSpy.mock.calls.at(-1)?.[0] as string
+        expect(message).toContain('verification failed after upgrade')
+        expect(message).toContain('audit proxy refused CONNECT')
+    })
+
+    it('falls back to the last command name when failedCommand is absent', async () => {
+        // 标签回退链：`failedCommand` → 末条命令名 → 占位文本；缺失中间一环时不得写「verification」
+        workDir = mkdtempSync(join(tmpdir(), 'dependfix-quick-'))
+        writeFileSync(join(workDir, 'package.json'), JSON.stringify({ scripts: { lint: 'eslint .' } }))
+        const warnSpy = vi.fn()
+        mockRunVerification.mockResolvedValue({
+            success: false,
+            commandResults: [
+                { command: 'pnpm lint', exitCode: 2, durationMs: 1, stdout: '', stderr: 'boom' },
+            ],
+        })
+
+        const result = await quickVerifyProject({
+            logger: { info: vi.fn(), warn: warnSpy, error: vi.fn() } as never,
+            workDir,
+        } as never, 'foo/bar')
+
+        expect(result).toBe(false)
+        const message = warnSpy.mock.calls.at(-1)?.[0] as string
+        expect(message).toContain('pnpm lint failed after upgrade')
+        expect(message).toContain('exit code 2')
+    })
 })
 
 // ---------------------------------------------------------------------------
