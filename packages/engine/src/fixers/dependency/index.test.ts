@@ -4,15 +4,38 @@ import { tmpdir } from 'node:os'
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import type { NormalizedSecurityAlert } from '@dependfix/core'
 
-// Mock execSync to avoid needing pnpm in test environment.
+// 两处替身，职责分离（2026-10-17 可中断化后）：
+// - `mockExecSync`（node:child_process）：仅覆盖残留的**同步**调用 `detectPnpmMajor`（`pnpm --version`）
+// - `mockRunTrackedCommand`（runners/process-control）：覆盖安装类调用
+//   （`pnpm install --no-frozen-lockfile`，已迁到受管异步执行，无需真实 pnpm）
 // Must use vi.hoisted because vi.mock is hoisted above imports.
-const { mockExecSync } = vi.hoisted(() => ({
+const { mockExecSync, mockRunTrackedCommand } = vi.hoisted(() => ({
     mockExecSync: vi.fn(),
+    mockRunTrackedCommand: vi.fn(),
 }))
 
 vi.mock('node:child_process', () => ({
     execSync: mockExecSync,
 }))
+
+vi.mock('../../runners/process-control', () => ({
+    runTrackedCommand: mockRunTrackedCommand,
+}))
+
+/** 受管命令成功结果（安装类调用缺省 mock）。 */
+function okInstallOutcome(): import('../../runners/process-control').TrackedCommandResult {
+    return {
+        started: true,
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        aborted: false,
+        errno: null,
+        stdout: '',
+        stderr: '',
+        durationMs: 0,
+    }
+}
 
 import { classifyInstallFailure, formatInstallFailure } from './overrides-io'
 import {
@@ -548,10 +571,12 @@ describe('applyVersionedOverrides', () => {
         writeFileSync(pkgPath, JSON.stringify({ name: 'test-project', version: '1.0.0' }, null, 2))
         writeFileSync(lockfilePath, 'lockfileVersion: \'9.0\'\n')
         mockExecSync.mockReset()
+        mockRunTrackedCommand.mockReset()
+        mockRunTrackedCommand.mockResolvedValue(okInstallOutcome())
     })
 
     it('writes versioned overrides to pnpm.overrides and runs pnpm install', async () => {
-        mockExecSync.mockReturnValue('Done')
+        mockRunTrackedCommand.mockResolvedValue(okInstallOutcome())
 
         const result = await applyVersionedOverrides({
             packageName: 'vite',
@@ -563,14 +588,13 @@ describe('applyVersionedOverrides', () => {
         expect(result.packageName).toBe('vite')
         const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'))
         expect((pkg.pnpm as Record<string, unknown>).overrides).toEqual({ 'vite@5.4.14': '^5.4.21' })
-        expect(mockExecSync).toHaveBeenCalledWith(
-            expect.stringContaining('pnpm install --no-frozen-lockfile'),
-            expect.objectContaining({ cwd: dir }),
+        expect(mockRunTrackedCommand).toHaveBeenCalledWith(
+            expect.objectContaining({ binary: 'pnpm', args: ['install', '--no-frozen-lockfile'], cwd: dir }),
         )
     })
 
     it('writes versioned overrides to pnpm-workspace.yaml when present', async () => {
-        mockExecSync.mockReturnValue('Done')
+        mockRunTrackedCommand.mockResolvedValue(okInstallOutcome())
         const workspaceYamlPath = join(dir, 'pnpm-workspace.yaml')
         writeFileSync(workspaceYamlPath, 'packages:\n  - "packages/*"\n')
 
@@ -592,7 +616,7 @@ describe('applyVersionedOverrides', () => {
     })
 
     it('reuses existing equivalent override key instead of adding a duplicate (PR #298)', async () => {
-        mockExecSync.mockReturnValue('Done')
+        mockRunTrackedCommand.mockResolvedValue(okInstallOutcome())
         const workspaceYamlPath = join(dir, 'pnpm-workspace.yaml')
         writeFileSync(workspaceYamlPath, [
             'packages:',
@@ -616,9 +640,7 @@ describe('applyVersionedOverrides', () => {
     })
 
     it('rolls back cleanly when a batch contains equivalent keys (dedup by normalized key)', async () => {
-        mockExecSync.mockImplementation(() => {
-            throw new Error('install boom')
-        })
+        mockRunTrackedCommand.mockRejectedValue(new Error('install boom'))
         const workspaceYamlPath = join(dir, 'pnpm-workspace.yaml')
         writeFileSync(workspaceYamlPath, 'packages:\n  - "packages/*"\n')
 
@@ -637,9 +659,7 @@ describe('applyVersionedOverrides', () => {
     })
 
     it('rolls back versioned overrides and lockfile when pnpm install fails', async () => {
-        mockExecSync.mockImplementation(() => {
-            throw new Error('ERESOLVE')
-        })
+        mockRunTrackedCommand.mockRejectedValue(new Error('ERESOLVE'))
         const lockContent = 'lockfileVersion: \'9.0\'\n'
         writeFileSync(lockfilePath, lockContent)
 
@@ -664,9 +684,7 @@ describe('applyVersionedOverrides', () => {
             version: '1.0.0',
             pnpm: { overrides: { 'existing-pkg': '^1.0.0' } },
         }, null, 2))
-        mockExecSync.mockImplementation(() => {
-            throw new Error('install boom')
-        })
+        mockRunTrackedCommand.mockRejectedValue(new Error('install boom'))
 
         const result = await applyVersionedOverrides({
             packageName: 'vite',
@@ -682,7 +700,7 @@ describe('applyVersionedOverrides', () => {
     })
 
     it('writes path-level overrides (parent>child) and preserves top-level entries', async () => {
-        mockExecSync.mockReturnValue('Done')
+        mockRunTrackedCommand.mockResolvedValue(okInstallOutcome())
 
         const result = await applyVersionedOverrides({
             packageName: 'vite',
@@ -701,9 +719,7 @@ describe('applyVersionedOverrides', () => {
     })
 
     it('rolls back path-level overrides when pnpm install fails', async () => {
-        mockExecSync.mockImplementation(() => {
-            throw new Error('ERESOLVE')
-        })
+        mockRunTrackedCommand.mockRejectedValue(new Error('ERESOLVE'))
         const lockContent = 'lockfileVersion: \'9.0\'\n'
         writeFileSync(lockfilePath, lockContent)
 

@@ -3,15 +3,38 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { describe, expect, it, beforeEach, vi } from 'vitest'
 
-// Mock execSync to avoid needing pnpm in test environment.
+// 两处替身，职责分离（2026-10-17 可中断化后）：
+// - `mockExecSync`（node:child_process）：仅覆盖残留的**同步**调用 `detectPnpmMajor`（`pnpm --version`）
+// - `mockRunTrackedCommand`（runners/process-control）：覆盖安装类调用
+//   （`pnpm install --no-frozen-lockfile`，已迁到受管异步执行，无需真实 pnpm）
 // Must use vi.hoisted because vi.mock is hoisted above imports.
-const { mockExecSync } = vi.hoisted(() => ({
+const { mockExecSync, mockRunTrackedCommand } = vi.hoisted(() => ({
     mockExecSync: vi.fn(),
+    mockRunTrackedCommand: vi.fn(),
 }))
 
 vi.mock('node:child_process', () => ({
     execSync: mockExecSync,
 }))
+
+vi.mock('../../runners/process-control', () => ({
+    runTrackedCommand: mockRunTrackedCommand,
+}))
+
+/** 受管命令成功结果（安装类调用缺省 mock）。 */
+function okInstallOutcome(): import('../../runners/process-control').TrackedCommandResult {
+    return {
+        started: true,
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        aborted: false,
+        errno: null,
+        stdout: '',
+        stderr: '',
+        durationMs: 0,
+    }
+}
 
 import { cleanup, createTempProject, readPackageVersion } from './dependency.test-helpers'
 import {
@@ -30,6 +53,8 @@ describe('upgradeDependency', () => {
     beforeEach(() => {
         mockExecSync.mockReset()
         mockExecSync.mockReturnValue(Buffer.from(''))
+        mockRunTrackedCommand.mockReset()
+        mockRunTrackedCommand.mockResolvedValue(okInstallOutcome())
     })
 
     it('upgrades a package and preserves caret prefix', async () => {
@@ -48,9 +73,8 @@ describe('upgradeDependency', () => {
             isMajor: false,
             success: true,
         })
-        expect(mockExecSync).toHaveBeenCalledWith(
-            'pnpm install --no-frozen-lockfile',
-            expect.objectContaining({ cwd: project.dir }),
+        expect(mockRunTrackedCommand).toHaveBeenCalledWith(
+            expect.objectContaining({ binary: 'pnpm', args: ['install', '--no-frozen-lockfile'], cwd: project.dir }),
         )
         expect(readPackageVersion(project, 'lodash')).toBe('^4.17.21')
 
@@ -164,7 +188,7 @@ describe('upgradeDependency', () => {
 
         expect(result.success).toBe(false)
         expect(result.error).toContain('not found')
-        expect(mockExecSync).not.toHaveBeenCalled()
+        expect(mockRunTrackedCommand).not.toHaveBeenCalled()
 
         cleanup(project)
     })
@@ -184,11 +208,9 @@ describe('upgradeDependency', () => {
         const project = createTempProject({ lodash: '^4.17.20' })
         const originalContent = readFileSync(project.pkgPath, 'utf-8')
 
-        mockExecSync.mockImplementation(() => {
-            throw Object.assign(new Error('Install failed'), {
-                stderr: 'ERR_PNPM_LOCKFILE_BREAKING_CHANGE',
-            })
-        })
+        mockRunTrackedCommand.mockRejectedValue(Object.assign(new Error('Install failed'), {
+            stderr: 'ERR_PNPM_LOCKFILE_BREAKING_CHANGE',
+        }))
 
         const result = await upgradeDependency({
             packageName: 'lodash',
@@ -210,11 +232,9 @@ describe('upgradeDependency', () => {
     it('identifies minimumReleaseAge policy failure with readable hint', async () => {
         const project = createTempProject({ lodash: '^4.17.20' })
 
-        mockExecSync.mockImplementation(() => {
-            throw Object.assign(new Error('Install failed'), {
-                stderr: '[ERR_PNPM_NO_MATURE_MATCHING_VERSION] 2 versions do not meet the minimumReleaseAge constraint',
-            })
-        })
+        mockRunTrackedCommand.mockRejectedValue(Object.assign(new Error('Install failed'), {
+            stderr: '[ERR_PNPM_NO_MATURE_MATCHING_VERSION] 2 versions do not meet the minimumReleaseAge constraint',
+        }))
 
         const result = await upgradeDependency({
             packageName: 'lodash',
@@ -233,9 +253,7 @@ describe('upgradeDependency', () => {
         const project = createTempProject({ lodash: '^4.17.20' })
         const originalLockfile = readFileSync(project.lockfilePath, 'utf-8')
 
-        mockExecSync.mockImplementation(() => {
-            throw new Error('Lockfile error')
-        })
+        mockRunTrackedCommand.mockRejectedValue(new Error('Lockfile error'))
 
         await upgradeDependency({
             packageName: 'lodash',
@@ -306,6 +324,8 @@ describe('upgradeDependency (member manifest / manifestDir)', () => {
     beforeEach(() => {
         mockExecSync.mockReset()
         mockExecSync.mockReturnValue(Buffer.from(''))
+        mockRunTrackedCommand.mockReset()
+        mockRunTrackedCommand.mockResolvedValue(okInstallOutcome())
     })
 
     function createMemberProject(
@@ -342,9 +362,8 @@ describe('upgradeDependency (member manifest / manifestDir)', () => {
             success: true,
         })
         // install 仍在 workspace 根执行（workspace 解析语义）
-        expect(mockExecSync).toHaveBeenCalledWith(
-            'pnpm install --no-frozen-lockfile',
-            expect.objectContaining({ cwd: dir }),
+        expect(mockRunTrackedCommand).toHaveBeenCalledWith(
+            expect.objectContaining({ binary: 'pnpm', args: ['install', '--no-frozen-lockfile'], cwd: dir }),
         )
         const memberPkg = JSON.parse(readFileSync(memberPkgPath, 'utf-8')) as Record<string, Record<string, string>>
         expect(memberPkg.dependencies?.['vite']).toBe('^5.4.14')
@@ -383,9 +402,7 @@ describe('upgradeDependency (member manifest / manifestDir)', () => {
         const lockfilePath = join(dir, 'pnpm-lock.yaml')
         const originalLockfile = readFileSync(lockfilePath, 'utf-8')
 
-        mockExecSync.mockImplementation(() => {
-            throw new Error('Install failed')
-        })
+        mockRunTrackedCommand.mockRejectedValue(new Error('Install failed'))
 
         const result = await upgradeDependency({
             packageName: 'vite',
@@ -406,7 +423,7 @@ describe('upgradeDependency (member manifest / manifestDir)', () => {
         for (const declaration of ['workspace:*', 'catalog:', 'link:../pkg']) {
             const { dir, memberPkgPath } = createMemberProject({ vite: declaration })
             const originalMember = readFileSync(memberPkgPath, 'utf-8')
-            mockExecSync.mockClear()
+            mockRunTrackedCommand.mockClear()
 
             const result = await upgradeDependency({
                 packageName: 'vite',
@@ -417,7 +434,7 @@ describe('upgradeDependency (member manifest / manifestDir)', () => {
 
             expect(result.success).toBe(false)
             expect(result.error).toContain('non-semver declaration')
-            expect(mockExecSync).not.toHaveBeenCalled()
+            expect(mockRunTrackedCommand).not.toHaveBeenCalled()
             expect(readFileSync(memberPkgPath, 'utf-8')).toBe(originalMember)
 
             rmSync(dir, { recursive: true, force: true })
@@ -436,7 +453,7 @@ describe('upgradeDependency (member manifest / manifestDir)', () => {
 
         expect(result.success).toBe(false)
         expect(result.error).toContain('file not found')
-        expect(mockExecSync).not.toHaveBeenCalled()
+        expect(mockRunTrackedCommand).not.toHaveBeenCalled()
 
         rmSync(dir, { recursive: true, force: true })
     })
@@ -449,8 +466,9 @@ describe('upgradeDependency (member manifest / manifestDir)', () => {
 describe('overrideTransitiveDependency', () => {
     beforeEach(() => {
         mockExecSync.mockReset()
-        // 默认 mock：pnpm install 成功
-        mockExecSync.mockReturnValue(undefined)
+        mockRunTrackedCommand.mockReset()
+        // 默认 mock：pnpm install 成功（受管异步执行）
+        mockRunTrackedCommand.mockResolvedValue(okInstallOutcome())
     })
 
     it('adds package to pnpm.overrides and runs pnpm install', async () => {
@@ -526,9 +544,9 @@ describe('overrideTransitiveDependency', () => {
     })
 
     it('rolls back package.json on pnpm install failure', async () => {
-        mockExecSync.mockImplementation(() => {
-            throw Object.assign(new Error('install failed'), { stderr: 'ERR_PNPM_LOCKFILE_MISMATCH' })
-        })
+        mockRunTrackedCommand.mockRejectedValue(Object.assign(new Error('install failed'), {
+            stderr: 'ERR_PNPM_LOCKFILE_MISMATCH',
+        }))
 
         const project = createTempProject({ lodash: '^4.17.20' })
         const originalContent = readFileSync(project.pkgPath, 'utf-8')
@@ -558,9 +576,9 @@ describe('overrideTransitiveDependency', () => {
     })
 
     it('rolls back only the newly added override when existing overrides remain', async () => {
-        mockExecSync.mockImplementation(() => {
-            throw Object.assign(new Error('install failed'), { stderr: 'ERR_PNPM_LOCKFILE_MISMATCH' })
-        })
+        mockRunTrackedCommand.mockRejectedValue(Object.assign(new Error('install failed'), {
+            stderr: 'ERR_PNPM_LOCKFILE_MISMATCH',
+        }))
 
         const project = createTempProject({ lodash: '^4.17.20' }) // Pre-populate with an existing override that must survive the rollback
         const pkgWithOverrides = JSON.parse(readFileSync(project.pkgPath, 'utf-8')) as Record<string, unknown>
@@ -593,9 +611,7 @@ describe('overrideTransitiveDependency', () => {
     })
 
     it('rolls back only the newly added workspace override when existing overrides remain', async () => {
-        mockExecSync.mockImplementation(() => {
-            throw Object.assign(new Error('install failed'), { stderr: 'ERR' })
-        })
+        mockRunTrackedCommand.mockRejectedValue(Object.assign(new Error('install failed'), { stderr: 'ERR' }))
 
         const project = createTempProject({ lodash: '^4.17.20' })
         const workspaceYamlPath = join(project.dir, 'pnpm-workspace.yaml')
@@ -693,9 +709,7 @@ describe('overrideTransitiveDependency', () => {
     })
 
     it('rolls back pnpm-workspace.yaml on install failure', async () => {
-        mockExecSync.mockImplementation(() => {
-            throw Object.assign(new Error('install failed'), { stderr: 'ERR' })
-        })
+        mockRunTrackedCommand.mockRejectedValue(Object.assign(new Error('install failed'), { stderr: 'ERR' }))
 
         const project = createTempProject({ lodash: '^4.17.20' })
         const workspaceYamlPath = join(project.dir, 'pnpm-workspace.yaml')
@@ -760,12 +774,8 @@ describe('overrideTransitiveDependency', () => {
     // -----------------------------------------------------------------------
 
     it('detects pnpm v10+ writing to package.json overrides and verifies lockfile effect', async () => {
-        mockExecSync.mockImplementation((cmd: string) => {
-            if (String(cmd).includes('--version')) {
-                return '11.5.0' // pnpm v11（不读 package.json overrides）
-            }
-            return undefined // install 成功（mock 不更新 lockfile）
-        })
+        // 仅覆盖 pnpm 版本探测；安装由受管替身承担（缺省成功且不更新 lockfile → 模拟"假成功"）
+        mockExecSync.mockImplementation((cmd: string) => (String(cmd).includes('--version') ? '11.5.0' : undefined))
 
         const project = createTempProject({ lodash: '^4.17.20' })
         writeFileSync(project.lockfilePath, [
@@ -794,12 +804,8 @@ describe('overrideTransitiveDependency', () => {
     })
 
     it('succeeds with warning when lockfile actually updated', async () => {
-        mockExecSync.mockImplementation((cmd: string) => {
-            if (String(cmd).includes('--version')) {
-                return '11.5.0'
-            }
-            return undefined
-        })
+        // 仅覆盖 pnpm 版本探测（v11 不读 package.json overrides）；安装由受管替身承担
+        mockExecSync.mockImplementation((cmd: string) => (String(cmd).includes('--version') ? '11.5.0' : undefined))
 
         const project = createTempProject({ lodash: '^4.17.20' })
         // lockfile 已处于目标版本（模拟 install 生效）

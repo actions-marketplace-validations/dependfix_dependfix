@@ -1,13 +1,14 @@
-import { execFileSync } from 'node:child_process'
 import { copyFileSync, existsSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
+import { resolveInstallTimeoutMs } from '../install-timeouts'
 import {
     describeProcessSignals,
     extractProcessSignals,
-    getRawStderrText,
     getStderrText,
+    toExecLikeError,
     type ExecError,
 } from '../process-signals'
+import { getAbortReason, isAbortRequested, runTrackedCommand } from '../../runners/process-control'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -24,6 +25,8 @@ export type LockfileFailureCategory =
     // 环境性安装失败：进程被信号杀死 / 超时 / 静默非零退出且**无 stderr 诊断**。
     // 无锁文件证据可归类，按「不归因目标仓库」处理（与既有失败基线同族口径）。
     | 'ENVIRONMENT_ERROR'
+    // 本次运行已被取消（平台执行超时 / 运维中止）：命令未启动即返回，不伪装成环境性失败
+    | 'ABORTED'
     | 'UNKNOWN'
 
 export type RepairStrategy =
@@ -111,33 +114,50 @@ interface ClassificationResult {
  * 超时 / 静默非零退出）时归 `ENVIRONMENT_ERROR` + `environmental: true`——外部不再只看到
  * `Command failed: pnpm install --no-frozen-lockfile` 这类无定位信息的结果。
  */
-export function classifyLockfileFailure(workDir: string): ClassificationResult {
-    try {
-        execFileSync('pnpm', ['install', '--frozen-lockfile'], {
-            cwd: workDir,
-            stdio: 'pipe',
-            timeout: 120_000,
-        })
+export async function classifyLockfileFailure(workDir: string): Promise<ClassificationResult> {
+    const outcome = await runTrackedCommand({
+        binary: 'pnpm',
+        args: ['install', '--frozen-lockfile'],
+        cwd: workDir,
+        timeoutMs: resolveInstallTimeoutMs(),
+    })
+
+    if (outcome.exitCode === 0 && !outcome.timedOut) {
         return { ok: true, exitCode: 0, signal: null, timedOut: false, errno: null, noStderrDiagnostics: false, environmental: false }
-    } catch (err) {
-        const execError = err as ExecError
-        const signals = extractProcessSignals(execError)
-        // 原始 stderr（不含 err.message 回退）：无内容即视为「无诊断信息」
-        const rawStderr = getRawStderrText(execError)
-        // 环境性判定：信号终止 / 超时 / 无 stderr 诊断。带 stderr 的分类失败仍走原分类链
-        const environmental = signals.signal !== null || signals.timedOut || rawStderr.trim().length === 0
+    }
+
+    // 取消前置守卫命中（未启动子进程）：作为独立类别返回，不伪装成环境性失败
+    // （环境性 = 「不归因目标仓库」，与「本次运行被中止」语义不同，混用会掩盖中止事实）
+    if (!outcome.started) {
         return {
             ok: false,
-            category: environmental ? 'ENVIRONMENT_ERROR' : parseFailureCategory(rawStderr),
-            // stderr 保留原始文本（无 stderr 诊断时为空串，由 noStderrDiagnostics 标注；证据文本另取 err.message）
-            stderr: rawStderr,
-            exitCode: signals.exitCode,
-            signal: signals.signal,
-            timedOut: signals.timedOut,
-            errno: signals.errno,
-            noStderrDiagnostics: rawStderr.trim().length === 0,
-            environmental,
+            category: 'ABORTED',
+            stderr: `run aborted before diagnosis (${getAbortReason() ?? 'abort requested'})`,
+            exitCode: null,
+            signal: null,
+            timedOut: false,
+            errno: null,
+            noStderrDiagnostics: false,
+            environmental: false,
         }
+    }
+
+    // 直接映射受管执行结果（不经 execSync 形态错误往返，避免口径间接化）：
+    // `signal` / `timedOut` / `errno` 与旧 `extractProcessSignals(err)` 的语义一一对应
+    const rawStderr = outcome.stderr
+    // 环境性判定：信号终止 / 超时 / 无 stderr 诊断。带 stderr 的分类失败仍走原分类链
+    const environmental = outcome.signal !== null || outcome.timedOut || rawStderr.trim().length === 0
+    return {
+        ok: false,
+        category: environmental ? 'ENVIRONMENT_ERROR' : parseFailureCategory(rawStderr),
+        // stderr 保留原始文本（无 stderr 诊断时为空串，由 noStderrDiagnostics 标注；证据文本另取 err.message）
+        stderr: rawStderr,
+        exitCode: outcome.exitCode,
+        signal: outcome.signal,
+        timedOut: outcome.timedOut,
+        errno: outcome.errno,
+        noStderrDiagnostics: rawStderr.trim().length === 0,
+        environmental,
     }
 }
 
@@ -170,8 +190,20 @@ function parseFailureCategory(stderr: string): LockfileFailureCategory {
 // Repair Strategies
 // ---------------------------------------------------------------------------
 
-function execRepair(binary: string, args: string[], workDir: string, timeoutMs = 180_000): void {
-    execFileSync(binary, args, { cwd: workDir, stdio: 'pipe', timeout: timeoutMs })
+/**
+ * 执行一条修复策略命令（受管异步执行；非零退出 / 超时以 `execFileSync` 同形错误抛出）。
+ *
+ * 超时缺省与其余安装类调用同源（`resolveInstallTimeoutMs`，默认 300s、env 可覆盖）——
+ * 旧实现为独立硬编码 180s，属"同类调用多处各持一份超时值"的口径分裂（2026-10-16 复盘）。
+ */
+async function execRepair(binary: string, args: string[], workDir: string, timeoutMs = resolveInstallTimeoutMs()): Promise<void> {
+    const outcome = await runTrackedCommand({ binary, args, cwd: workDir, timeoutMs })
+    if (!outcome.started) {
+        throw new Error(`run aborted — repair command not started: ${[binary, ...args].join(' ')}`)
+    }
+    if (outcome.exitCode !== 0 || outcome.timedOut) {
+        throw toExecLikeError([binary, ...args].join(' '), outcome)
+    }
 }
 
 /**
@@ -200,6 +232,9 @@ function getStrategyChain(category: LockfileFailureCategory): RepairStrategy[] {
         case 'ENVIRONMENT_ERROR':
             return ['REGENERATE', 'REINSTALL']
         case 'CREDENTIAL_ERROR':
+            return []
+        // 运行被取消：不尝试任何策略（命令不会启动，逐级重试纯属空转）
+        case 'ABORTED':
             return []
     }
 }
@@ -365,18 +400,24 @@ const LOCKFILE_NAME = 'pnpm-lock.yaml'
  * 在 workDir 中使用 `pnpm install --frozen-lockfile` 验证 lockfile 合规性。
  * 验证通过 → 返回 ret:0；失败 → 返回 ret:1 + stderr。
  * 不抛异常——调用方通过 ret 判断结果。
+ *
+ * 2026-10-17 可中断化：同步 `execFileSync` → 受管异步 `runTrackedCommand`
+ * （不阻塞事件循环；子进程登记在案，运行级取消 / 超时按进程树终止）。
  */
-function verifyFrozenLockfile(workDir: string): { ret: number, stderr: string } {
-    try {
-        execFileSync('pnpm', ['install', '--frozen-lockfile'], {
-            cwd: workDir,
-            stdio: 'pipe',
-            timeout: 120_000,
-        })
-        return { ret: 0, stderr: '' }
-    } catch (err) {
-        return { ret: 1, stderr: getStderrText(err as ExecError) }
+async function verifyFrozenLockfile(workDir: string): Promise<{ ret: number, stderr: string }> {
+    const outcome = await runTrackedCommand({
+        binary: 'pnpm',
+        args: ['install', '--frozen-lockfile'],
+        cwd: workDir,
+        timeoutMs: resolveInstallTimeoutMs(),
+    })
+    if (!outcome.started) {
+        return { ret: 1, stderr: `run aborted — frozen-lockfile verification skipped (${getAbortReason() ?? 'abort requested'})` }
     }
+    if (outcome.exitCode === 0 && !outcome.timedOut) {
+        return { ret: 0, stderr: '' }
+    }
+    return { ret: 1, stderr: outcome.stderr || getStderrText(toExecLikeError('pnpm install --frozen-lockfile', outcome)) }
 }
 
 /**
@@ -420,10 +461,24 @@ function rollback(bakPath: string, workDir: string): void {
  *    - 验证通过 → 记录 diff、返回 success
  *    - 验证失败 → 继续下一个策略
  * 5. 所有策略失败 → 回滚 lockfile、返回失败结果
+ *
+ * 2026-10-17：本函数为**异步**（诊断 / frozen 校验 / 策略执行改为受管异步 `spawn`，
+ * 见 `runners/process-control.ts`）——同步实现会阻塞事件循环（引擎与平台同进程），
+ * 使平台的执行超时定时器一起停摆，且无法在取消时终止子进程树。
  */
-export function repairLockfile(params: RepairLockfileParams): LockfileRepairResult {
+export async function repairLockfile(params: RepairLockfileParams): Promise<LockfileRepairResult> {
     const { workDir } = params
     const workDir_ = workDir // alias for consistency
+    // 取消前置守卫：已被取消时不做备份 / 诊断 / 策略（避免"空转 + 伪造失败原因"）
+    if (isAbortRequested()) {
+        return {
+            success: false,
+            failureCategory: 'ABORTED',
+            failureDetail: `run aborted — lockfile repair skipped (${getAbortReason() ?? 'abort requested'})`,
+            strategy: 'SKIP',
+            attemptHistory: [],
+        }
+    }
     // 解析 pnpm 版本（toolchain 显式 > packageManager 字段 > null）
     const pnpmVersion = resolvePnpmVersion(workDir_, params.toolchain)
 
@@ -434,7 +489,7 @@ export function repairLockfile(params: RepairLockfileParams): LockfileRepairResu
     const beforeLockfileVersion = readLockfileVersionOf(workDir_)
 
     // ---- 2. 诊断 ----
-    const classification = classifyLockfileFailure(workDir_)
+    const classification = await classifyLockfileFailure(workDir_)
 
     if (classification.ok) {
         // 已合规，无需修复
@@ -453,8 +508,8 @@ export function repairLockfile(params: RepairLockfileParams): LockfileRepairResu
     const category = classification.category ?? 'UNKNOWN'
     const stderr = classification.stderr ?? ''
 
-    // ---- 3. CREDENTIAL_ERROR 不可修复 ----
-    if (category === 'CREDENTIAL_ERROR') {
+    // ---- 3. 不可修复的分类：凭据错误（需人工）/ 运行被取消（不空转） ----
+    if (category === 'CREDENTIAL_ERROR' || category === 'ABORTED') {
         try {
             rmSync(bakPath)
         } catch {
@@ -462,8 +517,10 @@ export function repairLockfile(params: RepairLockfileParams): LockfileRepairResu
         }
         return {
             success: false,
-            failureCategory: 'CREDENTIAL_ERROR',
-            failureDetail: `registry authentication error: ${truncate(stderr, 500)}`,
+            failureCategory: category,
+            failureDetail: category === 'ABORTED'
+                ? `run aborted — lockfile repair skipped (${getAbortReason() ?? 'abort requested'})`
+                : `registry authentication error: ${truncate(stderr, 500)}`,
             strategy: 'SKIP',
             attemptHistory: attempts,
         }
@@ -489,7 +546,7 @@ export function repairLockfile(params: RepairLockfileParams): LockfileRepairResu
         let strategySignal: string | null = null
 
         try {
-            execRepair(cmd.binary, cmd.args, workDir_)
+            await execRepair(cmd.binary, cmd.args, workDir_)
             strategySuccess = true
         } catch (err) {
             const execError = err as ExecError
@@ -516,7 +573,7 @@ export function repairLockfile(params: RepairLockfileParams): LockfileRepairResu
         }
 
         // 策略命令成功 → 验证 frozen-lockfile
-        const verify = verifyFrozenLockfile(workDir_)
+        const verify = await verifyFrozenLockfile(workDir_)
 
         if (verify.ret === 0) {
             // 验证通过 → 计算 diff + 格式漂移检测（lockfileVersion 前后对比）

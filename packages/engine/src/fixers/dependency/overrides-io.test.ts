@@ -1,8 +1,34 @@
 // overrides-io.test.ts — 依赖升级链的安装失败取证（`describeInstallError`）与既有格式化口径。
 // 覆盖 2026-10-16 生产复盘暴露的缺口：stderr 为空（超时 / 被信号杀死）时失败文本被清空，
 // 日志与报告里只剩 `pnpm install failed: `，无法区分「超时 / 被杀 / 装不动」。
-import { describe, expect, it } from 'vitest'
-import { classifyInstallFailure, describeInstallError, formatInstallFailure } from './overrides-io'
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
+import { DEFAULT_INSTALL_TIMEOUT_MS, INSTALL_TIMEOUT_ENV } from '../install-timeouts'
+import { classifyInstallFailure, describeInstallError, execPnpmInstall, formatInstallFailure } from './overrides-io'
+
+// 安装类调用已迁到受管异步执行（`runners/process-control.ts`）：本文件以替身接管该单一入口。
+const { mockRunTrackedCommand } = vi.hoisted(() => ({
+    mockRunTrackedCommand: vi.fn(),
+}))
+
+vi.mock('../../runners/process-control', () => ({
+    runTrackedCommand: mockRunTrackedCommand,
+}))
+
+/** 构造受管执行结果（缺省成功）。 */
+function outcome(overrides: Partial<import('../../runners/process-control').TrackedCommandResult> = {}) {
+    return {
+        started: true,
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        aborted: false,
+        errno: null,
+        stdout: '',
+        stderr: '',
+        durationMs: 1,
+        ...overrides,
+    }
+}
 
 /** 构造 `execSync` / `execFileSync` 形态的错误（`stderr` 为 Buffer，与 Node 实际抛出一致）。 */
 function makeExecError(options: {
@@ -82,5 +108,84 @@ describe('describeInstallError', () => {
 
         expect(described).toContain('exit code 1')
         expect(classifyInstallFailure(described)).toContain('minimumReleaseAge')
+    })
+})
+
+// ---------------------------------------------------------------------------
+// execPnpmInstall（受管异步执行：超时口径接线 + 错误形态零漂移）
+// ---------------------------------------------------------------------------
+
+describe('execPnpmInstall', () => {
+    const originalTimeout = process.env[INSTALL_TIMEOUT_ENV]
+
+    beforeEach(() => {
+        mockRunTrackedCommand.mockReset()
+        mockRunTrackedCommand.mockResolvedValue(outcome())
+    })
+
+    afterEach(() => {
+        if (originalTimeout === undefined) {
+            delete process.env[INSTALL_TIMEOUT_ENV]
+        } else {
+            process.env[INSTALL_TIMEOUT_ENV] = originalTimeout
+        }
+    })
+
+    it('uses the shared install timeout (default 300s) and never blocks the event loop entry', async () => {
+        await execPnpmInstall('/tmp/work')
+
+        expect(mockRunTrackedCommand).toHaveBeenCalledWith({
+            binary: 'pnpm',
+            args: ['install', '--no-frozen-lockfile'],
+            cwd: '/tmp/work',
+            timeoutMs: DEFAULT_INSTALL_TIMEOUT_MS,
+        })
+    })
+
+    it('honours DEPENDFIX_INSTALL_TIMEOUT_MS override', async () => {
+        process.env[INSTALL_TIMEOUT_ENV] = '45000'
+
+        await execPnpmInstall('/tmp/work')
+
+        expect(mockRunTrackedCommand).toHaveBeenCalledWith(
+            expect.objectContaining({ timeoutMs: 45_000 }),
+        )
+    })
+
+    it('keeps stderr evidence when the install exits non-zero', async () => {
+        mockRunTrackedCommand.mockResolvedValue(outcome({
+            exitCode: 1,
+            stderr: 'ERR_PNPM_OUTDATED_LOCKFILE: lockfile out of sync',
+        }))
+
+        const err = await execPnpmInstall('/tmp/work').catch((error: unknown) => error)
+
+        expect(err).toBeInstanceOf(Error)
+        expect(describeInstallError(err)).toBe('exit code 1: ERR_PNPM_OUTDATED_LOCKFILE: lockfile out of sync')
+    })
+
+    it('keeps the process signal when the install is killed / timed out (empty stderr)', async () => {
+        mockRunTrackedCommand.mockResolvedValue(outcome({
+            exitCode: null,
+            signal: 'SIGKILL',
+            timedOut: true,
+        }))
+
+        const err = await execPnpmInstall('/tmp/work').catch((error: unknown) => error)
+        const described = describeInstallError(err)
+
+        expect(described).toContain('signal SIGKILL')
+        expect(described).toContain('timed out')
+    })
+
+    it('renders spawn errno when the pnpm toolchain is missing', async () => {
+        mockRunTrackedCommand.mockResolvedValue(outcome({
+            exitCode: null,
+            errno: 'ENOENT',
+        }))
+
+        const err = await execPnpmInstall('/tmp/work').catch((error: unknown) => error)
+
+        expect(describeInstallError(err)).toBe('spawn error ENOENT: spawn pnpm install --no-frozen-lockfile ENOENT')
     })
 })

@@ -1,7 +1,8 @@
-import { execSync } from 'node:child_process'
 import { copyFileSync, existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import YAML from 'yaml'
-import { describeProcessSignals, extractProcessSignals, getStderrText } from '../process-signals'
+import { resolveInstallTimeoutMs } from '../install-timeouts'
+import { describeProcessSignals, extractProcessSignals, getStderrText, toExecLikeError } from '../process-signals'
+import { runTrackedCommand } from '../../runners/process-control'
 import type { DependencyFixResult, PackageJson } from './index'
 
 // ---------------------------------------------------------------------------
@@ -15,20 +16,29 @@ import type { DependencyFixResult, PackageJson } from './index'
 
 /**
  * 执行 `pnpm install --no-frozen-lockfile`。
- * 将同步 `execSync` 包装为 Promise，使上层 `upgradeDependency` 保持 async 语义。
+ *
+ * 2026-10-17 可中断化：由同步 `execSync` 改为受管异步 `runTrackedCommand`——
+ * ① 不阻塞事件循环（引擎与平台同进程，同步调用会让平台的执行超时定时器一起停摆）；
+ * ② 子进程登记在案，运行级取消（平台执行超时 / 运维中止）时按进程树终止，
+ * 不再留下"僵尸 pnpm 与后续仓库争抢内存"（2026-10-16 内核 OOM 级联的成因之一）；
+ * ③ 超时口径与其余安装类调用统一（`resolveInstallTimeoutMs`，默认 300s、env 可覆盖）。
+ *
+ * 失败仍以**与 `execSync` 同形**的错误抛出（`status` / `signal` / `code` / `stderr`），
+ * 使既有读取口径（`describeInstallError` / `extractProcessSignals`）零漂移。
  */
 export function execPnpmInstall(workDir: string): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-        try {
-            execSync('pnpm install --no-frozen-lockfile', {
-                cwd: workDir,
-                encoding: 'utf-8',
-                stdio: 'pipe',
-                timeout: 120_000, // 2 min
-            })
-            resolve()
-        } catch (err: unknown) {
-            reject(err instanceof Error ? err : new Error(String(err)))
+    const command = 'pnpm install --no-frozen-lockfile'
+    return runTrackedCommand({
+        binary: 'pnpm',
+        args: ['install', '--no-frozen-lockfile'],
+        cwd: workDir,
+        timeoutMs: resolveInstallTimeoutMs(),
+    }).then((outcome) => {
+        if (!outcome.started) {
+            throw new Error(`run aborted — install not started: ${command}`)
+        }
+        if (outcome.exitCode !== 0 || outcome.timedOut) {
+            throw toExecLikeError(command, outcome)
         }
     })
 }
