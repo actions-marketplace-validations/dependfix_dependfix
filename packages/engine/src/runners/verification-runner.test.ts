@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // ---------------------------------------------------------------------------
 // Mock child_process.spawn
@@ -107,6 +107,44 @@ function successCp(stdout?: string, stderr?: string): MockChildProcess {
 function failedCp(exitCode = 1, stderr?: string): MockChildProcess {
     return createMockCp({ exitCode, stderr: stderr ?? 'command failed' })
 }
+
+// ---------------------------------------------------------------------------
+// 宿主代理环境隔离
+// ---------------------------------------------------------------------------
+
+/**
+ * 宿主代理环境隔离：本文件的代理断言均以「父环境无代理」为基线，故用例前快照清空宿主进程的代理 env、用例后逐键还原。
+ *
+ * **不要删除本隔离块**：dependfix 的验证子进程会被 `buildSpawnEnv` 注入审计代理，「工具验证自身」时断言
+ * `spawn env` 无代理的用例必然假红；开发者本机带 `NO_PROXY` 时同样误伤（缘由与处置见
+ * [dependency-fixer-records.md §12.9](../../../../docs/design/modules/dependency-fixer-records.md)）。
+ */
+const PROXY_ENV_KEYS = [
+    'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY',
+    'http_proxy', 'https_proxy', 'all_proxy',
+    'NO_PROXY', 'no_proxy',
+] as const
+
+let proxyEnvSnapshot: Record<string, string | undefined> = {}
+
+beforeEach(() => {
+    proxyEnvSnapshot = {}
+    for (const key of PROXY_ENV_KEYS) {
+        proxyEnvSnapshot[key] = process.env[key]
+        delete process.env[key]
+    }
+})
+
+afterEach(() => {
+    for (const key of PROXY_ENV_KEYS) {
+        const value = proxyEnvSnapshot[key]
+        if (value === undefined) {
+            delete process.env[key]
+        } else {
+            process.env[key] = value
+        }
+    }
+})
 
 // ---------------------------------------------------------------------------
 // sanitizeOutput
@@ -364,6 +402,41 @@ describe('runVerification', () => {
                 delete process.env.ALL_PROXY
             } else {
                 process.env.ALL_PROXY = originalProxy
+            }
+            if (originalNuxtTelemetry === undefined) {
+                delete process.env.NUXT_TELEMETRY_DISABLED
+            } else {
+                process.env.NUXT_TELEMETRY_DISABLED = originalNuxtTelemetry
+            }
+        }
+    })
+
+    it('skips proxy injection when only lowercase http_proxy is set', async () => {
+        // 小写形态与大写同等生效（`hasExistingProxy` 读 8 个键；curl / 部分 CLI 只认小写），
+        // 只设小写时同样不得注入审计代理，否则会覆盖用户既有代理
+        const originalProxy = process.env.http_proxy
+        const originalNuxtTelemetry = process.env.NUXT_TELEMETRY_DISABLED
+        process.env.http_proxy = 'http://corp-proxy.example:8080'
+        delete process.env.NUXT_TELEMETRY_DISABLED
+        try {
+            mockSpawn.mockImplementation(() => successCp('ok'))
+
+            const result = await runVerification({
+                workDir: '/tmp/test',
+                commands: ['echo ok'],
+            })
+
+            const spawnOptions = mockSpawn.mock.calls[0][1] as { env?: NodeJS.ProcessEnv }
+            expect(spawnOptions.env?.http_proxy).toBe('http://corp-proxy.example:8080')
+            expect(spawnOptions.env?.HTTP_PROXY).toBeUndefined()
+            // telemetry 仍注入
+            expect(spawnOptions.env?.NUXT_TELEMETRY_DISABLED).toBe('1')
+            expect(result.networkAudit).toBeDefined()
+        } finally {
+            if (originalProxy === undefined) {
+                delete process.env.http_proxy
+            } else {
+                process.env.http_proxy = originalProxy
             }
             if (originalNuxtTelemetry === undefined) {
                 delete process.env.NUXT_TELEMETRY_DISABLED
