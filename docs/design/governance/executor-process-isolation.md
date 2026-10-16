@@ -1,6 +1,7 @@
 # 平台执行模型隔离设计（设计先行稿）
 
 > 状态：✅ 已落地（2026-10-09 M38 闭环归档；选型 2026-10-08：方案 ①′ 独立 worker 进程 + 方案 ③ 已落地；见 §3.1 实现路径调整）
+>   **追加（2026-10-17）**：§8 执行超时与运行级取消——把「超时」从「放弃等待」升级为「请求取消 + 有界宽限期」，并登记资源口径
 > 提出：2026-10-06（生产运行日志根因分析）
 > 范围：`apps/platform`（队列执行拓扑 / 执行器路由）；不触碰引擎修复与验证业务语义
 > 关联：[executor-sandbox.md §7.2 / §7.4 / §7.8](./executor-sandbox-implementation.md)、[platform.md §3.3 / §10](../../standards/platform.md)、`apps/platform/server/services/queue/scan-worker.ts`、`apps/platform/server/services/executor/container-executor.ts`、`docs/plan/roadmap.md` §M38
@@ -213,3 +214,49 @@ scan-queue.add(jobId = scan-<repositoryId>)   [scan-queue.ts]
 - [platform.md](../../standards/platform.md)：§3.3 迁移与数据库口径 / §10 运行时与部署
 - 代码锚点：`apps/platform/server/services/queue/queue.service.ts`、`scan-worker.ts`、`scan-queue.ts`、`apps/platform/server/services/executor/container-executor.ts`、`apps/platform/server/plugins/stale-cleanup.ts`
 - 规划：`docs/plan/roadmap.md` §M38（2026-10-09 已闭环归档，见 [todo-archive.md §M38](../../plan/archive/todo-archive-phases-m38.md#m38-平台执行模型隔离m381m386-全部已闭环--2026-10-09-归档)）+ [platform.md §10.5 / §10.6](../../standards/platform.md)
+
+## 8. 执行超时与运行级取消（2026-10-17）
+
+### 8.1 症状与证据链
+
+- **症状**：定时批次中大量「有可修告警 / 已修复 0」的仓库在运行列表显示为**已完成**；部分仓库整轮耗时 40 分钟以上。
+- **证据（2026-10-16 生产批次，39 仓 / 4 小时 41 分）**：
+  - 内核日志 `journalctl -k` 在该窗口内 **41 次** `Out of memory: Killed process … (MainThread)`（UID 1000、`anon-rss` 0.70–1.06 GB），时间戳与引擎日志行**同秒对齐**（例：`10:11:57` ↔ 逐包安装日志、`11:30:29` ↔ 修复前基线 `pnpm lint`、`14:41:26` ↔ 基线安装）。
+  - `MainThread` 为 Node 主线程名（本机实测 `/proc/self/comm`），即引擎 spawn 的安装 / 构建 / 测试进程。
+  - 63 次「版本化 override 探针」中 **47 次既无成功也无失败留痕**，全部落在环境性安装失败的仓库上（留痕缺口已由 §12.8 同源的 `recordUpgradeFailure` 补齐）。
+- **根因链（三环）**：
+  1. 引擎内长命令走**同步**子进程 API → 阻塞平台事件循环 → 执行超时定时器与队列锁续期一起停摆（实测超时定时器比设定值晚约 **9.5 分钟**才触发）；
+  2. 执行超时只 `Promise.race`（放弃等待、不中断底层工作）→ 平台清理工作目录后引擎仍在写盘，**僵尸安装进程**继续占用内存；
+  3. 单仓安装次数被**逐包应用**放大（= 可修包数 K，大仓实测 7–8 次），与 ① ② 叠加 → 僵尸进程与后续仓库争抢 4 GB 内存 → 级联 OOM。
+
+### 8.2 契约（五条，生效面 = 引擎 + 平台）
+
+1. **超时先请求取消**：超时到达时先调用引擎 `abort()`（终止已登记子进程树 + 置位取消标记 + 写 `ABORTED` 审计条目），再抛专属超时错误；取消回调自身抛错不得掩盖超时判定。
+2. **取消后不再启动新工作**：仓库边界、验证链每条命令、以及每个安装类命令（受管的取消前置守卫，返回 `started: false`）三重短路；被跳过的仓库显式计数并汇总，不静默。
+3. **中止结论独立上报**：安装 / 锁文件修复在取消下的收尾类别为 `ABORTED`（计入非零退出码），**不得**伪装成 `ENVIRONMENT_ERROR`——后者的语义是"不归因目标仓库"，混用会掩盖中止事实。
+4. **取消后不交付**：跳过本地提交与 PR 创建（工作区处于"部分修复 + 未完整验证"状态）。
+5. **有界宽限期**：平台在清理工作目录前等待引擎落定（缺省 10 秒，可经容器执行器构造参数收窄），并留一条区分"已落定 / 未落定"的日志。
+
+### 8.3 单次修复的安装预算（合批后）
+
+1 次修复前基线链 + **至多 1 次合批安装**（可修包 ≥ 2 时把 K 次压到 1 次；失败回退逐包）+ 1 次修复后验证链 + 至多 3 次锁文件修复命令。合批语义见 [dependency-fixer-records.md §12.10](../modules/dependency-fixer-records.md#_12-10-安装类命令的超时口径与版本化-overrides-合批-2026-10-17)。
+
+### 8.4 资源口径与部署建议（2026-10-17 用户裁定：仅文档化，不改默认注入）
+
+- 单次安装进程常驻内存可达约 1 GB 量级；**容器 / 主机内存建议 ≥ 8 GB**（4 GB 已验证会 OOM）。
+- 队列并发保持 1（单机同时至多一个引擎运行）。
+- 如需硬上限，用**容器内存限制**而非在命令上注入堆大小（后者会把偶发 OOM 换成对大仓构建的确定性误杀）。
+- `DEPENDFIX_INSTALL_TIMEOUT_MS`（缺省 5 分钟，越界 / 非法回退默认）可按部署算力调整；权威登记见 `apps/platform/.env.full.example` + [平台配置指南](../../guide/configuration.md)。
+
+### 8.5 不做什么
+
+- 不把引擎迁出平台进程（子进程化改造成本远超本批次粒度，登记为残余候选）。
+- 不在默认命令上注入 `--child-concurrency` / 堆上限（见 §8.4 末条）。
+- 不改验证链条数与顺序、不改 `execution_timeout` 的状态机分类口径。
+- 不改锁文件修复策略链的语义（仅将其纳入统一超时与取消面）。
+
+### 8.6 残余与观察项
+
+- 引擎子进程化（彻底消除"引擎与平台同进程"的阻塞面）—— 未立项。
+- 取消发生时工作区可能残留**部分修复**（未提交，随运行目录清理消失；CLI 就地运行场景需人工 `git restore`）。
+- 宽限期内的引擎落定与否只写日志，未落库为结构化字段（如需按 run 统计"僵尸率"，需补信号）。

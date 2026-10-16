@@ -98,6 +98,8 @@
 - **5.1.42 可注入 composable 的缺省实现必须在 setup 期解析 setup-only 依赖（hard requirement）**：为可测性给 composable 引入依赖注入（`useXxx(deps)`）时，缺省实现若写成**延迟求值**的缺省参数（如 `deps.t ?? ((key, params) => useI18n().t(key, params))`），`useI18n()` 会在**事件处理期**被调用，而 `useI18n` / `useRoute` / `useState` 等属 setup-only composable → 抛错被 handler 的 try/catch 吞掉 → **整条分支静默失效**（注入桩的单测不复现、`typecheck` / `lint` 均 0 报错，只能靠既有 e2e 全量复跑暴露）。**做法**：缺省分支用 `deps.x ?? resolveXxx()`，`resolveXxx()` 在 **setup 期**求值一次并由闭包持有；事件处理期只允许调用 event-safe 全局（`$fetch` / `navigateTo`）。
 - **5.1.43 跨边界镜像阈值 / 枚举必须用具名常量 + 权威侧等值断言锁定两侧（hard requirement）**：前端或下游包需要上游权威口径（上限、窗口大小、枚举取值）做**预判**（禁用态、提示文案、分支判断）时，**不得**裸写魔数——镜像侧用具名常量承载 + 注释指向权威常量，并在**权威侧用例**补一条等值断言（`expect(镜像值).toBe(权威值)`），使漂移在 CI 而非生产暴露。权威侧始终保留校验（413 / 400 等），镜像只决定预判提示；镜像缺失或漂移的后果须限定为「提示与实际响应不一致」，**不得**成为放行越权操作的依据。实例：`app/utils/run-view.ts` 的 `EXPORT_RUNS_LIMIT` ↔ `server/api/runs/logs-export.get.ts` 的 `MAX_EXPORT_RUNS`（断言在 `server/api/runs/runs-logs.test.ts`）。
 
+- **5.1.44 引擎内长命令必须异步执行且可被运行级取消（hard requirement）**：安装 / 锁文件修复 / 验证一类**长命令**不得使用同步子进程 API（`execSync` / `execFileSync`）——引擎与平台同进程运行，同步调用会阻塞事件循环，使平台执行超时定时器与队列锁续期一起停摆，且无法在取消时终止子进程树。**做法**：统一走受管异步执行（`packages/engine/src/runners/process-control.ts`），命令启动前检查取消状态（已取消则不启动、返回 `started: false`），运行级取消按**进程树**终止在跑子进程；超时/取消后不得交付（跳过提交与 PR），且中止结果须以独立类别上报（不伪装成"环境性失败"）。**证据要求**：声明"已超时 / 已取消"前须有子进程真正终止的证据，仅 `Promise.race` 放弃等待不算完成（放弃等待后引擎会继续运行并与后续任务争抢资源）。契约与资源口径见 [executor-process-isolation.md §8](../design/governance/executor-process-isolation.md#_8-执行超时与运行级取消-2026-10-17)。
+
 ## 6. 样式规范（平台阶段适用）
 
 - **纯 SCSS**：禁止 CSS-in-JS、Tailwind；优先复用全局变量（Variables）与混合宏（Mixins）。

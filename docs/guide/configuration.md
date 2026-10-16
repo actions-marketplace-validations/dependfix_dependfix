@@ -313,6 +313,7 @@ export DEPENDFIX_ALERTS_SOURCE=pnpm-audit
 |:---|:---:|:---|:---|
 | `RUN_WORK_ROOT` | — | `data/runs` | 运行工作根目录（clone / 执行产物） |
 | `EXECUTION_TIMEOUT_MS` | — | `1800000`（30 分钟） | 单仓库执行超时；容器执行器与队列 Worker 锁时长同源联动（`resolveExecutionTimeoutMs()`）。越界（< 1 分钟 / > 24 小时）/ 非法值回退默认 |
+| `DEPENDFIX_INSTALL_TIMEOUT_MS` | — | `300000`（5 分钟） | 安装类命令超时（引擎内依赖安装与锁文件修复链共用一处解析器）；越界（< 10 秒 / > 30 分钟）/ 非法值回退默认。超时后引擎按运行级取消终止子进程树 |
 | `CLONE_TIMEOUT_MS` | — | `300000` | git clone 超时（毫秒） |
 | `CLONE_MAX_RETRIES` | — | `3` | clone 最大重试次数 |
 | `SANDBOX_RUNTIME` | — | `runc` | 沙箱 OCI runtime |

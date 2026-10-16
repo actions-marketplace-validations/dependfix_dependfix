@@ -195,6 +195,7 @@ The management platform (`apps/platform`) is configured via env vars injected by
 |:---|:---:|:---|:---|
 | `RUN_WORK_ROOT` | — | `data/runs` | Run working root (clone / execution artifacts) |
 | `EXECUTION_TIMEOUT_MS` | — | `1800000` (30 min) | Single-repo execution timeout; the container executor and queue Worker lock duration share one resolver (`resolveExecutionTimeoutMs()`). Out-of-range (< 1 min / > 24 h) or invalid falls back to default |
+| `DEPENDFIX_INSTALL_TIMEOUT_MS` | — | `300000` (5 min) | Install-class command timeout (dependency install and lockfile repair chain share one resolver); out-of-range (< 10 s / > 30 min) or invalid falls back to default. On timeout the engine cancels the run and terminates the child process tree |
 | `CLONE_TIMEOUT_MS` | — | `300000` | git clone timeout (ms) |
 | `CLONE_MAX_RETRIES` | — | `3` | Max clone retries |
 | `SANDBOX_RUNTIME` | — | `runc` | Sandbox OCI runtime |
