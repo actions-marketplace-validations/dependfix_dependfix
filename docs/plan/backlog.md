@@ -159,18 +159,6 @@
   - **触发条件**：下次改动上述规范文件 / 文档门禁扩面 / 阶段归档批次。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
-- **依赖升级探针的 `pnpm install` 次数与超时口径收敛（待评估，P1 🛠️）** —— 现象（2026-10-17 生产实证）：单仓 install 次数 = 1（修复前基线）+ K（逐包版本化 overrides 探针）+ 1（修复后验证）+ 1~3（lockfile repair 策略链）≈ **K+3~5**；2026-10-16 定时批次（39 仓）中 cookie-cloudflare / push-all-in-cloud 各触发 8 次探针 install，整批 63 次探针里 **47 次既无 `passed verification` 也无失败文本**（失败留痕已由 [todo.md §M45](todo.md#m45-运行可靠性与交付链收口-2026-10-15-用户决策方案-a) 追加临时待办②的 `recordUpgradeFailure` 补齐，该批 run 的构建未含该提交）。
-  - **证据锚点**：探针 install 为**硬编码 120s**（`packages/engine/src/fixers/dependency/overrides-io.ts:20-32`，同步 `execSync`），而基线与修复后验证链单命令上限为 **10 分钟**（`packages/engine/src/runners/verification-runner.ts:116`）。实测探针间隔 2m01s / 2m39s 与 120s 上限吻合（即"被超时打断"而非"装完失败"），另有单次探针耗时 11m10s（超时未被真正回收）。
-  - **待评估点**：① 探针**合批**（同批 overrides 一次写盘 + 单次 install + 组级验证，K 次降到 1~3 次）；② install 超时是否与验证链同源并转为可配置；③ 与「逐包失败粒度 / 回滚粒度」的取舍（合批会放大单次回滚单元，需与下方的门禁回滚粒度候选同批评估）。
-  - **触发条件**：已命中（用户 2026-10-17 提供内核 OOM 实证与批次日志导出）；**与 [todo.md §M45](todo.md#m45-运行可靠性与交付链收口-2026-10-15-用户决策方案-a) 追加临时待办②的残余⑤（原文：环境侧（install 120s 超时 / pnpm store 卷 / 出网抖动）待实测结论另议）承接对齐**（该延后项即本条来源，非重复登记）。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
-
-- **单仓执行的内存预算与超时真中断（待评估，P1 🛠️）** —— 现象（2026-10-17 生产实证）：服务端 4 核 4 GB 上，2026-10-16 批次窗口内内核 **41 次 OOM kill**（`journalctl -k` 全部为 `Killed process … (MainThread)`，UID 1000，`anon-rss` 0.70–1.06 GB），时间戳与引擎日志**同秒对齐**（例：`10:11:57` ↔ `[multi-version] joi: applying`；`11:30:29` ↔ 自用基线 `pnpm lint`；`14:41:26` ↔ 基线 install）。`MainThread` 为 Node 主线程名（本机实测 `/proc/self/comm` 一致），即引擎 spawn 的 pnpm / 构建 / 测试进程。
-  - **证据锚点**：① install 与 git 类操作走**同步** `execSync` / `execFileSync`（`packages/engine/src/fixers/dependency/overrides-io.ts:20`、`packages/engine/src/fixers/pnpm/index.ts:114`），而引擎**与平台同进程**运行（`apps/platform/server/services/executor/container-executor.ts:331` `withTimeout(app.run(), …)`）⇒ 同步调用期间整个平台事件循环被阻塞；② `withTimeout` 只 `Promise.race` 不 abort（同文件 `:567-578`）⇒ 超时后引擎继续跑（cookie-cloudflare 引擎日志比 30 分钟上限晚约 9.5 分钟收尾），**僵尸运行与后续仓库争抢内存** ⇒ 级联 OOM；③ 单命令 10 分钟上限 × 六段链 > 单仓 30 分钟执行上限（`DEFAULT_EXECUTION_TIMEOUT_MS`）。
-  - **待评估点**：① 超时后**真正终止**引擎（AbortSignal / 独立子进程 + kill 进程树）；② 执行侧内存上限（cgroup / `--max-old-space-size` / `pnpm --child-concurrency` / `NODE_OPTIONS`）与单机并发政策的组合；③ 是否把引擎从平台进程内迁到独立进程（与 ① 同源）；④ 机器扩容（8–16 GB）与上述软约束的优先级排序。
-  - **触发条件**：已命中（OOM 实证在手）；若后续批次仍出现批次内 ≥ 3 次 OOM kill 则升级为强触发。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
-
 - **环境性失败的可见性口径：不归因 ≠ 不可见（待评估，P1 🛠️）** —— 现象（2026-10-17 生产实证）：13 个仓库「有可修告警 / 0 修复」在运行列表显示为**已完成**，平台侧无任何"本来要修但没修成"的信号。链路：`ENVIRONMENT_ERROR` 判定（`packages/engine/src/fixers/pnpm/index.ts:114-141`，**证据只取 stderr——stderr 为空、或被信号终止、或超时即判环境性**）→ `SKIPPED_AUDIT_CATEGORIES` 不计入错误（`packages/engine/src/app/result-assembly.ts:152-157`）→ `environmentalFailure` 不计入失败动作（同文件 `:181`） → 平台 `exitCode=1 + result` 走 `completed`（`apps/platform/server/services/scan-run-state.ts:136` 注释口径 + `:157` 兜底返回），且**引擎 exit code 未落库**（`apps/platform/server/entities/scan-run.ts` 无该列）。
   - **待评估点**：① `classifyLockfileFailure` 的证据采集补 stdout 尾部（pnpm 进度/错误按经验大量走 stdout，现口径把真实安装失败一并吞成"环境性"）；② 引擎 exit code 与「环境性失败计数」落库；③ 运行列表 / 详情对「`alertsSkipped`（跨线 / 子目录 / 不可修）+ `alertsTruncated`（单仓 20 条截断）+ `alertsFailed` + `alertsConverged`」分列展示，并对「有可修告警但 0 修复」打 `needs-review` 标（与 `failure_kind=transient` 的受约束重试入口衔接）；④ 超时失败 run（`result` 为 undefined）不 reconcile 告警明细（`apps/platform/server/services/scan-orchestrator.service.ts:411-417`）⇒ 列表"告警数 0"，是否补落快照。
   - **触发条件**：已命中；或用户再次以「列表显示成功但告警未修」形式报告现象。

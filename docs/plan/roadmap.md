@@ -268,6 +268,8 @@
 
 **阶段期间追加临时待办（不占阶段条目编号，2026-10-16 用户授权）**：CI 双红收口（视觉基线连带失配重建 + 自验链代理 env 假红修复 + `quick-verify` 失败留痕）——同为追加于 §M45 段落末尾（标记口径同上）；规则落 [testing.md §6.7](../standards/testing.md)（文案类改动连带失配 + update 落盘帧须由 no-update 连跑复核）与 [dependency-fixer-records.md §12.9](../design/modules/dependency-fixer-records.md)（验证链注入 env 与目标仓库测试断言的冲突面），任务与闭环记录见 [todo.md](todo.md)，批次记录见 [archive/index.md §4](archive/index.md)。**不计入本阶段原子条目数与类型平衡**。
 
+**阶段期间追加临时待办（不占阶段条目编号，2026-10-17 用户授权）**：执行超时真中断与单仓内存口径 + 依赖升级探针次数与安装超时口径收敛（内核 OOM 实证驱动）——两条同为追加于 §M45 段落末尾（标记口径同上）。处置面：① 执行超时从「放弃等待」升级为「请求运行级取消 + 有界宽限期」（契约落 [executor-process-isolation.md §8](../design/governance/executor-process-isolation.md#_8-执行超时与运行级取消-2026-10-17)）；② 安装类命令超时收敛到单一事实源（缺省 5 分钟，`DEPENDFIX_INSTALL_TIMEOUT_MS` 可覆盖，权威登记见 `.env.full.example` + [平台配置指南](../guide/configuration.md)）；③ 版本化 overrides 合批把单仓安装次数由 K 压到 1（失败回退逐包，语义不变，见 [dependency-fixer-records.md §12.10](../design/modules/dependency-fixer-records.md#_12-10-安装类命令的超时口径与版本化-overrides-合批-2026-10-17)）；④ 工程规则落 [development.md §5.1.44](../standards/development.md)（长命令须异步且可取消）。内存防按用户裁定**仅文档化部署口径**（建议 ≥ 8 GB / 并发 1 / 用容器内存限制而非注入堆上限），不改默认命令注入。任务与闭环记录见 [todo.md](todo.md)，批次记录见 [archive/index.md §4](archive/index.md)。**不计入本阶段原子条目数与类型平衡**。
+
 **commits 状态**：阶段启动规划 commit 落地后按 [规划规范 §4.4 第 5 条](../standards/planning.md#44-大批量归档批次操作规范) 用 `git rev-list HEAD ^origin/master --count` 双向核验并动态描述，不写死数字。
 
 > 详细任务与 8 要素见 [todo.md §M45](todo.md#m45-运行可靠性与交付链收口-2026-10-15-用户决策方案-a)；上一阶段（M44）见 [todo-archive.md §M44](todo-archive.md#m44-验证链治本--文档门禁可信度收口m441m446-全部已闭环--2026-10-15-归档)。
