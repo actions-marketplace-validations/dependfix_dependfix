@@ -252,6 +252,16 @@ describe('DependfixApp dual token', () => {
 // 验证门禁集成测试：验证失败（lint 不过）→ 回滚 + 不创建 PR + exit 2
 // ---------------------------------------------------------------------------
 
+// 不可修复告警载荷（无 first_patched_version）：仅让仓库「有工作」以取得归因前提（口径见
+// docs/design/modules/dependency-fixer-records.md §12.9——零告警仓库按设计不产生归属型失败）。
+const unfixableAlertPayload = () => ([{
+    number: 1,
+    state: 'open',
+    security_advisory: { ghsa_id: 'GHSA-test-0000-0000', severity: 'high' },
+    security_vulnerability: { package: { ecosystem: 'npm', name: 'lodash' }, severity: 'high', vulnerable_version_range: '< 4.17.21' },
+    dependency: { package: { ecosystem: 'npm', name: 'lodash' }, manifest_path: 'package.json' },
+}])
+
 describe('DependfixApp verification gate', () => {
     let workDir: string
 
@@ -283,10 +293,11 @@ describe('DependfixApp verification gate', () => {
     })
 
     it('rolls back and skips PR creation when verification fails (regression: bad PR #23)', async () => {
+        // 锁定「归属型验证失败必须阻断交付」：仓库须「有工作」才有归属前提（见 unfixableAlertPayload）
         nock('https://api.github.com')
             .get('/repos/foo/bar/dependabot/alerts')
             .query({ state: 'open', per_page: '100' })
-            .reply(200, [])
+            .reply(200, unfixableAlertPayload())
         nock('https://api.github.com')
             .get('/repos/foo/bar')
             .reply(200, { default_branch: 'master' })
@@ -315,10 +326,11 @@ describe('DependfixApp verification gate', () => {
     }, 30_000) // 含真实 git init/回滚 + 验证子进程：Windows 并行负载下放宽超时
 
     it('修复前即红的命令（既有失败）→ 记 PRE_EXISTING_FAILURE，不触发门禁回滚', async () => {
+        // 锁定「基线命中 → PRE_EXISTING_FAILURE」的端到端链路（仓库须「有工作」才会采样基线）
         nock('https://api.github.com')
             .get('/repos/foo/bar/dependabot/alerts')
             .query({ state: 'open', per_page: '100' })
-            .reply(200, [])
+            .reply(200, unfixableAlertPayload())
         nock('https://api.github.com')
             .get('/repos/foo/bar')
             .reply(200, { default_branch: 'master' })

@@ -76,7 +76,8 @@ export interface RepoFixCtx extends AppContext {
     /**
      * 运行级「修复前验证基线」持有器（由 index.ts 在运行开始时创建，跨仓库复用同一对象）。
      *
-     * - 首次需要时惰性采样一次（修复前 pristine 工作区）
+     * - 首个**有工作的仓库**处惰性采样一次（修复前 pristine 工作区）；零告警仓库不采样——
+     *   其验证失败按「无改动即豁免」处理（口径见 docs/design/modules/dependency-fixer-records.md §12.9）
      * - 多仓库共享同一 workDir（就地修复）时沿用首采结果——与既有 `preExistingDirty`
      *   的运行级语义一致；多仓库场景的粒度局限同 `verification-gate.ts` 所述（按 run 级归因，无法逐仓库区分）
      * - 未提供（如测试直接构造 ctx）⇒ 不采样，退回原始「全量归因」口径
@@ -115,13 +116,16 @@ export async function processRepoFix(
     }
 
     try {
-        // 修复前一次性采样验证基线（在任何改动之前；用于区分「本次引入」与「既有」失败）
-        await ensureVerificationBaseline(ctx, repo)
-        const sets = await prepareRepoFix(ctx, client, repo, progress)
+        // 只读抓取前置（不写工作区）：本仓库是否有工作决定是否付一次修复前基线验证链——
+        // 零告警仓库无任何写操作，其验证失败在 pristine 工作区下必然也是既有失败（判定见 ensureVerificationBaseline）
+        const alertInputs = await fetchRepoFixInputs(ctx, client, repo, progress)
+        // 修复前按需采样验证基线（首个有工作的仓库处采样，在任何改动之前；用于区分「本次引入」与「既有」失败）
+        const { exemptAttribution } = await ensureVerificationBaseline(ctx, repo, { hasWork: alertInputs.length > 0 })
+        const sets = await prepareRepoFixSets(ctx, repo, alertInputs, progress)
         const { singleVersionAlerts } = await applyLockfileFixes(ctx, client, repo, sets, progress)
         await applyMemberUpgrades(ctx, repo, sets, progress)
         await applyGroupUpgrades(ctx, repo, sets, singleVersionAlerts, progress)
-        await finalizeRepoFix(ctx, repo, progress)
+        await finalizeRepoFix(ctx, repo, progress, { exemptAttribution })
     } catch (error: unknown) {
         const message = toErrorMessage(error)
         const hint = alertsFetchTokenHint(error)
@@ -149,15 +153,20 @@ export async function processRepoFix(
 }
 
 /**
-     * 步骤 1：抓取告警（双源 + 截断提示）→ Code Scanning 模板修复 → 依赖告警分区。
-     * @returns 依赖告警分区产物（root/member/lockfilePath）
-     */
-async function prepareRepoFix(
+ * 步骤 1a（只读抓取，不写工作区）：双源告警抓取 → 过滤 → 优先级 → 截断提示 → 默认分支。
+ *
+ * 拆出理由：调用方需要在「本仓库是否值得付一次修复前基线验证链」的判定之前拿到告警面——
+ * 零告警仓库无任何写操作，其验证失败在 pristine 工作区下必然也是既有失败，无需采样
+ * （判定见 `ensureVerificationBaseline`；口径见 docs/design/modules/dependency-fixer-records.md 验证链章节）。
+ *
+ * @returns 限流后的告警（含 Code Scanning 源；后续步骤共用）
+ */
+async function fetchRepoFixInputs(
     ctx: RepoFixCtx,
     client: Octokit | null,
     repo: string,
     progress: RepoFixProgress,
-): Promise<LockfileAlertSets> {
+): Promise<NormalizedSecurityAlert[]> {
     // 1. Fetch alerts（双源：github-dependabot 走 alertsToken / pnpm-audit 本地回退）
     const rawAlerts = await fetchRepoAlerts(ctx, repo)
     const { filtered } = filterAlerts(rawAlerts, { severityThreshold: ctx.config.severityThreshold })
@@ -175,6 +184,19 @@ async function prepareRepoFix(
 
     ctx.allAlerts.push(...limited)
 
+    return limited
+}
+
+/**
+ * 步骤 1b（写盘段）：Code Scanning 模板修复 → 依赖告警分区。
+ * @returns 依赖告警分区产物（root/member/lockfilePath）
+ */
+async function prepareRepoFixSets(
+    ctx: RepoFixCtx,
+    repo: string,
+    limited: NormalizedSecurityAlert[],
+    progress: RepoFixProgress,
+): Promise<LockfileAlertSets> {
     // 2.0 Code Scanning 模板修复（A 类白名单；与依赖升级链路并行、互不干扰）
     // 逐告警：快照 → 应用模板 → quickVerify（lint）→ 失败回滚（不静默）
     const csCounts = await runCodeScanningFixes(ctx, repo, limited)

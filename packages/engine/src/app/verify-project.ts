@@ -3,9 +3,10 @@
 // 从 `app/helpers.ts` 拆出：验证链的命令解析、基线采样与「逐命令归因」属同一职责单元，
 // 拆分时 helpers.ts 已因本模块代码超出 max-lines 上限。
 //
-// 归因口径（既有失败基线判定）：修复前在 pristine 工作区采样一次基线；修复后仍失败、且
-// **同一命令**在基线下也失败 → 标记 `preExisting`（既有失败，不归因本次改动）；
-// 基线中缺失的命令保守归因本次（未知不算既有）。详见 docs/design/modules/dependency-fixer-records.md。
+// 归因口径（既有失败基线判定）：修复前在 pristine 工作区**按需**采样基线（首个有工作的仓库处采样；
+// 零告警仓库不采样，改由 `noChanges` 选项做等价豁免）；修复后仍失败、且**同一命令**在基线下也失败
+// → 标记 `preExisting`（既有失败，不归因本次改动）；基线中缺失的命令保守归因本次（未知不算既有）。
+// 详见 docs/design/modules/dependency-fixer-records.md §12.9。
 import { toErrorMessage, type FixAction } from '@dependfix/core'
 import { logNetworkAudit, redactUrlForReport } from '../runners/network-audit'
 import {
@@ -125,6 +126,33 @@ export interface VerifyProjectOptions {
      * （不归因本次改动，门禁不据此回滚；报告记 `PRE_EXISTING_FAILURE`）。
      */
     baseline?: CommandResult[]
+    /**
+     * 本次运行对该仓库**无任何写操作**（无告警 / 待修复项 → 调用方未采样基线）：
+     * 修复后失败一律标记 `preExisting`（不归因本次改动）。
+     *
+     * 与 `baseline` 的关系：该场景下工作区仍是 pristine，修复后验证与「若采样的基线」跑的是
+     * **同一命令、同一工作区**，故「失败 ⇒ 基线中亦失败」——两者对归因等价，因此可省去一条基线链成本。
+     * 与 `baseline` 同时提供时以「任一命中即豁免」处理（`noChanges` 语义不依赖基线）。
+     */
+    noChanges?: boolean
+}
+
+/**
+ * 解析「失败不可归因本次改动」的原因文案（返回 `undefined` ⇒ 归因本次改动）。
+ * 两条来源：① 同一命令在修复前基线中也失败；② 本次运行对该仓库无任何写操作（未采样基线）。
+ */
+function resolvePreExistingReason(
+    command: string,
+    options: VerifyProjectOptions,
+    baselineFailedCommands: Set<string>,
+): string | undefined {
+    if (baselineFailedCommands.has(command)) {
+        return 'already failing before this run'
+    }
+    if (options.noChanges === true) {
+        return 'no alerts or pending fixes for this repository in this run'
+    }
+    return undefined
 }
 
 export async function verifyProject(
@@ -174,18 +202,22 @@ export async function verifyProject(
             // 失败时附 stdout/stderr 摘要（已脱敏截断）供日志/报告定位失败原因（run 31552922137 教训：仅 "exit code 1" 无法定位）
             const failed = cr.exitCode !== 0
             const error = failed ? formatVerificationError(cr) : undefined
-            const preExisting = failed && baselineFailedCommands.has(cr.command)
+            // 既有失败两条来源：① 基线中同命令也失败；② 本次运行对该仓库无任何写操作（未采样基线）
+            const preExistingReason = failed
+                ? resolvePreExistingReason(cr.command, options, baselineFailedCommands)
+                : undefined
+            const preExisting = preExistingReason !== undefined
             if (preExisting) {
                 // 既有失败：不归因本次改动（门禁不据此回滚），但必须显式记录，避免"静默放过"
                 logger.warn(
-                    `Verification failed for ${repo}: ${cr.command} — pre-existing failure (already failing before this run), not attributed to this change`,
+                    `Verification failed for ${repo}: ${cr.command} — pre-existing failure (${preExistingReason}), not attributed to this change`,
                 )
                 allErrors.push({
                     repository: repo,
                     target: cr.command,
                     stage: 'verify',
                     category: 'PRE_EXISTING_FAILURE',
-                    message: `Pre-existing failure (already failing before this run; not caused by this change): ${cr.command} — ${error}`,
+                    message: `Pre-existing failure (${preExistingReason}; not caused by this change): ${cr.command} — ${error}`,
                 })
             } else if (failed) {
                 logger.error(`Verification failed for ${repo}: ${cr.command} — ${error}`)
