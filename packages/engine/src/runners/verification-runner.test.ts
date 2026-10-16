@@ -51,6 +51,7 @@ import {
     sanitizeOutput,
     summarizeVerificationOutput,
 } from './verification-runner'
+import { requestAbort, resetProcessControlState } from './process-control'
 import { extractHostname } from './network-audit'
 
 // ---------------------------------------------------------------------------
@@ -222,8 +223,41 @@ describe('runVerification', () => {
         mockSpawnSync.mockReset()
         mockDiscoverRegistryHosts.mockReset()
         capturedAuditOptions.length = 0
+        // 运行级取消状态是模块级单例：本 describe 内含 abort 用例，逐用例复位避免跨用例污染
+        resetProcessControlState()
         // 默认：未发现任何 registry（等价于预置清单行为）
         mockDiscoverRegistryHosts.mockReturnValue({ hosts: [], source: 'none' })
+    })
+
+    // 运行级取消（平台执行超时 / 运维中止）：链的余下命令一律不 spawn，并以失败收尾说明原因
+    it('aborts before starting any command when cancellation was already requested', async () => {
+        requestAbort('execution timeout')
+
+        const result = await runVerification({ workDir: '/tmp/aborted', commands: ['first', 'second'] })
+
+        expect(result.success).toBe(false)
+        expect(result.failedCommand).toBe('first')
+        expect(result.failure).toContain('run aborted before "first"')
+        expect(result.failure).toContain('execution timeout')
+        expect(result.commandResults).toHaveLength(0)
+        expect(mockSpawn).not.toHaveBeenCalled()
+    })
+
+    it('stops starting further commands when cancellation arrives mid-chain', async () => {
+        // 第一条命令执行期间请求取消（模拟平台在命令运行中触发 abort）
+        mockSpawn.mockImplementation(() => {
+            requestAbort('mid-run cancel')
+            return successCp('ok')
+        })
+
+        const result = await runVerification({ workDir: '/tmp/mid-abort', commands: ['first', 'second'] })
+
+        expect(result.success).toBe(false)
+        expect(result.failedCommand).toBe('second')
+        expect(result.failure).toContain('run aborted before "second"')
+        // 已跑完的命令结果保留（不丢证据），后续命令不 spawn
+        expect(result.commandResults.map((r) => r.command)).toEqual(['first'])
+        expect(mockSpawn).toHaveBeenCalledTimes(1)
     })
 
     it('passes workDir to registry discovery and surfaces degraded-discovery warning', async () => {

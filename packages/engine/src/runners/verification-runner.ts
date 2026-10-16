@@ -1,10 +1,17 @@
-import { spawn, spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import {
     startNetworkAudit,
     extractUrlsFromOutput,
     type NetworkAudit,
     type NetworkAuditEntry,
 } from './network-audit'
+import {
+    getAbortReason,
+    isAbortRequested,
+    killProcessTree,
+    trackChildProcess,
+    untrackChildProcess,
+} from './process-control'
 import { discoverRegistryHosts } from './registry-discovery'
 
 /**
@@ -202,6 +209,17 @@ export async function runVerification(params: VerificationParams): Promise<Verif
 
     try {
         for (const command of commands) {
+            // 运行级取消（平台执行超时 / 运维中止）后不再启动新命令：链的余下命令一律不 spawn，
+            // 直接以失败收尾并如实记录"因取消而未执行"（不静默截断）
+            if (isAbortRequested()) {
+                return {
+                    success: false,
+                    commandResults,
+                    failedCommand: command,
+                    failure: `run aborted before "${command}": ${getAbortReason() ?? 'abort requested'}`,
+                    ...(audit ? { networkAudit: audit.entries, networkViolations: audit.violations } : {}),
+                }
+            }
             const result = await execCommand(command, params.workDir, params.commandTimeoutMs, proxyUrl)
             commandResults.push(result)
 
@@ -303,6 +321,9 @@ function execCommand(
         const stdoutChunks: string[] = []
         const stderrChunks: string[] = []
 
+        // 受管登记：运行级取消（`requestAbort`）时按进程树终止（防僵尸命令与新仓库争抢资源）
+        trackChildProcess(cp.pid)
+
         const timer = setTimeout(() => {
             timedOut = true
             killProcessTree(cp.pid)
@@ -319,6 +340,7 @@ function execCommand(
 
         cp.on('error', (err) => {
             clearTimeout(timer)
+            untrackChildProcess(cp.pid)
             resolve({
                 command,
                 exitCode: -1,
@@ -330,6 +352,7 @@ function execCommand(
 
         cp.on('close', (code) => {
             clearTimeout(timer)
+            untrackChildProcess(cp.pid)
             const stdout = truncateLines(stdoutChunks.join(''), MAX_OUTPUT_LINES)
             const stderr = truncateLines(stderrChunks.join(''), MAX_OUTPUT_LINES)
             resolve({
@@ -342,29 +365,6 @@ function execCommand(
             })
         })
     })
-}
-
-/**
- * 终止进程树：POSIX 杀进程组（detached 进程组组长），Windows 用 taskkill /T /F。
- * 失败时静默退化（主终止路径已由调用方 cp.kill 兜底）。
- */
-function killProcessTree(pid?: number): void {
-    if (pid === undefined || pid <= 0) {
-        return
-    }
-    if (process.platform === 'win32') {
-        try {
-            spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' })
-        } catch {
-            // taskkill 不可用时由调用方 cp.kill 兜底
-        }
-    } else {
-        try {
-            process.kill(-pid, 'SIGKILL')
-        } catch {
-            // 进程组不存在时由调用方 cp.kill 兜底
-        }
-    }
 }
 
 /** 截断文本到指定行数 */

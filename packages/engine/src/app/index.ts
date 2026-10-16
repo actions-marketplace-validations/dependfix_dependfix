@@ -1,9 +1,6 @@
 import type { Octokit } from '@octokit/rest'
 import {
     createLogger,
-    filterAlerts,
-    prioritizeAlerts,
-    limitAlerts,
     generateMarkdownReport,
     generateJsonReport,
     writeReport,
@@ -42,10 +39,13 @@ import { runWithConcurrency } from '../multirepo/scheduler'
 import { writeArchive } from '../report/archiver'
 import type { RuntimeConfig } from '../config'
 import { enforceVerificationGate } from '../runners/verification-gate'
+import { requestAbort, resetProcessControlState } from '../runners/process-control'
 import { collectSupplyChainWarnings } from '../supply-chain'
 import { loadRulesConfigFromEnv, resetActiveRulesConfig, setActiveRulesConfig } from '../code-scanning/rule-config'
 import type { CommandResult } from '../runners/verification-runner'
-import { fetchRepoAlerts, fetchDefaultBranch, hasSourceScopedFetchFailure, truncatedWarning } from './repo-alerts'
+import { fetchDefaultBranch } from './repo-alerts'
+import { abortAwareRepoTask, abortBlocksDelivery, logSkippedRepos, recordRunAbort } from './abort'
+import { processRepoForReport } from './repo-report'
 import { processRepoFix, type AiUsageRef } from './repo-fix'
 import { applyRepoConfig } from './repo-config'
 import {
@@ -65,7 +65,7 @@ import {
     runBranchCleanupForRepo,
     type AppContext,
 } from './helpers'
-import { alertsFetchTokenHint, pullRequestCreationHint } from './token-hints'
+import { pullRequestCreationHint } from './token-hints'
 
 // 仅 re-export 平台直接调用的辅助函数（PR 创建在平台 A 模式复用）
 export { buildPrTitle } from './helpers'
@@ -239,6 +239,23 @@ export class DependfixApp {
                 suggestedCount: ruleConfig.suggested.size,
             })
         }
+
+        // 进程级状态生命周期（同 `resetActiveRulesConfig` 口径）：运行级取消状态与受管子进程登记
+        // 是模块级单例，每次构造 app 先复位，避免同一进程内的前一次运行状态污染本次运行
+        // （同一进程多次 new DependfixApp 场景：cli 测试 / 平台多 batch 调度）。
+        resetProcessControlState()
+    }
+
+    /**
+     * 请求中止本次运行（平台执行超时 / 运维中止的接入点；协作式、可重复调用）。
+     *
+     * 语义与留痕口径见 [app/abort.ts](./abort.ts) 的 `recordRunAbort`；核心三步：
+     * ① 立即终止在跑子进程树；② 不再启动新工作（仓库边界 / 验证链 / 安装命令三重短路）；
+     * ③ 放弃交付（半成品不落地）。不抛错、不中断调用栈。
+     */
+    abort(reason = 'abort requested'): void {
+        requestAbort(reason)
+        recordRunAbort(this.ctx, reason)
     }
 
     /** 供辅助方法使用的状态切片。 */
@@ -405,63 +422,7 @@ export class DependfixApp {
     private async executeReportMode(): Promise<void> {
         const client = this.githubClientOrNull()
         const repositories = await this.resolveRepositories(client)
-        await this.runRepoPipeline(repositories, (repo) => this.processRepoForReport(client, repo))
-    }
-
-    private async processRepoForReport(client: Octokit | null, repo: string): Promise<void> {
-        const startTime = Date.now()
-        const [owner, name] = repo.split('/')
-
-        try {
-            const alerts = await fetchRepoAlerts(this.ctx, repo)
-            const { filtered } = filterAlerts(alerts, { severityThreshold: this.config.severityThreshold })
-            const prioritized = prioritizeAlerts(filtered)
-            const { limited, truncated } = limitAlerts(prioritized, this.config.maxAlertsPerRepository)
-            if (truncated.length > 0) {
-                this.summary.alertsTruncated += truncated.length
-                this.logger.warn(truncatedWarning(this.config, truncated.length))
-            }
-
-            const defaultBranch = await fetchDefaultBranch(client, owner, name)
-
-            this.allAlerts.push(...limited)
-            this.repoResults.push({
-                repository: repo,
-                defaultBranch,
-                alertsCount: limited.length,
-                fixable: limited.filter((a) => a.fixable).length,
-                fixed: 0,
-                failed: 0,
-                lockfileRepaired: false,
-                durationMs: Date.now() - startTime,
-            })
-
-            this.logger.info(`Fetched ${limited.length} alerts for ${repo}`)
-        } catch (error: unknown) {
-            const message = toErrorMessage(error)
-            const hint = alertsFetchTokenHint(error)
-            this.logger.error(`Failed to fetch alerts for ${repo}: ${message}${hint ? ` — ${hint}` : ''}`)
-            // 仓库级错误只在「没有 per-source 信号」时补记：全部启用源失败时 fetchRepoAlerts 已写入
-            // 带 source 的 FETCH_FAILED，再追加无 source 的同类会形成重复信号并落入日志汇总的 unknown 分组
-            if (!hasSourceScopedFetchFailure(this.allErrors, repo)) {
-                this.allErrors.push({
-                    repository: repo,
-                    stage: 'fetch',
-                    category: 'FETCH_FAILED',
-                    message: hint ? `${message}（${hint}）` : message,
-                })
-            }
-            this.repoResults.push({
-                repository: repo,
-                defaultBranch: '',
-                alertsCount: 0,
-                fixable: 0,
-                fixed: 0,
-                failed: 0,
-                lockfileRepaired: false,
-                durationMs: Date.now() - startTime,
-            })
-        }
+        await this.runRepoPipeline(repositories, (repo) => processRepoForReport(this.ctx, client, repo))
     }
 
     // -----------------------------------------------------------------------
@@ -475,6 +436,10 @@ export class DependfixApp {
 
         // 修复完成后，按需在本地当前分支直接提交（不推送、不创建 PR）
         if (this.config.commit) {
+            // 运行级取消：不交付半成品
+            if (abortBlocksDelivery(this.ctx, 'local commit')) {
+                return
+            }
             // 验证门禁：任一仓库验证失败 → 回滚，不提交坏改动
             if (enforceVerificationGate(this.ctx, { preExistingDirty: this.preExistingDirty, action: 'commit' })) {
                 return
@@ -537,6 +502,9 @@ export class DependfixApp {
         }
 
         // 2. Verification gate：任一仓库验证失败 → 回滚修复改动并跳过 PR 创建
+        if (abortBlocksDelivery(this.ctx, 'PR creation')) {
+            return
+        }
         if (enforceVerificationGate(this.ctx, { preExistingDirty: this.preExistingDirty, action: 'pr' })) {
             return
         }
@@ -775,10 +743,15 @@ export class DependfixApp {
             )
         }
 
+        /** 因运行级取消而未处理的仓库（显式计数，避免静默跳过）。 */
+        const abortedRepos: string[] = []
+
         await runWithConcurrency({
             items: repositories,
             concurrency: this.config.maxConcurrency,
-            task,
+            // 运行级取消：中止后不再启动新仓库（也不抓告警 / 不装依赖），避免"僵尸运行"与后续
+            // 队列任务争抢资源；被跳过的仓库显式计数并汇总告警（不静默）
+            task: abortAwareRepoTask(task, abortedRepos),
             logger: this.logger,
             // 防御兜底：task 内部未捕获异常 → 记录审计错误，不中断整体
             onError: (repo, error) => {
@@ -792,6 +765,8 @@ export class DependfixApp {
                 })
             },
         })
+
+        logSkippedRepos(this.logger, abortedRepos)
     }
 
     /**
