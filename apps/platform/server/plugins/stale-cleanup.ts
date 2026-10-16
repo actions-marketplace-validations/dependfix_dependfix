@@ -5,6 +5,7 @@ import { cleanupPendingWorkdirs } from '#server/services/batch/cleanup-pending-w
 import { getQueueService, type QueueService } from '#server/services/queue/queue.service'
 import type { ScanQueue } from '#server/services/queue/scan-queue'
 import { resolveExecutionTimeoutMs } from '#server/services/executor/container-executor'
+import { shouldSkipHttpOnlyPlugin } from '#server/utils/process-role'
 
 /**
  * 周期清理孤儿 ScanRun / BatchRun + 周期兜底对账 + `_pending/` 过期 workDir：
@@ -120,6 +121,13 @@ export const runStaleCleanupOnce = async (): Promise<void> => {
 }
 
 export default defineNitroPlugin((nitroApp) => {
+    // 队列 worker 进程跳过周期清理：周期任务只需一个进程执行——容器双进程形态下 HTTP 主进程恒存在，
+    // 且 §10.6 已把「worker 崩溃后的兜底」挂在它身上；两进程同跑会产生重复 DB 查询与
+    // `_pending/` 目录删除竞态。角色判定与清单见 docs/standards/platform.md §10.6。
+    if (shouldSkipHttpOnlyPlugin('stale-cleanup')) {
+        return
+    }
+
     const intervalMs = Number(process.env.STALE_CLEANUP_INTERVAL_MS) || DEFAULT_INTERVAL_MS
     let timer: ReturnType<typeof setInterval> | null = null
 

@@ -77,6 +77,9 @@ HOME_DIR_CANON="$(check_dir_path HOME "$HOME_DIR")"
 #   HTTP 进程：NUXT_IN_PROCESS_WORKER=false 不消费队列，event loop 不再被扫描执行阻塞。
 # worker 的 Nitro HTTP 监听收敛到 unix socket（不占端口、不对外暴露），避免与主进程端口冲突；
 # 迁移仅由主进程执行（worker 侧 DATABASE_MIGRATIONS_RUN=false），避免两进程迁移竞争。
+# 进程角色：入口向两进程分别注入 DEPENDFIX_ROLE（worker / server）——worker 侧据此跳过 HTTP-only
+#   插件（周期清理 stale-cleanup / 版本戳 build-info），避免重复 DB 查询与日志噪声；单进程形态由
+#   入口归一化为 server（外部误设 worker 不生效）。判定口径与插件清单见 docs/standards/platform.md §10.6。
 # worker 由看护循环托管：异常退出后按指数退避自动重启；连续重启超过上限则放弃（HTTP 进程不受影响，
 # 队列由 stale-cleanup 兜底）；容器停止（TERM / INT）时终止看护循环与 worker，不再重启。
 # 口径见 docs/standards/platform.md §10.6。默认 0 = 单进程形态（行为与既有一致）。
@@ -116,6 +119,7 @@ supervise_queue_worker() {
         $worker_prefix env HOME="$HOME_DIR" \
             NUXT_QUEUE_ENABLED=true \
             NUXT_IN_PROCESS_WORKER=true \
+            DEPENDFIX_ROLE=worker \
             DATABASE_MIGRATIONS_RUN=false \
             NITRO_UNIX_SOCKET="$WORKER_SOCKET" \
             "$@" &
@@ -172,9 +176,12 @@ run_platform() {
     fi
 
     if [ "$WORKER_ENABLED" != "1" ]; then
-        # 单进程形态（向后兼容）：入口替换为平台进程
+        # 单进程形态（向后兼容）：入口替换为平台进程。
+        # 角色归一化：单进程形态没有独立 worker，显式置 server——避免外部误设 DEPENDFIX_ROLE=worker
+        # 后周期清理（stale-cleanup）在本进程被跳过而无人承担（fail-safe：宁可多跑一次幂等清理，
+        # 也不静默停用孤儿清理）。口径见 docs/standards/platform.md §10.6。
         # shellcheck disable=SC2086
-        exec $prefix "$@"
+        exec $prefix env DEPENDFIX_ROLE=server "$@"
     fi
 
     # 双进程形态：worker 由后台看护循环托管（崩溃自动重启），主进程前台托管
@@ -191,7 +198,7 @@ run_platform() {
     SUPERVISOR_PID=$!
 
     # shellcheck disable=SC2086
-    $prefix env NUXT_QUEUE_ENABLED=true NUXT_IN_PROCESS_WORKER=false "$@" &
+    $prefix env NUXT_QUEUE_ENABLED=true NUXT_IN_PROCESS_WORKER=false DEPENDFIX_ROLE=server "$@" &
     MAIN_PID=$!
 
     echo "[entrypoint] HTTP 进程 pid=${MAIN_PID} 不消费队列；队列 worker 看护进程 pid=${SUPERVISOR_PID}（socket=${WORKER_SOCKET}）"
