@@ -2,11 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 /**
  * stale-cleanup 插件单测：覆盖 runStaleCleanupOnce 的三类任务编排、队列模式接线
- * （isPendingOrphan 下行 + 孤儿 job 按 run 归属释放）与失败降级路径。
+ * （queueJobProbe 下行 + 本轮 / 近期孤儿 job 按 run 归属释放）与失败降级路径。
  * 依赖模块全部 mock，不触达真实 DB / Redis。
  */
-const { cleanupStaleRunsMock, reconcileMock, pendingMock, getQueueServiceMock } = vi.hoisted(() => ({
+const { cleanupStaleRunsMock, findRecentOrphanedRunsMock, reconcileMock, pendingMock, getQueueServiceMock } = vi.hoisted(() => ({
     cleanupStaleRunsMock: vi.fn(),
+    findRecentOrphanedRunsMock: vi.fn(),
     reconcileMock: vi.fn(),
     pendingMock: vi.fn(),
     getQueueServiceMock: vi.fn(),
@@ -15,7 +16,10 @@ const { cleanupStaleRunsMock, reconcileMock, pendingMock, getQueueServiceMock } 
 vi.mock('nitropack/runtime', () => ({
     defineNitroPlugin: (fn: unknown) => fn,
 }))
-vi.mock('#server/services/batch/stale-cleanup', () => ({ cleanupStaleRuns: cleanupStaleRunsMock }))
+vi.mock('#server/services/batch/stale-cleanup', () => ({
+    cleanupStaleRuns: cleanupStaleRunsMock,
+    findRecentOrphanedRuns: findRecentOrphanedRunsMock,
+}))
 vi.mock('#server/services/batch/batch-reconciler', () => ({ reconcileRunningBatchRuns: reconcileMock }))
 vi.mock('#server/services/batch/cleanup-pending-workdirs', () => ({ cleanupPendingWorkdirs: pendingMock }))
 vi.mock('#server/services/queue/queue.service', () => ({ getQueueService: getQueueServiceMock }))
@@ -36,13 +40,21 @@ describe('stale-cleanup 插件 runStaleCleanupOnce', () => {
         })
         reconcileMock.mockResolvedValue({ checkedAt: 'T', scanned: 0, completed: 0, progressUpdated: 0, orphaned: 0 })
         pendingMock.mockResolvedValue({ checkedAt: 'T', removed: 0, skippedMissingMeta: 0 })
+        findRecentOrphanedRunsMock.mockResolvedValue([])
         getQueueServiceMock.mockResolvedValue(syncQueueService())
     })
 
-    it('async 模式：下行 isPendingOrphan（基于 hasLiveJob）+ 按 run 归属释放孤儿 job', async () => {
+    it('async 模式：下行 queueJobProbe（inspect + hasConsumers）+ 按 run 归属释放孤儿 job', async () => {
         const remove = vi.fn().mockResolvedValue({ removed: true })
-        const hasLiveJob = vi.fn().mockResolvedValue(true)
-        getQueueServiceMock.mockResolvedValue({ mode: 'async', queue: { remove, hasLiveJob }, close: vi.fn() })
+        const inspect = vi.fn().mockResolvedValue({
+            jobId: 'scan-repo-1',
+            state: 'waiting',
+            runId: 'run-1',
+            runIdKey: 'run-1',
+            ageMs: 10 * 60 * 1000,
+        })
+        const hasConsumers = vi.fn().mockResolvedValue(true)
+        getQueueServiceMock.mockResolvedValue({ mode: 'async', queue: { remove, inspect, hasConsumers }, close: vi.fn() })
         cleanupStaleRunsMock.mockResolvedValue({
             scanRunsFailed: 1,
             batchRunsFailed: 0,
@@ -52,15 +64,59 @@ describe('stale-cleanup 插件 runStaleCleanupOnce', () => {
 
         await runStaleCleanupOnce()
 
-        expect(cleanupStaleRunsMock).toHaveBeenCalledWith({ scanRunTimeoutMs: resolveExecutionTimeoutMs(), isPendingOrphan: expect.any(Function) })
-        const options = cleanupStaleRunsMock.mock.calls[0]![0] as { isPendingOrphan: (run: { repositoryId: string }) => Promise<boolean> }
-        // hasLiveJob=true → isPendingOrphan 返回 false（非孤儿，不误杀）
-        await expect(options.isPendingOrphan({ repositoryId: 'repo-1' })).resolves.toBe(false)
-        expect(hasLiveJob).toHaveBeenCalledWith('repo-1')
+        expect(cleanupStaleRunsMock).toHaveBeenCalledWith(expect.objectContaining({
+            scanRunTimeoutMs: resolveExecutionTimeoutMs(),
+            queueJobProbe: expect.objectContaining({
+                inspect: expect.any(Function),
+                hasConsumers: expect.any(Function),
+            }),
+        }))
+        const options = cleanupStaleRunsMock.mock.calls[0]![0] as {
+            queueJobProbe: {
+                inspect: (repositoryId: string) => Promise<unknown>
+                hasConsumers: () => Promise<boolean | null>
+            }
+        }
+        await expect(options.queueJobProbe.inspect('repo-1')).resolves.toMatchObject({ runId: 'run-1' })
+        await expect(options.queueJobProbe.hasConsumers()).resolves.toBe(true)
+        // 一轮内消费者探测只执行一次（多个 pending run 复用）
+        expect(hasConsumers).toHaveBeenCalledTimes(1)
         expect(remove).toHaveBeenCalledWith('repo-1', 'run-1')
     })
 
-    it('sync 模式：isPendingOrphan 为 undefined，且不触发队列释放', async () => {
+    it('释放候选合并：本轮孤儿 + 近期 orphan_run，按 runId 去重', async () => {
+        const remove = vi.fn().mockResolvedValue({ removed: true })
+        const inspect = vi.fn(async (repositoryId: string) => ({
+            jobId: `scan-${repositoryId}`,
+            state: 'waiting',
+            runId: repositoryId === 'repo-1' ? 'run-1' : 'run-recent',
+            runIdKey: repositoryId === 'repo-1' ? 'run-1' : 'run-recent',
+            ageMs: 0,
+        }))
+        getQueueServiceMock.mockResolvedValue({
+            mode: 'async',
+            queue: { remove, inspect, hasConsumers: vi.fn().mockResolvedValue(true) },
+            close: vi.fn(),
+        })
+        cleanupStaleRunsMock.mockResolvedValue({
+            scanRunsFailed: 1,
+            batchRunsFailed: 0,
+            orphanedRuns: [{ repositoryId: 'repo-1', runId: 'run-1' }],
+            checkedAt: 'T',
+        })
+        findRecentOrphanedRunsMock.mockResolvedValue([
+            { repositoryId: 'repo-1', runId: 'run-1' }, // 与本轮重复 → 去重
+            { repositoryId: 'repo-recent', runId: 'run-recent' },
+        ])
+
+        await runStaleCleanupOnce()
+
+        expect(remove).toHaveBeenCalledTimes(2)
+        expect(remove).toHaveBeenCalledWith('repo-1', 'run-1')
+        expect(remove).toHaveBeenCalledWith('repo-recent', 'run-recent')
+    })
+
+    it('sync 模式：queueJobProbe 为 undefined，且不触发队列释放', async () => {
         const remove = vi.fn()
         getQueueServiceMock.mockResolvedValue({ mode: 'sync', queue: { remove, hasLiveJob: vi.fn() }, close: vi.fn() })
         cleanupStaleRunsMock.mockResolvedValue({
@@ -72,7 +128,10 @@ describe('stale-cleanup 插件 runStaleCleanupOnce', () => {
 
         await runStaleCleanupOnce()
 
-        expect(cleanupStaleRunsMock).toHaveBeenCalledWith({ scanRunTimeoutMs: resolveExecutionTimeoutMs(), isPendingOrphan: undefined })
+        expect(cleanupStaleRunsMock).toHaveBeenCalledWith(expect.objectContaining({
+            scanRunTimeoutMs: resolveExecutionTimeoutMs(),
+            queueJobProbe: undefined,
+        }))
         expect(remove).not.toHaveBeenCalled()
     })
 
@@ -88,7 +147,10 @@ describe('stale-cleanup 插件 runStaleCleanupOnce', () => {
 
         await runStaleCleanupOnce()
 
-        expect(cleanupStaleRunsMock).toHaveBeenCalledWith({ scanRunTimeoutMs: resolveExecutionTimeoutMs(), isPendingOrphan: undefined })
+        expect(cleanupStaleRunsMock).toHaveBeenCalledWith(expect.objectContaining({
+            scanRunTimeoutMs: resolveExecutionTimeoutMs(),
+            queueJobProbe: undefined,
+        }))
         expect(errSpy).toHaveBeenCalled()
         errSpy.mockRestore()
     })
@@ -109,7 +171,18 @@ describe('stale-cleanup 插件 runStaleCleanupOnce', () => {
         const remove = vi.fn()
             .mockRejectedValueOnce(new Error('remove failed'))
             .mockResolvedValueOnce({ removed: true })
-        getQueueServiceMock.mockResolvedValue({ mode: 'async', queue: { remove, hasLiveJob: vi.fn().mockResolvedValue(false) }, close: vi.fn() })
+        const inspect = vi.fn(async (repositoryId: string) => ({
+            jobId: `scan-${repositoryId}`,
+            state: 'waiting',
+            runId: repositoryId === 'repo-1' ? 'run-1' : 'run-2',
+            runIdKey: repositoryId === 'repo-1' ? 'run-1' : 'run-2',
+            ageMs: 0,
+        }))
+        getQueueServiceMock.mockResolvedValue({
+            mode: 'async',
+            queue: { remove, inspect, hasConsumers: vi.fn().mockResolvedValue(false) },
+            close: vi.fn(),
+        })
         cleanupStaleRunsMock.mockResolvedValue({
             scanRunsFailed: 2,
             batchRunsFailed: 0,

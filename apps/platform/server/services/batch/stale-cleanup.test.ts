@@ -1,12 +1,18 @@
 import 'reflect-metadata'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { setupMemoryDatabase, teardownMemoryDatabase } from '../../../tests/api-helper'
-import { cleanupStaleRuns } from './stale-cleanup'
+import { cleanupStaleRuns, findRecentOrphanedRuns, type CleanupOptions, type QueueJobProbe } from './stale-cleanup'
 import { BatchRun } from '#server/entities/batch-run'
 import { ScanRun } from '#server/entities/scan-run'
 import { Repository } from '#server/entities/repository'
 import { ensureDatabaseInitialized } from '#server/database'
 import { resolveOrganizationId } from '#server/utils/organization'
+
+/**
+ * 本文件 fixture 以「31 分钟前」为 stale 边界，running 计入口径由 wrapper 关闭宽限期，
+ * 保持既有断言聚焦（宽限期本身另设独立用例）。
+ */
+const runCleanup = (options: CleanupOptions = {}) => cleanupStaleRuns({ runningGraceMs: 0, ...options })
 
 /** 清理 in-memory DB（每个测试独立）。Organization 表保留——resolveOrganizationId 依赖其存在。 */
 const clearAllTables = async (): Promise<void> => {
@@ -26,6 +32,16 @@ const backdateScanRun = async (id: string, startedAt: Date, createdAt?: Date): P
     await ds.getRepository(ScanRun).createQueryBuilder()
         .update(ScanRun)
         .set(set)
+        .where('id = :id', { id })
+        .execute()
+}
+
+/** 仅回填 createdAt（不改 startedAt，用于 startedAt 为 NULL 的脏数据用例） */
+const backdateScanRunCreatedAt = async (id: string, createdAt: Date): Promise<void> => {
+    const ds = await ensureDatabaseInitialized()
+    await ds.getRepository(ScanRun).createQueryBuilder()
+        .update(ScanRun)
+        .set({ createdAt })
         .where('id = :id', { id })
         .execute()
 }
@@ -102,7 +118,7 @@ describe('cleanupStaleRuns', () => {
     })
 
     it('空库：无清理动作', async () => {
-        const result = await cleanupStaleRuns()
+        const result = await runCleanup()
         expect(result).toEqual({
             scanRunsFailed: 0,
             batchRunsFailed: 0,
@@ -121,7 +137,7 @@ describe('cleanupStaleRuns', () => {
         await backdateScanRun(a.id, new Date(Date.now() - 31 * 60 * 1000))
         await backdateScanRun(b.id, new Date(Date.now() - 31 * 60 * 1000))
 
-        const result = await cleanupStaleRuns()
+        const result = await runCleanup()
         expect(result.scanRunsFailed).toBe(2)
         expect(result.orphanedRuns).toHaveLength(2)
         expect(result.orphanedRuns).toEqual(expect.arrayContaining([
@@ -140,7 +156,7 @@ describe('cleanupStaleRuns', () => {
         await backdateScanRun(scan.id, scan.startedAt as unknown as Date ?? new Date(), new Date(Date.now() - 31 * 60 * 1000))
         await backdateBatchRun(batch.id, new Date(Date.now() - 31 * 60 * 1000))
 
-        const result = await cleanupStaleRuns({ isPendingOrphan: async () => false })
+        const result = await runCleanup({ isPendingOrphan: async () => false })
         expect(result.scanRunsFailed).toBe(0)
         expect(result.orphanedRuns).toEqual([])
 
@@ -158,7 +174,7 @@ describe('cleanupStaleRuns', () => {
         const scan = await createScanRun({ repositoryId: 'repo-x', batchRunId: batch.id, status: 'pending', startedAt: null })
         await backdateScanRun(scan.id, scan.startedAt as unknown as Date ?? new Date(), new Date(Date.now() - 31 * 60 * 1000))
 
-        const result = await cleanupStaleRuns({ isPendingOrphan: async () => true })
+        const result = await runCleanup({ isPendingOrphan: async () => true })
         expect(result.scanRunsFailed).toBe(1)
         expect(result.orphanedRuns).toEqual([{ repositoryId: 'repo-x', runId: scan.id }])
         const reloaded = await ds.getRepository(ScanRun).findOne({ where: { id: scan.id } })
@@ -174,7 +190,7 @@ describe('cleanupStaleRuns', () => {
         await backdateScanRun(scan.id, new Date(Date.now() - 31 * 60 * 1000))
         const isPendingOrphan = vi.fn().mockResolvedValue(false)
 
-        const result = await cleanupStaleRuns({ isPendingOrphan })
+        const result = await runCleanup({ isPendingOrphan })
         expect(result.scanRunsFailed).toBe(1)
         expect(isPendingOrphan).not.toHaveBeenCalled()
     })
@@ -190,7 +206,7 @@ describe('cleanupStaleRuns', () => {
         const runningRun = await createScanRun({ repositoryId: 'repo-running', batchRunId: batch.id, status: 'running', startedAt: new Date() })
         await backdateScanRun(runningRun.id, new Date(Date.now() - 31 * 60 * 1000))
 
-        const result = await cleanupStaleRuns({
+        const result = await runCleanup({
             isPendingOrphan: async () => {
                 throw new Error('redis unavailable')
             },
@@ -213,7 +229,7 @@ describe('cleanupStaleRuns', () => {
         // backdate startedAt 到 31 分钟前
         await backdateScanRun(scan.id, new Date(Date.now() - 31 * 60 * 1000))
 
-        const result = await cleanupStaleRuns()
+        const result = await runCleanup()
         expect(result.scanRunsFailed).toBe(1)
         expect(result.batchRunsFailed).toBe(0)
 
@@ -238,7 +254,7 @@ describe('cleanupStaleRuns', () => {
         // backdate createdAt 到 31 分钟前
         await backdateScanRun(scan.id, scan.startedAt as unknown as Date ?? new Date(), new Date(Date.now() - 31 * 60 * 1000))
 
-        const result = await cleanupStaleRuns()
+        const result = await runCleanup()
         expect(result.scanRunsFailed).toBe(1)
         const reloaded = await ds.getRepository(ScanRun).findOne({ where: { id: scan.id } })
         expect(reloaded?.status).toBe('failed')
@@ -263,7 +279,7 @@ describe('cleanupStaleRuns', () => {
         // batchRun 自身 backdate（确保超过 batchRunTimeoutMs）
         await backdateBatchRun(batch.id, new Date(Date.now() - 31 * 60 * 1000))
 
-        const result = await cleanupStaleRuns()
+        const result = await runCleanup()
         expect(result.scanRunsFailed).toBe(1)
         expect(result.batchRunsFailed).toBe(1)
 
@@ -289,7 +305,7 @@ describe('cleanupStaleRuns', () => {
 
         const updateSpy = vi.spyOn(batchRepo, 'update')
         const saveSpy = vi.spyOn(batchRepo, 'save')
-        const result = await cleanupStaleRuns()
+        const result = await runCleanup()
 
         expect(result.batchRunsFailed).toBe(1)
         // 条件写回：WHERE id + status='running'，payload 仅失败终态 + finishedAt + 空 summary 兜底
@@ -332,7 +348,7 @@ describe('cleanupStaleRuns', () => {
         }) as typeof batchRepo.update
 
         try {
-            const result = await cleanupStaleRuns()
+            const result = await runCleanup()
             expect(result.scanRunsFailed).toBe(1)
             // 条件不匹配 → 不计入 batchRunsFailed（不虚报），且不覆盖并发终态
             expect(result.batchRunsFailed).toBe(0)
@@ -356,7 +372,7 @@ describe('cleanupStaleRuns', () => {
         })
         await backdateBatchRun(batch.id, new Date(Date.now() - 31 * 60 * 1000))
 
-        const result = await cleanupStaleRuns()
+        const result = await runCleanup()
         expect(result.batchRunsFailed).toBe(0) // 没有 stale 子 run，不应误杀
 
         const reloadedBatch = await batchRepo.findOne({ where: { id: batch.id } })
@@ -382,7 +398,7 @@ describe('cleanupStaleRuns', () => {
         await backdateScanRun(completedRun.id, new Date(Date.now() - 60 * 60 * 1000))
         await backdateScanRun(failedRun.id, new Date(Date.now() - 60 * 60 * 1000))
 
-        const result = await cleanupStaleRuns()
+        const result = await runCleanup()
         expect(result.scanRunsFailed).toBe(0)
         expect(result.batchRunsFailed).toBe(0)
     })
@@ -406,7 +422,7 @@ describe('cleanupStaleRuns', () => {
         await Promise.all(runs.map((r) => backdateScanRun(r.id, new Date(Date.now() - 1000))))
         await backdateBatchRun(batch.id, new Date(Date.now() - 1000))
 
-        const result = await cleanupStaleRuns({ scanRunTimeoutMs: 1, batchRunTimeoutMs: 1 })
+        const result = await runCleanup({ scanRunTimeoutMs: 1, batchRunTimeoutMs: 1 })
         expect(result.scanRunsFailed).toBe(2)
         expect(result.batchRunsFailed).toBe(1)
 
@@ -417,5 +433,248 @@ describe('cleanupStaleRuns', () => {
 
         const reloadedBatch = await batchRepo.findOne({ where: { id: batch.id } })
         expect(reloadedBatch?.status).toBe('failed')
+    })
+
+    /** 构造队列探针：默认 job 归属当前 pending run、waiting、有消费者 */
+    const makeProbe = (overrides: Partial<QueueJobProbe> = {}): QueueJobProbe => ({
+        inspect: vi.fn().mockResolvedValue({
+            jobId: 'scan-repo-pending',
+            state: 'waiting',
+            runId: null,
+            runIdKey: '',
+            ageMs: 60_000,
+        }),
+        hasConsumers: vi.fn().mockResolvedValue(true),
+        ...overrides,
+    })
+
+    it('running + startedAt 为 NULL（脏数据）：按 createdAt 回退命中并清理', async () => {
+        const ds = await ensureDatabaseInitialized()
+        const organizationId = await resolveOrganizationId(ds)
+        await createRepo('repo-null')
+        const batch = await createBatchRun(organizationId)
+        const run = await createScanRun({ repositoryId: 'repo-null', batchRunId: batch.id, status: 'running', startedAt: null })
+        // startedAt 保持 NULL，仅 backdate createdAt
+        await backdateScanRunCreatedAt(run.id, new Date(Date.now() - 36 * 60 * 1000))
+
+        const result = await runCleanup()
+        expect(result.scanRunsFailed).toBe(1)
+        const reloaded = await ds.getRepository(ScanRun).findOne({ where: { id: run.id } })
+        expect(reloaded?.status).toBe('failed')
+        expect(JSON.parse(reloaded?.errorJson ?? '{}')).toMatchObject({ code: 'orphan_run' })
+    })
+
+    it('pending + 队列无消费者：判孤儿并清理（不再被 waiting job 一票否决）', async () => {
+        const ds = await ensureDatabaseInitialized()
+        const organizationId = await resolveOrganizationId(ds)
+        await createRepo('repo-pending')
+        const batch = await createBatchRun(organizationId)
+        const run = await createScanRun({ repositoryId: 'repo-pending', batchRunId: batch.id, status: 'pending', startedAt: null })
+        await backdateScanRun(run.id, run.startedAt as unknown as Date ?? new Date(), new Date(Date.now() - 10 * 60 * 1000))
+        const probe = makeProbe({
+            inspect: vi.fn().mockResolvedValue({ jobId: 'scan-repo-pending', state: 'waiting', runId: run.id, ageMs: 10 * 60 * 1000 }),
+            hasConsumers: vi.fn().mockResolvedValue(false),
+        })
+
+        const result = await runCleanup({ queueJobProbe: probe })
+        expect(result.scanRunsFailed).toBe(1)
+        expect(result.orphanedRuns).toEqual([{ repositoryId: 'repo-pending', runId: run.id }])
+        const reloaded = await ds.getRepository(ScanRun).findOne({ where: { id: run.id } })
+        expect(reloaded?.status).toBe('failed')
+    })
+
+    it('pending + 无消费者但 job 年龄不足 2× 宽限：跳过（避免 worker 滚动重启误杀）', async () => {
+        const ds = await ensureDatabaseInitialized()
+        const organizationId = await resolveOrganizationId(ds)
+        await createRepo('repo-young-job')
+        const batch = await createBatchRun(organizationId)
+        const run = await createScanRun({ repositoryId: 'repo-young-job', batchRunId: batch.id, status: 'pending', startedAt: null })
+        await backdateScanRun(run.id, run.startedAt as unknown as Date ?? new Date(), new Date(Date.now() - 10 * 60 * 1000))
+        const probe = makeProbe({
+            // job 年龄 6 分钟 < 2× 5 分钟 → 即便无消费者也不判孤儿
+            inspect: vi.fn().mockResolvedValue({ jobId: 'scan-repo-young-job', state: 'waiting', runId: run.id, runIdKey: run.id, ageMs: 6 * 60 * 1000 }),
+            hasConsumers: vi.fn().mockResolvedValue(false),
+        })
+
+        const result = await runCleanup({ queueJobProbe: probe })
+        expect(result.scanRunsFailed).toBe(0)
+    })
+
+    it('pending + 有消费者 + job 归属自身且 waiting：合法排队，跳过', async () => {
+        const ds = await ensureDatabaseInitialized()
+        const organizationId = await resolveOrganizationId(ds)
+        await createRepo('repo-queue')
+        const batch = await createBatchRun(organizationId)
+        const run = await createScanRun({ repositoryId: 'repo-queue', batchRunId: batch.id, status: 'pending', startedAt: null })
+        await backdateScanRun(run.id, run.startedAt as unknown as Date ?? new Date(), new Date(Date.now() - 10 * 60 * 1000))
+        const probe = makeProbe({
+            inspect: vi.fn().mockResolvedValue({ jobId: 'scan-repo-queue', state: 'waiting', runId: run.id, ageMs: 10 * 60 * 1000 }),
+            hasConsumers: vi.fn().mockResolvedValue(true),
+        })
+
+        const result = await runCleanup({ queueJobProbe: probe })
+        expect(result.scanRunsFailed).toBe(0)
+        const reloaded = await ds.getRepository(ScanRun).findOne({ where: { id: run.id } })
+        expect(reloaded?.status).toBe('pending')
+    })
+
+    it('pending + job 归属另一个已终态 run：判孤儿并清理', async () => {
+        const ds = await ensureDatabaseInitialized()
+        const organizationId = await resolveOrganizationId(ds)
+        await createRepo('repo-owner')
+        const batch = await createBatchRun(organizationId)
+        const owner = await createScanRun({
+            repositoryId: 'repo-owner', batchRunId: batch.id, status: 'failed', startedAt: new Date(), finishedAt: new Date(),
+        })
+        const run = await createScanRun({ repositoryId: 'repo-owner', batchRunId: batch.id, status: 'pending', startedAt: null })
+        await backdateScanRun(run.id, run.startedAt as unknown as Date ?? new Date(), new Date(Date.now() - 10 * 60 * 1000))
+        const probe = makeProbe({
+            inspect: vi.fn().mockResolvedValue({ jobId: 'scan-repo-owner', state: 'waiting', runId: owner.id, ageMs: 60_000 }),
+            hasConsumers: vi.fn().mockResolvedValue(true),
+        })
+
+        const result = await runCleanup({ queueJobProbe: probe })
+        expect(result.scanRunsFailed).toBe(1)
+    })
+
+    it('pending + job 归属另一个非终态 run：保留（不抢占正在排队 / 执行的任务）', async () => {
+        const ds = await ensureDatabaseInitialized()
+        const organizationId = await resolveOrganizationId(ds)
+        await createRepo('repo-other')
+        const batch = await createBatchRun(organizationId)
+        const owner = await createScanRun({
+            repositoryId: 'repo-other', batchRunId: batch.id, status: 'running', startedAt: new Date(),
+        })
+        const run = await createScanRun({ repositoryId: 'repo-other', batchRunId: batch.id, status: 'pending', startedAt: null })
+        await backdateScanRun(run.id, run.startedAt as unknown as Date ?? new Date(), new Date(Date.now() - 10 * 60 * 1000))
+        const probe = makeProbe({
+            inspect: vi.fn().mockResolvedValue({ jobId: 'scan-repo-other', state: 'active', runId: owner.id, ageMs: 60_000 }),
+            hasConsumers: vi.fn().mockResolvedValue(true),
+        })
+
+        const result = await runCleanup({ queueJobProbe: probe })
+        expect(result.scanRunsFailed).toBe(0)
+    })
+
+    it('pending + job 已终态：判孤儿并清理', async () => {
+        const ds = await ensureDatabaseInitialized()
+        const organizationId = await resolveOrganizationId(ds)
+        await createRepo('repo-terminal')
+        const batch = await createBatchRun(organizationId)
+        const run = await createScanRun({ repositoryId: 'repo-terminal', batchRunId: batch.id, status: 'pending', startedAt: null })
+        await backdateScanRun(run.id, run.startedAt as unknown as Date ?? new Date(), new Date(Date.now() - 10 * 60 * 1000))
+        const probe = makeProbe({
+            inspect: vi.fn().mockResolvedValue({ jobId: 'scan-repo-terminal', state: 'failed', runId: run.id, ageMs: 60_000 }),
+        })
+
+        const result = await runCleanup({ queueJobProbe: probe })
+        expect(result.scanRunsFailed).toBe(1)
+    })
+
+    it('pending + job 不存在：判孤儿并清理', async () => {
+        const ds = await ensureDatabaseInitialized()
+        const organizationId = await resolveOrganizationId(ds)
+        await createRepo('repo-missing-job')
+        const batch = await createBatchRun(organizationId)
+        const run = await createScanRun({ repositoryId: 'repo-missing-job', batchRunId: batch.id, status: 'pending', startedAt: null })
+        await backdateScanRun(run.id, run.startedAt as unknown as Date ?? new Date(), new Date(Date.now() - 10 * 60 * 1000))
+        const probe = makeProbe({ inspect: vi.fn().mockResolvedValue(null) })
+
+        const result = await runCleanup({ queueJobProbe: probe })
+        expect(result.scanRunsFailed).toBe(1)
+    })
+
+    it('pending + 探针抛错（Redis 抖动）：保守跳过，不误杀', async () => {
+        const ds = await ensureDatabaseInitialized()
+        const organizationId = await resolveOrganizationId(ds)
+        await createRepo('repo-probe-error')
+        const batch = await createBatchRun(organizationId)
+        const run = await createScanRun({ repositoryId: 'repo-probe-error', batchRunId: batch.id, status: 'pending', startedAt: null })
+        await backdateScanRun(run.id, run.startedAt as unknown as Date ?? new Date(), new Date(Date.now() - 10 * 60 * 1000))
+        const probe = makeProbe({ inspect: vi.fn().mockRejectedValue(new Error('redis unavailable')) })
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+
+        const result = await runCleanup({ queueJobProbe: probe })
+        expect(result.scanRunsFailed).toBe(0)
+        expect(warnSpy).toHaveBeenCalled()
+        warnSpy.mockRestore()
+    })
+
+    it('并发完成抢先（ScanRun 条件更新 affected=0）：不计数且不覆盖 completed 终态', async () => {
+        const ds = await ensureDatabaseInitialized()
+        const organizationId = await resolveOrganizationId(ds)
+        const scanRepo = ds.getRepository(ScanRun)
+        await createRepo('repo-scan-race')
+        const batch = await createBatchRun(organizationId)
+        const run = await createScanRun({
+            repositoryId: 'repo-scan-race', batchRunId: batch.id, status: 'running', startedAt: new Date(),
+        })
+        await backdateScanRun(run.id, new Date(Date.now() - 36 * 60 * 1000))
+
+        const originalCreate = scanRepo.createQueryBuilder.bind(scanRepo)
+        let injected = false
+        scanRepo.createQueryBuilder = ((alias?: string) => {
+            const qb = originalCreate(alias)
+            const originalUpdate = qb.update.bind(qb)
+            qb.update = ((entity: unknown) => {
+                const updateQb = originalUpdate(entity as never)
+                if (!injected) {
+                    injected = true
+                    const originalExecute = updateQb.execute.bind(updateQb)
+                    // 在清理的条件 UPDATE 真正执行前，模拟 worker 完成写库
+                    // （走 repository.update，避免递归 createQueryBuilder）
+                    updateQb.execute = (async () => {
+                        await scanRepo.update({ id: run.id }, { status: 'completed', finishedAt: new Date() })
+                        return originalExecute()
+                    }) as typeof updateQb.execute
+                }
+                return updateQb
+            }) as typeof qb.update
+            return qb
+        }) as typeof scanRepo.createQueryBuilder
+
+        try {
+            const result = await runCleanup()
+            expect(result.scanRunsFailed).toBe(0)
+
+            const reloaded = await scanRepo.findOne({ where: { id: run.id } })
+            expect(reloaded?.status).toBe('completed')
+        } finally {
+            scanRepo.createQueryBuilder = originalCreate
+        }
+    })
+
+    it('findRecentOrphanedRuns：仅取窗口内 failureCode=orphan_run 的 failed run', async () => {
+        const ds = await ensureDatabaseInitialized()
+        const organizationId = await resolveOrganizationId(ds)
+        const scanRepo = ds.getRepository(ScanRun)
+        await createRepo('repo-recent')
+        const batch = await createBatchRun(organizationId)
+
+        const recent = await createScanRun({ repositoryId: 'repo-recent', batchRunId: batch.id, status: 'failed', startedAt: new Date(), finishedAt: new Date() })
+        await scanRepo.update({ id: recent.id }, { failureCode: 'orphan_run' })
+        const wrongCode = await createScanRun({ repositoryId: 'repo-recent', batchRunId: batch.id, status: 'failed', startedAt: new Date(), finishedAt: new Date() })
+        await scanRepo.update({ id: wrongCode.id }, { failureCode: 'execution_failed' })
+        const tooOld = await createScanRun({ repositoryId: 'repo-recent', batchRunId: batch.id, status: 'failed', startedAt: new Date(), finishedAt: new Date() })
+        await scanRepo.update({ id: tooOld.id }, { failureCode: 'orphan_run', finishedAt: new Date(Date.now() - 3 * 60 * 60 * 1000) })
+        await createScanRun({ repositoryId: 'repo-recent', batchRunId: batch.id, status: 'running', startedAt: new Date() })
+
+        const result = await findRecentOrphanedRuns()
+        expect(result).toEqual([{ repositoryId: 'repo-recent', runId: recent.id }])
+    })
+
+    it('running run 不查询队列探针（超时语义与消费者无关）', async () => {
+        const ds = await ensureDatabaseInitialized()
+        const organizationId = await resolveOrganizationId(ds)
+        await createRepo('repo-running-only')
+        const batch = await createBatchRun(organizationId)
+        const run = await createScanRun({ repositoryId: 'repo-running-only', batchRunId: batch.id, status: 'running', startedAt: new Date() })
+        await backdateScanRun(run.id, new Date(Date.now() - 36 * 60 * 1000))
+        const probe = makeProbe()
+
+        const result = await runCleanup({ queueJobProbe: probe })
+        expect(result.scanRunsFailed).toBe(1)
+        expect(probe.inspect).not.toHaveBeenCalled()
+        expect(probe.hasConsumers).not.toHaveBeenCalled()
     })
 })
