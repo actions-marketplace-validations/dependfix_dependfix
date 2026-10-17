@@ -231,3 +231,17 @@
 - **闭环记录（2026-10-17）**：**根因**（本条修复对象）= 三环叠加：① 同步子进程阻塞平台事件循环（超时定时器晚约 9.5 分钟触发）→ ② 超时只放弃等待、不中断底层工作（僵尸安装进程）→ ③ 安装次数被逐包放大（上一批次）⇒ 4 核 4 GB 主机单批次 41 次内核 OOM、13 个仓库「有可修告警 / 0 修复」且显示为已完成。**契约**：五条（超时先取消 / 不再启动新工作 / 中止独立上报 / 不交付 / 有界宽限期）落 [executor-process-isolation.md §8](../design/governance/executor-process-isolation.md#_8-执行超时与运行级取消-2026-10-17)；工程规则落 [development.md §5.1.44](../standards/development.md)；资源口径（内存 ≥ 8 GB / 并发 1 / 用容器内存限制而非注入堆上限）见 §8.4。**backlog 候选处置留痕**：来源 = §候选评估中「单仓执行的内存预算与超时真中断」（P1 🛠️）；取舍 = 落实现可代码化的两半（真中断 + 取消契约），内存防按用户裁定**仅文档化**（否决默认注入）；处置 = 候选已移出候选池（处置记录即本条 + 批次记录）。
 
 - **批次记录（含 commits）见 [archive/index.md §4](archive/index.md)**：`70585b3e` + `81f7b11d` + `7a915018` + `0efe5e75` + `d7f3d892` + `7e9565ab` + `9f747fea`（7 commits：探针次数与超时口径 2 + 超时真中断与内存口径 4 + 类型导入形态修正 1）。
+
+### M45 追加临时待办（不占阶段条目编号，2026-10-17）：CI 双红收口（周回归审计门禁 + entrypoint 角色归一化用例竞态）
+
+> **位置与标记**：本条为**追加临时待办**（追加在 §M45 段落末尾，处于上一追加条目之后）；标记口径（位置 / 编号 / 容量）以 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 为唯一权威声明。
+
+- **目标**：让两条互相独立的红链恢复绿——① 周级回归 `Core Regression`（`security:audit-deps` 阻断）；② master `Test` 的 `apps/platform/docker/entrypoint.test.mjs`「角色归一化」用例（取快照早于 worker 标记输出）。
+- **触发依据**：用户 2026-10-17 提供两条失败 run（`38929908272` Weekly Regression / `39001057441` Test）并要求处置；分类 = [规划规范 §3.1 插队例外清单](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement)第 3 类「CI 主链路阻塞」；**不占阶段编号**。
+- **范围**：`pnpm-lock.yaml`（`@nuxt/devtools` 3.4.1 → 3.4.3 / `seroval` 1.6.2 → 1.6.9 / `shell-quote` 1.10.0 → 1.12.0；`package.json` 声明范围不变，均为既有范围的锁文件提升）；`apps/platform/docker/entrypoint.test.mjs`（角色归一化用例在取快照前补 worker 标记等待）。
+- **验收标准**：
+  - [x] ① **审计门禁**：`pnpm audit --prod --audit-level=moderate --registry=https://registry.npmjs.org` exit 0——3 条 critical / 5 条 high 全部由锁文件提升闭合（`@nuxt/devtools` 3.4.3 已移除 `simple-git` 依赖 ⇒ `simple-git` ×2 / `@simple-git/argv-parser` 三条消失；`shell-quote` 1.12.0、`seroval` 1.6.9 达 patched 版本）；`pnpm why simple-git` / `pnpm why @simple-git/argv-parser` 零命中；剩余 2 条 high 为既有 `audit.ignore` 豁免（node-forge / braces），**未新增豁免**。
+  - [x] ② **竞态消除**：CI 失败日志显示断言时输出只有 `role-marker http=[server]`，worker 标记在其后 `队列 worker 进程 pid=` 行之后才出现；本批在断言前补 `waitFor(worker 标记)`。一次性探针（worker 分支延迟 0.3s、与用例同构的 harness）实测「只等 http 标记时 worker 标记必然缺失」，验证窗口真实存在。
+  - [x] ③ **门禁**：`pnpm run lint` 0 error（2 条存量 `max-lines` warning）；`pnpm run typecheck` 7 包 Done；全仓 `pnpm run test` 270 文件 / **4243 passed**；`docker/entrypoint.test.mjs` 连跑 3 次 11 passed。
+- **不做什么**：不改 `entrypoint.sh` 的进程编排 / 信号处置与角色注入顺序（只改用例的观测时机）；不放宽 `pnpm audit` 阈值、不新增 `audit.ignore` 条目；不升级 `nuxt` 4.5 → 4.6（会牵动 `devalue` / `undici` 等既有 overrides，属独立升级评估）；不放宽既有 `waitFor` 5s 超时预算。
+- **残余与观察项**：① 本批只消除该用例的确定性竞态，`entrypoint.test.mjs` 在重负载下超时余量偏紧的既有观察（M45.2 残余 ⑥）不变；② 该链路来自 `@nuxt/devtools` 上游，后续 `nuxt` 升级时须复核 `simple-git` 未回流；③ 本地默认 registry（npmmirror）无 audit endpoint，复现须显式 `--registry=https://registry.npmjs.org`。
