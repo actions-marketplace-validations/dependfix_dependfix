@@ -33,7 +33,7 @@ const makeStub = (root, body) => {
     return path
 }
 
-const makeShims = (root, { dateShim = false } = {}) => {
+const makeShims = (root, { dateShim = false, sleepStub = 'exit 0' } = {}) => {
     const bin = join(root, 'bin')
     mkdirSync(bin)
     writeExecutable(join(bin, 'id'), `#!/bin/sh
@@ -43,9 +43,10 @@ case "$*" in
     *) echo "uid=100(test) gid=101(test)" ;;
 esac
 `)
-    // 退避 sleep 置零：崩溃重启即时发生，避免测试等待
+    // 退避 sleep 默认置零：崩溃重启即时发生，避免测试等待。
+    // 需要验证「TERM 可打断长 sleep」的用例通过 sleepStub 注入真实 sleep。
     writeExecutable(join(bin, 'sleep'), `#!/bin/sh
-exit 0
+${sleepStub}
 `)
     if (dateShim) {
         const counter = join(root, 'date-counter')
@@ -67,9 +68,9 @@ esac
     return bin
 }
 
-const start = ({ stub, env = {}, dateShim = false }) => {
+const start = ({ stub, env = {}, dateShim = false, sleepStub = 'exit 0' }) => {
     const root = mkdtempSync(join(tmpdir(), 'entrypoint-test-'))
-    const bin = makeShims(root, { dateShim })
+    const bin = makeShims(root, { dateShim, sleepStub })
     const dataDir = join(root, 'data')
     const homeDir = join(root, 'home')
     mkdirSync(dataDir)
@@ -263,17 +264,82 @@ describe.skipIf(skipOnWindows)('entrypoint.sh 队列 worker 看护', () => {
         await terminate(handle)
     })
 
-    it('连续重启超过上限：停止自动重启且 HTTP 进程不受影响', async () => {
+    it('连续重启超过上限：转为慢重试（不永久放弃）且 HTTP 进程不受影响', async () => {
         const handle = start({
             stub: 'if [ "$NUXT_IN_PROCESS_WORKER" = "true" ]; then\n    exit 7\nfi\nexec tail -f /dev/null',
             env: { DEPENDFIX_QUEUE_WORKER: '1', NUXT_QUEUE_ENABLED: 'true' },
         })
-        await waitFor(() => handle.output().includes('停止自动重启'))
+        await waitFor(() => handle.output().includes('转为慢重试'))
         const output = handle.output()
         expect(output).toContain('连续重启 5 次')
         expect(output).toContain('exit=7')
         expect(output.match(/第 \d+ 次重启/g)).toHaveLength(5)
+        // 慢重试模式下 worker 仍会继续被拉起（HTTP 进程不受影响）
+        await waitFor(() => handle.output().includes('慢重试第 1 次'))
+        expect(handle.exited).toBeUndefined()
         await terminate(handle)
+    })
+
+    it('慢重试间隔非法值：回退 300s（避免 sleep 失败导致看护退出）', async () => {
+        const handle = start({
+            stub: 'if [ "$NUXT_IN_PROCESS_WORKER" = "true" ]; then\n    exit 9\nfi\nexec tail -f /dev/null',
+            env: {
+                DEPENDFIX_QUEUE_WORKER: '1',
+                NUXT_QUEUE_ENABLED: 'true',
+                DEPENDFIX_QUEUE_WORKER_SLOW_RETRY_SECONDS: 'abc',
+            },
+        })
+        await waitFor(() => handle.output().includes('转为慢重试（每 300s）'))
+        expect(handle.exited).toBeUndefined()
+        await terminate(handle)
+    })
+
+    it('慢重试间隔 00：数值等价 0，回退 300s（不形成重启风暴）', async () => {
+        const handle = start({
+            stub: 'if [ "$NUXT_IN_PROCESS_WORKER" = "true" ]; then\n    exit 8\nfi\nexec tail -f /dev/null',
+            env: {
+                DEPENDFIX_QUEUE_WORKER: '1',
+                NUXT_QUEUE_ENABLED: 'true',
+                DEPENDFIX_QUEUE_WORKER_SLOW_RETRY_SECONDS: '00',
+            },
+        })
+        await waitFor(() => handle.output().includes('转为慢重试（每 300s）'))
+        expect(handle.exited).toBeUndefined()
+        await terminate(handle)
+    })
+
+    it('慢重试间隔超出 shell 整数范围：回退 300s（不因 Illegal number 绕过校验）', async () => {
+        const handle = start({
+            stub: 'if [ "$NUXT_IN_PROCESS_WORKER" = "true" ]; then\n    exit 6\nfi\nexec tail -f /dev/null',
+            env: {
+                DEPENDFIX_QUEUE_WORKER: '1',
+                NUXT_QUEUE_ENABLED: 'true',
+                DEPENDFIX_QUEUE_WORKER_SLOW_RETRY_SECONDS: '99999999999999999999',
+            },
+        })
+        await waitFor(() => handle.output().includes('转为慢重试（每 300s）'))
+        expect(handle.exited).toBeUndefined()
+        await terminate(handle)
+    })
+
+    it('慢重试中收到 TERM：立即退出（后台 sleep 可被 trap 打断）', async () => {
+        const handle = start({
+            stub: 'if [ "$NUXT_IN_PROCESS_WORKER" = "true" ]; then\n    exit 7\nfi\nexec tail -f /dev/null',
+            env: {
+                DEPENDFIX_QUEUE_WORKER: '1',
+                NUXT_QUEUE_ENABLED: 'true',
+                DEPENDFIX_QUEUE_WORKER_SLOW_RETRY_SECONDS: '7',
+            },
+            // 只让慢重试值（7）真实睡眠；快速退避（1/2/4/8/16）仍即时返回
+            sleepStub: 'case "$1" in\n    7) exec /bin/sleep 5 ;;\n    *) exit 0 ;;\nesac',
+        })
+        await waitFor(() => handle.output().includes('转为慢重试'))
+        const started = Date.now()
+        const { code, signal } = await terminate(handle)
+        const elapsed = Date.now() - started
+        expect({ code, signal }, '容器停止须由 entrypoint 转发 TERM 并以 143 退出').toEqual({ code: 143, signal: null })
+        // 前台 sleep 会阻塞到 5s；后台 sleep + wait 应在 1.5s 内退出
+        expect(elapsed).toBeLessThan(1_500)
     })
 
     it('worker 稳定运行后崩溃：连续重启计数归零（不触发上限）', async () => {
@@ -285,7 +351,7 @@ describe.skipIf(skipOnWindows)('entrypoint.sh 队列 worker 看护', () => {
         // 稳定窗口（60s）快进后每次崩溃都视为「首次连续重启」，计数归零 → 永远停留在第 1 次
         await waitFor(() => (handle.output().match(/第 \d+ 次重启/g) || []).length >= 6)
         const output = handle.output()
-        expect(output).not.toContain('停止自动重启')
+        expect(output).not.toContain('转为慢重试')
         expect(output).not.toContain('第 2 次重启')
         await terminate(handle)
     })

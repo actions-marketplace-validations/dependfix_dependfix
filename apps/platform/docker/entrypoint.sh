@@ -80,8 +80,9 @@ HOME_DIR_CANON="$(check_dir_path HOME "$HOME_DIR")"
 # 进程角色：入口向两进程分别注入 DEPENDFIX_ROLE（worker / server）——worker 侧据此跳过 HTTP-only
 #   插件（周期清理 stale-cleanup / 版本戳 build-info），避免重复 DB 查询与日志噪声；单进程形态由
 #   入口归一化为 server（外部误设 worker 不生效）。判定口径与插件清单见 docs/standards/platform.md §10.6。
-# worker 由看护循环托管：异常退出后按指数退避自动重启；连续重启超过上限则放弃（HTTP 进程不受影响，
-# 队列由 stale-cleanup 兜底）；容器停止（TERM / INT）时终止看护循环与 worker，不再重启。
+# worker 由看护循环托管：异常退出后按指数退避自动重启；连续快速失败超过上限后转为慢重试
+# （不永久放弃——HTTP 进程不受影响，但队列必须有消费者；stale-cleanup 只能改 DB 不能消费队列）；
+# 容器停止（TERM / INT）时终止看护循环与 worker，不再重启。
 # 口径见 docs/standards/platform.md §10.6。默认 0 = 单进程形态（行为与既有一致）。
 WORKER_ENABLED="${DEPENDFIX_QUEUE_WORKER:-0}"
 WORKER_SOCKET="${DEPENDFIX_QUEUE_WORKER_SOCKET:-/tmp/dependfix-queue-worker.sock}"
@@ -89,8 +90,23 @@ WORKER_SOCKET="${DEPENDFIX_QUEUE_WORKER_SOCKET:-/tmp/dependfix-queue-worker.sock
 WORKER_PID_FILE="${WORKER_SOCKET}.pid"
 WORKER_BACKOFF_INIT=1     # 首次重启退避（秒），随后指数增长
 WORKER_BACKOFF_MAX=30     # 退避上限（秒）；当前上限 5 次下实际最大 16s，保留 30s 上界以便调整上限时仍封顶
-WORKER_MAX_RESTARTS=5     # 连续重启上限：超过则停止重启（防重启风暴）
-WORKER_STABLE_SECONDS=60  # 运行时长达到该值视为稳定，连续重启计数归零
+WORKER_MAX_RESTARTS=5     # 连续快速重启上限：超过后转为慢重试（不永久放弃，防重启风暴）
+WORKER_STABLE_SECONDS=60  # 运行时长达到该值视为稳定，连续重启计数与慢重试状态归零
+WORKER_SLOW_RETRY_SECONDS="${DEPENDFIX_QUEUE_WORKER_SLOW_RETRY_SECONDS:-300}" # 慢重试间隔（秒）
+# env 注入值校验：空 / 非纯数字 / <= 0 / > 3600 一律回退 300
+# （`00` / `000` 数值等价 0，不能只靠 case 字面匹配；sleep 0 会形成重启风暴）
+case "$WORKER_SLOW_RETRY_SECONDS" in
+    ''|*[!0-9]*) WORKER_SLOW_RETRY_SECONDS=300 ;;
+    *)
+        # 先按长度粗筛（> 4 位必越界）：避免超出 shell 整数范围的值使 `[` 报 Illegal number，
+        # 导致比较结果为假而绕过回退（等价于 worker 永不重启）
+        if [ "${#WORKER_SLOW_RETRY_SECONDS}" -gt 4 ] \
+            || [ "$WORKER_SLOW_RETRY_SECONDS" -le 0 ] \
+            || [ "$WORKER_SLOW_RETRY_SECONDS" -gt 3600 ]; then
+            WORKER_SLOW_RETRY_SECONDS=300
+        fi
+        ;;
+esac
 SUPERVISOR_PID=""
 MAIN_PID=""
 
@@ -107,13 +123,17 @@ stop_queue_worker() {
     fi
 }
 
-# 队列 worker 看护循环：启动 worker → 等待退出 → 按指数退避重启；连续重启超上限则放弃。
+# 队列 worker 看护循环：启动 worker → 等待退出 → 按指数退避重启；连续快速失败超上限后
+# 转为慢重试（间隔 WORKER_SLOW_RETRY_SECONDS），不永久放弃——stale-cleanup 只能改 DB，
+# 不能消费队列，worker 永久退出会让所有任务无声挂起。
 # 运行在后台子 shell，worker 崩溃不影响前台 HTTP 主进程生命周期。
 supervise_queue_worker() {
     worker_prefix="$1"; shift
     # 看护自身收 TERM/INT：终止当前 worker 并退出（父 shell 亦经 pid 文件兜底，双保险）
     trap 'kill -TERM "$QUEUE_WORKER_PID" 2>/dev/null || true; exit 0' TERM INT
     restart_count=0
+    slow_mode=0
+    slow_attempt=0
     while :; do
         # shellcheck disable=SC2086
         $worker_prefix env HOME="$HOME_DIR" \
@@ -134,15 +154,30 @@ supervise_queue_worker() {
         # set -e 下 wait 非零会中断子 shell，须用 || 捕获退出码
         wait "$QUEUE_WORKER_PID" || worker_status=$?
 
-        # 运行足够久视为稳定，连续重启计数归零（避免长期运行容器偶发崩溃累积触发上限）
+        # 运行足够久视为稳定，连续重启计数与慢重试状态归零
+        # （避免长期运行容器偶发崩溃累积触发上限 / 永久停留在慢重试）
         worker_elapsed=$(( $(date -u +%s) - worker_started ))
         if [ "$worker_elapsed" -ge "$WORKER_STABLE_SECONDS" ]; then
             restart_count=0
+            slow_mode=0
+            slow_attempt=0
         fi
         restart_count=$(( restart_count + 1 ))
-        if [ "$restart_count" -gt "$WORKER_MAX_RESTARTS" ]; then
-            echo "[entrypoint] 队列 worker 连续重启 ${WORKER_MAX_RESTARTS} 次仍失败（最近退出码 ${worker_status}），停止自动重启；队列由 stale-cleanup 兜底" >&2
-            exit 0
+        if [ "$slow_mode" = "1" ] || [ "$restart_count" -gt "$WORKER_MAX_RESTARTS" ]; then
+            if [ "$slow_mode" = "0" ]; then
+                slow_mode=1
+                echo "[entrypoint] 队列 worker 连续重启 ${WORKER_MAX_RESTARTS} 次仍失败（最近退出码 ${worker_status}），转为慢重试（每 ${WORKER_SLOW_RETRY_SECONDS}s）；HTTP 进程继续服务" >&2
+            fi
+            slow_attempt=$(( slow_attempt + 1 ))
+            # 慢重试日志降噪：首次与每 12 次记录一条（sleep 桩置零的测试里不会刷屏）
+            if [ "$slow_attempt" = "1" ] || [ $(( slow_attempt % 12 )) -eq 0 ]; then
+                echo "[entrypoint] 队列 worker 慢重试第 ${slow_attempt} 次（最近退出码 ${worker_status}）" >&2
+            fi
+            # 必须后台 sleep + wait：前台 sleep 会阻塞 trap（dash / busybox 语义），
+            # 容器 TERM 最长要等满慢重试间隔才退出（docker stop 10s 宽限下会被 SIGKILL）
+            sleep "$WORKER_SLOW_RETRY_SECONDS" &
+            wait $! || true
+            continue
         fi
 
         # 指数退避：INIT * 2^(restart_count-1)，封顶 MAX
@@ -156,7 +191,9 @@ supervise_queue_worker() {
             backoff="$WORKER_BACKOFF_MAX"
         fi
         echo "[entrypoint] 队列 worker 异常退出（exit=${worker_status}），$(date -u +%Y-%m-%dT%H:%M:%SZ) 第 ${restart_count} 次重启，退避 ${backoff}s" >&2
-        sleep "$backoff"
+        # 同慢重试：后台 sleep + wait 保证 TERM / INT 可立即打断退避
+        sleep "$backoff" &
+        wait $! || true
     done
 }
 
