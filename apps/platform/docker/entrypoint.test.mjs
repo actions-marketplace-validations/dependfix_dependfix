@@ -220,7 +220,9 @@ describe.skipIf(skipOnWindows)('entrypoint.sh 队列 worker 看护', () => {
             stub: 'if [ "$NUXT_IN_PROCESS_WORKER" = "true" ]; then\n    echo "role-marker worker=[$DEPENDFIX_ROLE]"\n    exec tail -f /dev/null\nfi\necho "role-marker http=[$DEPENDFIX_ROLE]"\nexec tail -f /dev/null',
             env: { DEPENDFIX_QUEUE_WORKER: '1', NUXT_QUEUE_ENABLED: 'true', DEPENDFIX_ROLE: 'queue' },
         })
+        // 两份标记的输出顺序不作保证（看护循环与 HTTP 主进程异步启动）：到齐后再取快照，避免只等到 http 就断言 worker
         await waitFor(() => handle.output().includes('role-marker http=[server]'))
+        await waitFor(() => handle.output().includes('role-marker worker=[worker]'))
         const output = handle.output()
         expect(output).toContain('role-marker worker=[worker]')
         expect(output).toContain('role-marker http=[server]')
