@@ -12,19 +12,22 @@ vi.mock('#server/utils/guard', () => ({
 }))
 
 // GitHub API 调用统一 mock（真实网络不可用；vi.hoisted：vi.mock factory 被提升）。
-// docs/plan/todo.md §PR3-2 C49 修订：octokit.paginate 现在被 importable.get.ts 调用，需要同时 mock paginate 方法。
+// octokit.paginate 现在被 importable.get.ts 调用，需要同时 mock paginate 方法。
 // mapFn 模式下 paginate 调一次 endpoint 然后交给 mapFn，mapFn 返回数组被合并。
-// M26.2 C67 扩展：discoverOwners 调 users.getAuthenticated / orgs.listForAuthenticatedUser / apps.getInstallation
-const { listForAuthenticatedUser, getAuthenticated, listForAuthenticatedOrgs, getInstallation } = vi.hoisted(() => ({
+// Resource owner 扩展：discoverOwners 调 users.getAuthenticated / orgs.listForAuthenticatedUser / apps.getInstallation
+// 批量导入 org 仓库修复：fetchReposByOwner 先用 users.getByUsername 判定主体类型，org 走 repos.listForOrg
+const { listForAuthenticatedUser, listForOrg, getAuthenticated, getByUsername, listForAuthenticatedOrgs, getInstallation } = vi.hoisted(() => ({
     listForAuthenticatedUser: vi.fn(),
+    listForOrg: vi.fn(),
     getAuthenticated: vi.fn(),
+    getByUsername: vi.fn(),
     listForAuthenticatedOrgs: vi.fn(),
     getInstallation: vi.fn(),
 }))
 vi.mock('@octokit/rest', () => ({
     Octokit: class {
-        repos = { listForAuthenticatedUser }
-        users = { getAuthenticated }
+        repos = { listForAuthenticatedUser, listForOrg }
+        users = { getAuthenticated, getByUsername }
         orgs = { listForAuthenticatedUser: listForAuthenticatedOrgs }
         apps = { getInstallation }
         // paginate mock：单页（mock 数据无 Link header），mapFn 接收 response 返回 response.data
@@ -106,6 +109,12 @@ describe('GET /api/repos/importable', () => {
         vi.clearAllMocks()
         listForAuthenticatedUser.mockReset()
         listForAuthenticatedUser.mockResolvedValue(sampleRepos())
+        // org 路径默认空结果；需要时由用例覆写
+        listForOrg.mockReset()
+        listForOrg.mockResolvedValue({ data: [] })
+        // 默认 owner 主体类型 = User（personal 路径保持 affiliation=owner）
+        getByUsername.mockReset()
+        getByUsername.mockResolvedValue({ data: { login: 'demo', type: 'User' } })
         // 默认 discoverOwners 行为：personal = 'demo' + 空 orgs
         getAuthenticated.mockReset()
         getAuthenticated.mockResolvedValue({ data: { login: 'demo', avatar_url: 'https://example.com/avatar' } })
@@ -128,7 +137,7 @@ describe('GET /api/repos/importable', () => {
 
     it('lists accessible repositories from GitHub with new response shape', async () => {
         const result = await call(`/api/repos/importable?credentialId=${credentialId}`) as ImportableResponse
-        // 新响应结构（docs/plan/todo.md §PR3-2 C49）：{ repos, total, cachedAt, fromCache }
+        // 新响应结构：{ repos, total, cachedAt, fromCache }
         expect(Array.isArray(result.repos)).toBe(true)
         expect(result.total).toBe(2)
         expect(result.fromCache).toBe(false)
@@ -140,6 +149,8 @@ describe('GET /api/repos/importable', () => {
             private: false,
             fork: false,
             archived: false,
+            // sampleRepos 未提供 disabled → 归一为 false（minimal-repository 可选字段契约）
+            disabled: false,
             defaultBranch: 'main',
             imported: false,
         })
@@ -214,7 +225,7 @@ describe('GET /api/repos/importable', () => {
         expect(result.repos.find((r) => r.fullName === 'demo/alpha')).toMatchObject({ imported: true })
     })
 
-    it('serves cached result on second call within TTL (docs/plan/todo.md §PR3-2 C49)', async () => {
+    it('serves cached result on second call within TTL', async () => {
         // 第一次请求：fromCache=false，loader 被调一次
         const first = await call(`/api/repos/importable?credentialId=${credentialId}`) as ImportableResponse
         expect(first.fromCache).toBe(false)
@@ -227,7 +238,7 @@ describe('GET /api/repos/importable', () => {
         expect(listForAuthenticatedUser).toHaveBeenCalledTimes(1)
     })
 
-    it('forces refresh when ?fresh=true even with valid cache (docs/plan/todo.md §PR3-2 C49)', async () => {
+    it('forces refresh when ?fresh=true even with valid cache', async () => {
         // 预热缓存
         await call(`/api/repos/importable?credentialId=${credentialId}`)
         expect(listForAuthenticatedUser).toHaveBeenCalledTimes(1)
@@ -314,6 +325,54 @@ describe('GET /api/repos/importable', () => {
             const result = await call(`/api/repos/importable?credentialId=${credentialId}&owner=demo`) as ImportableResponse
             expect(result.repos).toHaveLength(2)
             expect(result.repos.every((r) => r.owner === 'demo')).toBe(true)
+        })
+
+        // 回归：affiliation=owner 只返回认证用户名下仓库，org owner 必须走 listForOrg
+        it('org owner 走 listForOrg（不再被 affiliation=owner 过滤成空）', async () => {
+            getByUsername.mockResolvedValueOnce({ data: { login: 'dependfix', type: 'Organization' } })
+            listForOrg.mockResolvedValueOnce({
+                data: [
+                    {
+                        id: 21,
+                        name: 'dependfix',
+                        full_name: 'dependfix/dependfix',
+                        owner: { login: 'dependfix' },
+                        private: true,
+                        fork: false,
+                        archived: false,
+                        disabled: false,
+                        default_branch: 'master',
+                        description: null,
+                        permissions: { push: true },
+                    },
+                ],
+            })
+
+            const result = await call(`/api/repos/importable?credentialId=${credentialId}&owner=dependfix`) as ImportableResponse
+
+            expect(result.repos).toHaveLength(1)
+            expect(result.repos[0]).toMatchObject({ fullName: 'dependfix/dependfix', owner: 'dependfix', defaultBranch: 'master' })
+            expect(getByUsername).toHaveBeenCalledWith({ username: 'dependfix' })
+            expect(listForOrg).toHaveBeenCalledWith({ org: 'dependfix', type: 'all', per_page: 100, sort: 'updated' })
+            expect(listForAuthenticatedUser).not.toHaveBeenCalled()
+        })
+
+        it('personal owner 仍走 listForAuthenticatedUser（保留私有仓库可见性）', async () => {
+            getByUsername.mockResolvedValueOnce({ data: { login: 'demo', type: 'User' } })
+
+            const result = await call(`/api/repos/importable?credentialId=${credentialId}&owner=demo`) as ImportableResponse
+
+            expect(result.repos).toHaveLength(2)
+            expect(listForAuthenticatedUser).toHaveBeenCalledWith({ affiliation: 'owner', per_page: 100, sort: 'updated' })
+            expect(listForOrg).not.toHaveBeenCalled()
+        })
+
+        it('org 无授权时抛鉴权错误而非空列表', async () => {
+            getByUsername.mockResolvedValueOnce({ data: { login: 'dependfix', type: 'Organization' } })
+            listForOrg.mockRejectedValueOnce({ status: 403, message: 'Forbidden' })
+
+            const err = await expectError(call(`/api/repos/importable?credentialId=${credentialId}&owner=dependfix`), 403)
+            expect(err.data?.code).toBe('GITHUB_API_AUTH_FAILED')
         })
 
         it('没有 owner 时走 discoverOwners 兜底（向后兼容 affiliation 默认行为）', async () => {

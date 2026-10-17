@@ -9,7 +9,7 @@ import { createLocalizedError } from '#server/utils/localized-error'
 import { cachedFetch } from '#server/utils/repos-cache'
 
 /**
- * GET /api/repos/importable：批量导入对话框数据源（todo.md §M26.2 + backlog.md §C67）。
+ * GET /api/repos/importable：批量导入对话框数据源（Resource owner 化单端点契约）。
  *
  * 单端点 + include 路由设计（与 MCP discover_repos owner: string[] 同源）：
  * - `?credentialId=X&include=owners` → `{ owners: ResourceOwner[] }`，TTL=5min 缓存（key=`owners:${credentialId}`）
@@ -22,6 +22,11 @@ import { cachedFetch } from '#server/utils/repos-cache'
  * Resource owner 抽象：沿用 GitHub 官方 user/org 概念（ownerLogin 是 user login 或 org login）；
  * 与 MCP `discover_repos` `owner: string[]` 参数 + engine `fetchOwnerRepositories`
  * auto-detect user/org 模式天然一致。
+ *
+ * 仓库拉取按 owner 类型分流（见 fetchReposByOwner）：
+ * - Organization → `GET /orgs/{org}/repos`
+ * - User → `GET /user/repos?affiliation=owner`（认证用户本人仓库）
+ * 不能用单一 `affiliation=owner` 覆盖两者：该参数只返回认证用户名下的仓库，不含组织仓库。
  */
 
 const CACHE_TTL_MS = 5 * 60 * 1000
@@ -45,8 +50,9 @@ interface RawRepo {
     owner: { login: string }
     private: boolean
     fork: boolean
-    archived: boolean
-    disabled: boolean
+    /** archived / disabled 在 minimal-repository 响应中为可选字段，统一归一为布尔 */
+    archived?: boolean
+    disabled?: boolean
     default_branch?: string
     description: string | null
     permissions?: { push?: boolean }
@@ -122,34 +128,22 @@ export default defineEventHandler(async (event) => {
             params: { message: '缺少 owner 参数（请通过 include=owners 端点获取可用 owner 列表）' },
         })
     }
+    // 收敛为 const：闭包（cachedFetch loader）内不再受 let 重赋值影响，保持类型收窄
+    const resolvedOwnerLogin = ownerLogin
 
     const existing = await repoRepo.find()
     const existingKeys = new Set(existing.map((r) => `${r.owner}/${r.name}`))
 
-    const cacheKey = `repos:${credentialId}:${ownerLogin}`
+    const cacheKey = `repos:${credentialId}:${resolvedOwnerLogin}`
     try {
         const { value: rawRepos, cachedAt, fromCache } = await cachedFetch(
             cacheKey,
             CACHE_TTL_MS,
-            async () => {
-                let pageCount = 0
-                const data = await octokit.paginate(
-                    octokit.repos.listForAuthenticatedUser,
-                    { affiliation: 'owner', per_page: 100, sort: 'updated' },
-                    (response, done) => {
-                        pageCount++
-                        if (pageCount >= MAX_PAGES) {
-                            done()
-                        }
-                        return response.data
-                    },
-                )
-                return data
-            },
+            () => fetchReposByOwner(octokit, resolvedOwnerLogin),
             { fresh },
         )
 
-        const repos = (rawRepos as RawRepo[])
+        const repos = rawRepos
             .filter((repo) => !repo.private || repo.permissions?.push)
             .filter((repo) => !ownerFromQuery || repo.owner.login === ownerFromQuery)
             .map((repo) => ({
@@ -159,8 +153,8 @@ export default defineEventHandler(async (event) => {
                 owner: repo.owner.login,
                 private: repo.private,
                 fork: repo.fork,
-                archived: repo.archived,
-                disabled: repo.disabled,
+                archived: repo.archived ?? false,
+                disabled: repo.disabled ?? false,
                 defaultBranch: repo.default_branch ?? 'main',
                 description: repo.description,
                 imported: existingKeys.has(repo.full_name),
@@ -176,6 +170,45 @@ export default defineEventHandler(async (event) => {
         throw mapGitHubErrorInline(event, error as { status?: number, message?: string })
     }
 })
+
+/**
+ * 按 owner 类型拉取该 owner 名下的全部仓库。
+ *
+ * 关键约束：`GET /user/repos?affiliation=owner` 的 `owner` 语义是
+ * 「Repositories that are owned by the authenticated user」，不包含组织仓库；
+ * 因此选中 org owner 时必须改走 `GET /orgs/{org}/repos`，否则结果会被 owner 过滤成空列表。
+ * 与 engine `fetchOwnerRepositories` 的 user/org 分流保持同一口径。
+ *
+ * User 路径保留 `listForAuthenticatedUser`：`GET /users/{username}/repos` 只返回公开仓库，
+ * 会丢失当前用户私有仓库的可见性。
+ */
+async function fetchReposByOwner(octokit: Octokit, ownerLogin: string): Promise<RawRepo[]> {
+    // 先判定主体类型（GET /users/{owner} 对 token 权限要求最低），再选择分页端点，避免试探性调用
+    const { data: subject } = await octokit.users.getByUsername({ username: ownerLogin })
+
+    let pageCount = 0
+    // 分页上限守卫：超过 MAX_PAGES 后停止翻页，避免超大 org 拖垮请求
+    const collectPage = (response: { data: RawRepo[] }, done: () => void) => {
+        pageCount++
+        if (pageCount >= MAX_PAGES) {
+            done()
+        }
+        return response.data
+    }
+
+    if (subject.type === 'Organization') {
+        return await octokit.paginate(
+            octokit.repos.listForOrg,
+            { org: ownerLogin, type: 'all', per_page: 100, sort: 'updated' },
+            collectPage,
+        )
+    }
+    return await octokit.paginate(
+        octokit.repos.listForAuthenticatedUser,
+        { affiliation: 'owner', per_page: 100, sort: 'updated' },
+        collectPage,
+    )
+}
 
 /**
  * 解析凭据可访问的 Resource owner 列表（personal + organizations）。
