@@ -1,5 +1,6 @@
 import type { RunResult } from '@dependfix/core'
 import { resolveScanRunState } from './scan-run-state'
+import { isTerminalScanRunStatus } from './scan-run-status'
 import { applyFailureClassification } from './run-failure-classify'
 import { withRepoLock } from './repo-lock'
 import { decryptToken, getEncryptionKey } from './credential.service'
@@ -177,8 +178,7 @@ const runScanInternal = async (
         // 终态校验（竞态防护）：入队半成功 + failover 双执行时，job 续用不得回滚已终态的 run
         // （worker 侧抛错走 BullMQ 重试/失败，不触碰 run 记录）；pending/running 允许续用（保留崩溃重试）
         // —— reuse=true 时绕过（用户主动复用，例如 report-only run → fix 复用为 fix 模式 run）
-        if (!options.reuse
-            && (existing.status === 'completed' || existing.status === 'failed' || existing.status === 'dispatched' || existing.status === 'degraded')) {
+        if (!options.reuse && isTerminalScanRunStatus(existing.status)) {
             throw new Error(`[scan] run ${existing.id} 已处于终态 ${existing.status}，跳过重复执行`)
         }
         existing.status = 'running'

@@ -5,6 +5,7 @@ import { buildScanQueueOptions, createScanQueue } from './scan-queue'
 interface QueueInstance {
     getJob: ReturnType<typeof vi.fn>
     add: ReturnType<typeof vi.fn>
+    getWorkersCount: ReturnType<typeof vi.fn>
     upsertJobScheduler: ReturnType<typeof vi.fn>
     removeJobScheduler: ReturnType<typeof vi.fn>
     close: ReturnType<typeof vi.fn>
@@ -21,6 +22,7 @@ vi.mock('bullmq', () => ({
             const instance: QueueInstance = {
                 getJob: vi.fn(),
                 add: vi.fn(),
+                getWorkersCount: vi.fn(),
                 upsertJobScheduler: vi.fn(),
                 removeJobScheduler: vi.fn(),
                 close: vi.fn(),
@@ -70,7 +72,7 @@ describe('createScanQueue', () => {
         const instance = currentInstance()
         instance.getJob.mockResolvedValue(null)
         const result = await queue.add('repo-1', { mode: 'fix', severityThreshold: 'high' }, { runId: 'run-1' })
-        expect(result).toEqual({ jobId: 'scan-repo-1', reused: false })
+        expect(result).toEqual({ jobId: 'scan-repo-1', reused: false, existingRunId: null })
         expect(instance.add).toHaveBeenCalledWith(
             'scan',
             { repositoryId: 'repo-1', request: { mode: 'fix', severityThreshold: 'high' }, runId: 'run-1' },
@@ -83,8 +85,20 @@ describe('createScanQueue', () => {
         const queue = createScanQueue(makeConnection(), {})
         currentInstance().getJob.mockResolvedValue(existing)
         const result = await queue.add('repo-1', { mode: 'fix', severityThreshold: 'high' })
-        expect(result).toEqual({ jobId: 'scan-repo-1', reused: true })
+        expect(result).toEqual({ jobId: 'scan-repo-1', reused: true, existingRunId: null })
         expect(existing.getState).toHaveBeenCalled()
+        expect(currentInstance().add).not.toHaveBeenCalled()
+    })
+
+    it('dedupes and reports existing run ownership when existing job carries runId', async () => {
+        const existing = {
+            data: { runId: 'run-old' },
+            getState: vi.fn().mockResolvedValue('waiting'),
+        }
+        const queue = createScanQueue(makeConnection(), {})
+        currentInstance().getJob.mockResolvedValue(existing)
+        const result = await queue.add('repo-1', { mode: 'fix', severityThreshold: 'high' }, { runId: 'run-new' })
+        expect(result).toEqual({ jobId: 'scan-repo-1', reused: true, existingRunId: 'run-old' })
         expect(currentInstance().add).not.toHaveBeenCalled()
     })
 
@@ -163,6 +177,42 @@ describe('createScanQueue', () => {
             expect(existing.remove).not.toHaveBeenCalled()
         })
 
+        it('legacy job（runId 为空串）：空串归属匹配 → removed=true', async () => {
+            const existing = {
+                data: { runId: '' },
+                getState: vi.fn().mockResolvedValue('waiting'),
+                remove: vi.fn().mockResolvedValue(undefined),
+            }
+            const queue = createScanQueue(makeConnection(), {})
+            currentInstance().getJob.mockResolvedValue(existing)
+            await expect(queue.remove('repo-1', '')).resolves.toEqual({ removed: true })
+            expect(existing.remove).toHaveBeenCalled()
+        })
+
+        it('job data 缺少 runId 字段（遗留）→ 空串哨兵视为匹配并可释放', async () => {
+            const existing = {
+                data: {},
+                getState: vi.fn().mockResolvedValue('waiting'),
+                remove: vi.fn().mockResolvedValue(undefined),
+            }
+            const queue = createScanQueue(makeConnection(), {})
+            currentInstance().getJob.mockResolvedValue(existing)
+            await expect(queue.remove('repo-1', '')).resolves.toEqual({ removed: true })
+            expect(existing.remove).toHaveBeenCalled()
+        })
+
+        it('legacy job 在 inspect 后被新触发替换 → 空串归属不匹配，removed=false', async () => {
+            const existing = {
+                data: { runId: 'run-new' },
+                getState: vi.fn().mockResolvedValue('waiting'),
+                remove: vi.fn().mockResolvedValue(undefined),
+            }
+            const queue = createScanQueue(makeConnection(), {})
+            currentInstance().getJob.mockResolvedValue(existing)
+            await expect(queue.remove('repo-1', '')).resolves.toEqual({ removed: false })
+            expect(existing.remove).not.toHaveBeenCalled()
+        })
+
         it('active 且被 worker 锁定 → remove 抛错被吞，removed=false', async () => {
             const existing = {
                 data: { runId: 'run-1' },
@@ -199,6 +249,66 @@ describe('createScanQueue', () => {
                 instance.getJob.mockResolvedValue({ getState: vi.fn().mockResolvedValue(state) })
                 await expect(queue.hasLiveJob('repo-1')).resolves.toBe(true)
             }
+        })
+    })
+
+    describe('inspect（job 现场快照）', () => {
+        it('job 不存在 → null', async () => {
+            const queue = createScanQueue(makeConnection(), {})
+            currentInstance().getJob.mockResolvedValue(null)
+            await expect(queue.inspect('repo-1')).resolves.toBeNull()
+        })
+
+        it('返回 state / runId / ageMs（timestamp 缺失按 0）', async () => {
+            const queue = createScanQueue(makeConnection(), {})
+            const instance = currentInstance()
+            const now = Date.now()
+            instance.getJob.mockResolvedValue({
+                data: { runId: 'run-1' },
+                timestamp: now - 60_000,
+                getState: vi.fn().mockResolvedValue('waiting'),
+            })
+            const result = await queue.inspect('repo-1')
+            expect(result).toMatchObject({
+                jobId: 'scan-repo-1',
+                state: 'waiting',
+                runId: 'run-1',
+                runIdKey: 'run-1',
+            })
+            expect(result?.ageMs).toBeGreaterThanOrEqual(60_000)
+
+            instance.getJob.mockResolvedValue({
+                data: {},
+                getState: vi.fn().mockResolvedValue('active'),
+            })
+            await expect(queue.inspect('repo-1')).resolves.toEqual({
+                jobId: 'scan-repo-1',
+                state: 'active',
+                runId: null,
+                runIdKey: '',
+                ageMs: 0,
+            })
+        })
+    })
+
+    describe('hasConsumers（消费者存在性）', () => {
+        it('有 worker → true；无 worker → false', async () => {
+            const queue = createScanQueue(makeConnection(), {})
+            const instance = currentInstance()
+            instance.getWorkersCount.mockResolvedValue(1)
+            await expect(queue.hasConsumers()).resolves.toBe(true)
+            instance.getWorkersCount.mockResolvedValue(0)
+            await expect(queue.hasConsumers()).resolves.toBe(false)
+        })
+
+        it('CLIENT LIST 不可用 / 查询失败 → null（未知，不抛错）', async () => {
+            const queue = createScanQueue(makeConnection(), {})
+            const instance = currentInstance()
+            instance.getWorkersCount.mockRejectedValue(new Error('ERR unknown command CLIENT'))
+            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+            await expect(queue.hasConsumers()).resolves.toBeNull()
+            expect(warnSpy).toHaveBeenCalled()
+            warnSpy.mockRestore()
         })
     })
 

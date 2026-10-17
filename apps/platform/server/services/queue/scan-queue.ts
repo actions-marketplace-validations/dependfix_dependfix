@@ -54,9 +54,29 @@ export interface ScheduledJobTemplate {
     opts?: { priority?: number }
 }
 
+/** 队列 job 现场快照（去重合并自愈与孤儿释放共用） */
+export interface ScanJobInspection {
+    jobId: string
+    /** BullMQ 状态（waiting / active / delayed / completed / failed / unknown 等） */
+    state: string
+    /** job 承载的 run id（旧 job / 非 scan job 可能为 null） */
+    runId: string | null
+    /**
+     * 原始 runId（legacy job 为 `''`）：释放时作为归属哨兵传给 `remove`，
+     * 避免 `inspect` 与 `remove` 之间 job 被新触发替换后误删新任务的去重键。
+     */
+    runIdKey: string
+    /** job 创建距今时长（ms；BullMQ `job.timestamp` 缺失时为 0） */
+    ageMs: number
+}
+
 export interface ScanQueue {
-    /** 入队结果：jobId 供状态关联；reused=true 表示命中同仓库进行中任务（去重合并，未新建 job） */
-    add: (repositoryId: string, request: ScanRequest, options?: { priority?: number, runId?: string, reuse?: boolean }) => Promise<{ jobId: string, reused: boolean }>
+    /**
+     * 入队结果：jobId 供状态关联；reused=true 表示命中同仓库进行中任务（去重合并，未新建 job）。
+     * `existingRunId` 命中复用时返回既有 job 承载的 run id（无 runId 的旧 job 为 null），
+     * 供调用方判断「复用的是否为僵尸 job」并按归属释放。
+     */
+    add: (repositoryId: string, request: ScanRequest, options?: { priority?: number, runId?: string, reuse?: boolean }) => Promise<{ jobId: string, reused: boolean, existingRunId: string | null }>
     /**
      * 释放指定仓库的去重键（孤儿 run 收尾用）：移除 `scan-<repositoryId>` 的 job。
      * - job 不存在 → removed=false
@@ -65,10 +85,28 @@ export interface ScanQueue {
      */
     remove: (repositoryId: string, expectedRunId?: string) => Promise<{ removed: boolean }>
     /**
-     * 是否存在同仓库的非终态 job（waiting/active/delayed 等）：
-     * pending run 的孤儿判定依据——真正排队 / 执行中的 run 不应被 stale cleanup 误杀。
+     * 是否存在同仓库的非终态 job（waiting/active/delayed 等）。
+     *
+     * @deprecated 该信号不区分 job 归属 run，也无法区分「无人消费的僵尸 waiting」，
+     * 孤儿清理已改用 `inspect` + `hasConsumers`，不得再用它作一票否决。
+     * 保留仅为历史调用与集成测试兼容，后续批次评估删除。
      */
     hasLiveJob: (repositoryId: string) => Promise<boolean>
+    /**
+     * 队列 job 现场快照：不存在 → null。
+     * 供 stale-cleanup 判断 job 归属 run / job 年龄 / 状态，以及释放去重键前的归属校验。
+     */
+    inspect: (repositoryId: string) => Promise<ScanJobInspection | null>
+    /**
+     * 队列消费者探测：存在至少一个 Worker 连接 → true；明确无消费者 → false；
+     * 其它查询异常 → null（未知，调用方按保守方向处理）。
+     * 注意：BullMQ 6 在 `CLIENT` 命令不受支持时会返回一条伪 worker（结果为 true，假阳性）；
+     * 该信号不是强保证，排障需结合 `waiting` 堆积判断。
+     *
+     * 目的：worker 进程死掉后，waiting job 会永久保留去重键；仅靠「job 非终态」无法判定
+     * 这些 run 是否还会被执行。消费者存在性是该判定的必要信号。
+     */
+    hasConsumers: () => Promise<boolean | null>
     /**
      * job 查询（stalled / lockRenewalFailed 事件补全 runId 用）：
      * 不存在 → undefined；只暴露 `data`（不泄漏 BullMQ Job 实例）。
@@ -86,7 +124,7 @@ export interface ScanQueue {
 }
 
 /** BullMQ job 是否已达终态：仅 completed / failed 释放去重键（其余状态视为进行中） */
-const isTerminalJobState = (state: string): boolean => state === 'completed' || state === 'failed'
+export const isTerminalScanJobState = (state: string): boolean => state === 'completed' || state === 'failed'
 
 export const createScanQueue = (connection: Redis, options: { retriesRaw?: string, backoffMsRaw?: string }): ScanQueue => {
     const queue = new Queue<ScanJobData>(SCAN_QUEUE_NAME, {
@@ -100,13 +138,15 @@ export const createScanQueue = (connection: Redis, options: { retriesRaw?: strin
             const existing = await queue.getJob(jobId)
             if (existing) {
                 const state = await existing.getState()
-                if (isTerminalJobState(state)) {
+                if (isTerminalScanJobState(state)) {
                     // 终态 job（BullMQ 6：EXISTS job key 即幂等返回，终态在清理前占用 jobId）：
                     // 先移除再重建，保证"扫描完成后可立即再次触发"
                     await existing.remove()
                 } else {
-                    // 等待/活跃/延迟中：去重合并（不新建 job），告知调用方复用
-                    return { jobId, reused: true }
+                    // 等待/活跃/延迟中：去重合并（不新建 job），告知调用方复用与既有 run 归属。
+                    // 归属交给调用方判断是否僵尸（job 承载的 run 已终态 / 不存在）——队列层不查 DB
+                    const existingRunId = existing.data?.runId
+                    return { jobId, reused: true, existingRunId: existingRunId || null }
                 }
             }
             await queue.add(SCAN_QUEUE_NAME, {
@@ -118,7 +158,7 @@ export const createScanQueue = (connection: Redis, options: { retriesRaw?: strin
                 jobId,
                 priority: opts?.priority ?? SCAN_JOB_PRIORITY.manual,
             })
-            return { jobId, reused: false }
+            return { jobId, reused: false, existingRunId: null }
         },
         remove: async (repositoryId, expectedRunId) => {
             const existing = await queue.getJob(buildScanJobId(repositoryId))
@@ -126,8 +166,10 @@ export const createScanQueue = (connection: Redis, options: { retriesRaw?: strin
                 return { removed: false }
             }
             // 归属收敛：job 可能已被用户重新触发替换为新 run 的 job（终态 job 在 add 时 remove 重建），
-            // 仅释放归属本次孤儿 run 的 job，避免误删新触发任务的去重键
-            if (expectedRunId && existing.data?.runId !== expectedRunId) {
+            // 仅释放归属本次孤儿 run 的 job，避免误删新触发任务的去重键。
+            // 注意用 `!== undefined` 而非真值判断：legacy job 的 raw runId 为 `''`，
+            // 也必须走归属比较（否则 inspect → remove 之间被替换时会误删新 job）。
+            if (expectedRunId !== undefined && (existing.data?.runId ?? '') !== expectedRunId) {
                 return { removed: false }
             }
             try {
@@ -145,7 +187,34 @@ export const createScanQueue = (connection: Redis, options: { retriesRaw?: strin
             if (!existing) {
                 return false
             }
-            return !isTerminalJobState(await existing.getState())
+            return !isTerminalScanJobState(await existing.getState())
+        },
+        inspect: async (repositoryId) => {
+            const jobId = buildScanJobId(repositoryId)
+            const existing = await queue.getJob(jobId)
+            if (!existing) {
+                return null
+            }
+            const runIdKey = existing.data?.runId ?? ''
+            return {
+                jobId,
+                state: await existing.getState(),
+                runId: runIdKey || null,
+                runIdKey,
+                // BullMQ Job.timestamp 为创建时间（ms）；测试替身缺失时按 0 处理（不编造年龄）
+                ageMs: typeof existing.timestamp === 'number' ? Math.max(0, Date.now() - existing.timestamp) : 0,
+            }
+        },
+        hasConsumers: async () => {
+            try {
+                const count = await queue.getWorkersCount()
+                return count > 0
+            } catch (error) {
+                // 查询异常（非 CLIENT 命令受限——那种情况 BullMQ 会返回伪 worker → true）：
+                // 返回未知，调用方按保守方向处理
+                console.warn('[scan-queue] 队列消费者探测失败（返回未知）:', error)
+                return null
+            }
         },
         getJob: async (jobId) => {
             const job = await queue.getJob(jobId)

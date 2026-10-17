@@ -4,6 +4,7 @@
  * 聚合更新策略（设计 §5.2 双通道）：详情接口 GET /api/batch-runs/[id] 实时计算写回（用户查看时收敛）
  * + 周期兜底对账 batch-reconciler.ts（收敛未被查看的批次），不引入 Worker 回调机制（降低耦合）。
  */
+import { TERMINAL_SCAN_RUN_STATUSES } from '../scan-run-status'
 import type { BatchRunStatus } from '#server/entities/batch-run'
 import type { ScanResult } from '#server/entities/scan-result'
 import type { ScanRun } from '#server/entities/scan-run'
@@ -31,8 +32,9 @@ export interface BatchAggregation {
 
 /** 终态状态集合（聚合计数口径：completed + failed + dispatched + degraded 均计终态）。
  * degraded 是 sandbox 启动时降级的终态——业务结果完整（与 completed 等价口径计入 alertsTotal/fixedCount），
- * 但因路径偏离不计入 completedCount；详见 executor-sandbox-implementation.md §7.8.4 */
-const TERMINAL_STATUSES = new Set(['completed', 'failed', 'dispatched', 'degraded'])
+ * 但因路径偏离不计入 completedCount；详见 executor-sandbox-implementation.md §7.8.4。
+ * 集合本体统一由 `scan-run-status.ts` 提供，避免多处副本漂移。 */
+const TERMINAL_STATUSES = new Set<string>(TERMINAL_SCAN_RUN_STATUSES)
 
 /** 解析 ScanRun.summaryJson（core RunSummary 形状），非法/缺失返回零值（防御：落库路径已控制） */
 const parseRunSummary = (raw: string | null | undefined): { alertsFound: number, alertsFixed: number } => {

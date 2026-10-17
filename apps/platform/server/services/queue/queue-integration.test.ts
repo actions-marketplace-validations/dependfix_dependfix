@@ -61,6 +61,8 @@ describe.skipIf(!enabled)('scan queue real-redis integration', () => {
             repositoryId: 'integration-repo-1',
             runId: 'integration-run-1',
         })
+        // 消费者探测：真实 worker 连接存在（依赖 BullMQ blocking connection 的 CLIENT SETNAME）
+        await expect(queue.hasConsumers()).resolves.toBe(true)
 
         await worker.close()
         await queue.close()
@@ -74,10 +76,11 @@ describe.skipIf(!enabled)('scan queue real-redis integration', () => {
         // 随机 repoId：避免重复运行测试时命中上次残留 waiting job（幂等，e2e 同款设计）
         const repoId = `integration-repo-2-${Date.now()}`
         // 第一个 job 入队（无 worker 消费，保持 waiting）
+        const firstRunId = `integration-run-2-${Date.now()}`
         const first = await queue.add(repoId, {
             mode: 'report-only',
             severityThreshold: 'high',
-        }, { runId: `integration-run-2-${Date.now()}` })
+        }, { runId: firstRunId })
         expect(first.reused).toBe(false)
 
         // 第二次入队：等待中 → 去重合并
@@ -86,6 +89,13 @@ describe.skipIf(!enabled)('scan queue real-redis integration', () => {
             severityThreshold: 'high',
         }, { runId: `integration-run-2b-${Date.now()}` })
         expect(second.reused).toBe(true)
+        expect(second.existingRunId).toBe(firstRunId)
+        // 现场快照：归属首个 job 的 run（供触发自愈判断 owner 是否已终态）
+        await expect(queue.inspect(repoId)).resolves.toMatchObject({
+            state: 'waiting',
+            runId: firstRunId,
+            runIdKey: firstRunId,
+        })
 
         await queue.close()
         queueConnection.disconnect()
