@@ -185,9 +185,12 @@ The management platform (`apps/platform`) is configured via env vars injected by
 | `QUEUE_JOB_RETRIES` / `QUEUE_BACKOFF_MS` | — | empty | Job retries / backoff (ms); in the compose whitelist (→ `NUXT_*`) |
 | `QUEUE_WORKER` → `DEPENDFIX_QUEUE_WORKER` | — | compose `1` / entrypoint `0` | Independent worker process consuming the queue (removes BullMQ lock-renewal failures); `0` reverts to single-process. ⚠️ **compose-side name is `QUEUE_WORKER`** |
 | `DEPENDFIX_QUEUE_WORKER_SOCKET` | — | `/tmp/dependfix-queue-worker.sock` | Worker internal socket path (outside the whitelist; container name) |
+| `DEPENDFIX_QUEUE_WORKER_SLOW_RETRY_SECONDS` | — | `300` | Slow-retry interval (seconds, 1-3600; invalid / 0 falls back to 300) after the worker exceeds the consecutive fast-failure limit; restarts are never permanently abandoned. Forwarded by compose |
 | `DEPENDFIX_ROLE` | — | injected per process by the entrypoint (`worker` / `server`) | Process role: `worker` skips HTTP-only plugins (periodic cleanup / build stamp), avoiding duplicated DB queries and log noise; the entrypoint normalizes it to `server` in the single-process form (equivalent to unset: nothing is skipped); unset for direct processes. Outside the whitelist (container-internal); contract: [platform.md §10.6](../../../standards/platform.md#106-队列执行进程隔离独立-worker-进程) |
 | `IN_PROCESS_WORKER` → `NUXT_IN_PROCESS_WORKER` | — | `true` (compose) / `false` (direct process) | In-process worker (sole consumer in single-process deployments); the effective default follows compose forwarding |
 | `STALE_CLEANUP_INTERVAL_MS` | — | `300000` | Orphan task cleanup cadence (ms) |
+| `STALE_CLEANUP_RUNNING_GRACE_MS` | — | `300000` | Grace period (ms, > 0; invalid / 0 falls back to default) after a running run exceeds the execution timeout before it is marked `orphan_run`. Forwarded by compose |
+| `STALE_CLEANUP_PENDING_GRACE_MS` | — | `300000` | Minimum wait (ms, > 0; invalid / 0 falls back to default) before a pending run is considered orphaned when no consumer exists / the job belongs to a terminal run; the no-consumer branch additionally requires a job age ≥ 2× this value. Forwarded by compose |
 
 ### Executor / sandbox / scan
 

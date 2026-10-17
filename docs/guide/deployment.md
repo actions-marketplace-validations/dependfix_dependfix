@@ -75,7 +75,7 @@ Compose 从 `apps/platform/.env` 读取变量并注入容器。核心项：
 | `QUEUE_ENABLED` | 否 | `true`（compose 内） | 扫描队列模式：`auto` 自动判定 / `true` 强制异步 / `false` 强制同步 |
 | `IN_PROCESS_WORKER` | 否 | `true`（compose 内） | 单进程形态（`QUEUE_WORKER=0`）下进程内消费扫描队列；见下方说明 |
 
-> ⚠️ **扫描队列的消费者**：异步队列（入队立即返回 + 前端轮询）**必须有消费者**才会真正执行。容器部署默认由入口启动**独立 worker 进程**消费队列（compose `QUEUE_WORKER=1` → 容器 `DEPENDFIX_QUEUE_WORKER=1`）——扫描执行（含引擎同步子进程调用）在 worker 进程，**HTTP 进程 event loop 不被阻塞**，消除 BullMQ 锁续期失败（`could not renew lock` → stalled 重排）。设 `QUEUE_WORKER=0` 回退**单进程形态**，此时由进程内 worker 消费（compose `IN_PROCESS_WORKER` → 容器 `NUXT_IN_PROCESS_WORKER`，默认 `true`）。若自行编排容器（不经入口脚本），务必注入 `NUXT_IN_PROCESS_WORKER=true`（或 `NUXT_QUEUE_ENABLED=false` 走同步），否则异步任务无人消费而挂起；`auto` 模式下未启用进程内 worker 会自动降级同步（日志 `自动模式降级同步`）。入口同时按进程注入角色 `DEPENDFIX_ROLE`（worker 子进程 `worker` / HTTP 主进程 `server`；单进程形态归一化为 `server`），worker 侧据此跳过 HTTP-only 插件（周期清理 / 版本戳）——日志中可见 `跳过 HTTP-only 插件`。完整口径见 [platform.md §10.6](../standards/platform.md#106-队列执行进程隔离独立-worker-进程)。
+> ⚠️ **扫描队列的消费者**：异步队列（入队立即返回 + 前端轮询）**必须有消费者**才会真正执行。容器部署默认由入口启动**独立 worker 进程**消费队列（compose `QUEUE_WORKER=1` → 容器 `DEPENDFIX_QUEUE_WORKER=1`）——扫描执行（含引擎同步子进程调用）在 worker 进程，**HTTP 进程 event loop 不被阻塞**，消除 BullMQ 锁续期失败（`could not renew lock` → stalled 重排）。设 `QUEUE_WORKER=0` 回退**单进程形态**，此时由进程内 worker 消费（compose `IN_PROCESS_WORKER` → 容器 `NUXT_IN_PROCESS_WORKER`，默认 `true`）。若自行编排容器（不经入口脚本），务必注入 `NUXT_IN_PROCESS_WORKER=true`（或 `NUXT_QUEUE_ENABLED=false` 走同步），否则异步任务无人消费而挂起；`auto` 模式下未启用进程内 worker 会自动降级同步（日志 `自动模式降级同步`）。入口同时按进程注入角色 `DEPENDFIX_ROLE`（worker 子进程 `worker` / HTTP 主进程 `server`；单进程形态归一化为 `server`），worker 侧据此跳过 HTTP-only 插件（周期清理 / 版本戳）——日志中可见 `跳过 HTTP-only 插件`。**worker 崩溃自愈**：连续快速失败超上限（5 次）后入口转为慢重试（`DEPENDFIX_QUEUE_WORKER_SLOW_RETRY_SECONDS`，缺省 300s），不再永久停止重启——`stale-cleanup` 只能改 DB，不能消费队列。宿主机重启 / 容器停止后遗留的任务由 `stale-cleanup` 收敛：`running` 在「执行超时 + 5 分钟宽限」后、`pending` 在「创建 + 5 分钟宽限」后（无消费者分支额外要求 job 年龄 ≥ 10 分钟）判 `orphan_run`，并释放 BullMQ 去重键，避免新触发被 `SCAN_PENDING_MERGED` 永久合并；完整口径见 [platform.md §10.6](../standards/platform.md#106-队列执行进程隔离独立-worker-进程) 与 [队列僵尸任务终结与去重键释放设计](../design/governance/queue-stale-recovery.md)。
 
 > ⚠️ **Compose 变量名与容器变量名不同**：`AUTH_SECRET` 经 compose 映射为容器内 `NUXT_AUTH_SECRET`；`REGISTRATION_DISABLED` → `NUXT_REGISTRATION_DISABLED`；`QUEUE_ENABLED` → `NUXT_QUEUE_ENABLED` 等。Nuxt `runtimeConfig` 运行时覆盖只认 `NUXT_` 前缀。
 >
@@ -194,7 +194,8 @@ docker compose start platform
 | 凭据保存报密钥错误 | 未设置 `NUXT_ENCRYPTION_KEY`（32 字节随机值） |
 | 登录回调 404 / 重定向异常 | `NUXT_PUBLIC_BETTER_AUTH_URL` 与反代对外地址不一致，或反代未透传 `Host` |
 | 队列未生效 | Redis 不可达 / 版本 < 5.0 时自动降级同步；查看日志 `version_too_old` 等提示 |
-| 扫描任务一直 `pending` / 批量批次约 30 分钟后失败 `orphan_run`，且日志无执行记录 | 异步队列无消费者：容器部署应看到入口日志 `队列 worker 进程 pid=...`，worker 进程日志出现 `IN_PROCESS_WORKER=true，当前进程消费扫描队列`；单进程形态（`QUEUE_WORKER=0`）应确认容器有 `NUXT_IN_PROCESS_WORKER=true`。若自行编排容器漏注入消费者开关，异步任务将无人消费；显式设 `QUEUE_ENABLED=true` 时不会自动降级，需配置消费者或改回 `auto` |
+| 扫描任务一直 `pending` / 批量批次约 30 分钟后失败 `orphan_run`，且日志无执行记录 | 异步队列无消费者：容器部署应看到入口日志 `队列 worker 进程 pid=...`，worker 进程日志出现 `IN_PROCESS_WORKER=true，当前进程消费扫描队列`；单进程形态（`QUEUE_WORKER=0`）应确认容器有 `NUXT_IN_PROCESS_WORKER=true`。若自行编排容器漏注入消费者开关，异步任务将无人消费；显式设 `QUEUE_ENABLED=true` 时不会自动降级，需配置消费者或改回 `auto`。worker 连续失败会转慢重试（日志 `转为慢重试`），可查 `stale-cleanup` 的 `consumers=yes|no|unknown` 判断消费者是否存活。注意：托管 Redis 禁用 `CLIENT LIST` 时 BullMQ 可能返回伪 worker → `consumers=yes` 可能假阳性，需结合 `bull:scan:wait` 堆积判断 |
+| 重新触发被提示「已有进行中的扫描任务，本次触发已合并」且长时间不执行 | 旧 job 的 dedupe 键被僵尸任务占用。新版 `stale-cleanup` 会在无消费者 / job 归属终态 run 时清理并释放该键；也可在批次页「强制完成」后重试（会同步释放 job）。仍无法恢复时查 Redis：`llen bull:scan:wait`、`zcard bull:scan:active`、`client list \| grep -c 'bull:'`（Worker 未显式命名时连接名是 `bull:<base64(queue)>`，不含 `:w:`） |
 
 数据库自检（源码环境）：`pnpm --filter @dependfix/platform db:doctor`，可输出文件元信息、PRAGMA、各表行数与「数据正常 / 被清空 / schema 从未建立」结论。
 

@@ -32,6 +32,7 @@
 | [扫描偏好（设备级）设计](./scan-preferences.md) | 专项设计（设备级 localStorage 偏好：优先级 / 写入时机 / SSR 与可测性） | ✅ 已落地（2026-10-07，M37.2） |
 | [平台执行模型隔离设计](./executor-process-isolation.md) | 专项设计（M38 设计先行：BullMQ 锁续期失败根因 + 三方案选型） | ✅ 已落地（2026-10-09 M38 闭环归档，选型 ①′ 独立 worker 进程） |
 | [PR 构建与部署信号采集设计](./pr-build-deploy-signals.md) | 专项设计（PR 构建 / 部署多源聚合：GitHub Checks + Commit Statuses + Deployments，可选 provider 日志富化） | 🔶 设计先行稿（backlog 候选，2026-10-10） |
+| [队列僵尸任务终结与去重键释放设计](./queue-stale-recovery.md) | 专项设计（宿主机重启后 pending/running 收敛 + BullMQ 去重键释放 + 触发自愈 + worker 慢重试） | ✅ 已落地（2026-10-18，Review Gate R2 Pass） |
 
 ## 使用约定
 
