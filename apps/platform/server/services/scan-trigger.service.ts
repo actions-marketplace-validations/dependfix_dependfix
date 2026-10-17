@@ -7,8 +7,10 @@
 // 端点侧仍负责各自的鉴权 / 归属 / 请求校验（scan 走 schema 校验，retry 走来源 run 校验）。
 import { SCAN_JOB_PRIORITY } from './queue/queue-mode'
 import { getQueueService } from './queue/queue.service'
+import type { ScanQueue } from './queue/scan-queue'
 import { applyFailureClassification } from './run-failure-classify'
-import { createPendingScanRun, runScanForRepository } from './scan-orchestrator.service'
+import { createPendingScanRun, runScanForRepository, type ScanRequest } from './scan-orchestrator.service'
+import { isTerminalScanRunStatus } from './scan-run-status'
 import { ensureDatabaseInitialized } from '#server/database'
 import { ScanRun } from '#server/entities/scan-run'
 import type { ScanRequestInput } from '#server/schemas/scan'
@@ -35,6 +37,57 @@ export interface TriggerScanOutcome {
     run: ScanRun
     /** 去重合并提示（存在即表示本次触发被合并、未真正执行；前端据此提示且不跳转） */
     merged?: { code: string, message: string }
+}
+
+export interface EnqueueScanJobOptions {
+    priority?: number
+    /** 用户主动复用既有 run（透传给 worker，绕过终态校验） */
+    reuse?: boolean
+}
+
+/**
+ * 入队扫描 job（单仓触发 / 批量触发共用，含僵尸去重键自愈）。
+ *
+ * 自愈规则：`add` 命中复用后，若既有 job 承载的 run 已终态或不存在，说明该 job 是
+ * 「worker 死后遗留的僵尸 job」（或归属历史 run 的残留），直接 remove 后重试一次。
+ * 这样新的触发不会被 `SCAN_PENDING_MERGED` 永久合并——即使周期清理尚未跑到。
+ *
+ * 归属另一个**非终态** run 时保持既有合并语义（真正排队 / 执行中的任务不应被抢占）。
+ */
+export const enqueueScanJob = async (
+    queue: ScanQueue,
+    repositoryId: string,
+    request: ScanRequest,
+    run: ScanRun,
+    options: EnqueueScanJobOptions = {},
+): Promise<{ reused: boolean }> => {
+    const add = () => queue.add(repositoryId, request, {
+        priority: options.priority,
+        runId: run.id,
+        reuse: options.reuse,
+    })
+    let result = await add()
+    if (!result.reused) {
+        return { reused: false }
+    }
+    // 无 runId 的旧 job / 就是当前 run：保持既有合并语义
+    if (!result.existingRunId || result.existingRunId === run.id) {
+        return { reused: true }
+    }
+    const ds = await ensureDatabaseInitialized()
+    const owner = await ds.getRepository(ScanRun).findOne({
+        where: { id: result.existingRunId },
+        select: { id: true, status: true },
+    })
+    if (owner && !isTerminalScanRunStatus(owner.status)) {
+        return { reused: true }
+    }
+    const { removed } = await queue.remove(repositoryId, result.existingRunId)
+    if (!removed) {
+        return { reused: true }
+    }
+    result = await add()
+    return { reused: result.reused }
 }
 
 /**
@@ -64,9 +117,8 @@ export const triggerScanForRepository = async (
             pendingRun = await createPendingScanRun(repositoryId, params, { retriedFromRunId })
         }
         try {
-            const { reused } = await queueService.queue.add(repositoryId, params, {
+            const { reused } = await enqueueScanJob(queueService.queue, repositoryId, params, pendingRun, {
                 priority: SCAN_JOB_PRIORITY.manual,
-                runId: pendingRun.id,
                 reuse: !!reuseExisting, // 用户主动复用：worker 端透传 reuse=true 绕过终态校验
             })
             if (!reused) {

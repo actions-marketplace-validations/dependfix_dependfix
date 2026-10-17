@@ -13,6 +13,7 @@
 import { In } from 'typeorm'
 import { getQueueService } from '../queue/queue.service'
 import { SCAN_JOB_PRIORITY } from '../queue/queue-mode'
+import { enqueueScanJob } from '../scan-trigger.service'
 import { createPendingScanRun, runScanForRepository, type ScanRequest } from '../scan-orchestrator.service'
 import { applyFailureClassification } from '../run-failure-classify'
 import { aggregateScanRuns, EMPTY_BATCH_SUMMARY } from './batch-aggregate'
@@ -73,7 +74,7 @@ export const executeBatchRun = async (input: ExecuteBatchInput): Promise<Execute
             let run: ScanRun | null = null
             try {
                 run = await createPendingScanRun(repositoryId, input.request, { batchRunId: batchRun.id })
-                const { reused } = await queueService.queue.add(repositoryId, input.request, { priority, runId: run.id })
+                const { reused } = await enqueueScanJob(queueService.queue, repositoryId, input.request, run, { priority })
                 if (reused) {
                     // 同仓库已有进行中任务（jobId 去重合并）：本次预创建的 pending run 不会被 worker 消费，
                     // 置 failed + duplicate 标记，保证聚合终态收敛（与单仓库 scan.post.ts 语义一致）
