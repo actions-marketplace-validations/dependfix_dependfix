@@ -37,18 +37,18 @@ pnpm i --frozen-lockfile
 | `LOCKFILE_VERSION_MISMATCH` | `"lockfileVersion"` 不兼容 + pnpm 版本差异 | lockfile 由不同 pnpm 主版本生成 |
 | `MINIMUM_RELEASE_AGE` | `"ERR_PNPM_NO_MATURE_MATCHING_VERSION"` / `"ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION"` / `"minimumReleaseAge"` | 目标仓库配置冷却期约束，锁定版本过新 |
 | `RESOLVE_ERROR` | `"ERR_PNPM_NO_MATCHING_VERSION"` / `"resolution"` / lockfile 与 manifest 引用不匹配 | 依赖版本约束无法解析 |
-| `ENVIRONMENT_ERROR` | **前置判定**（先于关键词匹配）：信号终止 / 超时 / 无 stderr 诊断 | 执行环境问题而非 lockfile 内容问题；**不归因目标仓库**（见 §2.4） |
+| `ENVIRONMENT_ERROR` | **前置判定**（先于关键词匹配）：信号终止 / 超时 / 无 stderr 诊断（stdout 诊断会作为证据保留） | 执行环境问题而非 lockfile 内容问题；**不归因目标仓库**（见 §2.4） |
 | `UNKNOWN` | 不匹配以上任何特征 | 未分类 |
 
-**进程级信号保留**：每次诊断 / 策略执行都从子进程错误中提取 `exitCode`（退出码）、`signal`（终止信号，如 `SIGKILL` / `SIGTERM`）、`timedOut`（`ETIMEDOUT`）与 `errno`（`ENOENT` 等 spawn 级错误）并随结果上抛——外部不再只看到 `Command failed: pnpm install --no-frozen-lockfile` 这类无定位信息的结果。`ENVIRONMENT_ERROR` 的失败详情形如 `environmental install failure (exit code 1): no stderr diagnostics`（有 stderr 证据时改为 `… (signal SIGKILL): stderr: <文本>`）。
+**进程级信号保留**：每次诊断 / 策略执行都从子进程错误中提取 `exitCode`（退出码）、`signal`（终止信号，如 `SIGKILL` / `SIGTERM`）、`timedOut`（`ETIMEDOUT`）与 `errno`（`ENOENT` 等 spawn 级错误）并随结果上抛——外部不再只看到 `Command failed: pnpm install --no-frozen-lockfile` 这类无定位信息的结果。`ENVIRONMENT_ERROR` 的失败详情形如 `environmental install failure (exit code 1): no stderr/stdout diagnostics`（有 stderr 或 stdout 证据时改为 `… (signal SIGKILL): diagnostics: <文本>`）。**stdout 证据**：pnpm 11 把安装脚本错误写到 stdout，`getInstallDiagnostics` 会同时读取 stderr / stdout，两路都有时按 `stderr:` / `--- stdout ---` 标注。
 
 ### 2.3 分类优先级
 
-部分错误可能同时触发的关键词（如 manifest mismatch 可能同时出现 "out of sync" 和 `ERR_PNPM_OUTDATED_LOCKFILE`），此时**取第一个匹配**，顺序同 §2.2 表（与实现 `FAILURE_PATTERNS` 同序）。**环境性判定前置**：一旦命中信号终止 / 超时 / 无 stderr 诊断，直接归 `ENVIRONMENT_ERROR`（进程可能在吐出部分 stderr 后被杀死，此时关键词分类不可信）。
+部分错误可能同时触发的关键词（如 manifest mismatch 可能同时出现 "out of sync" 和 `ERR_PNPM_OUTDATED_LOCKFILE`），此时**取第一个匹配**，顺序同 §2.2 表（与实现 `FAILURE_PATTERNS` 同序）。**环境性判定前置**：一旦命中信号终止 / 超时 / 无 stderr 诊断，直接归 `ENVIRONMENT_ERROR`（进程可能在吐出部分 stderr 后被杀死，此时关键词分类不可信）。**运行级取消优先**：未启动（`started:false`）或运行中被取消（`aborted:true`）在环境性判定之前映射 `ABORTED`，不伪装成 `ENVIRONMENT_ERROR`。
 
 ### 2.4 环境性失败与非归因口径
 
-`ENVIRONMENT_ERROR` 表示**执行环境**问题（OOM 杀死、超时、静默非零退出），此时锁文件内容是否合规无从判断：
+`ENVIRONMENT_ERROR` 表示**执行环境**问题（OOM 杀死、超时、静默非零退出；stderr 为空但 stdout 有安装脚本错误时仍按环境性处理，stdout 作为证据保留），此时锁文件内容是否合规无从判断：
 
 - 分类结果携带 `environmental: true`，并在 `RepairLockfileResult.environmental` 上透出；
 - 调用方 `tryLockfileRepair` 据此把该 action 标记为 `environmentalFailure`、并记 `ENVIRONMENT_ERROR` 审计条目（`stage: 'repair'`）；
@@ -183,7 +183,7 @@ export async function repairLockfile(params: RepairLockfileParams): Promise<Lock
 /** 执行 pnpm i --frozen-lockfile 并解析失败分类（含进程级信号） */
 export function classifyLockfileFailure(
     workDir: string
-): { ok: boolean; category?: LockfileFailureCategory; stderr?: string; exitCode: number | null; signal: string | null; timedOut: boolean; errno: string | null; noStderrDiagnostics: boolean; environmental: boolean }
+): { ok: boolean; category?: LockfileFailureCategory; stderr?: string; stdout?: string; diagnostics?: string; exitCode: number | null; signal: string | null; timedOut: boolean; errno: string | null; noDiagnostics: boolean; environmental: boolean }
 
 /** 计算 lockfile 变更摘要 */
 export function computeLockfileDiff(

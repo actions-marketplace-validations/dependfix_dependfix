@@ -155,7 +155,7 @@ Nuxt 4（全栈 SSR + API Routes，`app/` + `server/`）/ TypeScript strict / UI
 
 - Docker 镜像的关键启动默认值（如 `DATABASE_MIGRATIONS_RUN=true`）**必须**用 Dockerfile runtime `ENV` 固化，不能只靠 compose 注入（用户可能沿用旧 compose 或直接 `docker run`，导致镜像「能启动但功能不可用」）；**发布门禁**为推送前对真实构建镜像跑首启冒烟（不注入该 env），断言 HTTP 200 + 业务表数下限 + 无 `no such table`（`apps/platform/docker/smoke-test.sh`，已接入 `docker.yml`）；空库 + 未开迁移时启动须打明确告警。
 
-- **10.2 runtime 镜像只含 .output（Nitro trace 自包含）**：`.output/server/node_modules` 由 Nitro trace 自带全部运行时依赖（含 better-sqlite3 的 musl prebuild），workspace 包被打进 `.output/server/chunks`——runtime 阶段**只 `COPY .output`**，**不得**再复制根 `node_modules` + workspace dist（曾致镜像膨胀至约 1.1GB，移除后约 239MB）。**校验口径**：`rg "from ['\"]@dependfix" apps/platform/.output/server` 应 0 命中（排除注释）；`.output/server/package.json` 声明依赖逐项 `existsSync` 全命中 + 容器 HTTP 冒烟 + 原生模块 PRAGMA。
+- **10.2 runtime 镜像的 Node 依赖面只含 .output（Nitro trace 自包含）**：`.output/server/node_modules` 由 Nitro trace 自带全部运行时依赖（含 better-sqlite3 的 musl prebuild），workspace 包被打进 `.output/server/chunks`——runtime 阶段**只 `COPY .output`**，**不得**再复制根 `node_modules` + workspace dist（曾致镜像膨胀至约 1.1GB，移除后约 239MB）。**校验口径**：`rg "from ['\"]@dependfix" apps/platform/.output/server` 应 0 命中（排除注释）；`.output/server/package.json` 声明依赖逐项 `existsSync` 全命中 + 容器 HTTP 冒烟 + 原生模块 PRAGMA。**系统工具链**：目标仓库原生模块回退编译所需 `python3/make/g++` 的安装口径、体积实测与 `smoke-test.sh` 校验见 [dependency-fixer-records.md §12.11](../design/modules/dependency-fixer-records.md)。
 
 ### 10.3 Nitro 插件不阻塞监听（启动引导语义）
 

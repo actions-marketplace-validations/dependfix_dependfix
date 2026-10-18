@@ -159,8 +159,8 @@
   - **触发条件**：下次改动上述规范文件 / 文档门禁扩面 / 阶段归档批次。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
-- **环境性失败的可见性口径：不归因 ≠ 不可见（待评估，P1 🛠️）** —— 现象（2026-10-17 生产实证）：13 个仓库「有可修告警 / 0 修复」在运行列表显示为**已完成**，平台侧无任何"本来要修但没修成"的信号。链路：`ENVIRONMENT_ERROR` 判定（`packages/engine/src/fixers/pnpm/index.ts:114-141`，**证据只取 stderr——stderr 为空、或被信号终止、或超时即判环境性**）→ `SKIPPED_AUDIT_CATEGORIES` 不计入错误（`packages/engine/src/app/result-assembly.ts:152-157`）→ `environmentalFailure` 不计入失败动作（同文件 `:181`） → 平台 `exitCode=1 + result` 走 `completed`（`apps/platform/server/services/scan-run-state.ts:136` 注释口径 + `:157` 兜底返回），且**引擎 exit code 未落库**（`apps/platform/server/entities/scan-run.ts` 无该列）。
-  - **待评估点**：① `classifyLockfileFailure` 的证据采集补 stdout 尾部（pnpm 进度/错误按经验大量走 stdout，现口径把真实安装失败一并吞成"环境性"）；② 引擎 exit code 与「环境性失败计数」落库；③ 运行列表 / 详情对「`alertsSkipped`（跨线 / 子目录 / 不可修）+ `alertsTruncated`（单仓 20 条截断）+ `alertsFailed` + `alertsConverged`」分列展示，并对「有可修告警但 0 修复」打 `needs-review` 标（与 `failure_kind=transient` 的受约束重试入口衔接）；④ 超时失败 run（`result` 为 undefined）不 reconcile 告警明细（`apps/platform/server/services/scan-orchestrator.service.ts:411-417`）⇒ 列表"告警数 0"，是否补落快照。
+- **环境性失败的可见性口径：不归因 ≠ 不可见（待评估，P1 🛠️）** —— 现象（2026-10-17 生产实证）：13 个仓库「有可修告警 / 0 修复」在运行列表显示为**已完成**，平台侧无任何"本来要修但没修成"的信号。链路：`ENVIRONMENT_ERROR` 判定（`packages/engine/src/fixers/pnpm/index.ts` + `fixers/process-signals.ts`，**环境性判定仍以 stderr 为空 / 信号 / 超时为准；证据采集已补 stdout，见下方 ①**）→ `SKIPPED_AUDIT_CATEGORIES` 不计入错误（`packages/engine/src/app/result-assembly.ts:152-157`）→ `environmentalFailure` 不计入失败动作（同文件 `:181`） → 平台 `exitCode=1 + result` 走 `completed`（`apps/platform/server/services/scan-run-state.ts:136` 注释口径 + `:157` 兜底返回），且**引擎 exit code 未落库**（`apps/platform/server/entities/scan-run.ts` 无该列）。
+  - **待评估点**：① **证据采集已补 stdout 尾部**（2026-10-18，`getInstallDiagnostics` 读取 stderr+stdout 并脱敏，见 [dependency-fixer-records.md §12.11](../design/modules/dependency-fixer-records.md)）——但**分类语义未变**（stderr 为空 / 信号 / 超时仍判环境性），真实安装失败仍可能被并入环境性，保留待评估；② 引擎 exit code 与「环境性失败计数」落库；③ 运行列表 / 详情展示已合并至「跨 major / 截断 / 子目录跳过的用户可见披露」条目（P2），含 `needs-review` 标与 `failure_kind=transient` 重试衔接；④ 超时失败 run（`result` 为 undefined）不 reconcile 告警明细（`apps/platform/server/services/scan-orchestrator.service.ts:411-417`）⇒ 列表"告警数 0"，是否补落快照。
   - **触发条件**：已命中；或用户再次以「列表显示成功但告警未修」形式报告现象。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
@@ -174,8 +174,8 @@
   - **触发条件**：用户计划引入自动构建/部署（Jenkins webhook → 镜像推送）时；或下次需要判定"线上是否含某提交"时。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
-- **跨 major / 截断 / 子目录跳过的用户可见披露（待评估，P3 🚀）** —— 现象（2026-10-17 生产实证）：2026-10-16 批次中多处「有告警 / 0 修复」实为**设计性跳过**——`allowMajorUpgrade` 在平台侧硬编码为 `false`（`apps/platform/server/services/scan-orchestrator.service.ts:265`）⇒ rss-impact-server 6/15、rss-resources-download 5/8、nuxt-latest-template 4/6、afdian-linker 4/6、auto-backup-database 5/5 等告警因「线内无修复」被跳过；另有单仓 20 条截断（`maxAlertsPerRepository: 20`，同文件 `:266`；cookie-cloudflare 截 9 / caomei-auth 截 3）与子目录 / 根直接依赖 manifest 跳过（momei 的 `quill`、tauri-template 的 `Cargo.lock` ×3）。这些在 UI 上与"环境性失败导致 0 修复"外观相同。
-  - **待评估点**：① 是否提供仓库级「允许跨线升级」开关（走完整验证 + AI 研判兜底）或维持一律人工；② 若维持人工，UI 是否必须明示「N 条因跨 major 跳过，需人工处理」；③ 截断 / 子目录跳过是否同样需要在运行详情给可点开的清单（当前只有引擎 WARN 日志）。
+- **跨 major / 截断 / 子目录跳过的用户可见披露（待评估，P2 🎨 用户体验）** —— 现象（2026-10-17 生产实证，2026-10-18 用户报告补充）：2026-10-16 批次中多处「有告警 / 0 修复」实为**设计性跳过**——`allowMajorUpgrade` 在平台侧硬编码为 `false`（`apps/platform/server/services/scan-orchestrator.service.ts:265`）⇒ rss-impact-server 6/15、rss-resources-download 5/8、nuxt-latest-template 4/6、afdian-linker 4/6、auto-backup-database 5/5 等告警因「线内无修复」被跳过；另有单仓 20 条截断（`maxAlertsPerRepository: 20`，同文件 `:266`；cookie-cloudflare 截 9 / caomei-auth 截 3）与子目录 / 根直接依赖 manifest 跳过（momei 的 `quill`、tauri-template 的 `Cargo.lock` ×3）。这些在 UI 上与"环境性失败导致 0 修复"外观相同。
+  - **待评估点**：① 是否提供仓库级「允许跨线升级」开关（走完整验证 + AI 研判兜底）或维持一律人工；② 若维持人工，UI 是否必须明示「N 条因跨 major 跳过，需人工处理」；③ 截断 / 子目录跳过是否同样需要在运行详情给可点开的清单（当前只有引擎 WARN 日志）；④ 运行摘要是否持久化 `alertsTruncated` 与按原因分组的 `alertsSkipped`，并在列表 / 详情以 `20/26（6 截断，4 跨大版本）` 形式展示（当前 `alertsCount` 只统计截断后的数量，用户无法从 UI 判断差异）。
   - **触发条件**：用户对"有可修告警却未修"再次要求解释时；或跨 major 告警占比升高时。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
@@ -187,6 +187,21 @@
 - **lint-staged 配置内的裸 `git add` 任务会全量暂存工作区（待评估，P2 🛠️）** —— 现象（2026-10-17 本批实证 3 次）：`package.json` 的 `lint-staged` 任务里 `*.{js,ts}` / `*.{css,scss,vue}` / `*.md` 三条均以裸 `git add`（无路径参数）收尾，lint-staged 自身已会重暂存其修改过的文件，该任务**额外把整个工作区未暂存改动一并入索引** ⇒ 同一工作区里的下一篇文档 / 下一个提交的文件的改动被"抢先"混入当前 commit（本批实测：引擎修复提交混入 `backlog.md`、规范文档提交混入 `todo.md`），原子提交边界失效；husky 另会打印「tasks use `git add`」告警。审计侧核对「commit 与内容归属」时表现为归属不符。
   - **待评估点**：① 直接移除三条任务里的裸 `git add`（lint-staged 自动重暂存已覆盖）；② 或改为带路径的形式（`git add -- <匹配文件>` 无意义，因为 lint-staged 已做）；③ 是否同时收紧 `packages/skills/**` 那条（该条带路径参数，属正确形态，可作为对照）。
   - **触发条件**：再次出现「提交内容与 commit 主题不符」或审计标记归属问题；或整理提交钩子配置时。
+  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
+
+- **pnpm store 持久化与项目内 store 的提交卫生（待评估，P2 🚀 性能 / 🛡️ 技术债）** —— 现象（2026-10-18 安装失败复盘）：平台按 run 创建 `workRoot/<runId>` 并在结束时删除；当工作目录与 `$HOME` 位于不同文件系统时，pnpm 把 content-addressable store 放在项目内（实测 `/work/.pnpm-store/v11`），随 run 清理消失 ⇒ 每个仓库都是冷安装（大仓 2000+ 包、网络抖动时直接放大超时 / OOM 概率）。同时 `.pnpm-store/` 未被目标仓库 `.gitignore` 覆盖，而 `stageAndCommit` 使用 `git add .`——一旦有真实修复，存在把整份 store 提交进目标仓库的风险。
+  - **待评估点**：① 是否把 `store-dir` 固定到持久卷（如 `/app/data/pnpm-store`）并配置容量 / 定期 GC；② 提交前是否统一把 `.pnpm-store/`（以及防御性 `node_modules/`）写入目标仓库 `.git/info/exclude` 或临时 `.gitignore`，避免 `git add .` 误收；③ 多仓库共享 store 的并发 / 权限边界（当前队列并发 1，风险可控）。
+  - **触发条件**：再次出现冷安装导致的超时 / OOM；或平台部署批次调整数据卷 / 缓存策略时。
+  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
+
+- **独立 installer 容器 / runtime 工具链移出（待评估，P2 🛡️ 安全 / 🚀 体积）** —— 背景（2026-10-18）：runtime 阶段补 `python3 make g++` 以支持目标仓库原生模块的 `node-gyp` 回退；审计实测同 digest 基础镜像下 content size +约 110MB、`docker images` disk +约 421MB（`/usr` +约 303MB），同时扩大了不可信仓库可用的编译面。工具链本身也不是充分条件：node headers / prebuild 源需可达，部分模块另需 `linux-headers`（当前未装）。
+  - **待评估点**：① 是否把安装依赖拆到独立 installer 容器 / 阶段（只在该阶段保留工具链，主 runtime 仍只含 `.output`）；② 若保留在 runtime，是否补 `linux-headers` / 预置 node-gyp headers 缓存，并加镜像体积门禁；③ 与「pnpm store 持久化」候选的卷 / 缓存策略联动。
+  - **触发条件**：镜像体积 / 安全评审要求收敛编译面；或再次出现「预编译包下载失败 + 缺 headers / 工具链」的原生构建失败。
+  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
+
+- **单仓通用执行预算 / deadline 检查（待评估，P2 🛠️ 可靠性）** —— 现象：2026-10-18 已用「修复前基线安装失败即跳过依赖链 + 合批环境性失败跳过逐包 + 逐包环境性中断」覆盖已观测的超时形态；但当基线安装成功、多个单包安装各自以**非环境性**失败结束时，仍可能把单仓 30 分钟预算耗在多次安装上。引擎目前只感知运行级 abort，不感知「剩余预算」。
+  - **待评估点**：① 平台是否把 `deadlineAt`（或剩余毫秒）透传给引擎，在每次安装 / 验证前检查；② 或在编排层以「连续 N 次安装失败即停止本仓」的保守阈值兜底；③ 与「部分成功交付」的交互（停止前已完成的修复是否允许提交 / 验证）。
+  - **触发条件**：再次出现「基线成功但逐包安装耗尽 30 分钟」的运行；或平台执行预算调整时。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
 ### 待上收候选（评估完成，等待用户决策）

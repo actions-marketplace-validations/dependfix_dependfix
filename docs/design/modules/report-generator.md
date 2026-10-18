@@ -233,7 +233,7 @@ interface FixError {
 - **分组**：同一仓库的告警和动作聚合在一起，按仓库名称排序
 - **状态图标**：成功 `✅` 失败 `❌` 跳过 `⏭️`
 - **版本列**：仅 `dependency-upgrade` 动作显示 from/to 版本；lockfile-repair 显示 strategy^；verification 显示 `—`，但**既有失败**（`FixAction.preExisting`，修复前即红、未归因本次改动）显示「既有失败（修复前即红，未归因本次改动）」
-- **环境性安装失败**：`lockfile-repair` 的环境性失败（`FixAction.environmentalFailure === true`）在 **Fix Actions 表的失败原因**（渲染自 `FixAction.error`，见 `markdown-generator.ts` 的 `actionDetails`）展示进程信号（如 `signal SIGKILL` / `exit code 1`）与 `no stderr diagnostics`（有 stderr 证据时为 `stderr: <文本>`），供审计定位；`environmentalFailure` 字段本身不被渲染器消费，仅作非归因标记（见 [pnpm-lockfile-fixer.md §2.4](./pnpm-lockfile-fixer.md)）
+- **环境性安装失败**：`lockfile-repair` 的环境性失败（`FixAction.environmentalFailure === true`）在 **Fix Actions 表的失败原因**（渲染自 `FixAction.error`，见 `markdown-generator.ts` 的 `actionDetails`）展示进程信号（如 `signal SIGKILL` / `exit code 1`）与 `diagnostics: <stderr+stdout 尾部>`（无诊断时为 `no stderr/stdout diagnostics`），供审计定位；`environmentalFailure` 字段本身不被渲染器消费，仅作非归因标记（见 [pnpm-lockfile-fixer.md §2.4](./pnpm-lockfile-fixer.md) 与 [dependency-fixer-records.md §12.11](./dependency-fixer-records.md)）
 - **空数据处理**：
   - 无错误 → 不渲染 Errors 节
   - 无修复动作 → Fix Actions 表显示 `No fix actions performed.`
