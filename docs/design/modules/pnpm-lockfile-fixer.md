@@ -123,7 +123,9 @@ interface LockfileRepairResult {
     /** 实际采用的修复策略 */
     strategy?: RepairStrategy
     /** lockfile 变更摘要 */
-    diff?: LockfileDiff
+    diff?: LockfileDiff | null
+    /** 修复后 lockfile 内容是否实际改变（已合规，或修复后与备份字节一致时为 false） */
+    changed?: boolean
     /** 各策略的尝试历史（含进程级退出码 / 信号） */
     attemptHistory: RepairAttempt[]
     /** 环境性安装失败（诊断步无 stderr 诊断）→ 调用方不归因目标仓库（见 §2.4） */
@@ -170,6 +172,8 @@ interface LockfileDiff {
     summary: string
 }
 ```
+
+> **`changed` 与 noOp 口径（2026-10-18）**：`success && changed === false` 表示 lockfile 已合规，或修复后内容与备份一致（按字节比较）——两种情况都视为**内容未改动**；`tryLockfileRepair` 据此标记 `FixAction.noOp`，交付层（`hasDeliverableFixes`）不会把「无需修复」当成可交付修复，也不会因 side-effect 改动创建零修复 PR。
 
 ### 4.2 入口函数
 

@@ -177,6 +177,22 @@
 - **跨 major / 截断 / 子目录跳过的用户可见披露（待评估，P2 🎨 用户体验）** —— 现象（2026-10-17 生产实证，2026-10-18 用户报告补充）：2026-10-16 批次中多处「有告警 / 0 修复」实为**设计性跳过**——`allowMajorUpgrade` 在平台侧硬编码为 `false`（`apps/platform/server/services/scan-orchestrator.service.ts:265`）⇒ rss-impact-server 6/15、rss-resources-download 5/8、nuxt-latest-template 4/6、afdian-linker 4/6、auto-backup-database 5/5 等告警因「线内无修复」被跳过；另有单仓 20 条截断（`maxAlertsPerRepository: 20`，同文件 `:266`；cookie-cloudflare 截 9 / caomei-auth 截 3）与子目录 / 根直接依赖 manifest 跳过（momei 的 `quill`、tauri-template 的 `Cargo.lock` ×3）。这些在 UI 上与"环境性失败导致 0 修复"外观相同。
   - **待评估点**：① 是否提供仓库级「允许跨线升级」开关（走完整验证 + AI 研判兜底）或维持一律人工；② 若维持人工，UI 是否必须明示「N 条因跨 major 跳过，需人工处理」；③ 截断 / 子目录跳过是否同样需要在运行详情给可点开的清单（当前只有引擎 WARN 日志）；④ 运行摘要是否持久化 `alertsTruncated` 与按原因分组的 `alertsSkipped`，并在列表 / 详情以 `20/26（6 截断，4 跨大版本）` 形式展示（当前 `alertsCount` 只统计截断后的数量，用户无法从 UI 判断差异）。
   - **触发条件**：用户对"有可修告警却未修"再次要求解释时；或跨 major 告警占比升高时。
+  - **2026-10-18 补充**：`undici` 最高版本误判（`cookie-cloudflare` 报 `Converged` 但 5.x 仍脆弱）已由 P0 交付正确性批次修复（收敛按全部实例 + `alertsSkipped`）；本条剩余待评估点 = **①（仍开放：是否提供仓库级 `allowMajorUpgrade` 开关，或维持一律人工；平台当前仍硬编码 `false`）+ ②③④ 的 UI / PR 正文展示**——运行详情与 PR 正文仍需展示 `alertsTruncated`、按原因分组的 `alertsSkipped` 与「未关闭告警」计数，避免用户把「部分修复」读成「全部修复」。
+  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
+
+- **验证链与目标仓库 CI 命令对齐 / 默认分支 workflow 健康预检（待评估，P2 🛠️）** —— 现象（2026-10-18 生产复盘）：dependfix 的验证链是固定默认链（`install → lint → build → typecheck → test`），不读取目标仓库 `.github/workflows/*.yml`；`rss-image-download#103` 的 CI 不跑 `pnpm test`，dependfix 却因「No test files found」把 test 标成既有失败；`hexo-cloudflare-counter#114` 的 CI 不跑 typecheck，dependfix 却因 TS 6 的 `TS5101 baseUrl` 标红；`cookie-cloudflare#84` 的 CI 只跑 install/lint/build，而合并后的 `Publish Docker` 失败（阿里 ACR OCI attestation）完全不在验证面内。结果：PR 正文的红字与 GitHub CI 的绿/红不是同一口径，用户难以判断「PR 是否真的过 CI」。
+  - **待评估点**：① 是否按仓库读取 `test.yml` 的 `run:` 命令作为 `verifyCommands`（需处理 matrix / secrets / services / 多 job，建议先做「检测到差异时在 PR 正文告警」的保守版）；② 是否在建 PR 前查询默认分支最近 workflow 结论，若同 workflow 已红则在 PR 正文标注「非本 PR 引入」；③ 是否在 PR 创建后回读 check runs 并在失败时评论 / 关闭（成本与时序需评估）。
+  - **触发条件**：用户再次以「PR 正文红但 CI 绿 / PR 绿但合并后红」报告困惑时；或新增仓库级 `verifyCommands` 配置面时。
+  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
+
+- **基线红 / 安装失败的交付降级策略（draft PR / issue / 人工确认）（待评估，P2 🎨）** —— 现象（2026-10-18 生产复盘）：P0 交付正确性批次已实现「修复后安装仍既有失败 → 不建普通 PR」，但被跳过的告警仍只剩报告与日志，用户没有「可跟踪的待办载体」。`nest-template#2421` 的基线 lockfile 本身损坏，正确处置可能是开 issue / draft PR 说明「先修 lockfile」，而不是静默跳过。
+  - **待评估点**：① 是否支持 `DEPENDFIX_ON_BASELINE_RED=skip|issue|draft`（默认 skip，保持当前行为）；② issue / draft PR 的标题、正文、标签与去重键（复用 `findDependfixOpenPR` 还是新 issue 查询）；③ 与 `PRE_EXISTING_FAILURE` / `alertsSkipped` 记账的衔接，避免同一原因反复开单；④ 交付被跳过仍为 exit-code 中性（`PRE_EXISTING_FAILURE` 在跳过类白名单），CI 无法从退出码感知「要求交付但未交付」——是否补一个**非归因但可见**的交付跳过信号（summary 字段 / 平台 run 状态 / UI 标记）。
+  - **触发条件**：用户要求「0 修复也要有可跟踪记录」；或 baseline 红仓库占比持续升高时。
+  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
+
+- **执行容器内存下限与 OOM 归因（待评估，P1 🛠️）** —— 现象（2026-10-18 生产复盘）：多仓 `pnpm install` 以 `signal SIGKILL` / `exit code -1` 失败（tinyfish-mcp / rss-to-memos-sync / sharp-cloud-uploader / push-all-in-cloud / momei / rss-impact-server 等），结合 2026-10-17 内核 OOM 实证（41 次终止、时间戳与引擎日志同秒对齐）与「4 核 4 GB 主机」记录，内存是当前最大的单点环境瓶颈。**口径冲突**：治理设计 [executor-process-isolation.md §8.4](../design/governance/executor-process-isolation.md#_8-执行超时与运行级取消-2026-10-17) 建议容器 / 主机内存 **≥ 8 GB**（4 GB 已验证会 OOM），而用户可见的 [deployment.md](../guide/deployment.md) 仍写「至少 1 CPU / 1GB（推荐 2GB+）」，两份口径相差约 4 倍；按部署指南部署会直接落进 OOM 场景。当前缺少启动期 / 运行期的内存可观测断言。
+  - **待评估点**：① 平台启动时记录 cgroup / 宿主机内存与并发，低于建议值时 warn（不阻断）；② 运行记录落 `memory.max` / 峰值 RSS / OOM 计数，便于把 SIGKILL 归因到 OOM 而非超时；③ 是否把「并发 1 + 内存 ≥ 8 GB」写成部署门禁 / compose 默认；④ 与 pnpm store 持久化、独立 installer 容器的联动；⑤ **首要处置**：同步 `docs/guide/deployment.md` 的前置要求（区分控制面最低规格与执行面 ≥ 8 GB），或明确「1 GB 仅控制面、执行面另计」。
+  - **触发条件**：再次出现批量 SIGKILL / 0 修复；或部署环境调整内存规格时。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
 - **交付类同步调用未纳入运行级取消面（待评估，P2 🛠️）** —— 现象（2026-10-17 审计派生）：本轮把安装 / 锁文件修复 / 验证三类长命令迁到受管异步执行并纳入取消面，但 `github/pr-creator.ts` 的 `git push` / `git commit` 与 `app/helpers.ts` 的仓库状态查询仍是同步子进程调用 —— 弱网下 `git push` 会持续阻塞事件循环（平台执行超时定时器、队列锁续期与 HTTP 同族阻塞面的残留），且不受取消守卫覆盖（[executor-process-isolation.md §8.5](../design/governance/executor-process-isolation.md#_8-执行超时与运行级取消-2026-10-17) 已声明覆盖边界）。

@@ -272,6 +272,8 @@
 
 **阶段期间追加临时待办（不占阶段条目编号，2026-10-17）**：CI 双红收口（周回归 `security:audit-deps` 阻断 + `entrypoint.test.mjs`「角色归一化」用例竞态）——追加于 §M45 段落末尾（标记口径同上）。处置面：① 依赖链锁文件提升闭合 3 critical / 5 high（`@nuxt/devtools` 3.4.3 已移除 `simple-git` 依赖 + `shell-quote` 1.12.0 + `seroval` 1.6.9，**未新增** `audit.ignore` 豁免）；② 用例在取快照前等待 worker 角色标记（消除「只等 http 标记就断言 worker」的时序窗口，不改 `entrypoint.sh` 的进程编排与信号处置）。任务与闭环记录见 [todo.md](todo.md)，批次记录见 [archive/index.md §5](archive/index.md)。
 
+**阶段期间追加临时待办（不占阶段条目编号，2026-10-18 用户授权）**：交付正确性（零修复不交付 / 修复后安装既有失败不交付 / override 生效校验 / 收敛判定按全部实例）——追加于 §M45 段落末尾（标记口径同上）。处置面：① `app/delivery.ts` + `app/skipped-delivery.ts` 新增交付守卫；② `helpers.ts` / `index.ts` / `repo-fix.ts` / `verify-project.ts` / `fixers/pnpm/index.ts` / `fixers/dependency/**` 接入；③ 拆出 `fixers/dependency/{semver,lockfile-versions,override-verification}.ts` 控制文件行数；④ 设计口径落 [dependency-fixer-records.md §12.12](../design/modules/dependency-fixer-records.md) 与 [pnpm-lockfile-fixer.md §4.1](../design/modules/pnpm-lockfile-fixer.md)。剩余 P1/P2 候选（CI 命令对齐 / draft-issue 降级 / 内存下限 / UI 披露）已登记 [backlog.md](backlog.md)。任务与闭环记录见 [todo.md](todo.md)，批次记录见 [archive/index.md §4](archive/index.md)。**不计入本阶段原子条目数与类型平衡**。
+
 **commits 状态**：阶段启动规划 commit 落地后按 [规划规范 §4.4 第 5 条](../standards/planning.md#44-大批量归档批次操作规范) 用 `git rev-list HEAD ^origin/master --count` 双向核验并动态描述，不写死数字。
 
 > 详细任务与 8 要素见 [todo.md §M45](todo.md#m45-运行可靠性与交付链收口-2026-10-15-用户决策方案-a)；上一阶段（M44）见 [todo-archive.md §M44](todo-archive.md#m44-验证链治本--文档门禁可信度收口m441m446-全部已闭环--2026-10-15-归档)。
