@@ -4,6 +4,9 @@
 // `withTimeout` 只 race 不中断），僵尸 install 与后续仓库争抢内存 → 内核 OOM 级联。
 // 本文件锁定两条行为：① abort 后立即终止已登记子进程树且不再启动新命令；
 // ② 受管命令的结果形态（退出码 / 信号 / 超时 / errno / 输出限长）。
+import { readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it, beforeEach } from 'vitest'
 import {
     getAbortReason,
@@ -148,6 +151,87 @@ describe('runTrackedCommand', () => {
         expect(trackedChildProcessCount()).toBe(0)
         if (process.platform !== 'win32') {
             expect(result.signal).toBe('SIGKILL')
+        }
+    })
+
+    it('直接子进程退出但孙进程持有管道时，有界宽限期后落定', async () => {
+        // 场景：安装脚本派生一个继承 stdout/stderr 的孙进程后自身退出。Node 的 `close`
+        // 要等所有写端关闭才触发，孙进程不退出时旧实现会一直挂起（实测把 5 分钟超时拖到 12 分钟）。
+        const pidFile = join(tmpdir(), `dependfix-grandchild-${process.pid}-${Date.now()}.pid`)
+        const script = `
+            const { spawn } = require('node:child_process');
+            const fs = require('node:fs');
+            const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 10000)'], {
+                stdio: ['ignore', 'inherit', 'inherit'],
+            });
+            fs.writeFileSync(${JSON.stringify(pidFile)}, String(child.pid));
+            setTimeout(() => process.exit(0), 20);
+        `
+        const startedAt = Date.now()
+        try {
+            const result = await runTrackedCommand({
+                binary: process.execPath,
+                args: ['-e', script],
+                cwd: process.cwd(),
+                timeoutMs: 30_000,
+                // 直接 spawn node：脚本含换行 / 单引号，Windows 的 cmd 会把换行当命令分隔
+                shell: false,
+            })
+
+            expect(result.exitCode).toBe(0)
+            expect(result.timedOut).toBe(false)
+            // 宽限期 2s；无兜底时本用例会等到孙进程 10s 后退出（8s 阈值留出 CI 负载余量）
+            expect(Date.now() - startedAt).toBeLessThan(8_000)
+        } finally {
+            try {
+                const pid = Number.parseInt(readFileSync(pidFile, 'utf-8'), 10)
+                if (Number.isInteger(pid) && pid > 0) {
+                    process.kill(pid)
+                }
+            } catch {
+                // 孙进程已退出 / PID 文件未写入：无需清理
+            }
+            rmSync(pidFile, { force: true })
+        }
+    })
+
+    it('超时且孙进程逃逸持有管道时，超时 + 宽限期后落定', async () => {
+        // 真实事故路径：直接子进程 hang 住，孙进程以 detached 逃出进程组并继承 stdout/stderr。
+        // kill 进程组收掉直接子进程后，孙进程仍持有管道 → `close` 不来；必须有超时 + 宽限期兜底。
+        const pidFile = join(tmpdir(), `dependfix-escape-${process.pid}-${Date.now()}.pid`)
+        const script = `
+            const { spawn } = require('node:child_process');
+            const fs = require('node:fs');
+            const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], {
+                detached: true, stdio: ['ignore', 'inherit', 'inherit'],
+            });
+            fs.writeFileSync(${JSON.stringify(pidFile)}, String(child.pid));
+            setTimeout(() => {}, 30000);
+        `
+        const startedAt = Date.now()
+        try {
+            const result = await runTrackedCommand({
+                binary: process.execPath,
+                args: ['-e', script],
+                cwd: process.cwd(),
+                timeoutMs: 200,
+                shell: false,
+            })
+
+            expect(result.timedOut).toBe(true)
+            // 直接子进程已被 SIGKILL 收掉，不应标记 termination unconfirmed
+            expect(result.terminationUnconfirmed).toBeUndefined()
+            expect(Date.now() - startedAt).toBeLessThan(8_000)
+        } finally {
+            try {
+                const pid = Number.parseInt(readFileSync(pidFile, 'utf-8'), 10)
+                if (Number.isInteger(pid) && pid > 0) {
+                    process.kill(pid)
+                }
+            } catch {
+                // 孙进程已退出 / PID 文件未写入
+            }
+            rmSync(pidFile, { force: true })
         }
     })
 

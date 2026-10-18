@@ -311,6 +311,58 @@ describe('runVerification', () => {
         expect(cp.kill).toHaveBeenCalled()
     })
 
+    it('settles after exit when a descendant keeps the stdio pipes open', async () => {
+        // 只发 exit、不发 close：模拟测试 / 构建命令派生的孙进程仍持有管道。
+        // 旧实现只等 close，会一直挂到孙进程退出（可能远超单命令超时）。
+        mockSpawn.mockImplementation(() => {
+            const cp = new EventEmitter() as MockChildProcess
+            cp.stdout = new EventEmitter()
+            cp.stderr = new EventEmitter()
+            cp.kill = vi.fn()
+            setImmediate(() => {
+                cp.stdout.emit('data', Buffer.from('partial output'))
+                cp.emit('exit', 0)
+            })
+            return cp
+        })
+
+        const startedAt = Date.now()
+        const result = await runVerification({
+            workDir: '/tmp/test',
+            commands: ['cmd'],
+            networkAuditDisabled: true,
+        })
+
+        expect(result.success).toBe(true)
+        expect(result.commandResults[0].stdout).toContain('partial output')
+        // 宽限期 2s；无兜底时本用例会一直挂起直到测试超时
+        expect(Date.now() - startedAt).toBeLessThan(5_000)
+    })
+
+    it('marks terminationUnconfirmed when the child never exits after timeout', async () => {
+        // 直接子进程连 exit 都不发（模拟不可中断状态）：超时 + 宽限期后必须显式标记未确认退出，
+        // 不能把「放弃等待」当成「已终止」。
+        const cp = new EventEmitter() as MockChildProcess
+        cp.stdout = new EventEmitter()
+        cp.stderr = new EventEmitter()
+        cp.kill = vi.fn()
+        mockSpawn.mockImplementation(() => cp)
+
+        const startedAt = Date.now()
+        const result = await runVerification({
+            workDir: '/tmp/test',
+            commands: ['cmd'],
+            commandTimeoutMs: 30,
+            networkAuditDisabled: true,
+        })
+
+        expect(result.commandResults[0].timedOut).toBe(true)
+        expect(result.commandResults[0].terminationUnconfirmed).toBe(true)
+        expect(result.failure).toContain('timed out')
+        // 宽限期 2s；8s 阈值留出 CI 负载余量
+        expect(Date.now() - startedAt).toBeLessThan(8_000)
+    })
+
     it('does not run subsequent commands after timeout', async () => {
         mockSpawn
             .mockImplementationOnce(() => createMockCp({ exitCode: 0, delay: 10_000 }))

@@ -26,6 +26,19 @@ import { spawn, spawnSync } from 'node:child_process'
 /** 单流捕获上限（与 `execSync` 默认 `maxBuffer` 同量级）：超限后继续 drain 但不再累积。 */
 const MAX_STREAM_CAPTURE_BYTES = 1024 * 1024
 
+/**
+ * 子进程退出后等待 stdio 关闭的有界宽限期。
+ *
+ * `close` 事件只有在**所有**持有 stdout / stderr 写端的进程都退出后才会触发；安装脚本
+ * （node-gyp / prebuild-install / postinstall）可能派生出脱离直接子进程生命周期的孙进程，
+ * 即使进程组已被终止，只要孙进程仍持有管道，`close` 就永远不会到来。实测一次 5 分钟
+ * 安装超时因此拖到 12 分钟才落定，直接吃掉单仓 30 分钟执行预算。
+ *
+ * 超时只约束"等待退出"，不改变输出语义：宽限期内正常关闭仍走 `close`；超期则主动
+ * destroy 管道并用已捕获的输出落定。
+ */
+export const STREAM_CLOSE_GRACE_MS = 2_000
+
 /** 运行级 abort 原因（`undefined` = 未请求取消）。 */
 let abortReason: string | undefined
 
@@ -138,6 +151,11 @@ export interface TrackedCommandResult {
     signal: NodeJS.Signals | null
     /** 是否因超过 `timeoutMs` 被本模块终止 */
     timedOut: boolean
+    /**
+     * 超时兜底落定时是否未能确认直接子进程已退出。
+     * `true` 表示进程可能仍处于不可中断状态，资源占用未被证实释放（调用方应显式告警 / 保守处理）。
+     */
+    terminationUnconfirmed?: boolean
     /** 执行期间是否处于"已请求取消"状态（含被 abort 终止） */
     aborted: boolean
     /** spawn 级 errno（如 `ENOENT`——工具链缺失）；无时为 null */
@@ -217,11 +235,69 @@ export function runTrackedCommand(params: TrackedCommandParams): Promise<Tracked
 
         trackChildProcess(cp.pid)
 
+        let settled = false
+        let exited = false
+        let closeGraceTimer: NodeJS.Timeout | undefined
+
         const timer = setTimeout(() => {
             timedOut = true
             killProcessTree(cp.pid)
             cp.kill('SIGKILL')
+            // 直接子进程未触发 exit（kill 失败 / 卡在不可中断状态）时的最终兜底
+            settleAfterStreamGrace({ exitCode: null, signal: 'SIGKILL' })
         }, params.timeoutMs)
+
+        function finish(result: {
+            exitCode: number | null
+            signal: NodeJS.Signals | null
+            errno?: string | null
+        }): void {
+            if (settled) {
+                return
+            }
+            settled = true
+            clearTimeout(timer)
+            if (closeGraceTimer) {
+                clearTimeout(closeGraceTimer)
+            }
+            untrackChildProcess(cp.pid)
+            resolve({
+                started: true,
+                exitCode: result.exitCode,
+                signal: result.signal,
+                timedOut,
+                terminationUnconfirmed: timedOut && !exited ? true : undefined,
+                aborted: isAbortRequested(),
+                errno: result.errno ?? null,
+                stdout: stdoutChunks.join(''),
+                stderr: stderrChunks.join(''),
+                durationMs: Date.now() - startedAt,
+            })
+        }
+
+        /**
+         * 直接子进程已退出（或已被主动终止）后，等待 stdio 关闭的**有界**窗口。
+         * `close` 正常到来时由 `finish` 清掉本定时器；孙进程持有管道时由本定时器兜底。
+         */
+        function settleAfterStreamGrace(result: {
+            exitCode: number | null
+            signal: NodeJS.Signals | null
+            errno?: string | null
+        }): void {
+            if (settled) {
+                return
+            }
+            if (closeGraceTimer) {
+                clearTimeout(closeGraceTimer)
+            }
+            closeGraceTimer = setTimeout(() => {
+                // 直接子进程已退出，但进程组内可能仍有幸存孙进程：落定前再收一次
+                killProcessTree(cp.pid)
+                cp.stdout?.destroy?.()
+                cp.stderr?.destroy?.()
+                finish(result)
+            }, STREAM_CLOSE_GRACE_MS)
+        }
 
         const capture = (chunks: string[], bytes: number, data: Buffer): number => {
             const next = bytes + data.byteLength
@@ -238,28 +314,13 @@ export function runTrackedCommand(params: TrackedCommandParams): Promise<Tracked
             stderrBytes = capture(stderrChunks, stderrBytes, data)
         })
 
-        const finish = (result: {
-            exitCode: number | null
-            signal: NodeJS.Signals | null
-            errno?: string | null
-        }): void => {
-            clearTimeout(timer)
-            untrackChildProcess(cp.pid)
-            resolve({
-                started: true,
-                exitCode: result.exitCode,
-                signal: result.signal,
-                timedOut,
-                aborted: isAbortRequested(),
-                errno: result.errno ?? null,
-                stdout: stdoutChunks.join(''),
-                stderr: stderrChunks.join(''),
-                durationMs: Date.now() - startedAt,
-            })
-        }
-
         cp.on('error', (err: NodeJS.ErrnoException) => {
             finish({ exitCode: null, signal: null, errno: err.code ?? 'UNKNOWN' })
+        })
+        // `exit` 早于 `close`：先启动有界宽限期，由 `close` 正常关闭或超期强制落定
+        cp.on('exit', (code, signal) => {
+            exited = true
+            settleAfterStreamGrace({ exitCode: code, signal })
         })
         cp.on('close', (code, signal) => {
             finish({ exitCode: code, signal })

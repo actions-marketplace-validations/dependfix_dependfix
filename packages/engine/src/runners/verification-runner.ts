@@ -9,10 +9,14 @@ import {
     getAbortReason,
     isAbortRequested,
     killProcessTree,
+    STREAM_CLOSE_GRACE_MS,
     trackChildProcess,
     untrackChildProcess,
 } from './process-control'
+import { sanitizeOutput } from './output-sanitizer'
 import { discoverRegistryHosts } from './registry-discovery'
+
+export { sanitizeOutput } from './output-sanitizer'
 
 /**
  * 单条命令的执行结果
@@ -26,6 +30,8 @@ export interface CommandResult {
     durationMs: number
     /** 是否因超时被中止（默认 false） */
     timedOut?: boolean
+    /** 超时兜底落定时是否未能确认直接子进程已退出 */
+    terminationUnconfirmed?: boolean
     /** stdout 摘要（截断到 200 行，已脱敏） */
     stdout: string
     /** stderr 摘要（截断到 200 行，已脱敏） */
@@ -166,7 +172,9 @@ export function summarizeVerificationOutput(output: string): string {
  */
 export function formatVerificationError(cr: CommandResult): string {
     if (cr.timedOut) {
-        return `timed out after ${cr.durationMs}ms`
+        return cr.terminationUnconfirmed
+            ? `timed out after ${cr.durationMs}ms (termination unconfirmed)`
+            : `timed out after ${cr.durationMs}ms`
     }
     const detail = [cr.stdout, cr.stderr].filter(Boolean).join('\n--- stderr ---\n').trim()
     return detail
@@ -324,11 +332,59 @@ function execCommand(
         // 受管登记：运行级取消（`requestAbort`）时按进程树终止（防僵尸命令与新仓库争抢资源）
         trackChildProcess(cp.pid)
 
+        let settled = false
+        let exited = false
+        let closeGraceTimer: NodeJS.Timeout | undefined
+
         const timer = setTimeout(() => {
             timedOut = true
             killProcessTree(cp.pid)
             cp.kill('SIGKILL')
+            settleAfterStreamGrace(-1)
         }, timeoutMs)
+
+        function finish(exitCode: number, errorMessage?: string): void {
+            if (settled) {
+                return
+            }
+            settled = true
+            clearTimeout(timer)
+            if (closeGraceTimer) {
+                clearTimeout(closeGraceTimer)
+            }
+            untrackChildProcess(cp.pid)
+            const stdout = truncateLines(stdoutChunks.join(''), MAX_OUTPUT_LINES)
+            const stderr = errorMessage ?? truncateLines(stderrChunks.join(''), MAX_OUTPUT_LINES)
+            resolve({
+                command,
+                exitCode,
+                durationMs: Date.now() - startTime,
+                timedOut,
+                terminationUnconfirmed: timedOut && !exited ? true : undefined,
+                stdout: sanitizeOutput(stdout),
+                stderr: sanitizeOutput(stderr),
+            })
+        }
+
+        /**
+         * 子进程退出后等待 stdio 关闭的有界窗口：验证链同样可能派生持有管道的孙进程
+         * （测试 runner / 构建 watcher），只等 `close` 会让单命令超时无限延后。
+         */
+        function settleAfterStreamGrace(exitCode: number): void {
+            if (settled) {
+                return
+            }
+            if (closeGraceTimer) {
+                clearTimeout(closeGraceTimer)
+            }
+            closeGraceTimer = setTimeout(() => {
+                // 直接子进程已退出，但进程组内可能仍有幸存孙进程：落定前再收一次
+                killProcessTree(cp.pid)
+                cp.stdout?.destroy?.()
+                cp.stderr?.destroy?.()
+                finish(exitCode)
+            }, STREAM_CLOSE_GRACE_MS)
+        }
 
         cp.stdout.on('data', (data: Buffer) => {
             stdoutChunks.push(data.toString('utf-8'))
@@ -339,30 +395,16 @@ function execCommand(
         })
 
         cp.on('error', (err) => {
-            clearTimeout(timer)
-            untrackChildProcess(cp.pid)
-            resolve({
-                command,
-                exitCode: -1,
-                durationMs: Date.now() - startTime,
-                stdout: '',
-                stderr: sanitizeOutput(err.message),
-            })
+            finish(-1, err.message)
+        })
+
+        cp.on('exit', (code) => {
+            exited = true
+            settleAfterStreamGrace(code ?? -1)
         })
 
         cp.on('close', (code) => {
-            clearTimeout(timer)
-            untrackChildProcess(cp.pid)
-            const stdout = truncateLines(stdoutChunks.join(''), MAX_OUTPUT_LINES)
-            const stderr = truncateLines(stderrChunks.join(''), MAX_OUTPUT_LINES)
-            resolve({
-                command,
-                exitCode: code ?? -1,
-                durationMs: Date.now() - startTime,
-                timedOut,
-                stdout: sanitizeOutput(stdout),
-                stderr: sanitizeOutput(stderr),
-            })
+            finish(code ?? -1)
         })
     })
 }
@@ -374,34 +416,4 @@ function truncateLines(text: string, maxLines: number): string {
         return text
     }
     return `${lines.slice(0, maxLines).join('\n')}\n... (truncated, ${lines.length - maxLines} more lines)`
-}
-
-/**
- * 脱敏处理：移除命令输出中可能包含的敏感信息。
- *
- * 过滤规则：
- * - 包含 `token=` / `secret=` / `password=` 的行
- * - `npm_config_` / `GITHUB_TOKEN` / `NPM_TOKEN` 等环境变量暴露
- * - URL 中的 user:password@ 模式
- */
-const SECRET_PATTERNS: [RegExp, string][] = [
-    // 环境变量赋值（大写下划线变量 = 敏感值）
-    [/^(GITHUB_TOKEN|NPM_TOKEN|NODE_AUTH_TOKEN|DOCKER_PASSWORD)=.+/gim, '$1=***'],
-    // Token=xxx / secret=xxx 模式
-    [/\b(token|secret|password|api[_-]?key)\s*[=:]\s*\S+/gi, '$1=***'],
-    // URL 中的认证信息 user:pass@host
-    [/\/\/[^@\n]+@/g, '//***@'],
-    // npm_config 环境变量（可能包含 registry token）
-    [/npm_config_[a-z_]+=\S+/g, 'npm_config_***=***'],
-]
-
-/**
- * 对外暴露以支持单独测试
- */
-export function sanitizeOutput(output: string): string {
-    let result = output
-    for (const [pattern, replacement] of SECRET_PATTERNS) {
-        result = result.replace(pattern, replacement)
-    }
-    return result
 }
