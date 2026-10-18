@@ -471,6 +471,18 @@ describe('overrideTransitiveDependency', () => {
         mockRunTrackedCommand.mockResolvedValue(okInstallOutcome())
     })
 
+    /** 模拟 install 成功并把 lockfile 写成目标版本（否则生效校验会正确判失败）。 */
+    function mockInstallWritingLockfile(lockfilePath: string, versions: Record<string, string>): void {
+        mockRunTrackedCommand.mockImplementation(async () => {
+            const lines = ['lockfileVersion: \'9.0\'', '']
+            for (const [name, version] of Object.entries(versions)) {
+                lines.push(`  ${name}@${version}:`, '    resolution: {integrity: sha512-xxx}', '')
+            }
+            writeFileSync(lockfilePath, lines.join('\n'))
+            return okInstallOutcome()
+        })
+    }
+
     it('adds package to pnpm.overrides and runs pnpm install', async () => {
         const project = createTempProject({ lodash: '^4.17.20' })
         // Write a minimal lockfile so readLockfileVersion can find the current version
@@ -481,6 +493,7 @@ describe('overrideTransitiveDependency', () => {
             '  resolution: {integrity: sha512-xxx}',
             '',
         ].join('\n'))
+        mockInstallWritingLockfile(project.lockfilePath, { 'fast-uri': '5.0.1' })
 
         const result = await overrideTransitiveDependency({
             packageName: 'fast-uri',
@@ -510,6 +523,7 @@ describe('overrideTransitiveDependency', () => {
             '    resolution: {integrity: sha512-xxx}',
             '',
         ].join('\n'))
+        mockInstallWritingLockfile(project.lockfilePath, { 'fast-uri': '3.1.6' })
 
         const result = await overrideTransitiveDependency({
             packageName: 'fast-uri',
@@ -661,6 +675,7 @@ describe('overrideTransitiveDependency', () => {
             '  resolution: {integrity: sha512-xxx}',
             '',
         ].join('\n'))
+        mockInstallWritingLockfile(project.lockfilePath, { 'fast-uri': '5.0.1' })
 
         await overrideTransitiveDependency({
             packageName: 'fast-uri',
@@ -687,6 +702,7 @@ describe('overrideTransitiveDependency', () => {
             '  resolution: {integrity: sha512-xxx}',
             '',
         ].join('\n'))
+        mockInstallWritingLockfile(project.lockfilePath, { 'fast-uri': '5.0.1' })
 
         const result = await overrideTransitiveDependency({
             packageName: 'fast-uri',
@@ -753,6 +769,7 @@ describe('overrideTransitiveDependency', () => {
             '  resolution: {integrity: sha512-xxx}',
             '',
         ].join('\n'))
+        mockInstallWritingLockfile(project.lockfilePath, { 'fast-uri': '5.0.1' })
 
         await overrideTransitiveDependency({
             packageName: 'fast-uri',
@@ -803,6 +820,40 @@ describe('overrideTransitiveDependency', () => {
         cleanup(project)
     })
 
+    it('detects workspace override false success when lockfile keeps a lower instance', async () => {
+        const project = createTempProject({ lodash: '^4.17.20' })
+        const workspaceYamlPath = join(project.dir, 'pnpm-workspace.yaml')
+        writeFileSync(workspaceYamlPath, [
+            'packages:',
+            '  - \'.\'',
+            'overrides:',
+            '  fast-uri: 5.0.1',
+            '',
+        ].join('\n'))
+        writeFileSync(project.lockfilePath, [
+            'lockfileVersion: \'9.0\'',
+            '',
+            '  fast-uri@5.0.0:',
+            '    resolution: {integrity: sha512-xxx}',
+            '',
+        ].join('\n'))
+
+        const result = await overrideTransitiveDependency({
+            packageName: 'fast-uri',
+            targetVersion: '5.0.1',
+            workDir: project.dir,
+        })
+
+        expect(result.success).toBe(false)
+        expect(result.error).toContain('override did not take effect')
+        expect(result.error).toContain('5.0.0')
+        // 原 override 保留，lockfile 回滚
+        expect(readFileSync(workspaceYamlPath, 'utf-8')).toContain('fast-uri: 5.0.1')
+        expect(readFileSync(project.lockfilePath, 'utf-8')).toContain('fast-uri@5.0.0')
+
+        cleanup(project)
+    })
+
     it('succeeds with warning when lockfile actually updated', async () => {
         // 仅覆盖 pnpm 版本探测（v11 不读 package.json overrides）；安装由受管替身承担
         mockExecSync.mockImplementation((cmd: string) => (String(cmd).includes('--version') ? '11.5.0' : undefined))
@@ -829,8 +880,8 @@ describe('overrideTransitiveDependency', () => {
         cleanup(project)
     })
 
-    it('no verification when pnpm major is unknown (mock install does not update lockfile)', async () => {
-        // mockExecSync 默认返回 undefined → detectPnpmMajor 无法解析 → 不触发校验
+    it('verifies lockfile effect even when pnpm major is unknown', async () => {
+        // 生效校验不再依赖 pnpm 版本探测：install 成功但 lockfile 未更新 → 仍判假成功
         const project = createTempProject({ lodash: '^4.17.20' })
         writeFileSync(project.lockfilePath, [
             'lockfileVersion: \'9.0\'',
@@ -846,9 +897,8 @@ describe('overrideTransitiveDependency', () => {
             workDir: project.dir,
         })
 
-        // 未知 pnpm 版本 → 不校验（保持旧行为），成功且无 warning
-        expect(result.success).toBe(true)
-        expect(result.warning).toBeUndefined()
+        expect(result.success).toBe(false)
+        expect(result.error).toContain('override did not take effect')
 
         cleanup(project)
     })

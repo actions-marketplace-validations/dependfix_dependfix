@@ -19,8 +19,13 @@ import {
 
 export type { VersionedOverridesApplyResult, VersionedOverridesPlan } from './overrides-io'
 import { upsertOverride } from './override-key'
+import { parseMajorVersion } from './semver'
+import { readLockfileVersion, readLockfileVersions } from './lockfile-versions'
+import { remainingVersionsBelowTarget, verifyVersionedOverridesApplied } from './override-verification'
 
 export { normalizeOverrideKey, normalizeOverrideSelector, upsertOverride } from './override-key'
+export { compareSemver, parseMajorVersion } from './semver'
+export { readLockfileVersion, readLockfileVersions } from './lockfile-versions'
 export type { OverrideUpsert } from './override-key'
 
 // ---------------------------------------------------------------------------
@@ -283,7 +288,6 @@ export async function overrideTransitiveDependency(
     let oldOverride: string | undefined
     // 无 workspace.yaml 且 pnpm v10+ → package.json overrides 可能被忽略（假成功风险）
     let pkgJsonOverrideWarning: string | undefined
-    let verifyOverrideTookEffect = false
 
     if (usesWorkspaceYaml) {
         oldOverride = writeWorkspaceOverride(workspaceYamlPath, packageName, toVersion)
@@ -291,7 +295,6 @@ export async function overrideTransitiveDependency(
         const pnpmMajor = detectPnpmMajor(workDir)
         if (pnpmMajor !== null && pnpmMajor >= 10) {
             pkgJsonOverrideWarning = `pnpm v${pnpmMajor} may ignore package.json#pnpm.overrides without pnpm-workspace.yaml — if the lockfile does not update to >= ${targetVersion}, create pnpm-workspace.yaml with the override instead`
-            verifyOverrideTookEffect = true
         }
         const overrides = ensurePnpmOverrides(pkg)
         oldOverride = overrides[packageName]
@@ -329,31 +332,33 @@ export async function overrideTransitiveDependency(
         }
     }
 
-    // ---- 7.5 生效校验：仅"无 workspace.yaml + pnpm v10+"风险场景——
-    // install 后 lockfile 版本必须达到目标，否则判定假成功：回滚 + 报错 ----
-    if (verifyOverrideTookEffect) {
-        const afterVersion = readLockfileVersion(lockfilePath, packageName)
-        if (afterVersion !== null && compareSemver(afterVersion, targetVersion) < 0) {
-            rollbackOverrideWrite({
-                usesWorkspaceYaml,
-                workspaceYamlPath,
-                packageName,
-                oldOverride,
-                pkg,
-                pkgPath,
-                pkgBackup,
-                lockfilePath,
-                lockBackup,
-                workspaceBackup,
-            })
-            return {
-                packageName,
-                fromVersion,
-                toVersion,
-                isMajor,
-                success: false,
-                error: `override did not take effect: lockfile still at ${afterVersion} (< ${targetVersion}). pnpm v10+ may ignore package.json#pnpm.overrides without pnpm-workspace.yaml — changes rolled back; create pnpm-workspace.yaml with the override and retry.`,
-            }
+    // ---- 7.5 生效校验：所有 override 写入路径（含 pnpm-workspace.yaml）——
+    // install 后回读**全部**锁定实例；只要仍有实例低于目标，就判定 override 未生效：
+    // 回滚 + 报错。不能只看最高版本：通用 override 已存在、但被路径级规则压过时，
+    // pnpm install 可能认为 lockfile 已最新而不重解析（2026-10-18 cmyr-skills-agents
+    // undici 7.28.0 实证：日志报升级成功、实际无 diff、commit 被跳过）。
+    const remaining = remainingVersionsBelowTarget(lockfilePath, packageName, targetVersion)
+    if (remaining.length > 0) {
+        rollbackOverrideWrite({
+            usesWorkspaceYaml,
+            workspaceYamlPath,
+            packageName,
+            oldOverride,
+            pkg,
+            pkgPath,
+            pkgBackup,
+            lockfilePath,
+            lockBackup,
+            workspaceBackup,
+        })
+        return {
+            packageName,
+            fromVersion,
+            toVersion,
+            isMajor,
+            success: false,
+            error: `override did not take effect: locked instance(s) ${remaining.join(', ')} remain below ${targetVersion}`
+                + `${pkgJsonOverrideWarning ? ` (${pkgJsonOverrideWarning})` : ''}; changes rolled back`,
         }
     }
 
@@ -541,6 +546,23 @@ export async function applyVersionedOverridesBatch(
         }
     }
 
+    // ---- 5. 生效校验：回读 lockfile，确认每条 override 覆盖的实例都达到目标 ----
+    // 与单包 override 同族：pnpm install 成功 ≠ override 真正生效（已存在 / 被更具体规则压过时
+    // lockfile 可能保持旧版本）。未满足则整体回滚，不能把「无改动」当成功。
+    const verifyFailure = verifyVersionedOverridesApplied(lockfilePath, plans)
+    if (verifyFailure) {
+        rollback(pkgPath, pkgBackup, lockfilePath, lockBackup)
+        if (usesWorkspaceYaml && workspaceBackup) {
+            rollback(workspaceYamlPath, workspaceBackup, lockfilePath, null)
+        }
+        cleanupBackups({ pkgBackup, lockBackup, workspaceBackup })
+        return {
+            success: false,
+            error: `versioned override did not take effect: ${verifyFailure}; changes rolled back`,
+            failurePhase: 'verify',
+        }
+    }
+
     // 成功 — 清理备份文件
     cleanupBackups({ pkgBackup, lockBackup, workspaceBackup })
 
@@ -641,52 +663,6 @@ export function isNonSemverDeclaration(version: string): boolean {
 }
 
 /**
- * 从版本声明中提取主版本号（major）。
- * 去除前缀后匹配第一个 semver 段。
- *
- * @example
- * parseMajorVersion('^4.17.20')   // 4
- * parseMajorVersion('~2.0.0')     // 2
- * parseMajorVersion('1.2.3')      // 1
- * parseMajorVersion('*')          // -1
- */
-export function parseMajorVersion(version: string): number {
-    const cleaned = version.replace(/^\s*[\^~>=<]*\s*/, '')
-    const match = /^(\d+)\.\d+\.\d+/.exec(cleaned)
-    return match ? Number.parseInt(match[1], 10) : -1
-}
-
-/**
- * 比较两个语义化版本（`x.y.z`，可选 pre-release 后缀）。
- *
- * - `a > b` 返回正数，`a < b` 返回负数，相等返回 0
- * - 非 semver 字符串按 0 处理（保守：不参与大小比较）
- * - 仅比较主/次/补丁段，pre-release 后缀忽略（如 `1.0.0-beta` 视为 `1.0.0`）
- *
- * @example
- * compareSemver('4.18.0', '4.17.21')  // 1
- * compareSemver('5.4.20', '6.4.3')    // -1
- * compareSemver('1.2.3', '1.2.3')     // 0
- */
-export function compareSemver(a: string, b: string): number {
-    const parse = (v: string): number[] => {
-        const match = /^v?(\d+)\.(\d+)\.(\d+)/.exec(v.trim())
-        return match ? [Number.parseInt(match[1], 10), Number.parseInt(match[2], 10), Number.parseInt(match[3], 10)] : [0, 0, 0]
-    }
-
-    const [aMajor, aMinor, aPatch] = parse(a)
-    const [bMajor, bMinor, bPatch] = parse(b)
-
-    if (aMajor !== bMajor) {
-        return aMajor - bMajor
-    }
-    if (aMinor !== bMinor) {
-        return aMinor - bMinor
-    }
-    return aPatch - bPatch
-}
-
-/**
  * 在 `package.json` 的 `dependencies` / `devDependencies` / `optionalDependencies` 中按顺序查找包。
  */
 export function findDependencyVersion(
@@ -718,70 +694,6 @@ export function ensurePnpmOverrides(pkg: PackageJson): Record<string, string> {
 }
 
 /**
- * 从 `pnpm-lock.yaml` 中读取指定包的**所有**锁定版本实例。
- *
- * 支持两种 lockfile 键格式：
- * 1. v9 早期格式（lockfileVersion 9.0 起）：`/package-name/version:`
- * 2. pnpm v10+/v11 snapshot 格式：`package-name@version:` 或
- *    `package-name@version(peer@x)(peer2@y):`（peer 后缀条目）
- *
- * 同一包在 lockfile 中可能共存多个版本（如 vite@5.4.14 与 vite@8.2.0），
- * 多版本共存是「版本化 overrides（pkg@version: ^target）」修复策略的前提。
- *
- * @returns 去重后的版本列表（如 `['5.4.14', '8.2.0']`），未找到返回 `[]`
- */
-export function readLockfileVersions(lockfilePath: string, packageName: string): string[] {
-    if (!existsSync(lockfilePath)) {
-        return []
-    }
-
-    try {
-        const content = readFileSync(lockfilePath, 'utf-8')
-        const escapedName = escapeRegExp(packageName)
-        const versionCapture = '(\\d+(?:\\.\\d+(?:\\.\\d+)?(?:-[a-zA-Z0-9.]+)?))'
-        const versions = new Set<string>()
-
-        // 1. v9 格式：/packageName/version:
-        // 包名不转义：fast-uri → /fast-uri/5.0.0:；@babel/traverse → /@babel/traverse/7.26.0:
-        // 真实 pnpm v9 lockfile 的 packages 键带两空格缩进（fixtures 曾用列 0 合成数据）
-        const v9Pattern = new RegExp(`^\\s*/${escapedName}/${versionCapture}:`, 'gm')
-        for (const match of content.matchAll(v9Pattern)) {
-            versions.add(match[1])
-        }
-
-        // 2. pnpm v10+/v11 snapshot 格式：
-        //    - 普通包：pkg@version: 或 pkg@version(peer...):
-        //    - scoped 包：'@types/node@26.1.2':（键带单引号，右引号在冒号前）
-        //    版本后边界允许 `:` / `(`（peer 后缀）/ `'`（引号键右引号）
-        const snapshotPattern = new RegExp(`^\\s*'?${escapedName}@${versionCapture}(?:[(:'])`, 'gm')
-        for (const match of content.matchAll(snapshotPattern)) {
-            versions.add(match[1])
-        }
-
-        return [...versions].sort(compareSemver)
-    } catch {
-        return []
-    }
-}
-
-/**
- * 从 `pnpm-lock.yaml` 中读取指定包的当前锁定版本。
- *
- * 多版本并存时（如同一包同时被根与子目录 manifest 引用），取**最高版本**
- * （保守：不降级保护依赖此语义，如根 vite@8.2.0 与 docs vite@5.4.14 并存）。
- *
- * @returns 锁定版本字符串（如 `'5.0.0'`），未找到返回 `null`
- */
-export function readLockfileVersion(lockfilePath: string, packageName: string): string | null {
-    const versions = readLockfileVersions(lockfilePath, packageName)
-    if (versions.length === 0) {
-        return null
-    }
-    // 多版本并存 → 取最高（不降级保护语义）
-    return versions[versions.length - 1]
-}
-
-/**
  * 读取当前已生效的 pnpm overrides 映射（与写入位置保持一致）：
  * - 存在 `pnpm-workspace.yaml` → 读取其中 `overrides` 字段（pnpm v10+ 推荐位置）
  * - 否则 → 读取 `package.json` 的 `pnpm.overrides`
@@ -809,13 +721,6 @@ export function readExistingOverrides(workDir: string): Record<string, string> {
     } catch {
         return {}
     }
-}
-
-/**
- * 转义正则表达式特殊字符。
- */
-function escapeRegExp(str: string): string {
-    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 // ---------------------------------------------------------------------------

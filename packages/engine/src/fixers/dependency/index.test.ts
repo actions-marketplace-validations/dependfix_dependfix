@@ -740,6 +740,31 @@ describe('applyVersionedOverrides', () => {
         expect(readFileSync(lockfilePath, 'utf-8')).toBe(lockContent)
     })
 
+    it('fails and rolls back when the lockfile still has a lower instance', async () => {
+        const lockContent = [
+            'lockfileVersion: \'9.0\'',
+            '',
+            '  vite@5.4.14:',
+            '    resolution: {integrity: sha512-xxx}',
+            '',
+        ].join('\n')
+        writeFileSync(lockfilePath, lockContent)
+
+        const result = await applyVersionedOverrides({
+            packageName: 'vite',
+            versionedOverrides: { 'vite@5': '^5.4.21' },
+            workDir: dir,
+        })
+
+        expect(result.success).toBe(false)
+        expect(result.error).toContain('versioned override did not take effect')
+        expect(result.error).toContain('5.4.14')
+        // 整体回滚：package.json 无残留 override，lockfile 恢复
+        const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'))
+        expect((pkg.pnpm as Record<string, unknown> | undefined)?.overrides).toBeUndefined()
+        expect(readFileSync(lockfilePath, 'utf-8')).toBe(lockContent)
+    })
+
     it('returns failure when no overrides provided', async () => {
         const result = await applyVersionedOverrides({
             packageName: 'vite',

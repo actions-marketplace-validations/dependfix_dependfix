@@ -23,8 +23,11 @@ export interface VersionedOverridesApplyResult {
     success: boolean
     warning?: string
     error?: string
-    /** 失败阶段：`precheck`（未写盘）/ `install`（已写盘且安装失败）——供单包包装保持既有 `toVersion` 口径 */
-    failurePhase?: 'precheck' | 'install'
+    /**
+     * 失败阶段：`precheck`（未写盘）/ `install`（已写盘且安装失败）/
+     * `verify`（安装成功但回读 lockfile 仍有低于目标的实例，已回滚）——供单包包装保持既有 `toVersion` 口径。
+     */
+    failurePhase?: 'precheck' | 'install' | 'verify'
     /** 安装失败是否由进程级环境问题导致（信号终止 / 超时）；调用方据此停止逐包重试 */
     environmental?: boolean
 }
