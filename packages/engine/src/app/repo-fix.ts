@@ -40,11 +40,12 @@ import {
     type AppContext,
 } from './helpers'
 import { verifyProject } from './verify-project'
+import { applyMemberUpgrades } from './repo-fix-member'
 import { tryBatchVersionedOverrides, type VersionedOverrideBatchItem } from './repo-fix-batch'
 import { fetchDefaultBranch, fetchRepoAlerts, truncatedWarning } from './repo-alerts'
 import { alertsFetchTokenHint } from './token-hints'
 import { recordUpgradeFailure } from './upgrade-failure'
-import { ensureVerificationBaseline, finalizeRepoFix } from './repo-fix-finalize'
+import { ensureVerificationBaseline, finalizeRepoFix, recordInstallBaselineFailure } from './repo-fix-finalize'
 
 // ---------------------------------------------------------------------------
 // 单仓库修复管线（fix / fix-and-pr 模式共用）
@@ -84,11 +85,12 @@ export interface RepoFixCtx extends AppContext {
      *   的运行级语义一致；多仓库场景的粒度局限同 `verification-gate.ts` 所述（按 run 级归因，无法逐仓库区分）
      * - 未提供（如测试直接构造 ctx）⇒ 不采样，退回原始「全量归因」口径
      */
-    verificationBaseline?: { value?: CommandResult[] }
+    /** `repo` = 采样时的仓库（运行级首采只对采样仓库自身可信，多仓复用不用于快速失败判定） */
+    verificationBaseline?: { repo?: string, value?: CommandResult[] }
 }
 
 /** lockfile 依赖告警分区产物（供 lockfile / 成员 / 常规升级步骤共用）。 */
-interface LockfileAlertSets {
+export interface LockfileAlertSets {
     rootManifestAlerts: NormalizedSecurityAlert[]
     memberManifestAlerts: MemberManifestAlert[]
     lockfilePath: string
@@ -122,11 +124,24 @@ export async function processRepoFix(
         // 零告警仓库无任何写操作，其验证失败在 pristine 工作区下必然也是既有失败（判定见 ensureVerificationBaseline）
         const alertInputs = await fetchRepoFixInputs(ctx, client, repo, progress)
         // 修复前按需采样验证基线（首个有工作的仓库处采样，在任何改动之前；用于区分「本次引入」与「既有」失败）
-        const { exemptAttribution } = await ensureVerificationBaseline(ctx, repo, { hasWork: alertInputs.length > 0 })
+        const { exemptAttribution, baseline } = await ensureVerificationBaseline(ctx, repo, { hasWork: alertInputs.length > 0 })
+        // pristine 安装失败 ⇒ overrides 安装必然同因失败；逐包重试只会耗尽预算，写盘前快速失败
+        const installBaselineFailure = recordInstallBaselineFailure(ctx, repo, baseline)
         const sets = await prepareRepoFixSets(ctx, repo, alertInputs, progress)
-        const { singleVersionAlerts } = await applyLockfileFixes(ctx, client, repo, sets, progress)
-        await applyMemberUpgrades(ctx, repo, sets, progress)
-        await applyGroupUpgrades(ctx, repo, sets, singleVersionAlerts, progress)
+        if (installBaselineFailure) {
+            ctx.logger.warn(`[multi-version] ${repo}: dependency upgrade chain skipped (pristine install baseline failed)`)
+        } else {
+            const { singleVersionAlerts, stopReason } = await applyLockfileFixes(ctx, client, repo, sets, progress)
+            if (stopReason) {
+                ctx.logger.warn(
+                    `[multi-version] ${repo}: dependency install chain stopped (${stopReason}) `
+                    + '— skipping member/group upgrades',
+                )
+            } else {
+                await applyMemberUpgrades(ctx, repo, sets, progress)
+                await applyGroupUpgrades(ctx, repo, sets, singleVersionAlerts, progress)
+            }
+        }
         await finalizeRepoFix(ctx, repo, progress, { exemptAttribution })
     } catch (error: unknown) {
         const message = toErrorMessage(error)
@@ -237,8 +252,9 @@ async function applyLockfileFixes(
     repo: string,
     sets: LockfileAlertSets,
     progress: RepoFixProgress,
-): Promise<{ singleVersionAlerts: NormalizedSecurityAlert[] }> {
+): Promise<{ singleVersionAlerts: NormalizedSecurityAlert[], stopReason?: 'environmental' | 'aborted' }> {
     const { rootManifestAlerts, lockfilePath } = sets
+    let stopReason: 'environmental' | 'aborted' | undefined
 
     const lockfileManifestAlerts = rootManifestAlerts.filter(
         (a) => a.source !== 'code-scanning' && a.manifestPath.trim().replace(/\\/g, '/') === 'pnpm-lock.yaml'
@@ -336,14 +352,23 @@ async function applyLockfileFixes(
         batchItems.push({ alert, versionedOverrides, targets })
     }
 
-    // 合批快路径（≥2 个包）：把 K 次完整安装压到 1 次；失败则回滚并由下方逐包路径重试
-    const batched = batchItems.length > 1
-        && await tryBatchVersionedOverrides(ctx, repo, progress, batchItems)
+    // 合批快路径（≥2 个包）：把 K 次完整安装压到 1 次；失败则回滚并由下方逐包路径重试。
+    // 环境性失败（信号 / 超时）例外：逐包重试只会重复同一失败并耗尽单仓预算，直接跳过。
+    const batchOutcome = batchItems.length > 1
+        ? await tryBatchVersionedOverrides(ctx, repo, progress, batchItems)
+        : { applied: false }
+    const itemsToRetry = batchOutcome.applied || batchOutcome.skipSequential ? [] : batchItems
 
-    for (const { alert, versionedOverrides } of batched ? [] : batchItems) {
+    if (batchOutcome.skipSequential) {
+        stopReason = isAbortRequested() ? 'aborted' : 'environmental'
+        return { singleVersionAlerts, stopReason }
+    }
+
+    for (const { alert, versionedOverrides } of itemsToRetry) {
         // 运行级取消（合批失败后的回退路径可能在中止后才走到）：不再逐个试装——
         // 取消态下每条都会以同一原因失败，产出 K 条「失败动作」只污染报告且无归因价值
         if (isAbortRequested()) {
+            stopReason = 'aborted'
             break
         }
         const snapshot = snapshotTrackedFiles(ctx.workDir)
@@ -369,6 +394,24 @@ async function applyLockfileFixes(
             durationMs: 0,
         }
         if (!result.success) {
+            if (isAbortRequested()) {
+                stopReason = 'aborted'
+                break
+            }
+            if (result.environmental) {
+                // 环境级失败（OOM / 超时）：不产出失败动作 / 不计入 alertsFailed（与合批路径同口径），
+                // 记非归因审计条目后停止本仓库剩余安装尝试（含成员 / 分组升级）。
+                ctx.allErrors.push({
+                    repository: alert.repository,
+                    target: alert.packageName,
+                    stage: 'fix',
+                    category: 'ENVIRONMENT_ERROR',
+                    message: `install failed (environmental): ${result.error ?? 'no error detail'}`,
+                })
+                ctx.logger.warn(`[multi-version] ${alert.packageName}: environmental install failure — stopping further dependency install attempts`)
+                stopReason = 'environmental'
+                break
+            }
             ctx.allActions.push(action)
             recordUpgradeFailure(ctx, progress, 'multi-version', alert.packageName, result.error)
             continue
@@ -387,6 +430,10 @@ async function applyLockfileFixes(
             progress.failed++
             ctx.logger.warn(`[multi-version] ${alert.packageName}: verification failed — rolled back versioned overrides`)
         }
+    }
+
+    if (stopReason) {
+        return { singleVersionAlerts, stopReason }
     }
 
     const autoMajorByPackage = new Map<string, NormalizedSecurityAlert>()
@@ -553,144 +600,6 @@ async function applyLockfileFixes(
     return { singleVersionAlerts }
 }
 
-/**
- * 步骤 3：成员级升级（workspace 成员 manifest 直接依赖；member 桶准入已保证：
- * 成员白名单 + 直接声明 + fixable + 单版本 + 非跨线）。按「包名 + manifestDir」
- * 聚合取最高推荐为代表；逐项快照 → upgradeDependency({ manifestDir }) → 实例
- * 复核（残留脆弱实例回滚）→ quickVerify（根 lint）→ 失败回滚。不误标 fixed/converged。
- */
-async function applyMemberUpgrades(
-    ctx: RepoFixCtx,
-    repo: string,
-    sets: LockfileAlertSets,
-    progress: RepoFixProgress,
-): Promise<void> {
-    const { memberManifestAlerts, lockfilePath } = sets
-    const memberByPackageAndDir = new Map<string, MemberManifestAlert>()
-    for (const item of memberManifestAlerts) {
-        const key = `${item.alert.packageName}@${item.manifestDir}`
-        const existing = memberByPackageAndDir.get(key)
-        const existingTarget = existing?.alert.recommendedVersion
-        const alertTarget = item.alert.recommendedVersion
-        if (!existing || (existingTarget && alertTarget && compareSemver(alertTarget, existingTarget) > 0)) {
-            memberByPackageAndDir.set(key, item)
-        }
-    }
-    if (memberManifestAlerts.length > memberByPackageAndDir.size) {
-        ctx.logger.info(
-            `[member-upgrade] ${memberManifestAlerts.length - memberByPackageAndDir.size} member alert(s) merged into package+dir representatives (highest target per package per member)`,
-        )
-    }
-    for (const item of [...memberByPackageAndDir.values()]) {
-        const { alert, manifestDir } = item
-        const memberManifestPath = `${manifestDir}/package.json`
-        if (ctx.config.dryRun) {
-            ctx.logger.info(`[dry-run] Would upgrade ${alert.packageName} in ${memberManifestPath} → ${alert.recommendedVersion}`)
-            ctx.allActions.push({
-                type: 'dependency-upgrade',
-                repository: alert.repository,
-                target: alert.packageName,
-                fromVersion: '',
-                toVersion: alert.recommendedVersion,
-                isMajor: false,
-                strategy: 'member-upgrade',
-                success: true,
-                durationMs: 0,
-                filePath: memberManifestPath,
-            })
-            progress.fixed++
-            continue
-        }
-        const memberSnapshot = snapshotTrackedFiles(ctx.workDir, [memberManifestPath])
-        ctx.logger.warn(
-            `[member-upgrade] ${alert.packageName}: upgrading member declaration in ${memberManifestPath} → ${alert.recommendedVersion}`,
-        )
-        const memberResult = await upgradeDependency({
-            packageName: alert.packageName,
-            targetVersion: alert.recommendedVersion!,
-            workDir: ctx.workDir,
-            manifestDir,
-        })
-        if (!memberResult.success) {
-            ctx.allActions.push({
-                type: 'dependency-upgrade',
-                repository: alert.repository,
-                target: alert.packageName,
-                fromVersion: memberResult.fromVersion,
-                toVersion: alert.recommendedVersion,
-                isMajor: memberResult.isMajor,
-                strategy: 'member-upgrade',
-                success: false,
-                error: memberResult.error,
-                durationMs: 0,
-                filePath: memberManifestPath,
-            })
-            recordUpgradeFailure(ctx, progress, 'member-upgrade', `${alert.packageName} (${memberManifestPath})`, memberResult.error)
-            continue
-        }
-        const remainingMemberVersions = readLockfileVersions(lockfilePath, alert.packageName)
-        const stillVulnerable = remainingMemberVersions.some(
-            (v) => compareSemver(v, alert.recommendedVersion!) < 0,
-        )
-        if (stillVulnerable) {
-            restoreTrackedFiles(ctx.workDir, memberSnapshot)
-            ctx.allActions.push({
-                type: 'dependency-upgrade',
-                repository: alert.repository,
-                target: alert.packageName,
-                fromVersion: memberResult.fromVersion,
-                toVersion: alert.recommendedVersion,
-                isMajor: false,
-                strategy: 'member-upgrade',
-                success: false,
-                error: 'vulnerable instance(s) remain after member upgrade (root override / other pin); changes rolled back',
-                durationMs: 0,
-                filePath: memberManifestPath,
-            })
-            progress.failed++
-            ctx.logger.warn(
-                `[member-upgrade] ${alert.packageName}: vulnerable instance(s) remain (${remainingMemberVersions.join(', ')}) — rolled back member upgrade in ${memberManifestPath}; residual instance likely pinned by another workspace member / root override, manual review required`,
-            )
-            continue
-        }
-        const memberOk = await quickVerifyProject(ctx, repo)
-        if (!memberOk) {
-            restoreTrackedFiles(ctx.workDir, memberSnapshot)
-            ctx.allActions.push({
-                type: 'dependency-upgrade',
-                repository: alert.repository,
-                target: alert.packageName,
-                fromVersion: memberResult.fromVersion,
-                toVersion: memberResult.toVersion,
-                isMajor: memberResult.isMajor,
-                strategy: 'member-upgrade',
-                success: false,
-                error: 'member upgrade failed verification; changes rolled back',
-                durationMs: 0,
-                filePath: memberManifestPath,
-            })
-            progress.failed++
-            ctx.logger.warn(
-                `[member-upgrade] ${alert.packageName}: verification failed — rolled back member upgrade in ${memberManifestPath}`,
-            )
-            continue
-        }
-        ctx.allActions.push({
-            type: 'dependency-upgrade',
-            repository: alert.repository,
-            target: alert.packageName,
-            fromVersion: memberResult.fromVersion,
-            toVersion: memberResult.toVersion,
-            isMajor: memberResult.isMajor,
-            strategy: 'member-upgrade',
-            success: true,
-            durationMs: 0,
-            filePath: memberManifestPath,
-        })
-        progress.fixed++
-        ctx.logger.info(`[member-upgrade] ${alert.packageName}: member upgrade passed verification (${memberManifestPath})`)
-    }
-}
 
 /**
  * 步骤 4：常规分组升级（组级验证失败 → 整组回滚 → 拆组逐个重试；
@@ -703,6 +612,9 @@ async function applyGroupUpgrades(
     singleVersionAlerts: NormalizedSecurityAlert[],
     progress: RepoFixProgress,
 ): Promise<void> {
+    if (isAbortRequested()) {
+        return
+    }
     const { lockfilePath } = sets
 
     const fixableAlerts = dedupeFixableAlerts(

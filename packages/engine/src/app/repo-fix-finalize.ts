@@ -1,13 +1,13 @@
 // repo-fix-finalize.ts — 单仓库修复管线的「基线采样触发」与「收尾（lockfile repair + 修复后验证）」交接面。
 //
 // 从 repo-fix.ts 迁出：该文件新增语句会越过 eslint `max-lines` 上限，按登记候选自带的触发条件
-// 「再次改动需要新增语句时（先拆分再改）」处置；该候选已随之移出候选池，处置记录见 docs/plan/todo.md §M45.2 闭环登记。
+// 「再次改动需要新增语句时（先拆分再改）」处置；该候选已随之移出候选池，处置记录见 docs/plan/todo.md 的「零告警仓库修复前基线采样成本」闭环登记。
 // 两段职责的耦合点只有运行级基线持有器：采样时机决定是否需要付基线成本，收尾消费采样结果做归因豁免。
 // 验证链口径见 docs/design/modules/dependency-fixer-records.md §12.9。
-import type { CommandResult } from '../runners/verification-runner'
+import { formatVerificationError, type CommandResult } from '../runners/verification-runner'
 import { tryLockfileRepair } from './helpers'
 import type { RepoFixCtx, RepoFixProgress } from './repo-fix'
-import { sampleVerificationBaseline, verifyProject } from './verify-project'
+import { findInstallBaselineFailure, sampleVerificationBaseline, verifyProject } from './verify-project'
 
 /**
  * 惰性取得本次运行修复前的验证基线（每运行一次），并返回本仓库的归因豁免判定。
@@ -23,12 +23,17 @@ export async function ensureVerificationBaseline(
     ctx: RepoFixCtx,
     repo: string,
     options: { hasWork: boolean },
-): Promise<{ exemptAttribution: boolean }> {
+): Promise<{ exemptAttribution: boolean, baseline?: CommandResult[] }> {
     if (ctx.config.dryRun || !ctx.verificationBaseline) {
         return { exemptAttribution: false }
     }
     if (ctx.verificationBaseline.value) {
-        return { exemptAttribution: false }
+        return {
+            exemptAttribution: false,
+            // 运行级首采只对采样仓库自身可信：多仓运行时不能把 A 仓的安装失败套到 B 仓，
+            // 否则会把 B 仓的修复链误跳过。归因口径仍沿用运行级基线（见 currentBaseline）。
+            baseline: ctx.verificationBaseline.repo === repo ? ctx.verificationBaseline.value : undefined,
+        }
     }
     if (!options.hasWork) {
         ctx.logger.info(
@@ -37,13 +42,49 @@ export async function ensureVerificationBaseline(
         )
         return { exemptAttribution: true }
     }
-    ctx.verificationBaseline.value = await sampleVerificationBaseline(ctx, repo)
-    return { exemptAttribution: false }
+    const value = await sampleVerificationBaseline(ctx, repo)
+    if (value) {
+        ctx.verificationBaseline.value = value
+        ctx.verificationBaseline.repo = repo
+    }
+    return { exemptAttribution: false, baseline: value }
 }
 
 /** 读取本次运行的修复前基线（未采样 / 采样失败时为 undefined ⇒ 全量归因）。 */
 function currentBaseline(ctx: RepoFixCtx): CommandResult[] | undefined {
     return ctx.verificationBaseline?.value
+}
+
+/**
+ * 记录 pristine 安装失败并返回该条结果（供调用方跳过依赖安装链）。
+ *
+ * 只在基线属于当前仓库时生效（`ensureVerificationBaseline` 已做仓库归属判定）；
+ * 审计条目不归因本次运行（`PRE_EXISTING_FAILURE` 在跳过类白名单内），但必须在报告里
+ * 留下失败命令与诊断，避免「有可修告警 / 0 修复」再次变成无证据运行。
+ */
+export function recordInstallBaselineFailure(
+    ctx: Pick<RepoFixCtx, 'logger' | 'allErrors'>,
+    repo: string,
+    baseline?: CommandResult[],
+): CommandResult | undefined {
+    const failure = findInstallBaselineFailure(baseline)
+    if (!failure) {
+        return undefined
+    }
+    const detail = formatVerificationError(failure)
+    ctx.logger.warn(
+        `[baseline] pristine install failed for ${repo}: ${failure.command} — ${detail}; `
+        + 'skipping dependency install attempts for this run (fix the execution environment or lockfile first)',
+    )
+    ctx.allErrors.push({
+        repository: repo,
+        target: failure.command,
+        stage: 'verify',
+        category: 'PRE_EXISTING_FAILURE',
+        message: `Pre-existing failure (already failing before this run; not caused by this change): `
+            + `${failure.command} — ${detail}`,
+    })
+    return failure
 }
 
 /**

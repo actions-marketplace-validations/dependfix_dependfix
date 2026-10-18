@@ -276,6 +276,76 @@ describe('DependfixApp 版本化 overrides 合批', () => {
         expect(result.errors.some((e) => e.category === 'ABORTED')).toBe(true)
     })
 
+    it('skips the dependency upgrade chain when the pristine install baseline fails', async () => {
+        perPackageMockSuccess()
+        nockTwoPackageAlerts()
+        // 修复前基线在 pnpm install 处即失败：pristine 工作区都装不上，后续 override 安装必然同因失败
+        mockRunVerification.mockResolvedValue(verificationResult(false))
+
+        const logger = makeLogger()
+        const { result } = await runApp(logger)
+
+        expect(mockApplyVersionedOverridesBatch).not.toHaveBeenCalled()
+        expect(mockApplyVersionedOverrides).not.toHaveBeenCalled()
+        expect(result.summary.alertsFixed).toBe(0)
+        expect(result.errors.some((e) => e.category === 'PRE_EXISTING_FAILURE')).toBe(true)
+        expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('skipping dependency install attempts'))
+    })
+
+    it('skips the per-package fallback when the batch install fails environmentally', async () => {
+        perPackageMockSuccess()
+        nockTwoPackageAlerts()
+        // 环境性失败（OOM / 超时）：逐包重试只会重复同一失败并耗尽预算，应直接短路
+        mockApplyVersionedOverridesBatch.mockImplementation(async ({ workDir: dir }: { workDir: string }) => {
+            writeFileSync(join(dir, 'pnpm-workspace.yaml'), 'overrides:\n  batch-sentinel: ^9.9.9\n')
+            return {
+                success: false,
+                error: 'pnpm install failed: signal SIGKILL: Command failed: pnpm install --no-frozen-lockfile',
+                failurePhase: 'install',
+                environmental: true,
+            }
+        })
+
+        const logger = makeLogger()
+        const { result } = await runApp(logger)
+
+        expect(mockApplyVersionedOverridesBatch).toHaveBeenCalledTimes(1)
+        expect(mockApplyVersionedOverrides).not.toHaveBeenCalled()
+        expect(result.actions.filter((a) => a.strategy === 'versioned-override')).toHaveLength(0)
+        expect(result.errors.some((e) => e.category === 'ENVIRONMENT_ERROR')).toBe(true)
+        // 合批残留仍被快照恢复清除
+        expect(readFileSync(join(workDir, 'pnpm-workspace.yaml'), 'utf-8')).not.toContain('batch-sentinel')
+        expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('跳过逐包重试'))
+    })
+
+    it('stops further install attempts when a per-package install fails environmentally', async () => {
+        mockApplyVersionedOverridesBatch.mockImplementation(async ({ workDir: dir }: { workDir: string }) => {
+            writeFileSync(join(dir, 'pnpm-workspace.yaml'), 'overrides:\n  batch-sentinel: ^9.9.9\n')
+            return { success: false, error: 'pnpm install failed: exit code 1: install boom', failurePhase: 'install' }
+        })
+        mockApplyVersionedOverrides.mockImplementation(async ({ packageName }: { packageName: string }) => ({
+            packageName,
+            fromVersion: '',
+            toVersion: '^1.0.0',
+            isMajor: false,
+            success: false,
+            error: 'pnpm install failed: signal SIGKILL: Command failed: pnpm install --no-frozen-lockfile',
+            environmental: true,
+        }))
+        nockTwoPackageAlerts()
+
+        const logger = makeLogger()
+        const { result } = await runApp(logger)
+
+        // 合批失败回退逐包；第一个包环境性失败后不再尝试第二个包，也不再进入成员 / 分组链
+        expect(mockApplyVersionedOverridesBatch).toHaveBeenCalledTimes(1)
+        expect(mockApplyVersionedOverrides).toHaveBeenCalledTimes(1)
+        expect(result.actions.filter((a) => a.strategy === 'versioned-override')).toHaveLength(0)
+        expect(result.summary.alertsFailed).toBe(0)
+        expect(result.errors.some((e) => e.category === 'ENVIRONMENT_ERROR')).toBe(true)
+        expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('skipping member/group'))
+    })
+
     it('does not enable batching for a single package (behavior unchanged)', async () => {
         perPackageMockSuccess()
         nock('https://api.github.com')

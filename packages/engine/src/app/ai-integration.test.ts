@@ -227,7 +227,9 @@ describe('DependfixApp AI integration (2.0.2 × AI)', () => {
 
     it('triggers AI on verification failure and keeps the upgrade when AI patch succeeds', async () => {
         setupMajorUpgradeFixture()
-        mockRunVerification.mockResolvedValue(verificationResult(false))
+        mockRunVerification
+            .mockResolvedValueOnce(verificationResult(true)) // 修复前基线：安装成功（失败来自本次改动）
+            .mockResolvedValue(verificationResult(false)) // 修复后验证：失败
         mockRunAiIntegration.mockResolvedValue({
             attempted: true,
             actions: [aiPatchSuccessAction()],
@@ -257,7 +259,9 @@ describe('DependfixApp AI integration (2.0.2 × AI)', () => {
 
     it('rolls back the upgrade when AI degrades to suggestion', async () => {
         setupMajorUpgradeFixture()
-        mockRunVerification.mockResolvedValue(verificationResult(false))
+        mockRunVerification
+            .mockResolvedValueOnce(verificationResult(true)) // 修复前基线：安装成功（失败来自本次改动）
+            .mockResolvedValue(verificationResult(false)) // 修复后验证：失败
         mockRunAiIntegration.mockResolvedValue({
             attempted: true,
             actions: [aiSuggestionAction()],
@@ -333,7 +337,9 @@ describe('DependfixApp AI integration (2.0.2 × AI)', () => {
 
     it('keeps AI disabled by default (no trigger, backward compatible)', async () => {
         setupMajorUpgradeFixture()
-        mockRunVerification.mockResolvedValue(verificationResult(false))
+        mockRunVerification
+            .mockResolvedValueOnce(verificationResult(true)) // 修复前基线：安装成功（失败来自本次改动）
+            .mockResolvedValue(verificationResult(false)) // 修复后验证：失败
 
         const { result } = await runApp({ cliOverrides: { allowMajorUpgrade: true } })
 

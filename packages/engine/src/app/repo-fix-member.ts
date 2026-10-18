@@ -1,0 +1,151 @@
+// repo-fix-member.ts — workspace 成员级依赖升级。
+//
+// 从 repo-fix.ts 拆出：该文件触及 eslint `max-lines` 上限，成员升级是自包含的安装动作组，
+// 与 lockfile / 分组升级无共享状态（只消费 LockfileAlertSets.memberManifestAlerts）。
+import { compareSemver, readLockfileVersions, upgradeDependency } from '../fixers/dependency'
+import { quickVerifyProject, restoreTrackedFiles, snapshotTrackedFiles, type MemberManifestAlert } from '../helpers'
+import { isAbortRequested } from '../runners/process-control'
+import type { LockfileAlertSets, RepoFixCtx, RepoFixProgress } from './repo-fix'
+import { recordUpgradeFailure } from './upgrade-failure'
+
+/**
+ * 步骤 3：成员级升级（workspace 成员 manifest 直接依赖；member 桶准入已保证：
+ * 成员白名单 + 直接声明 + fixable + 单版本 + 非跨线）。按「包名 + manifestDir」
+ * 聚合取最高推荐为代表；逐项快照 → upgradeDependency({ manifestDir }) → 实例
+ * 复核（残留脆弱实例回滚）→ quickVerify（根 lint）→ 失败回滚。不误标 fixed/converged。
+ */
+export async function applyMemberUpgrades(
+    ctx: RepoFixCtx,
+    repo: string,
+    sets: LockfileAlertSets,
+    progress: RepoFixProgress,
+): Promise<void> {
+    if (isAbortRequested()) {
+        return
+    }
+    const { memberManifestAlerts, lockfilePath } = sets
+    const memberByPackageAndDir = new Map<string, MemberManifestAlert>()
+    for (const item of memberManifestAlerts) {
+        const key = `${item.alert.packageName}@${item.manifestDir}`
+        const existing = memberByPackageAndDir.get(key)
+        const existingTarget = existing?.alert.recommendedVersion
+        const alertTarget = item.alert.recommendedVersion
+        if (!existing || (existingTarget && alertTarget && compareSemver(alertTarget, existingTarget) > 0)) {
+            memberByPackageAndDir.set(key, item)
+        }
+    }
+    if (memberManifestAlerts.length > memberByPackageAndDir.size) {
+        ctx.logger.info(
+            `[member-upgrade] ${memberManifestAlerts.length - memberByPackageAndDir.size} member alert(s) merged into package+dir representatives (highest target per package per member)`,
+        )
+    }
+    for (const item of [...memberByPackageAndDir.values()]) {
+        const { alert, manifestDir } = item
+        const memberManifestPath = `${manifestDir}/package.json`
+        if (ctx.config.dryRun) {
+            ctx.logger.info(`[dry-run] Would upgrade ${alert.packageName} in ${memberManifestPath} → ${alert.recommendedVersion}`)
+            ctx.allActions.push({
+                type: 'dependency-upgrade',
+                repository: alert.repository,
+                target: alert.packageName,
+                fromVersion: '',
+                toVersion: alert.recommendedVersion,
+                isMajor: false,
+                strategy: 'member-upgrade',
+                success: true,
+                durationMs: 0,
+                filePath: memberManifestPath,
+            })
+            progress.fixed++
+            continue
+        }
+        const memberSnapshot = snapshotTrackedFiles(ctx.workDir, [memberManifestPath])
+        ctx.logger.warn(
+            `[member-upgrade] ${alert.packageName}: upgrading member declaration in ${memberManifestPath} → ${alert.recommendedVersion}`,
+        )
+        const memberResult = await upgradeDependency({
+            packageName: alert.packageName,
+            targetVersion: alert.recommendedVersion!,
+            workDir: ctx.workDir,
+            manifestDir,
+        })
+        if (!memberResult.success) {
+            ctx.allActions.push({
+                type: 'dependency-upgrade',
+                repository: alert.repository,
+                target: alert.packageName,
+                fromVersion: memberResult.fromVersion,
+                toVersion: alert.recommendedVersion,
+                isMajor: memberResult.isMajor,
+                strategy: 'member-upgrade',
+                success: false,
+                error: memberResult.error,
+                durationMs: 0,
+                filePath: memberManifestPath,
+            })
+            recordUpgradeFailure(ctx, progress, 'member-upgrade', `${alert.packageName} (${memberManifestPath})`, memberResult.error)
+            continue
+        }
+        const remainingMemberVersions = readLockfileVersions(lockfilePath, alert.packageName)
+        const stillVulnerable = remainingMemberVersions.some(
+            (v) => compareSemver(v, alert.recommendedVersion!) < 0,
+        )
+        if (stillVulnerable) {
+            restoreTrackedFiles(ctx.workDir, memberSnapshot)
+            ctx.allActions.push({
+                type: 'dependency-upgrade',
+                repository: alert.repository,
+                target: alert.packageName,
+                fromVersion: memberResult.fromVersion,
+                toVersion: alert.recommendedVersion,
+                isMajor: false,
+                strategy: 'member-upgrade',
+                success: false,
+                error: 'vulnerable instance(s) remain after member upgrade (root override / other pin); changes rolled back',
+                durationMs: 0,
+                filePath: memberManifestPath,
+            })
+            progress.failed++
+            ctx.logger.warn(
+                `[member-upgrade] ${alert.packageName}: vulnerable instance(s) remain (${remainingMemberVersions.join(', ')}) — rolled back member upgrade in ${memberManifestPath}; residual instance likely pinned by another workspace member / root override, manual review required`,
+            )
+            continue
+        }
+        const memberOk = await quickVerifyProject(ctx, repo)
+        if (!memberOk) {
+            restoreTrackedFiles(ctx.workDir, memberSnapshot)
+            ctx.allActions.push({
+                type: 'dependency-upgrade',
+                repository: alert.repository,
+                target: alert.packageName,
+                fromVersion: memberResult.fromVersion,
+                toVersion: memberResult.toVersion,
+                isMajor: memberResult.isMajor,
+                strategy: 'member-upgrade',
+                success: false,
+                error: 'member upgrade failed verification; changes rolled back',
+                durationMs: 0,
+                filePath: memberManifestPath,
+            })
+            progress.failed++
+            ctx.logger.warn(
+                `[member-upgrade] ${alert.packageName}: verification failed — rolled back member upgrade in ${memberManifestPath}`,
+            )
+            continue
+        }
+        ctx.allActions.push({
+            type: 'dependency-upgrade',
+            repository: alert.repository,
+            target: alert.packageName,
+            fromVersion: memberResult.fromVersion,
+            toVersion: memberResult.toVersion,
+            isMajor: memberResult.isMajor,
+            strategy: 'member-upgrade',
+            success: true,
+            durationMs: 0,
+            filePath: memberManifestPath,
+        })
+        progress.fixed++
+        ctx.logger.info(`[member-upgrade] ${alert.packageName}: member upgrade passed verification (${memberManifestPath})`)
+    }
+}

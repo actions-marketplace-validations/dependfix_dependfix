@@ -119,6 +119,20 @@ export async function sampleVerificationBaseline(
     }
 }
 
+/**
+ * 从修复前基线中找出「安装命令本身失败」的那一条。
+ *
+ * 只认默认链的安装命令（`pnpm install …` / `corepack pnpm@x install …`），不把后续
+ * lint / build / test 的既有失败当成安装环境问题。调用方据此跳过依赖安装链：pristine
+ * 工作区都装不上时，任何 override 安装都会以同一原因失败，逐包重试只会耗尽运行预算。
+ */
+export function findInstallBaselineFailure(baseline?: CommandResult[]): CommandResult | undefined {
+    return baseline?.find((cr) => (
+        /(?:^|\s)(?:corepack\s+)?pnpm(?:@\S+)?\s+install\b/.test(cr.command)
+        && (cr.exitCode !== 0 || cr.timedOut === true)
+    ))
+}
+
 /** `verifyProject` 可选参数：修复前基线（`sampleVerificationBaseline` 产物）。 */
 export interface VerifyProjectOptions {
     /**
@@ -212,13 +226,22 @@ export async function verifyProject(
                 logger.warn(
                     `Verification failed for ${repo}: ${cr.command} — pre-existing failure (${preExistingReason}), not attributed to this change`,
                 )
-                allErrors.push({
-                    repository: repo,
-                    target: cr.command,
-                    stage: 'verify',
-                    category: 'PRE_EXISTING_FAILURE',
-                    message: `Pre-existing failure (${preExistingReason}; not caused by this change): ${cr.command} — ${error}`,
-                })
+                // 基线阶段可能已记录同一条安装失败（recordInstallBaselineFailure）；
+                // 按仓库 + 命令 + 类别去重，避免同一根因在报告里出现两次。
+                const alreadyRecorded = allErrors.some((e) => (
+                    e.repository === repo
+                    && e.target === cr.command
+                    && e.category === 'PRE_EXISTING_FAILURE'
+                ))
+                if (!alreadyRecorded) {
+                    allErrors.push({
+                        repository: repo,
+                        target: cr.command,
+                        stage: 'verify',
+                        category: 'PRE_EXISTING_FAILURE',
+                        message: `Pre-existing failure (${preExistingReason}; not caused by this change): ${cr.command} — ${error}`,
+                    })
+                }
             } else if (failed) {
                 logger.error(`Verification failed for ${repo}: ${cr.command} — ${error}`)
             }

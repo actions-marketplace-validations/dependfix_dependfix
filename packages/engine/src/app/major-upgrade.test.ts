@@ -308,7 +308,9 @@ describe('DependfixApp cross-major upgrade (--allow-major-upgrade)', () => {
         writeSingleVersionLockfile(workDir)
         nockAlerts([makeViteAlert(1, '6.4.3')])
         mockUpgradeWritingManifest('vite', '6.4.3')
-        mockRunVerification.mockResolvedValue(verificationResult(false))
+        mockRunVerification
+            .mockResolvedValueOnce(verificationResult(true)) // 修复前基线：安装成功（失败来自本次改动）
+            .mockResolvedValue(verificationResult(false)) // 修复后验证：失败
 
         const { result } = await runApp({ cliOverrides: { allowMajorUpgrade: true } })
 

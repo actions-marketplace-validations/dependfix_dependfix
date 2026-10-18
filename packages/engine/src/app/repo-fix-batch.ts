@@ -13,6 +13,7 @@
 import type { NormalizedSecurityAlert } from '@dependfix/core'
 import { applyVersionedOverridesBatch, type VersionedOverridesPlan } from '../fixers/dependency'
 import { quickVerifyProject, restoreTrackedFiles, snapshotTrackedFiles } from '../helpers'
+import { getAbortReason, isAbortRequested } from '../runners/process-control'
 import type { RepoFixCtx, RepoFixProgress } from './repo-fix'
 
 /** 合批条目（一个包一条；`targets` 用于动作的 `toVersion` 展示，与逐包路径同口径）。 */
@@ -22,18 +23,29 @@ export interface VersionedOverrideBatchItem {
     targets: string[]
 }
 
+/** 合批结果：是否已应用 + 是否应跳过逐包重试（环境性失败时逐包只会重复同一失败）。 */
+export interface VersionedOverrideBatchOutcome {
+    /** `true` = 已应用（动作与计数已写入，调用方不得再逐包重试） */
+    applied: boolean
+    /** `true` = 环境性失败（信号 / 超时），调用方应跳过逐包重试 */
+    skipSequential?: boolean
+    /** 失败原因（供日志 / 审计条目复用） */
+    reason?: string
+}
+
 /**
  * 尝试合批应用版本化 overrides（调用方仅在条目数 ≥ 2 时调用）。
  *
- * @returns `true` = 已应用（动作与计数已写入，调用方不得再逐包重试）；
- *          `false` = 未应用（工作区已回滚到合批前，调用方应逐包重试）
+ * @returns `applied: true` = 已应用（动作与计数已写入，调用方不得再逐包重试）；
+ *          `applied: false` = 未应用（工作区已回滚到合批前，调用方应逐包重试）；
+ *          `skipSequential: true` = 环境性失败（信号 / 超时），逐包重试无归因价值且会耗尽预算
  */
 export async function tryBatchVersionedOverrides(
     ctx: RepoFixCtx,
     repo: string,
     progress: RepoFixProgress,
     items: VersionedOverrideBatchItem[],
-): Promise<boolean> {
+): Promise<VersionedOverrideBatchOutcome> {
     const snapshot = snapshotTrackedFiles(ctx.workDir)
     const packages = items.map((item) => item.alert.packageName)
     ctx.logger.info(
@@ -50,17 +62,38 @@ export async function tryBatchVersionedOverrides(
 
     if (!result.success) {
         restoreTrackedFiles(ctx.workDir, snapshot)
+        // 运行级取消优先于环境性判定：中止是独立类别，不得伪装成 ENVIRONMENT_ERROR
+        if (isAbortRequested()) {
+            ctx.logger.warn('[multi-version] 合批安装失败（运行已取消） — 跳过逐包重试')
+            return { applied: false, skipSequential: true, reason: getAbortReason() ?? 'abort requested' }
+        }
+        if (result.environmental) {
+            // 信号 / 超时属于环境级失败：逐包重试会重复同一失败，并可能耗尽单仓执行预算。
+            // 审计条目走 ENVIRONMENT_ERROR（不归因本次运行），不产出逐包失败动作。
+            ctx.allErrors.push({
+                repository: repo,
+                target: packages.join(', '),
+                stage: 'fix',
+                category: 'ENVIRONMENT_ERROR',
+                message: `batch install failed (environmental): ${result.error ?? 'no error detail'}`,
+            })
+            ctx.logger.warn(
+                `[multi-version] 合批安装失败（环境性：${result.error ?? 'no error detail'}）`
+                + ' — 已回滚，跳过逐包重试（避免重复消耗安装预算）',
+            )
+            return { applied: false, skipSequential: true, reason: result.error }
+        }
         ctx.logger.warn(
             `[multi-version] 合批安装失败（${result.error ?? 'no error detail'}）— 已回滚，改为逐包重试`,
         )
-        return false
+        return { applied: false }
     }
 
     const groupOk = await quickVerifyProject(ctx, repo)
     if (!groupOk) {
         restoreTrackedFiles(ctx.workDir, snapshot)
         ctx.logger.warn('[multi-version] 合批后组级验证失败 — 已回滚，改为逐包重试（失败点见上方留痕）')
-        return false
+        return { applied: false }
     }
 
     for (const item of items) {
@@ -78,5 +111,5 @@ export async function tryBatchVersionedOverrides(
         progress.fixed++
     }
     ctx.logger.info(`[multi-version] 合批 ${items.length} 个包：versioned overrides passed verification`)
-    return true
+    return { applied: true }
 }

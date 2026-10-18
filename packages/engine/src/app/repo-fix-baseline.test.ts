@@ -13,7 +13,9 @@ import type { NormalizedSecurityAlert } from '@dependfix/core'
 import type { CommandResult } from '../runners/verification-runner'
 import type { AppContext } from './helpers'
 import { processRepoFix, type RepoFixCtx } from './repo-fix'
+import { ensureVerificationBaseline } from './repo-fix-finalize'
 import { computeExitCode } from './result-assembly'
+import { findInstallBaselineFailure } from './verify-project'
 
 const {
     mockFetchRepoAlerts,
@@ -253,5 +255,62 @@ describe('processRepoFix 修复前基线采样面', () => {
         expect(ctx.repoResults[1].verificationPassed).toBe(false)
         expect(ctx.repoResults[1].verificationBlocking).toBe(true)
         expect(computeExitCode(ctx)).toBe(1)
+    })
+})
+
+describe('ensureVerificationBaseline 仓库归属', () => {
+    const installFailure: CommandResult = {
+        command: 'pnpm install --frozen-lockfile',
+        exitCode: 1,
+        durationMs: 1,
+        stdout: 'gyp ERR! find Python',
+        stderr: '',
+    }
+
+    it('A 仓的基线不用于 B 仓的快速失败', async () => {
+        const ctx = makeCtx(process.cwd())
+        ctx.verificationBaseline = { repo: 'foo/a', value: [installFailure] }
+
+        const result = await ensureVerificationBaseline(ctx, 'foo/b', { hasWork: true })
+
+        expect(result.baseline).toBeUndefined()
+        expect(result.exemptAttribution).toBe(false)
+    })
+
+    it('采样仓库自身可取回基线', async () => {
+        const ctx = makeCtx(process.cwd())
+        ctx.verificationBaseline = { repo: 'foo/a', value: [installFailure] }
+
+        const result = await ensureVerificationBaseline(ctx, 'foo/a', { hasWork: true })
+
+        expect(result.baseline).toEqual([installFailure])
+    })
+})
+
+describe('findInstallBaselineFailure', () => {
+    it('命中默认链的 pnpm install 失败', () => {
+        const failure = findInstallBaselineFailure([
+            { command: 'pnpm install --frozen-lockfile', exitCode: 1, durationMs: 1, stdout: 'gyp ERR! find Python', stderr: '' },
+            { command: 'pnpm lint', exitCode: 0, durationMs: 1, stdout: '', stderr: '' },
+        ])
+
+        expect(failure?.command).toBe('pnpm install --frozen-lockfile')
+    })
+
+    it('命中 corepack 版本绑定的 install 超时', () => {
+        const failure = findInstallBaselineFailure([
+            { command: 'corepack pnpm@11.18.0 install --frozen-lockfile', exitCode: -1, durationMs: 1, timedOut: true, stdout: '', stderr: '' },
+        ])
+
+        expect(failure?.command).toContain('corepack pnpm@11.18.0 install')
+    })
+
+    it('不把 lint / build / test 的既有失败当成安装失败', () => {
+        const failure = findInstallBaselineFailure([
+            { command: 'pnpm install --frozen-lockfile', exitCode: 0, durationMs: 1, stdout: '', stderr: '' },
+            { command: 'pnpm lint', exitCode: 1, durationMs: 1, stdout: '', stderr: 'lint failed' },
+        ])
+
+        expect(failure).toBeUndefined()
     })
 })
