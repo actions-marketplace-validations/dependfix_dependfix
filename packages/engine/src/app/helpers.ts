@@ -30,6 +30,7 @@ import { applyCodeScanningFix, restoreSourceFile, snapshotSourceFile } from '../
 import { inferRepoFromGitRemote, type RuntimeConfig } from '../config'
 
 import { quickVerifyProject } from '../helpers'
+import { findInstallBlockedReposWithFixes, hasDeliverableFixes } from './delivery'
 import { handleOverrideProtection } from './override-protect'
 
 // ---------------------------------------------------------------------------
@@ -596,6 +597,7 @@ export async function tryLockfileRepair(
             strategy: result.strategy,
             durationMs: Date.now() - startMs,
             diff: diffSummary,
+            ...(result.success && result.changed === false ? { noOp: true } : {}),
             ...(environmentalFailure ? { environmentalFailure: true } : {}),
         }
     } catch (error: unknown) {
@@ -646,6 +648,23 @@ export function commitLocalChanges(
 
     if (!hasGitChanges(workDir)) {
         logger.info('No changes to commit — skipping local commit')
+        return
+    }
+
+    // 修复后安装仍为既有失败：PR 的 CI 会以同一错误失败，普通交付不应继续。
+    // 放在 hasGitChanges 之后：无改动的运行仍保留原有「No changes」日志。
+    const installBlockedRepos = findInstallBlockedReposWithFixes(allActions)
+    if (installBlockedRepos.length > 0) {
+        logger.warn(
+            `Install verification is still failing (pre-existing) after the fix for ${installBlockedRepos.join(', ')} `
+            + '— skipping local commit; fix the execution environment or target repository lockfile first',
+        )
+        return
+    }
+
+    // 零修复（只有 .gitignore / allowBuilds 等 side-effect 改动）不产生提交 / PR。
+    if (!hasDeliverableFixes(allActions)) {
+        logger.info('No deliverable fixes produced — skipping local commit')
         return
     }
 

@@ -65,6 +65,8 @@ import {
     runBranchCleanupForRepo,
     type AppContext,
 } from './helpers'
+import { findInstallBlockedReposWithFixes, hasDeliverableFixes } from './delivery'
+import { rollbackForSkippedDelivery, skipDeliveryForInstallFailure } from './skipped-delivery'
 import { pullRequestCreationHint } from './token-hints'
 
 // 仅 re-export 平台直接调用的辅助函数（PR 创建在平台 A 模式复用）
@@ -506,6 +508,30 @@ export class DependfixApp {
             return
         }
         if (enforceVerificationGate(this.ctx, { preExistingDirty: this.preExistingDirty, action: 'pr' })) {
+            return
+        }
+
+        // 2.5 交付正确性守卫（2026-10-18）：修复后安装仍既有失败 / 零修复时不建普通 PR。
+        // 放在门禁之后：先让「本次新引入」的失败按原语义回滚，再处理非归因的安装红与零修复。
+        const installBlockedRepos = findInstallBlockedReposWithFixes(this.allActions)
+        if (installBlockedRepos.length > 0) {
+            skipDeliveryForInstallFailure({
+                logger: this.logger,
+                workDir: this.workDir,
+                preExistingDirty: this.preExistingDirty,
+                allErrors: this.allErrors,
+                repos: installBlockedRepos,
+            })
+            return
+        }
+        if (!hasDeliverableFixes(this.allActions)) {
+            this.logger.info('No deliverable fixes produced — skipping PR creation')
+            rollbackForSkippedDelivery({
+                logger: this.logger,
+                workDir: this.workDir,
+                preExistingDirty: this.preExistingDirty,
+                reason: 'no deliverable fixes',
+            })
             return
         }
 

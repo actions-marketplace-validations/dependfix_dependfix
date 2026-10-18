@@ -494,16 +494,28 @@ describe('commitLocalChanges', () => {
     })
 
     /** ctx 携带可断言的 logger（`warn` 用于防御分支） */
-    function makeCommitCtx(workDir: string) {
+    function makeCommitCtx(workDir: string, allActions: FixAction[] = []) {
         const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
         return {
             ctx: {
                 workDir,
                 logger: logger as never,
-                allActions: [] as FixAction[],
+                allActions,
                 authProvider: undefined,
             },
             logger,
+        }
+    }
+
+    function deliverableAction(): FixAction {
+        return {
+            type: 'dependency-upgrade',
+            repository: 'foo/bar',
+            target: 'lodash',
+            fromVersion: '4.17.20',
+            toVersion: '4.17.21',
+            success: true,
+            durationMs: 1,
         }
     }
 
@@ -536,12 +548,55 @@ describe('commitLocalChanges', () => {
         execSync('git add . && git commit -qm init', { cwd: dir })
         writeFileSync(join(dir, 'tracked.txt'), 'v2\n', 'utf-8')
 
-        const { ctx, logger } = makeCommitCtx(dir)
+        const { ctx, logger } = makeCommitCtx(dir, [deliverableAction()])
 
         commitLocalChanges(ctx)
 
         expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('Committed fix changes to current branch'))
         // 提交落在本地当前分支（改动已入 HEAD）
         expect(execSync('git show HEAD:tracked.txt', { cwd: dir, encoding: 'utf-8' })).toBe('v2\n')
+    })
+
+    it('skips zero-fix runs even when side-effect files changed the worktree', () => {
+        execSync('git init -q', { cwd: dir })
+        execSync('git config user.name test', { cwd: dir })
+        execSync('git config user.email test@test', { cwd: dir })
+        writeFileSync(join(dir, 'tracked.txt'), 'v1\n', 'utf-8')
+        execSync('git add . && git commit -qm init', { cwd: dir })
+        // 模拟 ensureGitignore / allowBuilds 等 side-effect 改动：有 git diff 但零修复动作
+        writeFileSync(join(dir, 'tracked.txt'), 'v2\n', 'utf-8')
+
+        const { ctx, logger } = makeCommitCtx(dir)
+
+        commitLocalChanges(ctx)
+
+        expect(logger.info).toHaveBeenCalledWith('No deliverable fixes produced — skipping local commit')
+        expect(execSync('git show HEAD:tracked.txt', { cwd: dir, encoding: 'utf-8' })).toBe('v1\n')
+    })
+
+    it('skips local commit when post-fix install verification is still pre-existing failing', () => {
+        execSync('git init -q', { cwd: dir })
+        execSync('git config user.name test', { cwd: dir })
+        execSync('git config user.email test@test', { cwd: dir })
+        writeFileSync(join(dir, 'tracked.txt'), 'v1\n', 'utf-8')
+        execSync('git add . && git commit -qm init', { cwd: dir })
+        writeFileSync(join(dir, 'tracked.txt'), 'v2\n', 'utf-8')
+
+        const { ctx, logger } = makeCommitCtx(dir, [
+            deliverableAction(),
+            {
+                type: 'verification',
+                repository: 'foo/bar',
+                target: 'pnpm install --frozen-lockfile',
+                success: false,
+                preExisting: true,
+                durationMs: 1,
+            },
+        ])
+
+        commitLocalChanges(ctx)
+
+        expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Install verification is still failing'))
+        expect(execSync('git show HEAD:tracked.txt', { cwd: dir, encoding: 'utf-8' })).toBe('v1\n')
     })
 })

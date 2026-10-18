@@ -17,6 +17,7 @@ import {
     type VerificationResult,
 } from '../runners/verification-runner'
 import { validateVerifyCommands } from '../verification/validate-commands'
+import { isInstallCommand } from './delivery'
 import type { AppContext } from './helpers'
 
 /**
@@ -128,7 +129,7 @@ export async function sampleVerificationBaseline(
  */
 export function findInstallBaselineFailure(baseline?: CommandResult[]): CommandResult | undefined {
     return baseline?.find((cr) => (
-        /(?:^|\s)(?:corepack\s+)?pnpm(?:@\S+)?\s+install\b/.test(cr.command)
+        isInstallCommand(cr.command)
         && (cr.exitCode !== 0 || cr.timedOut === true)
     ))
 }
