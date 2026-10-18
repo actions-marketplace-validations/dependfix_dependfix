@@ -10,6 +10,8 @@
  * `fixers/dependency`（依赖升级）。
  */
 
+import { sanitizeOutput } from '../runners/output-sanitizer'
+
 /** `execSync` / `execFileSync` 抛出错误的最小结构（只取诊断所需字段）。 */
 export interface ExecError extends Error {
     stderr?: Buffer | string
@@ -19,6 +21,10 @@ export interface ExecError extends Error {
     signal?: string
     /** Node 错误码（超时时为 `ETIMEDOUT`；spawn 失败时为 `ENOENT` 等） */
     code?: string
+    /** 是否为运行级取消导致的终止（优先级高于信号 / 超时的环境性判定） */
+    aborted?: boolean
+    /** 超时兜底落定时是否未能确认直接子进程已退出 */
+    terminationUnconfirmed?: boolean
 }
 
 /** 进程级信号：退出码 / 信号 / 超时标记 / spawn errno。 */
@@ -37,9 +43,45 @@ export function getRawStderrText(err: ExecError): string {
     return typeof err.stderr === 'string' ? err.stderr : err.stderr.toString('utf-8')
 }
 
-/** 读取 stderr 文本（无 stderr 时回退 `err.message`，保持既有展示口径）。 */
-export function getStderrText(err: ExecError): string {
-    return getRawStderrText(err) || ((err as Error).message ?? '')
+/** 读取原始 stdout 文本；无 stdout 时返回空串。 */
+export function getRawStdoutText(err: ExecError): string {
+    if (!err.stdout) {
+        return ''
+    }
+    return typeof err.stdout === 'string' ? err.stdout : err.stdout.toString('utf-8')
+}
+
+/** 安装失败诊断的展示上限：保留头尾，避免大输出把报告 / 日志撑爆。 */
+const INSTALL_DIAGNOSTIC_MAX_CHARS = 4_000
+
+/** 头尾摘要（错误常在输出尾部，进度常在头部；两端都保留）。 */
+function summarizeInstallDiagnostics(text: string): string {
+    const trimmed = text.trim()
+    if (trimmed.length <= INSTALL_DIAGNOSTIC_MAX_CHARS) {
+        return trimmed
+    }
+    const head = trimmed.slice(0, 2_000).trimEnd()
+    const tail = trimmed.slice(-1_800).trimStart()
+    return `${head}\n... (${trimmed.length - head.length - tail.length} chars omitted) ...\n${tail}`
+}
+
+/**
+ * 组装安装命令的诊断文本：stderr 与 stdout **都**读取，缺失时回退 `err.message`。
+ *
+ * 背景：`prebuild-install` 下载预编译包超时、`node-gyp` 找不到 Python 等失败时，
+ * pnpm 把子脚本输出写到 stdout，stderr 为空。旧实现只读 stderr，导致失败证据只剩
+ * `Command failed: pnpm install …`，无法定位「缺构建工具链 / 预编译包下载失败」。
+ *
+ * 两路都有内容时按 stderr → stdout 标注来源；只有一路时保持原有纯文本形态（不破坏
+ * 既有日志断言与报告列宽度）。
+ */
+export function getInstallDiagnostics(err: ExecError): string {
+    // 先脱敏后截断：避免凭据恰落在截断边界时残留半段
+    const stderr = summarizeInstallDiagnostics(sanitizeOutput(getRawStderrText(err)))
+    const stdout = summarizeInstallDiagnostics(sanitizeOutput(getRawStdoutText(err)))
+    return stderr && stdout
+        ? `stderr:\n${stderr}\n--- stdout ---\n${stdout}`
+        : stderr || stdout || sanitizeOutput(((err as Error).message ?? '').trim()) || 'no error detail'
 }
 
 /** 从 `execFileSync` 抛出的错误中提取进程级信号（退出码 / 信号 / 超时标记 / spawn errno）。 */
@@ -52,6 +94,20 @@ export function extractProcessSignals(err: ExecError): ProcessSignals {
         // spawn 级 errno（ENOENT 等；超时的 ETIMEDOUT 已由 timedOut 表达，此处避免重复）
         errno: typeof err.code === 'string' && err.code !== 'ETIMEDOUT' ? err.code : null,
     }
+}
+
+/**
+ * 安装失败是否由进程级环境问题导致（信号终止 / 超时）；不含静默 exit 1。
+ *
+ * 运行级取消（`aborted`）必须返回 false：中止是独立类别（`ABORTED`），
+ * 不得伪装成「不归因目标仓库」的环境性失败。
+ */
+export function isEnvironmentalInstallError(err: ExecError): boolean {
+    if (err.aborted === true) {
+        return false
+    }
+    const signals = extractProcessSignals(err)
+    return signals.signal !== null || signals.timedOut
 }
 
 /** 渲染进程级信号的简短描述（用于失败详情）；无可用信号时返回空串。 */
@@ -73,7 +129,8 @@ export function describeProcessSignals(signals: ProcessSignals): string {
 
 /**
  * 受管命令执行结果的最小结构（与 `runners/process-control.ts` 的 `TrackedCommandResult`
- * 结构兼容；此处以结构类型声明，避免 fixers → runners 的模块方向耦合）。
+ * 结构兼容）。类型以结构声明避免引入 runner 的运行时装配；脱敏复用纯函数模块
+ * `runners/output-sanitizer`，不加载 network-audit / registry-discovery。
  */
 export interface CommandOutcomeLike {
     exitCode: number | null
@@ -81,6 +138,8 @@ export interface CommandOutcomeLike {
     timedOut: boolean
     /** 执行期间是否处于"已请求取消"状态（用于把中止与普通信号终止区分开） */
     aborted?: boolean
+    /** 超时兜底落定时是否未能确认直接子进程已退出 */
+    terminationUnconfirmed?: boolean
     errno: string | null
     stdout: string
     stderr: string
@@ -90,9 +149,9 @@ export interface CommandOutcomeLike {
  * 把受管命令（异步 `spawn`）的结果适配为既有 `execSync` / `execFileSync` 形态的错误对象。
  *
  * 目的：安装类调用从同步 `execFileSync` 迁到 `runTrackedCommand` 后，
- * `extractProcessSignals` / `getRawStderrText` / `describeInstallError` 的读取口径**零漂移**
- * ——`status` / `signal` / `code` / `stderr` 字段与 Node 抛出的形态一致（`status` 仅在有退出码时
- * 设置，`code` 在超时时为 `ETIMEDOUT`、spawn 失败时为 `errno`）。
+ * `extractProcessSignals` / `getRawStderrText` / `getRawStdoutText` / `describeInstallError`
+ * 的读取口径**零漂移**——`status` / `signal` / `code` / `stderr` / `stdout` 字段与 Node 抛出的
+ * 形态一致（`status` 仅在有退出码时设置，`code` 在超时时为 `ETIMEDOUT`、spawn 失败时为 `errno`）。
  */
 export function toExecLikeError(command: string, outcome: CommandOutcomeLike): ExecError {
     let message = `Command failed: ${command}`
@@ -105,9 +164,22 @@ export function toExecLikeError(command: string, outcome: CommandOutcomeLike): E
     } else if (outcome.errno) {
         message = `spawn ${command} ${outcome.errno}`
     }
+    if (outcome.terminationUnconfirmed) {
+        message += ' (termination unconfirmed)'
+    }
     const err = new Error(message) as ExecError
+    if (outcome.aborted) {
+        err.aborted = true
+    }
+    if (outcome.terminationUnconfirmed) {
+        err.terminationUnconfirmed = true
+    }
     if (outcome.stderr) {
         err.stderr = outcome.stderr
+    }
+    // pnpm 11 的安装脚本错误写在 stdout；保留原始输出供下游诊断，不在此处裁剪
+    if (outcome.stdout) {
+        err.stdout = outcome.stdout
     }
     if (outcome.exitCode !== null) {
         err.status = outcome.exitCode

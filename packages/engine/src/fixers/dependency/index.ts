@@ -9,10 +9,15 @@ import {
     failResult,
     formatInstallFailure,
     describeInstallError,
+    isInstallEnvironmentalFailure,
     rollback,
     rollbackOverrideWrite,
     writeWorkspaceOverride,
+    type VersionedOverridesApplyResult,
+    type VersionedOverridesPlan,
 } from './overrides-io'
+
+export type { VersionedOverridesApplyResult, VersionedOverridesPlan } from './overrides-io'
 import { upsertOverride } from './override-key'
 
 export { normalizeOverrideKey, normalizeOverrideSelector, upsertOverride } from './override-key'
@@ -52,6 +57,11 @@ export interface DependencyFixResult {
     error?: string
     /** 成功但存在需要用户注意的附加信息（如 overrides 写入位置可能被 pnpm 忽略） */
     warning?: string
+    /**
+     * 失败是否由进程级环境问题导致（信号终止 / 超时）。
+     * 调用方据此停止后续安装尝试——同一环境下逐包重试只会重复失败并耗尽运行预算。
+     */
+    environmental?: boolean
 }
 
 export interface PackageJson {
@@ -179,6 +189,7 @@ export async function upgradeDependency(
             isMajor,
             success: false,
             error: formatInstallFailure(describeInstallError(installErr)),
+            environmental: isInstallEnvironmentalFailure(installErr),
         }
     }
 
@@ -314,6 +325,7 @@ export async function overrideTransitiveDependency(
             isMajor,
             success: false,
             error: formatInstallFailure(installFailure),
+            environmental: isInstallEnvironmentalFailure(installErr),
         }
     }
 
@@ -384,21 +396,6 @@ export async function overrideTransitiveDependency(
  * @param params - 包名、overrides 映射（`pkg@major` 或 `pkg` → `^target`）、工作目录
  * @returns 修复结果（fromVersion 为空字符串，表示多实例无单一来源版本）
  */
-/** 版本化 overrides 批量应用条目（一条 = 一个包的多 key overrides）。 */
-export interface VersionedOverridesPlan {
-    packageName: string
-    overrides: Record<string, string>
-}
-
-/** 批量应用结果（不抛错：失败经 `error` 文本暴露，成功可带 `warning`）。 */
-export interface VersionedOverridesApplyResult {
-    success: boolean
-    warning?: string
-    error?: string
-    /** 失败阶段：`precheck`（未写盘）/ `install`（已写盘且安装失败）——供单包包装保持既有 `toVersion` 口径 */
-    failurePhase?: 'precheck' | 'install'
-}
-
 /**
  * 批量应用版本化 overrides：**一次写盘 + 一次安装**，失败整体回滚（含 lockfile）。
  * 动机：逐包应用使单仓安装次数 = 可修包数（实测大仓 7–8 次），是资源受限主机 OOM 的放大器之一；
@@ -536,7 +533,12 @@ export async function applyVersionedOverridesBatch(
         }
         cleanupBackups({ pkgBackup, lockBackup, workspaceBackup })
 
-        return { success: false, error: formatInstallFailure(describeInstallError(installErr)), failurePhase: 'install' }
+        return {
+            success: false,
+            error: formatInstallFailure(describeInstallError(installErr)),
+            failurePhase: 'install',
+            environmental: isInstallEnvironmentalFailure(installErr),
+        }
     }
 
     // 成功 — 清理备份文件
@@ -581,6 +583,7 @@ export async function applyVersionedOverrides(
         success: result.success,
         ...(result.error !== undefined ? { error: result.error } : {}),
         ...(result.warning !== undefined ? { warning: result.warning } : {}),
+        ...(result.environmental !== undefined ? { environmental: result.environmental } : {}),
     }
 }
 

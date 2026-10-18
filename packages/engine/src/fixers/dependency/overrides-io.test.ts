@@ -109,6 +109,51 @@ describe('describeInstallError', () => {
         expect(described).toContain('exit code 1')
         expect(classifyInstallFailure(described)).toContain('minimumReleaseAge')
     })
+
+    it('uses stdout evidence when pnpm writes install-script errors there', () => {
+        const err = Object.assign(new Error('Command failed: pnpm install --no-frozen-lockfile'), {
+            stdout: Buffer.from(
+                'prebuild-install warn install Request timed out\n'
+                + 'gyp ERR! find Python\ngyp ERR! not ok\n'
+                + '[ELIFECYCLE] Command failed with exit code 1.',
+                'utf-8',
+            ),
+            status: 1,
+        })
+
+        const described = describeInstallError(err)
+
+        expect(described).toContain('gyp ERR! find Python')
+        expect(described).not.toContain('no error detail')
+    })
+
+    it('classifies native build failures as an actionable hint', () => {
+        const described = describeInstallError(Object.assign(new Error('Command failed: pnpm install'), {
+            stdout: Buffer.from('prebuild-install warn install Request timed out\ngyp ERR! find Python', 'utf-8'),
+            status: 1,
+        }))
+
+        expect(classifyInstallFailure(described)).toContain('native module build failed')
+        expect(formatInstallFailure(described)).toContain('python3/make/g++')
+    })
+
+    it('classifies ignored dependency build scripts', () => {
+        const described = describeInstallError(makeExecError({
+            stderr: 'ERR_PNPM_IGNORED_BUILDS: Ignored build scripts: better-sqlite3@12.11.1',
+            status: 1,
+        }))
+
+        expect(classifyInstallFailure(described)).toContain('allowBuilds')
+    })
+
+    it('does not hijack an unrelated failure that merely mentions Ignored build scripts', () => {
+        const described = describeInstallError(makeExecError({
+            stderr: 'ERR_PNPM_OUTDATED_LOCKFILE: lockfile out of sync\nIgnored build scripts: left-pad@1.0.0',
+            status: 1,
+        }))
+
+        expect(classifyInstallFailure(described)).toBeNull()
+    })
 })
 
 // ---------------------------------------------------------------------------

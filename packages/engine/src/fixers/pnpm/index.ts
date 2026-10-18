@@ -4,7 +4,7 @@ import { resolveInstallTimeoutMs } from '../install-timeouts'
 import {
     describeProcessSignals,
     extractProcessSignals,
-    getStderrText,
+    getInstallDiagnostics,
     toExecLikeError,
     type ExecError,
 } from '../process-signals'
@@ -87,7 +87,12 @@ export interface LockfileRepairResult {
 interface ClassificationResult {
     ok: boolean
     category?: LockfileFailureCategory
+    /** 原始 stderr（保留供测试 / 来源区分；生产证据统一走 `diagnostics`） */
     stderr?: string
+    /** 原始 stdout（pnpm 11 的安装脚本错误常写在这里；生产证据统一走 `diagnostics`） */
+    stdout?: string
+    /** stderr + stdout 的合并诊断文本（分类与失败详情使用） */
+    diagnostics?: string
     /** 进程退出码（非零退出时；被信号杀死 / spawn 失败时为 null） */
     exitCode: number | null
     /** 终止进程的信号；非信号终止时为 null */
@@ -96,8 +101,8 @@ interface ClassificationResult {
     timedOut: boolean
     /** spawn 级 errno（如 `ENOENT`——工具链缺失）；无时为 null */
     errno: string | null
-    /** 原始 stderr 是否为空（无诊断信息） */
-    noStderrDiagnostics: boolean
+    /** 合并诊断是否为空（无任何可用诊断信息） */
+    noDiagnostics: boolean
     /** 是否环境性失败（信号 / 超时 / 无 stderr 诊断） */
     environmental: boolean
 }
@@ -126,38 +131,75 @@ export async function classifyLockfileFailure(workDir: string): Promise<Classifi
     // （环境性 = 「不归因目标仓库」，与「本次运行被中止」语义不同，混用会掩盖中止事实）。
     // 判定前置：未启动时退出码为占位值，不应参与 ok 判定
     if (!outcome.started) {
+        const detail = `run aborted before diagnosis (${getAbortReason() ?? 'abort requested'})`
         return {
             ok: false,
             category: 'ABORTED',
-            stderr: `run aborted before diagnosis (${getAbortReason() ?? 'abort requested'})`,
+            stderr: detail,
+            stdout: '',
+            diagnostics: detail,
             exitCode: null,
             signal: null,
             timedOut: false,
             errno: null,
-            noStderrDiagnostics: false,
+            noDiagnostics: false,
+            environmental: false,
+        }
+    }
+
+    // 运行级取消：命令可能已启动后被杀（`started=true` + `aborted=true`），仍以独立类别上报，
+    // 不得落入 `ENVIRONMENT_ERROR`（后者的语义是「不归因目标仓库」，混用会掩盖中止事实）。
+    if (outcome.aborted) {
+        const detail = `run aborted during diagnosis (${getAbortReason() ?? 'abort requested'})`
+        return {
+            ok: false,
+            category: 'ABORTED',
+            stderr: detail,
+            stdout: '',
+            diagnostics: detail,
+            exitCode: outcome.exitCode,
+            signal: outcome.signal,
+            timedOut: outcome.timedOut,
+            errno: outcome.errno,
+            noDiagnostics: false,
             environmental: false,
         }
     }
 
     if (outcome.exitCode === 0 && !outcome.timedOut) {
-        return { ok: true, exitCode: 0, signal: null, timedOut: false, errno: null, noStderrDiagnostics: false, environmental: false }
+        return {
+            ok: true,
+            stdout: outcome.stdout,
+            diagnostics: '',
+            exitCode: 0,
+            signal: null,
+            timedOut: false,
+            errno: null,
+            noDiagnostics: true,
+            environmental: false,
+        }
     }
 
     // 直接映射受管执行结果（不经 execSync 形态错误往返，避免口径间接化）：
     // `signal` / `timedOut` / `errno` 与旧 `extractProcessSignals(err)` 的语义一一对应
     const rawStderr = outcome.stderr
-    // 环境性判定：信号终止 / 超时 / 无 stderr 诊断。带 stderr 的分类失败仍走原分类链
+    const rawStdout = outcome.stdout
+    // 合并诊断：pnpm 11 的安装脚本错误写到 stdout，只读 stderr 会丢失根因
+    const diagnostics = getInstallDiagnostics(toExecLikeError('pnpm install --frozen-lockfile', outcome))
+    // 环境性判定保持既有口径（信号 / 超时 / 无 stderr 诊断）；诊断文本另取 stderr+stdout
     const environmental = outcome.signal !== null || outcome.timedOut || rawStderr.trim().length === 0
     return {
         ok: false,
-        category: environmental ? 'ENVIRONMENT_ERROR' : parseFailureCategory(rawStderr),
-        // stderr 保留原始文本（无 stderr 诊断时为空串，由 noStderrDiagnostics 标注；证据文本另取 err.message）
+        category: environmental ? 'ENVIRONMENT_ERROR' : parseFailureCategory(diagnostics),
+        // 原始流保留供需要区分来源的调用方使用；证据文本统一走 diagnostics
         stderr: rawStderr,
+        stdout: rawStdout,
+        diagnostics,
         exitCode: outcome.exitCode,
         signal: outcome.signal,
         timedOut: outcome.timedOut,
         errno: outcome.errno,
-        noStderrDiagnostics: rawStderr.trim().length === 0,
+        noDiagnostics: rawStderr.trim().length === 0 && rawStdout.trim().length === 0,
         environmental,
     }
 }
@@ -418,7 +460,11 @@ async function verifyFrozenLockfile(workDir: string): Promise<{ ret: number, std
     if (outcome.exitCode === 0 && !outcome.timedOut) {
         return { ret: 0, stderr: '' }
     }
-    return { ret: 1, stderr: outcome.stderr || getStderrText(toExecLikeError('pnpm install --frozen-lockfile', outcome)) }
+    return {
+        ret: 1,
+        // 字段名保持 stderr 以兼容调用方；内容为 stderr + stdout 的合并诊断
+        stderr: getInstallDiagnostics(toExecLikeError('pnpm install --frozen-lockfile', outcome)),
+    }
 }
 
 /**
@@ -507,7 +553,7 @@ export async function repairLockfile(params: RepairLockfileParams): Promise<Lock
     }
 
     const category = classification.category ?? 'UNKNOWN'
-    const stderr = classification.stderr ?? ''
+    const diagnostics = classification.diagnostics ?? ''
 
     // ---- 3. 不可修复的分类：凭据错误（需人工）/ 运行被取消（不空转） ----
     if (category === 'CREDENTIAL_ERROR' || category === 'ABORTED') {
@@ -521,7 +567,7 @@ export async function repairLockfile(params: RepairLockfileParams): Promise<Lock
             failureCategory: category,
             failureDetail: category === 'ABORTED'
                 ? `run aborted — lockfile repair skipped (${getAbortReason() ?? 'abort requested'})`
-                : `registry authentication error: ${truncate(stderr, 500)}`,
+                : `registry authentication error: ${truncate(diagnostics, 500)}`,
             strategy: 'SKIP',
             attemptHistory: attempts,
         }
@@ -530,7 +576,7 @@ export async function repairLockfile(params: RepairLockfileParams): Promise<Lock
     // ---- 4. 逐级尝试 ----
     const strategyChain = getStrategyChain(category)
 
-    let lastError = stderr
+    let lastError = diagnostics
     const startTimestamp = Date.now()
 
     for (const strategy of strategyChain) {
@@ -551,7 +597,7 @@ export async function repairLockfile(params: RepairLockfileParams): Promise<Lock
             strategySuccess = true
         } catch (err) {
             const execError = err as ExecError
-            strategyError = getStderrText(execError) || (err as Error).message
+            strategyError = getInstallDiagnostics(execError) || (err as Error).message
             const signals = extractProcessSignals(execError)
             strategyExitCode = signals.exitCode
             strategySignal = signals.signal
@@ -625,10 +671,10 @@ export async function repairLockfile(params: RepairLockfileParams): Promise<Lock
             timedOut: classification.timedOut,
             errno: classification.errno,
         })
-        const rawStderr = (classification.stderr ?? '').trim()
-        const evidence = classification.noStderrDiagnostics
-            ? 'no stderr diagnostics'
-            : `stderr: ${truncate(rawStderr, 200)}`
+        const rawDiagnostics = (classification.diagnostics ?? '').trim()
+        const evidence = classification.noDiagnostics
+            ? 'no stderr/stdout diagnostics'
+            : `diagnostics: ${truncateTail(rawDiagnostics, 500)}`
         return {
             success: false,
             failureCategory: category,
@@ -641,7 +687,7 @@ export async function repairLockfile(params: RepairLockfileParams): Promise<Lock
     return {
         success: false,
         failureCategory: category,
-        failureDetail: `${categoryNote}${truncate(lastError, 500)}`,
+        failureDetail: `${categoryNote}${truncateTail(lastError, 500)}`,
         attemptHistory: attempts,
     }
 }
@@ -655,6 +701,14 @@ function truncate(text: string, maxLen: number): string {
         return text
     }
     return `${text.slice(0, maxLen)}…`
+}
+
+/** 尾部截断：安装错误根因通常写在输出末尾（gyp / ELIFECYCLE），不能从头部切。 */
+function truncateTail(text: string, maxLen: number): string {
+    if (text.length <= maxLen) {
+        return text
+    }
+    return `…${text.slice(-maxLen)}`
 }
 
 /** 读取当前 lockfile 的 lockfileVersion（文件缺失/读取失败返回 null）。 */

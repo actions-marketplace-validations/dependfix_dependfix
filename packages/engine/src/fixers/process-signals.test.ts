@@ -5,7 +5,7 @@
 // 生产正向映射若漂移（不再置 `code='ETIMEDOUT'` / 不再回填 stderr / 不再标识中止），
 // 下游 `extractProcessSignals` / `describeInstallError` 的读取口径会静默改变。
 import { describe, expect, it } from 'vitest'
-import { toExecLikeError, type CommandOutcomeLike } from './process-signals'
+import { isEnvironmentalInstallError, toExecLikeError, type CommandOutcomeLike } from './process-signals'
 import { describeInstallError } from './dependency/overrides-io'
 
 /** 构造受管执行结果（缺省成功形态）。 */
@@ -56,7 +56,22 @@ describe('toExecLikeError', () => {
         }))
 
         expect(err.message).toContain('run aborted — command terminated by cancellation')
+        expect(err.aborted).toBe(true)
         expect(describeInstallError(err)).toContain('run aborted — command terminated by cancellation')
+        // 中止是独立类别，不得判为「不归因目标仓库」的环境性失败
+        expect(isEnvironmentalInstallError(err)).toBe(false)
+    })
+
+    it('超时未能确认退出：证据文本显式标注 termination unconfirmed', () => {
+        const err = toExecLikeError('pnpm install', outcome({
+            exitCode: null,
+            signal: 'SIGKILL',
+            timedOut: true,
+            terminationUnconfirmed: true,
+        }))
+
+        expect(err.terminationUnconfirmed).toBe(true)
+        expect(describeInstallError(err)).toContain('termination unconfirmed')
     })
 
     it('工具链缺失：errno 进 code（spawn 失败无退出码）', () => {
@@ -74,5 +89,29 @@ describe('toExecLikeError', () => {
 
         expect(err.stderr).toBeUndefined()
         expect(describeInstallError(err)).toBe('exit code 2: Command failed: pnpm install')
+    })
+
+    it('stdout 回填：安装脚本错误只写 stdout 时仍保留证据', () => {
+        const err = toExecLikeError('pnpm install', outcome({
+            exitCode: 1,
+            stdout: 'prebuild-install warn install Request timed out\ngyp ERR! find Python',
+        }))
+
+        expect(err.stdout).toContain('gyp ERR! find Python')
+        expect(describeInstallError(err)).toContain('gyp ERR! find Python')
+        expect(describeInstallError(err)).not.toContain('no error detail')
+    })
+
+    it('安装诊断与验证链共用脱敏规则（凭据不进入报告）', () => {
+        const err = toExecLikeError('pnpm install', outcome({
+            exitCode: 1,
+            stdout: 'NPM_TOKEN=secret-token\n'
+                + 'fetch https://x-access-token:ghp_abcdef@github.com/foo/bar',
+        }))
+
+        const described = describeInstallError(err)
+
+        expect(described).not.toContain('secret-token')
+        expect(described).not.toContain('ghp_abcdef')
     })
 })

@@ -1,9 +1,33 @@
 import { copyFileSync, existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import YAML from 'yaml'
 import { resolveInstallTimeoutMs } from '../install-timeouts'
-import { describeProcessSignals, extractProcessSignals, getStderrText, toExecLikeError } from '../process-signals'
+import {
+    describeProcessSignals,
+    extractProcessSignals,
+    getInstallDiagnostics,
+    isEnvironmentalInstallError,
+    toExecLikeError,
+    type ExecError,
+} from '../process-signals'
 import { runTrackedCommand } from '../../runners/process-control'
 import type { DependencyFixResult, PackageJson } from './index'
+
+/** 版本化 overrides 批量应用条目（一条 = 一个包的多 key overrides）。 */
+export interface VersionedOverridesPlan {
+    packageName: string
+    overrides: Record<string, string>
+}
+
+/** 批量应用结果（不抛错：失败经 `error` 文本暴露，成功可带 `warning`）。 */
+export interface VersionedOverridesApplyResult {
+    success: boolean
+    warning?: string
+    error?: string
+    /** 失败阶段：`precheck`（未写盘）/ `install`（已写盘且安装失败）——供单包包装保持既有 `toVersion` 口径 */
+    failurePhase?: 'precheck' | 'install'
+    /** 安装失败是否由进程级环境问题导致（信号终止 / 超时）；调用方据此停止逐包重试 */
+    environmental?: boolean
+}
 
 // ---------------------------------------------------------------------------
 // pnpm overrides 写入 / 回滚 / 备份 的文件 IO 组
@@ -251,18 +275,23 @@ function rollbackOverrides(params: {
  * 组装 `pnpm install` 失败的证据文本：进程级信号在前，原始诊断在后。
  *
  * 为什么不能只取 stderr：超时（`ETIMEDOUT`）与被信号杀死（`SIGKILL`）时 pnpm 的进度写在
- * stdout，stderr 常为空——只取 stderr 会得到空串，把「为什么失败」整段丢掉（日志与报告里
- * 只剩 `pnpm install failed: `）。此时进程信号与 `err.message`
- * （如 `spawnSync /bin/sh ETIMEDOUT`）是唯一能区分「超时 / 被杀 / 装不动」的证据，
- * 口径与 lockfile 修复链的环境性安装失败同源。
+ * stdout；更常见的是安装脚本（`prebuild-install` / `node-gyp`）的业务错误本身也写到 stdout
+ * ——只取 stderr 会得到空串，把「为什么失败」整段丢掉（日志与报告里只剩
+ * `pnpm install failed: `）。进程信号与 stderr / stdout 证据由 `getInstallDiagnostics`
+ * 统一组装，口径与 lockfile 修复链的环境性安装失败同源。
  */
 export function describeInstallError(err: unknown): string {
     if (!(err instanceof Error)) {
         return String(err).trim()
     }
     const signals = describeProcessSignals(extractProcessSignals(err))
-    const detail = getStderrText(err).trim() || 'no error detail'
+    const detail = getInstallDiagnostics(err as ExecError).trim() || 'no error detail'
     return signals ? `${signals}: ${detail}` : detail
+}
+
+/** 安装失败是否属于进程级环境问题（信号终止 / 超时），供调用方决定是否停止后续安装尝试。 */
+export function isInstallEnvironmentalFailure(err: unknown): boolean {
+    return err instanceof Error && isEnvironmentalInstallError(err as ExecError)
 }
 
 // ---------------------------------------------------------------------------
@@ -270,12 +299,24 @@ export function describeInstallError(err: unknown): string {
 // ---------------------------------------------------------------------------
 
 /**
- * `pnpm install` stderr 中的已知失败特征 → 可读提示。
- * 当前覆盖：minimumReleaseAge 冷却期约束（目标仓库显式配置该策略时 strict 模式生效，
- * 解析报 ERR_PNPM_NO_MATURE_MATCHING_VERSION、frozen 校验报 ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION）。
- * 未识别时返回 null，调用方保留原始 stderr。
+ * `pnpm install` 诊断中的已知失败特征 → 可读提示。
+ *
+ * 覆盖三类实际遇到的失败：
+ * - 原生模块回退源码编译失败（预编译包下载超时 + 环境缺 Python / 构建工具链）
+ * - pnpm 11 忽略未批准的构建脚本
+ * - minimumReleaseAge 冷却期约束
+ *
+ * 顺序有意义：原生构建 / ERR_PNPM_IGNORED_BUILDS 是更具体的根因，先于通用冷却期匹配。
  */
 const INSTALL_FAILURE_HINTS: [RegExp, string][] = [
+    [
+        /gyp ERR! find Python|node-gyp rebuild|prebuild-install.*(?:Request timed out|timed out)/i,
+        'native module build failed: prebuild download may have timed out and the environment lacks Python/build tools; install python3/make/g++ in the execution image or ensure prebuilt binaries are reachable',
+    ],
+    [
+        /ERR_PNPM_IGNORED_BUILDS/,
+        'pnpm ignored dependency build scripts (ERR_PNPM_IGNORED_BUILDS); approve only trusted dependencies via pnpm-workspace.yaml allowBuilds (or onlyBuiltDependencies) and retry',
+    ],
     [
         /ERR_PNPM_NO_MATURE_MATCHING_VERSION|ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION|minimumReleaseAge/i,
         'target repo has a minimumReleaseAge policy; the upgrade target version is too fresh (cooldown not elapsed). Retry after the cooldown period, or relax the policy',
@@ -283,9 +324,9 @@ const INSTALL_FAILURE_HINTS: [RegExp, string][] = [
 ]
 
 /** 识别 `pnpm install` 失败原因，未识别返回 null。 */
-export function classifyInstallFailure(stderr: string): string | null {
+export function classifyInstallFailure(diagnostics: string): string | null {
     for (const [pattern, hint] of INSTALL_FAILURE_HINTS) {
-        if (pattern.test(stderr)) {
+        if (pattern.test(diagnostics)) {
             return hint
         }
     }
@@ -297,7 +338,7 @@ export function classifyInstallFailure(stderr: string): string | null {
  * 供升级链路各 catch 块统一使用（upgradeDependency / overrideTransitiveDependency /
  * applyVersionedOverrides），避免三处重复匹配逻辑。
  */
-export function formatInstallFailure(stderr: string): string {
-    const hint = classifyInstallFailure(stderr)
-    return hint ? `pnpm install failed: ${hint}: ${stderr}` : `pnpm install failed: ${stderr}`
+export function formatInstallFailure(diagnostics: string): string {
+    const hint = classifyInstallFailure(diagnostics)
+    return hint ? `pnpm install failed: ${hint}: ${diagnostics}` : `pnpm install failed: ${diagnostics}`
 }

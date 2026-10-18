@@ -150,11 +150,13 @@ describe('classifyLockfileFailure', () => {
         const result = await classifyLockfileFailure('/tmp/test')
         expect(result).toEqual({
             ok: true,
+            stdout: '',
+            diagnostics: '',
             exitCode: 0,
             signal: null,
             timedOut: false,
             errno: null,
-            noStderrDiagnostics: false,
+            noDiagnostics: true,
             environmental: false,
         })
     })
@@ -168,15 +170,18 @@ describe('classifyLockfileFailure', () => {
             ok: false,
             category: 'LOCKFILE_NOT_FOUND',
             stderr: expect.stringContaining('Cannot find') as unknown,
+            stdout: '',
+            diagnostics: expect.stringContaining('Cannot find') as unknown,
             exitCode: null,
             signal: null,
             timedOut: false,
             errno: null,
-            noStderrDiagnostics: false,
+            noDiagnostics: false,
             environmental: false,
         })
     })
 
+    // pnpm 11 把安装脚本错误写到 stdout：stderr 为空时仍是环境性失败，但证据必须保留 stdout
     // 运行级取消：未启动子进程 → 独立类别 ABORTED，不伪装成环境性失败
     it('classifies as ABORTED (not environmental) when the run was cancelled', async () => {
         // 真实受管执行在取消态返回 started=false 且退出码为占位值；替身须复刻该形态
@@ -187,7 +192,7 @@ describe('classifyLockfileFailure', () => {
 
             expect(result.category).toBe('ABORTED')
             expect(result.environmental).toBe(false)
-            expect(result.noStderrDiagnostics).toBe(false)
+            expect(result.noDiagnostics).toBe(false)
             expect(result.stderr).toContain('run aborted before diagnosis')
         } finally {
             resetProcessControlState()
@@ -373,7 +378,7 @@ describe('classifyLockfileFailure', () => {
         expect(result.environmental).toBe(true)
         // stderr 仍保留为证据（信号杀死前可能已输出部分诊断）
         expect(result.stderr).toContain('ERR_PNPM_OUTDATED_LOCKFILE')
-        expect(result.noStderrDiagnostics).toBe(false)
+        expect(result.noDiagnostics).toBe(false)
     })
 
     // spawn 级失败（工具链缺失）：无退出码 / 信号 / stderr，errno 是唯一定位信息
@@ -389,7 +394,7 @@ describe('classifyLockfileFailure', () => {
         expect(result.errno).toBe('ENOENT')
         expect(result.exitCode).toBeNull()
         expect(result.signal).toBeNull()
-        expect(result.noStderrDiagnostics).toBe(true)
+        expect(result.noDiagnostics).toBe(true)
     })
 
     it('preserves exit code for a categorized (non-environmental) failure', async () => {
@@ -924,7 +929,7 @@ describe('repairLockfile', () => {
         // 不再只看到裸 `Command failed: …` —— 失败详情显式说明无诊断 + 进程信号
         expect(result.failureDetail).toContain('environmental install failure')
         expect(result.failureDetail).toContain('exit code 1')
-        expect(result.failureDetail).toContain('no stderr diagnostics')
+        expect(result.failureDetail).toContain('no stderr/stdout diagnostics')
     })
 
     it('reports signal + timeout in the environmental failure detail', async () => {
@@ -953,8 +958,8 @@ describe('repairLockfile', () => {
         expect(result.environmental).toBe(true)
         expect(result.failureDetail).toContain('signal SIGKILL')
         // stderr 作为证据保留（不再无条件声称「无诊断」）
-        expect(result.failureDetail).toContain('stderr: ERR_PNPM_BROKEN_LOCKFILE')
-        expect(result.failureDetail).not.toContain('no stderr diagnostics')
+        expect(result.failureDetail).toContain('diagnostics: ERR_PNPM_BROKEN_LOCKFILE')
+        expect(result.failureDetail).not.toContain('no stderr/stdout diagnostics')
     })
 
     it('reports spawn errno when the binary is missing and no stderr is produced', async () => {
@@ -965,7 +970,7 @@ describe('repairLockfile', () => {
 
         expect(result.environmental).toBe(true)
         expect(result.failureDetail).toContain('spawn error ENOENT')
-        expect(result.failureDetail).toContain('no stderr diagnostics')
+        expect(result.failureDetail).toContain('no stderr/stdout diagnostics')
     })
 
     it('records exit code / signal on failed strategy attempts', async () => {
