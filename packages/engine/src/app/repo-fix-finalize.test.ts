@@ -155,4 +155,25 @@ describe('processRepoFix 收尾守卫（零告警跳过）', () => {
         expect(mockVerifyProject).toHaveBeenCalledTimes(1)
         expect(ctx.repoResults[0].verificationPassed).toBe(true)
     })
+
+    it('does not mark lockfileRepaired when the repair was a no-op', async () => {
+        mockFetchRepoAlerts.mockResolvedValue([makeAlert()])
+        mockFetchDefaultBranch.mockResolvedValue('main')
+        mockRunCodeScanningFixes.mockResolvedValue({ fixed: 0, failed: 0 })
+        mockTryLockfileRepair.mockResolvedValue({
+            type: 'lockfile-repair',
+            repository: 'foo/bar',
+            target: 'pnpm-lock.yaml',
+            success: true,
+            noOp: true,
+            durationMs: 1,
+        })
+        mockVerifyProject.mockResolvedValue([])
+        const ctx = makeCtx(workDir)
+
+        await processRepoFix(ctx, null, 'foo/bar')
+
+        expect(mockTryLockfileRepair).toHaveBeenCalledTimes(1)
+        expect(ctx.repoResults[0].lockfileRepaired).toBe(false)
+    })
 })

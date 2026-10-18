@@ -72,6 +72,8 @@ export interface LockfileRepairResult {
     failureDetail?: string
     strategy?: RepairStrategy
     diff?: LockfileDiff | null
+    /** 修复后 lockfile **内容**是否实际改变（不同于行数 / 包数摘要；已合规时为 false）。 */
+    changed?: boolean
     attemptHistory: RepairAttempt[]
     /** 修复后 lockfile 的 lockfileVersion（提取自 pnpm-lock.yaml） */
     lockfileVersion?: string
@@ -548,6 +550,7 @@ export async function repairLockfile(params: RepairLockfileParams): Promise<Lock
         return {
             success: true,
             diff: null,
+            changed: false,
             attemptHistory: attempts,
         }
     }
@@ -624,7 +627,9 @@ export async function repairLockfile(params: RepairLockfileParams): Promise<Lock
 
         if (verify.ret === 0) {
             // 验证通过 → 计算 diff + 格式漂移检测（lockfileVersion 前后对比）
-            const diff = computeLockfileDiff(bakPath, join(workDir_, LOCKFILE_NAME))
+            const lockfilePath = join(workDir_, LOCKFILE_NAME)
+            const diff = computeLockfileDiff(bakPath, lockfilePath)
+            const changed = !filesEqual(bakPath, lockfilePath)
             const afterLockfileVersion = readLockfileVersionOf(workDir_)
             try {
                 rmSync(bakPath)
@@ -635,6 +640,7 @@ export async function repairLockfile(params: RepairLockfileParams): Promise<Lock
                 success: true,
                 strategy,
                 diff,
+                changed,
                 attemptHistory: attempts,
                 lockfileVersion: afterLockfileVersion ?? undefined,
                 lockfileVersionChanged: beforeLockfileVersion !== null
@@ -709,6 +715,15 @@ function truncateTail(text: string, maxLen: number): string {
         return text
     }
     return `…${text.slice(-maxLen)}`
+}
+
+/** 比较两个文件内容是否完全一致（读取失败按「已改变」保守处理）。 */
+function filesEqual(leftPath: string, rightPath: string): boolean {
+    try {
+        return readFileSync(leftPath).equals(readFileSync(rightPath))
+    } catch {
+        return false
+    }
 }
 
 /** 读取当前 lockfile 的 lockfileVersion（文件缺失/读取失败返回 null）。 */

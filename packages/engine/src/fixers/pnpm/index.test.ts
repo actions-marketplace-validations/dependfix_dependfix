@@ -576,6 +576,7 @@ describe('repairLockfile', () => {
         expect(result.success).toBe(true)
         expect(result.strategy).toBeUndefined()
         expect(result.diff).toBeNull()
+        expect(result.changed).toBe(false)
         expect(result.attemptHistory).toHaveLength(0)
     })
 

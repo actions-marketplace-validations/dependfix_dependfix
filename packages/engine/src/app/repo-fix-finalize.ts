@@ -102,7 +102,7 @@ export async function finalizeRepoFix(
     if (progress.alertsCount > 0) {
         const repairAction = await tryLockfileRepair(ctx, repo)
         ctx.allActions.push(repairAction)
-        if (repairAction.success) {
+        if (repairAction.success && !repairAction.noOp) {
             progress.lockfileRepaired = true
         }
     } else {

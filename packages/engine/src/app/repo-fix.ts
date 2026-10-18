@@ -14,7 +14,6 @@ import {
     compareSemver,
     isCrossMajorFixRequired,
     readExistingOverrides,
-    readLockfileVersion,
     readLockfileVersions,
     upgradeDependency,
 } from '../fixers/dependency'
@@ -649,15 +648,32 @@ async function applyGroupUpgrades(
                 continue
             }
 
-            const currentVersion = readLockfileVersion(lockfilePath, alert.packageName)
-            if (currentVersion && compareSemver(currentVersion, alert.recommendedVersion) >= 0) {
-                ctx.logger.info(
-                    `Skipping ${alert.packageName}: highest locked ${currentVersion} >= target ${alert.recommendedVersion} (no upgrade needed; vulnerable lower version may coexist across manifests — global fix not applicable, manual review advised)`,
+            // 收敛判定分三种形态（2026-10-18 cookie-cloudflare undici 实证）：
+            // - 最高实例 >= 目标且全部实例 >= 目标 → 已收敛
+            // - 最高实例 >= 目标但仍有低实例 → 不能算已收敛（低 major / 其它 manifest），
+            //   默认不跨 major 自动覆盖，按人工 review 计
+            // - 最高实例 < 目标 → 走常规升级（no-downgrade 保护只在最高实例已达标时生效）
+            const lockedVersions = readLockfileVersions(lockfilePath, alert.packageName)
+            const highestVersion = lockedVersions.at(-1)
+            if (highestVersion !== undefined && compareSemver(highestVersion, alert.recommendedVersion) >= 0) {
+                const belowTarget = lockedVersions.filter(
+                    (version) => compareSemver(version, alert.recommendedVersion) < 0,
                 )
-                ctx.summary.alertsConverged++
+                if (belowTarget.length === 0) {
+                    ctx.logger.info(
+                        `Skipping ${alert.packageName}: all locked versions ${lockedVersions.join(', ')} >= target ${alert.recommendedVersion} (no upgrade needed)`,
+                    )
+                    ctx.summary.alertsConverged++
+                    continue
+                }
+                ctx.logger.warn(
+                    `Skipping ${alert.packageName}: locked instance(s) ${belowTarget.join(', ')} remain below target ${alert.recommendedVersion} `
+                    + '(lower-major / different manifest instance; cross-major upgrade or manual review required)',
+                )
+                ctx.summary.alertsSkipped++
                 continue
             }
-            if (currentVersion === null) {
+            if (lockedVersions.length === 0) {
                 ctx.logger.warn(
                     `Could not resolve current version of ${alert.packageName} from lockfile — no-downgrade protection inactive`,
                 )

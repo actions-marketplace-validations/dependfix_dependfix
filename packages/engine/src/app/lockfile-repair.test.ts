@@ -66,6 +66,44 @@ describe('tryLockfileRepair', () => {
         expect(action.diff).toBe('lockfile updated: +10 lines (lockfileVersion changed)')
     })
 
+    it('marks noOp when the lockfile was already compliant (changed === false)', async () => {
+        pnpmFixerMock.repairLockfile.mockResolvedValue({
+            success: true,
+            diff: { summary: 'lockfile unchanged', linesChanged: 0, packagesChanged: 0 },
+            changed: false,
+            attemptHistory: [],
+        })
+
+        const action = await tryLockfileRepair({
+            config: { dryRun: false } as AppContext['config'],
+            logger,
+            workDir: '/tmp/work',
+            allErrors: [],
+        }, 'foo/bar')
+
+        expect(action.success).toBe(true)
+        expect(action.noOp).toBe(true)
+    })
+
+    it('does not mark noOp when the repair changed the lockfile', async () => {
+        pnpmFixerMock.repairLockfile.mockResolvedValue({
+            success: true,
+            diff: { summary: 'lockfile updated: +10 lines', linesChanged: 10, packagesChanged: 1 },
+            changed: true,
+            attemptHistory: [],
+        })
+
+        const action = await tryLockfileRepair({
+            config: { dryRun: false } as AppContext['config'],
+            logger,
+            workDir: '/tmp/work',
+            allErrors: [],
+        }, 'foo/bar')
+
+        expect(action.success).toBe(true)
+        expect(action.noOp).toBeUndefined()
+    })
+
     it('returns early success record in dry-run mode', async () => {
         const action = await tryLockfileRepair({
             config: { dryRun: true } as AppContext['config'],
