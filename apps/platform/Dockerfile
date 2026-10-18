@@ -15,7 +15,8 @@ FROM caomeiyouren/alpine-nodejs@sha256:6bf6f219ac051adf9b9e66f0e0dbda561649f5828
 
 FROM caomeiyouren/alpine-nodejs-minimize@sha256:8e71fdc605788175c649be9da5c27fccb1215f60199aded3827bab376c0060a2 AS runtime
 
-# 阶段一：依赖安装（better-sqlite3 在 alpine 需源码编译，临时装工具链）
+# 阶段一：依赖安装（better-sqlite3 在 alpine 需源码编译；工具链仅 deps 阶段临时安装，
+# runtime 阶段另行保留目标仓库原生模块回退所需的最小工具链）
 FROM nodejs AS deps
 WORKDIR /app
 RUN apk add --no-cache python3 make g++ && rm -rf /var/cache/apk/*
@@ -65,7 +66,13 @@ ENV DATABASE_MIGRATIONS_RUN=true
 # 容器工具链（ContainerExecutor 依赖）：git（clone）+ pnpm（install/audit）——
 # unzip：B mode result fetch（ActionResultFetcher unzip artifact）需要
 # git 随 alpine 滚动 index（与 unzip/su-exec 同惯例，实证版本 2.54.0）；可复现性以基础镜像 digest 为基线
-RUN apk add --no-cache unzip git && rm -rf /var/cache/apk/*
+#
+# python3 / make / g++：目标仓库的原生模块（better-sqlite3 / bcrypt / sharp 等）首选下载
+# prebuild 二进制；当预编译包下载失败或目标平台无对应 prebuild 时，install 脚本会回退
+# node-gyp 源码编译。缺少工具链时该回退以 `gyp ERR! find Python` 失败，整次安装被误判为
+# 「静默 exit 1」——stderr 为空、错误文本只写在 stdout。runtime 必须保留最小构建工具链，
+# 与 deps 阶段（平台自身的 better-sqlite3）保持同一口径。
+RUN apk add --no-cache unzip git python3 make g++ && rm -rf /var/cache/apk/*
 # pnpm：从构建链镜像（docker-minifier，完整 nodejs 镜像）拷贝，版本 11.18.0 与构建链一致、
 # 零网络下载保证可复现构建；与 package.json packageManager 声明（pnpm@11.17.0）的 minor 差异
 # 由 toolchainPnpmVersion 验证链处理（backlog C2 已闭环）。pnpm 为自包含 npm 全局包结构。

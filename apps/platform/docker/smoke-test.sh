@@ -63,6 +63,13 @@ fi
 
 docker image inspect "$IMAGE" >/dev/null 2>&1 || fail "镜像不存在：$IMAGE（可设 SMOKE_BUILD=1 本地构建）"
 
+# ── 场景 0：目标仓库原生模块回退编译所需的最小工具链 ─────────────────────────────
+# 单个 `command -v a b c` 在 busybox ash 下部分缺失仍可能 exit 0，必须逐个断言。
+for tool in python3 make g++; do
+    docker run --rm --entrypoint sh "$IMAGE" -c "command -v $tool >/dev/null" || fail "镜像缺少工具链：$tool"
+done
+log "工具链 python3/make/g++ 可用"
+
 # ── 场景 1：正常启动，不注入 DATABASE_MIGRATIONS_RUN（验证镜像级默认）──────────────
 log "场景 1：正常启动（不注入 DATABASE_MIGRATIONS_RUN）"
 docker run -d --name "$CONTAINER" \
