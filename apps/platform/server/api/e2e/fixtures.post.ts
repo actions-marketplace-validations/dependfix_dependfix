@@ -36,7 +36,8 @@ import { summarizeFailureSources } from '#server/services/monitor/build-signals'
  * 幂等策略：
  * - repos 按 owner+name+platform 查重（与 POST /api/repos 唯一性约束一致），已存在则复用 id
  *   标记 created=false（保证 global-setup 重复执行不报错）
- * - scanRuns 每次新建（每次 e2e 跑模拟一次新扫描；与历史 run 共存用于跨次去重断言）
+ * - scanRuns 每次新建（每次 e2e 跑模拟一次新扫描；与历史 run 共存用于跨次去重断言）；
+ *   显式传 `id` 时按主键覆盖写入，不再新增行——视觉套件依赖 global-setup 先 DELETE 保证是新建
  * - scanResults 跟随 scanRun 创建（无需查重，每条都是独立告警）
  * - prChecks 按 (repositoryId, prNumber, headSha) 复合唯一索引查重复用（同 repos 语义；
  *   该写入路径只服务测试——视觉套件需要 pr-checks 页行级基线，见 tests/visual/helpers/fixtures.ts）
@@ -61,6 +62,24 @@ const scanRunSchema = z.object({
     /** 引用 repos 中已存在的仓库（owner/name 组合在 repos 中唯一） */
     repositoryOwner: z.string().min(1),
     repositoryName: z.string().min(1),
+    /**
+     * 主键覆盖（雪花 ID 十六进制串，最长 36）。缺省由 `BaseEntity.setId` 生成。
+     * 运行 ID 以短 ID 形式渲染在运行抽屉与运行详情弹窗上 → 视觉基线需要确定性取值。
+     */
+    id: z.string().min(1).max(36).optional(),
+    /**
+     * 时间戳覆盖。缺省填注入时刻 `now()`；`createdAt` 参与「最近运行」统计与运行列表排序，
+     * `startedAt` / `finishedAt` 渲染在运行列表 / 运行详情弹窗 / 运行抽屉上 → 视觉基线需要确定性取值。
+     * `startedAt` / `finishedAt` 传 `null` 表示显式置空（与「不传走状态默认值」区分）。
+     */
+    createdAt: z.string().optional(),
+    startedAt: z.string().nullable().optional(),
+    finishedAt: z.string().nullable().optional(),
+    /** 执行级错误（写入 `errorJson`；详情弹窗失败横幅据此渲染，与 `failureCode` 同源） */
+    error: z.object({
+        code: z.string().max(64),
+        message: z.string().max(500),
+    }).optional(),
     mode: z.enum(['report-only', 'fix', 'fix-and-pr']).default('report-only'),
     severityThreshold: z.enum(['low', 'medium', 'high', 'critical']).default('high'),
     executorKind: z.enum(['container', 'github-action', 'sandbox']).default('container'),
@@ -76,6 +95,17 @@ const scanRunSchema = z.object({
     failureStage: z.enum(RUN_FAILURE_STAGES).optional(),
     failureKind: z.enum(RUN_FAILURE_KINDS).optional(),
 })
+
+/**
+ * 解析 fixtures 的时间戳覆盖：`undefined`（未传）用调用方给的状态默认值，`null` 显式置空。
+ * 视觉回归基线要求确定性取值（见 `tests/visual/helpers/fixtures.ts`）。
+ */
+const resolveTimestamp = (override: string | null | undefined, fallback: Date | null): Date | null => {
+    if (override === undefined) {
+        return fallback
+    }
+    return override === null ? null : new Date(override)
+}
 
 const scanResultSchema = z.object({
     /** 引用 scanRuns 数组中已创建的 index（0-based） */
@@ -255,15 +285,24 @@ export default defineEventHandler(async (event) => {
             }
             const repositoryId = repo.id
             const now = new Date()
+            const startedAt = resolveTimestamp(sr.startedAt, sr.status === 'pending' ? null : now)
+            const finishedAt = resolveTimestamp(
+                sr.finishedAt,
+                sr.status === 'completed' || sr.status === 'failed' ? now : null,
+            )
             const saved = await runRepo.save(runRepo.create({
+                // id / createdAt 走「传了才覆盖」：缺省交给 BaseEntity 与数据库默认值
+                ...(sr.id ? { id: sr.id } : {}),
+                ...(sr.createdAt ? { createdAt: new Date(sr.createdAt) } : {}),
                 repositoryId,
                 mode: sr.mode,
                 severityThreshold: sr.severityThreshold,
                 executorKind: sr.executorKind,
                 status: sr.status,
-                startedAt: sr.status === 'pending' ? null : now,
-                finishedAt: sr.status === 'completed' || sr.status === 'failed' ? now : null,
+                startedAt,
+                finishedAt,
                 summaryJson: sr.summary ? JSON.stringify(sr.summary) : null,
+                errorJson: sr.error ? JSON.stringify(sr.error) : null,
                 failureCode: sr.failureCode ?? null,
                 failureStage: sr.failureStage ?? null,
                 failureKind: sr.failureKind ?? null,

@@ -1,4 +1,5 @@
 import type { APIRequestContext } from '@playwright/test'
+import type { RunFailureKind, RunFailureStage } from '#server/services/run-failure-classify'
 
 /**
  * e2e fixtures helper：通过 POST /api/e2e/fixtures 注入 server-side fixtures。
@@ -23,11 +24,30 @@ import type { APIRequestContext } from '@playwright/test'
 export interface ScanRunFixture {
     repositoryOwner: string
     repositoryName: string
+    /**
+     * 主键覆盖（雪花 ID 十六进制串）。缺省由 `BaseEntity.setId` 生成；
+     * 视觉回归基线需要确定性的短 ID 文本（运行抽屉 / 运行详情弹窗会渲染它）。
+     */
+    id?: string
+    /**
+     * 时间戳覆盖。缺省由 fixtures 端点填注入时刻 `now()`：`createdAt` 参与运行列表排序与
+     * 「最近运行」统计，`startedAt` / `finishedAt` 渲染在运行列表 / 详情弹窗 / 运行抽屉上。
+     * `startedAt` / `finishedAt` 传 `null` 表示显式置空（与「不传走状态默认值」区分）。
+     */
+    createdAt?: string
+    startedAt?: string | null
+    finishedAt?: string | null
     mode?: 'report-only' | 'fix' | 'fix-and-pr'
     severityThreshold?: 'low' | 'medium' | 'high' | 'critical'
     executorKind?: 'container' | 'github-action' | 'sandbox'
     status?: 'pending' | 'running' | 'completed' | 'failed'
     summary?: { alertsFound: number, alertsFixed: number }
+    /** 执行级错误（写入 `errorJson`；详情弹窗失败横幅据此渲染，与 `failureCode` 同源） */
+    error?: { code: string, message: string }
+    /** 失败分类三列（复用服务端枚举，避免与端点校验的类型漂移） */
+    failureCode?: string
+    failureStage?: RunFailureStage
+    failureKind?: RunFailureKind
 }
 
 export interface ScanResultFixture {

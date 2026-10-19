@@ -165,6 +165,54 @@ describe('POST /api/e2e/fixtures 双门控（todo.md §M22.6）', () => {
         })), 400)
     })
 
+    /**
+     * scanRuns[].id / createdAt / startedAt / finishedAt / error：视觉回归基线要求确定性取值
+     * （时间列与短 ID 文本会入基线），证据链口径见 docs/standards/testing.md §6.7。
+     */
+    it('scanRuns[] 的 id / 时间戳 / error 可显式钉死，缺省仍走默认值', async () => {
+        vi.stubEnv('E2E_TEST', 'true')
+        vi.stubGlobal('useRuntimeConfig', () => ({ encryptionKey: 'test-encryption-key-32-bytes!!', e2eFixturesAllowed: true }))
+        await fixturesPostHandler(makeEvent('POST', '/api/e2e/fixtures', {
+            repos: [{ owner: 'fixture-run', name: 'pinned' }],
+            scanRuns: [
+                {
+                    id: '19a2b3c4d5e6f001',
+                    repositoryOwner: 'fixture-run',
+                    repositoryName: 'pinned',
+                    status: 'failed',
+                    createdAt: '2026-08-23T05:00:00.000Z',
+                    startedAt: '2026-08-23T05:00:00.000Z',
+                    finishedAt: '2026-08-23T05:00:30.000Z',
+                    failureCode: 'ETIMEDOUT',
+                    failureStage: 'clone',
+                    failureKind: 'transient',
+                    error: { code: 'ETIMEDOUT', message: '拉取超时' },
+                },
+                {
+                    repositoryOwner: 'fixture-run',
+                    repositoryName: 'pinned',
+                    status: 'pending',
+                    startedAt: null,
+                },
+            ],
+        }))
+
+        const ds = await ensureDatabaseInitialized()
+        const pinned = await ds.getRepository(ScanRun).findOneByOrFail({ id: '19a2b3c4d5e6f001' })
+        expect(pinned.createdAt.toISOString()).toBe('2026-08-23T05:00:00.000Z')
+        expect(pinned.startedAt?.toISOString()).toBe('2026-08-23T05:00:00.000Z')
+        expect(pinned.finishedAt?.toISOString()).toBe('2026-08-23T05:00:30.000Z')
+        expect(pinned.errorJson).toBe(JSON.stringify({ code: 'ETIMEDOUT', message: '拉取超时' }))
+
+        // 缺省路径：未传 id / createdAt / finishedAt 的运行仍由端点与实体填默认值，
+        // 且 `startedAt: null` 显式置空（与「不传走状态默认值」区分）
+        const defaults = await ds.getRepository(ScanRun).find({ where: { status: 'pending' } })
+        expect(defaults).toHaveLength(1)
+        expect(defaults[0]!.id).not.toBe('')
+        expect(defaults[0]!.startedAt).toBeNull()
+        expect(defaults[0]!.finishedAt).toBeNull()
+    })
+
     it('prChecks 引用未在 repos 载荷中的仓库 → 400', async () => {
         vi.stubEnv('E2E_TEST', 'true')
         vi.stubGlobal('useRuntimeConfig', () => ({ encryptionKey: 'test-encryption-key-32-bytes!!', e2eFixturesAllowed: true }))
