@@ -276,6 +276,153 @@ describe('ActionStatusMonitor', () => {
         })
     })
 
+    describe('关注集（聚合 / 告警层过滤）', () => {
+        const withFocus = (focus: unknown) => {
+            repoFind.mockResolvedValue([{
+                id: 'repo-1',
+                owner: 'octocat',
+                name: 'hello-world',
+                credentialId: null,
+                prCheckFocus: JSON.stringify(focus),
+            }])
+        }
+
+        it('未配置关注集：派生字段逐字节沿用快照值（即使与 signals 派生态冲突）', async () => {
+            // 等价性护栏：快照的 5 个派生字段全部与「由 signals 重新派生」的结果不同——
+            // 若实现把未配置路径也改为重新派生，本用例必须失败（mutation 标定点）
+            vi.mocked(mockSource.fetchSnapshots).mockResolvedValue([
+                makeSnapshot({
+                    conclusion: 'action_required',
+                    overallStatus: 'pending',
+                    checkRunId: 'snapshot-run-id',
+                    errorMessage: 'snapshot-error',
+                    signals: [
+                        makeSignal({
+                            name: 'Lint',
+                            state: 'failure',
+                            rawState: 'failure',
+                            summary: 'lint failed',
+                            sourceId: '9001',
+                        }),
+                    ],
+                }),
+            ])
+
+            await monitor.pollOnce({ organizationId: 'org-1' })
+            const saved = prCheckSave.mock.calls[0]?.[0]
+            expect(saved.conclusion).toBe('action_required')
+            expect(saved.overallStatus).toBe('pending')
+            expect(saved.checkRunId).toBe('snapshot-run-id')
+            expect(saved.errorMessage).toBe('snapshot-error')
+            // 失败源清单仍来自信号（未配置时即全量信号）
+            expect(JSON.parse(saved.failureSourcesJson)).toEqual([
+                { provider: 'github-actions', name: 'Lint', kind: 'check' },
+            ])
+        })
+
+        it('命中项全为 success：未关注的 failure 不触发告警，但全量信号仍落库', async () => {
+            withFocus({ names: ['Test'] })
+            vi.mocked(mockSource.fetchSnapshots).mockResolvedValue([
+                makeSnapshot({
+                    // 快照侧仍按全量信号派生 failure —— 监控器须以关注面覆盖
+                    conclusion: 'failure',
+                    overallStatus: 'failure',
+                    errorMessage: 'lint failed',
+                    signals: [
+                        makeSignal({ name: 'Test', state: 'success', rawState: 'success', sourceId: '9001' }),
+                        makeSignal({
+                            name: 'Lint',
+                            state: 'failure',
+                            rawState: 'failure',
+                            summary: 'lint failed',
+                            sourceId: '9002',
+                        }),
+                    ],
+                }),
+            ])
+
+            await monitor.pollOnce({ organizationId: 'org-1' })
+            const saved = prCheckSave.mock.calls[0]?.[0]
+            expect(saved.overallStatus).toBe('success')
+            expect(saved.conclusion).toBe('success')
+            expect(saved.alertFiring).toBe(false)
+            // 审计面：未关注信号仍全量落库
+            expect(JSON.parse(saved.signalsJson)).toHaveLength(2)
+            expect(JSON.parse(saved.failureSourcesJson)).toEqual([])
+            // 代表字段与告警同源（取关注面，而非未关注信号）
+            expect(saved.checkRunId).toBe('9001')
+            expect(saved.errorMessage).toBeNull()
+        })
+
+        it('命中项失败：聚合 / 结论 / 失败源 / 代表字段均取关注面（保留 timed_out 粒度）', async () => {
+            withFocus({ providers: ['GitHub-Actions'], names: ['test'], kinds: ['check'] })
+            vi.mocked(mockSource.fetchSnapshots).mockResolvedValue([
+                makeSnapshot({
+                    conclusion: 'success',
+                    overallStatus: 'success',
+                    signals: [
+                        makeSignal({
+                            name: 'Test',
+                            state: 'failure',
+                            rawState: 'timed_out',
+                            summary: 'Test timed out',
+                            sourceId: '9001',
+                        }),
+                        makeSignal({
+                            kind: 'deployment',
+                            provider: 'vercel',
+                            name: 'Preview',
+                            state: 'failure',
+                            rawState: 'failure',
+                            summary: 'Deployment failed',
+                            sourceId: '5001',
+                        }),
+                    ],
+                }),
+            ])
+
+            await monitor.pollOnce({ organizationId: 'org-1' })
+            const saved = prCheckSave.mock.calls[0]?.[0]
+            expect(saved.overallStatus).toBe('failure')
+            expect(saved.conclusion).toBe('timed_out')
+            expect(saved.alertFiring).toBe(true)
+            expect(JSON.parse(saved.failureSourcesJson)).toEqual([
+                { provider: 'github-actions', name: 'Test', kind: 'check' },
+            ])
+            expect(saved.errorMessage).toBe('Test timed out')
+        })
+
+        it('关注面零命中：按空集聚合为 success 并自动 ack，历史未关注失败仍可审计', async () => {
+            withFocus({ names: ['Missing'] })
+            prCheckFindOne.mockResolvedValue({
+                id: 'existing-1',
+                repositoryId: 'repo-1',
+                prNumber: 42,
+                headSha: 'a'.repeat(40),
+                alertFiring: true,
+                acknowledgedAt: new Date('2026-09-01T00:00:00Z'),
+                acknowledgedByUserId: 'user-1',
+                conclusion: 'failure',
+            })
+            vi.mocked(mockSource.fetchSnapshots).mockResolvedValue([
+                makeSnapshot({
+                    conclusion: 'failure',
+                    overallStatus: 'failure',
+                    signals: [makeSignal({ name: 'Lint', state: 'failure', rawState: 'failure' })],
+                }),
+            ])
+
+            await monitor.pollOnce({ organizationId: 'org-1' })
+            const saved = prCheckSave.mock.calls[0]?.[0]
+            expect(saved.overallStatus).toBe('success')
+            expect(saved.conclusion).toBe('success')
+            expect(saved.alertFiring).toBe(false)
+            expect(saved.acknowledgedAt).toBeNull()
+            expect(JSON.parse(saved.signalsJson)).toHaveLength(1)
+            expect(JSON.parse(saved.failureSourcesJson)).toEqual([])
+        })
+    })
+
     describe('终态节流（M43.2b 承接项）', () => {
         it('终态 + 静默窗口内 → 传入 knownTerminalHeads（采集层据此跳过）', async () => {
             prCheckFind.mockResolvedValue([

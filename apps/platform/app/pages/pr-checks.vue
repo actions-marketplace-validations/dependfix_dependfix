@@ -34,6 +34,8 @@ interface PRCheckSignalView {
     logUrl: string | null
     summary: string | null
     observedAt: string
+    /** 是否命中仓库关注集（未配置时恒 true；false = 未关注，不参与聚合 / 告警） */
+    focused: boolean
 }
 
 /** 失败源条目（服务端 JSON 列解析） */
@@ -58,6 +60,8 @@ interface PRCheckView {
     signals: PRCheckSignalView[] | null
     /** 失败源清单（null = 未采集 / 无失败源） */
     failureSources: PRCheckFailureSourceView[] | null
+    /** 该仓库是否配置了关注集（false = 全量告警；true = 只有命中信号参与告警） */
+    focusConfigured: boolean
     checkRunId: string | null
     detailsUrl: string | null
     errorMessage: string | null
@@ -468,6 +472,12 @@ const handleAck = async (row: PRCheckView) => {
                                 <CaomeiTag :tone="signalStateTone(row.overallStatus ?? 'neutral')">
                                     {{ signalStateLabel(row.overallStatus ?? 'neutral') }}
                                 </CaomeiTag>
+                                <CaomeiTag
+                                    v-if="row.focusConfigured"
+                                    tone="neutral"
+                                >
+                                    {{ t('prChecks.focusConfigured') }}
+                                </CaomeiTag>
                                 <template v-if="row.failureSources?.length">
                                     <span class="pr-checks__signals-label">{{ t('prChecks.signalsFailureSources') }}</span>
                                     <span class="pr-checks__signals-sources">
@@ -503,6 +513,12 @@ const handleAck = async (row: PRCheckView) => {
                                 </CaomeiTag>
                                 <CaomeiTag :tone="signalStateTone(signal.state)">
                                     {{ signalStateLabel(signal.state) }}
+                                </CaomeiTag>
+                                <CaomeiTag
+                                    v-if="row.focusConfigured && !signal.focused"
+                                    tone="neutral"
+                                >
+                                    {{ t('prChecks.signalIgnored') }}
                                 </CaomeiTag>
                                 <span class="pr-checks__signal-provider">{{ signal.provider }}</span>
                                 <span class="pr-checks__signal-name">{{ signal.name }}</span>

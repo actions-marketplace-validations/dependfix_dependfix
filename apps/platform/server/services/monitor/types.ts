@@ -13,6 +13,10 @@ import type { PRCheckConclusion } from '#server/entities/pr-check'
  * - 快照包含足够信息支持 PRCheck 实体 INSERT/UPDATE 幂等
  * - 不暴露 Octokit / HTTP 细节给上游（监控器只关心快照语义）
  *
+ * 派生字段归属：快照携带的 `conclusion` / `overallStatus` / `checkRunId` / `errorMessage` 是
+ * **按全量信号**派生的参考值；实现方（新 SyncSource）必须一并填充 `signals`——当仓库配置了
+ * PR Check 关注集时，监控器会**忽略这些参考值并从 `signals` 重新派生**（见 `action-status-monitor.ts`）。
+ *
  * 注意：快照层抽象掉"status='in_progress' → 落 conclusion='pending'"等 GitHub 协议
  * 细节（GitHub 官方 schema: status enum 不含 'stale'，conclusion enum 不含 'stale'/'pending'），
  * 由具体 SyncSource 实现做映射（PollingSource 内部落地）。

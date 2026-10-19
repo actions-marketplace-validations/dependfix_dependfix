@@ -137,6 +137,19 @@
         "fieldVerifyCommands": "Custom verification commands",
         "fieldVerifyCommandsPlaceholder": "One per line, e.g.:\npnpm install --frozen-lockfile\npnpm lint\npnpm test",
         "fieldVerifyCommandsHint": "Leave empty to use the engine default chain (install / lint / build / typecheck / test); custom commands run as-is (script existence is not checked). Only admin / org_admin can edit, and changes are recorded as audit events",
+        "fieldPrCheckFocus": "PR Check focus set",
+        "fieldPrCheckFocusProviders": "Focused providers (comma separated)",
+        "fieldPrCheckFocusProvidersPlaceholder": "e.g. github-actions, vercel",
+        "fieldPrCheckFocusNames": "Focused check names (comma separated)",
+        "fieldPrCheckFocusNamesPlaceholder": "e.g. Test, Preview",
+        "fieldPrCheckFocusKinds": "Focused source kinds",
+        "fieldPrCheckFocusKindsPlaceholder": "Leave empty for all source kinds",
+        "fieldPrCheckFocusHint": "Only signals matching the focus set take part in PR Check alerts; unmatched signals are still collected and shown in the expanded row. Values within a field are OR-ed, fields are AND-ed, an empty field means no restriction; all three empty = disabled (alert on everything).",
+        "focusKind": {
+            "check": "Check",
+            "status": "Status",
+            "deployment": "Deployment"
+        },
         "fieldNote": "Note",
         "fieldTags": "Tags",
         "fieldTagsPlaceholder": "Type a tag and press Enter (e.g. frontend / critical), used for schedule tag selection",
@@ -571,7 +584,9 @@
             "error": "Error",
             "neutral": "Neutral",
             "skipped": "Skipped"
-        }
+        },
+        "focusConfigured": "Focus set active",
+        "signalIgnored": "Not focused"
     },
     "envEvents": {
         "title": "Env Events",

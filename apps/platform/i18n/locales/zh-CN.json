@@ -137,6 +137,19 @@
         "fieldVerifyCommands": "自定义验证命令",
         "fieldVerifyCommandsPlaceholder": "一行一条，如：\npnpm install --frozen-lockfile\npnpm lint\npnpm test",
         "fieldVerifyCommandsHint": "留空使用引擎默认验证链（install / lint / build / typecheck / test）；自定义命令会原样执行（不校验脚本是否存在），仅 admin / org_admin 可修改，变更会记录审计事件",
+        "fieldPrCheckFocus": "PR Check 关注集",
+        "fieldPrCheckFocusProviders": "关注 provider（逗号分隔）",
+        "fieldPrCheckFocusProvidersPlaceholder": "如 github-actions, vercel",
+        "fieldPrCheckFocusNames": "关注 check 名（逗号分隔）",
+        "fieldPrCheckFocusNamesPlaceholder": "如 Test, Preview",
+        "fieldPrCheckFocusKinds": "关注来源类型",
+        "fieldPrCheckFocusKindsPlaceholder": "留空 = 不限来源类型",
+        "fieldPrCheckFocusHint": "只有命中关注集的信号参与 PR Check 告警；未命中的信号仍会采集，并可在展开行查看。维度内为 OR、维度间为 AND，留空维度不限；三项全空 = 不启用（全量告警）。",
+        "focusKind": {
+            "check": "Check",
+            "status": "Status",
+            "deployment": "部署"
+        },
         "fieldNote": "备注",
         "fieldTags": "标签",
         "fieldTagsPlaceholder": "输入标签后回车（如 frontend / critical），用于定时计划按标签选择",
@@ -571,7 +584,9 @@
             "error": "错误",
             "neutral": "中性",
             "skipped": "已跳过"
-        }
+        },
+        "focusConfigured": "关注集生效",
+        "signalIgnored": "未关注"
     },
     "envEvents": {
         "title": "环境事件",

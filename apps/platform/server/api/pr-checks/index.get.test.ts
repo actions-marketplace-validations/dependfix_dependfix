@@ -164,6 +164,138 @@ describe('GET /api/pr-checks', () => {
         expect(target.failureSources).toEqual([{ provider: 'vercel', name: 'Preview', kind: 'deployment' }])
     })
 
+    it('未配置关注集：focusConfigured=false 且所有信号 focused=true（现状不变）', async () => {
+        const list = await call(`/api/pr-checks?repositoryId=${repositoryId}`) as {
+            prNumber: number
+            focusConfigured: boolean
+            signals: { focused: boolean }[] | null
+        }[]
+        const target = list.find((r) => r.prNumber === 9)!
+        expect(target.focusConfigured).toBe(false)
+        expect(target.signals?.every((signal) => signal.focused)).toBe(true)
+    })
+
+    it('已配置关注集：未命中的信号仍返回并标注 focused=false（审计面）', async () => {
+        const ds = await ensureDatabaseInitialized()
+        const repositoryRepo = ds.getRepository(Repository)
+        const repoRow = await repositoryRepo.findOne({ where: { id: repositoryId } })
+        expect(repoRow).not.toBeNull()
+        repoRow!.prCheckFocus = JSON.stringify({ names: ['Test'] })
+        await repositoryRepo.save(repoRow!)
+
+        try {
+            const prRepo = ds.getRepository(PRCheck)
+            await prRepo.save(prRepo.create({
+                repositoryId,
+                prNumber: 12,
+                headSha: '0'.repeat(40),
+                authorLogin: 'dependfix[bot]',
+                conclusion: 'success',
+                signalsJson: JSON.stringify([
+                    {
+                        kind: 'check',
+                        provider: 'github-actions',
+                        name: 'Test',
+                        state: 'success',
+                        rawState: 'success',
+                        sourceId: '7001',
+                        targetUrl: null,
+                        logUrl: null,
+                        summary: null,
+                        observedAt: '2026-09-07T00:00:00.000Z',
+                    },
+                    {
+                        kind: 'check',
+                        provider: 'github-actions',
+                        name: 'Lint',
+                        state: 'failure',
+                        rawState: 'failure',
+                        sourceId: '7002',
+                        targetUrl: null,
+                        logUrl: null,
+                        summary: 'lint failed',
+                        observedAt: '2026-09-07T00:00:00.000Z',
+                    },
+                ]),
+                overallStatus: 'success',
+                failureSourcesJson: '[]',
+                alertFiring: false,
+                acknowledgedAt: null,
+                acknowledgedByUserId: null,
+                lastPolledAt: new Date('2026-09-07T00:00:00Z'),
+            }))
+
+            const list = await call(`/api/pr-checks?repositoryId=${repositoryId}`) as {
+                prNumber: number
+                focusConfigured: boolean
+                signals: { name: string, focused: boolean }[] | null
+            }[]
+            const target = list.find((r) => r.prNumber === 12)!
+            expect(target.focusConfigured).toBe(true)
+            expect(target.signals).toEqual([
+                expect.objectContaining({ name: 'Test', focused: true }),
+                expect.objectContaining({ name: 'Lint', focused: false }),
+            ])
+        } finally {
+            repoRow!.prCheckFocus = null
+            await repositoryRepo.save(repoRow!)
+        }
+    })
+
+    it('signals 合法数组含脏元素：丢弃非对象元素，字段缺失元素按未关注处理且不抛错', async () => {
+        const ds = await ensureDatabaseInitialized()
+        const repositoryRepo = ds.getRepository(Repository)
+        const repoRow = await repositoryRepo.findOne({ where: { id: repositoryId } })
+        repoRow!.prCheckFocus = JSON.stringify({ names: ['Test'] })
+        await repositoryRepo.save(repoRow!)
+
+        try {
+            const prRepo = ds.getRepository(PRCheck)
+            await prRepo.save(prRepo.create({
+                repositoryId,
+                prNumber: 13,
+                headSha: '1'.repeat(40),
+                authorLogin: 'dependfix[bot]',
+                conclusion: 'success',
+                // 第 2 项为非对象脏元素（应丢弃）；第 3 项缺 name / provider（按未关注处理）
+                signalsJson: JSON.stringify([
+                    {
+                        kind: 'check',
+                        provider: 'github-actions',
+                        name: 'Test',
+                        state: 'success',
+                        rawState: 'success',
+                        sourceId: '7003',
+                        targetUrl: null,
+                        logUrl: null,
+                        summary: null,
+                        observedAt: '2026-09-08T00:00:00.000Z',
+                    },
+                    null,
+                    { kind: 'check' },
+                ]),
+                overallStatus: 'success',
+                failureSourcesJson: '[]',
+                alertFiring: false,
+                acknowledgedAt: null,
+                acknowledgedByUserId: null,
+                lastPolledAt: new Date('2026-09-08T00:00:00Z'),
+            }))
+
+            const list = await call(`/api/pr-checks?repositoryId=${repositoryId}`) as {
+                prNumber: number
+                signals: { name?: string, focused: boolean }[] | null
+            }[]
+            const target = list.find((r) => r.prNumber === 13)!
+            expect(target.signals).toHaveLength(2)
+            expect(target.signals?.[0]).toEqual(expect.objectContaining({ name: 'Test', focused: true }))
+            expect(target.signals?.[1]).toEqual(expect.objectContaining({ focused: false }))
+        } finally {
+            repoRow!.prCheckFocus = null
+            await repositoryRepo.save(repoRow!)
+        }
+    })
+
     it('JSON 列损坏 / 缺失时回退 null（不抛错）', async () => {
         const ds = await ensureDatabaseInitialized()
         const repo = ds.getRepository(PRCheck)
