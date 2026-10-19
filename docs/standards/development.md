@@ -100,6 +100,10 @@
 
 - **5.1.44 引擎内长命令必须异步执行且可被运行级取消（hard requirement）**：安装 / 锁文件修复 / 验证一类**长命令**不得使用同步子进程 API（`execSync` / `execFileSync`）——引擎与平台同进程运行，同步调用会阻塞事件循环，使平台执行超时定时器与队列锁续期一起停摆，且无法在取消时终止子进程树。**做法**：统一走受管异步执行（`packages/engine/src/runners/process-control.ts`），命令启动前检查取消状态（已取消则不启动、返回 `started: false`），运行级取消按**进程树**终止在跑子进程；超时/取消后不得交付（跳过提交与 PR），且中止结果须以独立类别上报（不伪装成"环境性失败"）。**证据要求**：声明"已超时 / 已取消"前须有子进程真正终止的证据，仅 `Promise.race` 放弃等待不算完成（放弃等待后引擎会继续运行并与后续任务争抢资源）。**覆盖边界**：短命令（版本探测 / 仓库状态查询）与交付类同步调用（`git push` / `git commit`）不在本条范围（后者仍会阻塞事件循环，见 §8.5）。契约与资源口径见 [executor-process-isolation.md §8](../design/governance/executor-process-isolation.md#_8-执行超时与运行级取消-2026-10-17)。
 
+- **5.1.45 新增 / 修改 JSON 配置列时的写入闸门：宽容输入 + strict 拒绝未知键（hard requirement）**：新增或修改仓库级 / 组织级 JSON 配置列（如 `prCheckFocus`）时，其 Zod 校验必须同时满足两侧——① **输入宽容**：条目先 `trim`（枚举值再收敛到合法取值），重复项交由规范化去重，不因用户多打空格 / 重复选择返回 400；② **未知键拒绝**：对象加 `.strict()`，未知维度直接 400，避免 Zod 默认 strip 造成「配了但静默不生效」。校验常量（上限 / 长度 / 枚举）与规范化实现共用同一组导出常量（单一事实源）；读取侧保持容错（脏数据回退默认、不抛错），元素级脏数据按「非命中」处理而非解引用抛错。实例：`Repository.prCheckFocus`（`schemas/repository.ts` ↔ `utils/pr-check-focus.ts`）。**存量列不追溯**：`tags` / `sandboxLimits` 等既有列尚未满足 `.strict()` / 常量共用，缺口已登记 backlog 候选，不在本批追溯（避免条款落地即宣布既有实现违规）。
+- **5.1.46 新增「配置生效」分支时必须为旧路径提供逐字段等价护栏（hard requirement）**：聚合 / 派生逻辑引入「已配置走新路径、未配置沿用旧值」双路径时，须补一条**逐字段冲突**用例——把快照的每个派生字段都设为与「从信号重新派生」不同的值，断言存储结果等于快照原值。只覆盖其中一个字段会让其余分支的 mutant 存活；逐字段冲突才能保证任一分支被改成派生态时必然失败。实例：`ActionStatusMonitor.applyOne` 的 `overallStatus` / `checkRunId` / `errorMessage` / `conclusion`。
+- **5.1.47 进程失败证据必须「原文回退 + 信号渲染 + 就地留痕」（hard requirement）**：读取子进程失败时不得只读 stderr——超时 / 被信号杀死时 stderr 可能为空，`err.message`（如 `spawnSync ... ETIMEDOUT`）才是唯一证据；统一按「原始 stderr（非空时）→ stdout（非空时）→ `err.message`」回退（pnpm 11 的安装错误常写 stdout；仅读 stderr 会把「原生构建失败」读成空证据），并渲染 signal / exit code / spawn errno / timed-out 形态；不同读取器若优先级不同（如验证链以 `errorMessage` 优先），须在该读取器旁写明差异，不用「统一」覆盖两种语义。携带执行超时的执行器（平台 `withTimeout`）截断时拿到的是**早于引擎收尾**的日志快照，失败原因必须**在失败发生点**写日志，不得只依赖运行结束时的汇总输出。
+
 ## 6. 样式规范（平台阶段适用）
 
 - **纯 SCSS**：禁止 CSS-in-JS、Tailwind；优先复用全局变量（Variables）与混合宏（Mixins）。
