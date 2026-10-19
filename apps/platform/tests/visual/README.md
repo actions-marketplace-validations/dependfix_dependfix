@@ -74,6 +74,38 @@
 - `alerts`：1440 视口下表格容器横向溢出（`clientWidth 1166 < scrollWidth 1318`），整页基线只覆盖可视区左端；最右 `链接` / `详情` 两列由 `alerts-right-<theme>.png` 覆盖（M33.5：容器横向滚到最右后的元素级补拍，仅改容器内部滚动位置，不动 viewport / 阈值 / 列宽）。
 - 弹窗内浮层（M34.3）：`dialog-select-open-<theme>.png` 覆盖弹窗内 Select **展开态**（light / dark 各一张）。用**视口级**截图而非元素级 / 整页——门户面板挂在 body、不在弹窗子树内（元素级取不到），整页截图又会把 fixed 定位的遮罩与面板混进拼接；截图前另断言「面板不是弹窗后代」，防止面板未挂载时基线被落成缺面板形态。
 - 三个页面仅取亮色（`pr-checks` / `dialog-import-repos` / `login`），明暗两态仅覆盖 `alerts` / `repos` / `dialog-select-open`（后者因门户面板与遮罩存在叠色，分主题采基线）。
+- **浮层落点页（M45.5，light 4 张 + dark 1 张）**——均按视口级截图覆盖「页面 + 遮罩 + 浮层」的合成结果：
+  - `schedules-form-layer-<theme>.png`：定时计划「新建计划」弹窗 + 业务类型 Select 的**门户面板展开态**。表单的 cron 预览是「当前时刻 + cron」派生值（逐日/逐周变化），已在 `schedules.vue` 标 `data-visual-mask`（遮蔽块入基线）；其余字段与提示文案静态。
+  - `scans-run-detail-light.png`：`/scans?run=` 深链触发的 `repo-history-dialog`（`scans.vue` 唯一弹窗落点）。该视图**不渲染运行元信息块**（id / 时间 / 时长），内容主体是结果表——故运行 ID 与时间戳不是本基线的检查面，时间列由底图运行列表覆盖。
+  - `alerts-run-drawer-light.png`：`alert-run-sidebar` 的 `CaomeiDrawer` 展开态（右侧滑入面板 + 遮罩）。
+  - `pr-checks-toast-light.png`：`CaomeiToastProvider` 的门户轻提示，由「立即检查」在监测未启用时触发（视觉环境未设 `ACTION_STATUS_MONITOR_ENABLED` → 端点返回 `skipped`，**不触网、不改库**，故可与其它用例同批串行）。
+
+### 数据集的确定性取值（新增基线的前置）
+
+凡是会进入画面的**运行时派生值**，必须在 fixtures 一侧钉死，否则基线逐次漂移：
+
+| 取值 | 缺省行为 | 处置 |
+| :--- | :--- | :--- |
+| `ScanRun.id` | `BaseEntity` 雪花 ID（每次注入不同） | fixtures 可选 `id` 显式钉死；短 ID 会渲染在运行抽屉 / 运行详情弹窗上 |
+| `ScanRun.createdAt` | `@CreateDateColumn`（注入时刻） | 可选 `createdAt`；影响运行列表排序与「最近扫描」统计卡 |
+| `ScanRun.startedAt` / `finishedAt` | 端点填注入时刻 `now()` | 可选覆盖（`null` = 显式置空，与「不传走状态默认值」区分）；渲染在运行列表 / 运行抽屉的时间与时长列 |
+| `ScanRun.summaryJson` / `errorJson` | 可缺省 | 可选 `summary` / `error`；失败运行的详情横幅据此渲染 |
+| 瞬时时刻（cron 预览、`now()` 派生文案） | 随运行时刻变化 | 页面侧 `data-visual-mask` 遮蔽（加遮蔽必须重生成基线） |
+
+用例侧以 `pinnedRunId(index)` 读取钉死取值并 **fail-fast**：fixtures 被改动去掉 `id` 时用例直接失败，而不是静默产出一张不可复现的基线。
+
+### 已知盲区（本轮未覆盖，登记观察项）
+
+- **运行失败「受约束重试入口」+ 二次确认层**（M45.4 的 `run-detail-dialog` + `CaomeiConfirmDialog`）：只挂在 `alerts` 页，且需要「告警 → `transient` 失败运行」链路；现有视觉数据集的告警只指向已完成运行，补齐会连带重建 `alerts` 基线（改动面超出视觉扩面条目）→ 待该链路有独立需求时再覆盖。
+- `scans` 的 Tabs 切换态（按仓库聚合视图）与 `schedules` 列表行（视觉库不注入定时计划 fixtures，仅覆盖空态 + 表单浮层）。
+- Toast 的其余 tone（success / danger）与「自动消失」时序。
+
+## 顺序约束：M45.6（PR Check 告警关注集）尚未落地
+
+本轮新增基线建立在「M45.5 先于 M45.6 执行」的决策上（`docs/plan/todo.md` §M45.5 风险 R4 已按此登记）。
+M45.6 会触及平台配置页 / 表单：若其改动落在 `schedules` / `scans` / `alerts` 的可见结构或文案上，
+须按 [测试规范 §6.7](../../../../docs/standards/testing.md) 「改动页面即需重建其基线」连带重建受影响基线，
+并**不带 update 连跑两遍**复核。
 
 ## 不做什么
 
