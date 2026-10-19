@@ -1,6 +1,6 @@
 # PR 构建与部署信号采集设计（设计先行稿）
 
-> **状态**：✅ 已上收 **M43.2**（2026-10-12 用户决策方案 A）——契约与数据模型作为实现依据；**§5 决策点已于 2026-10-12 裁定**（D1 = Option A 扩展 `PRCheck` / D2 = 不做日志富化 / D3 = 全量只报警不阻断 / D4 = 本批不涉及）；按 §7 拆分子任务推进：**M43.2a 采集层已闭环（2026-10-12，见 [§3.7](#37-实现期细化m432a2026-10-12)）**、**M43.2b 持久化与 API 已闭环（2026-10-13，见 [§3.8](#38-m432b-落地持久化与-api2026-10-13)）**，M43.2c 待推进。
+> **状态**：✅ 已上收 **M43.2**（2026-10-12 用户决策方案 A）——契约与数据模型作为实现依据；**§5 决策点已于 2026-10-12 裁定**（D1 = Option A 扩展 `PRCheck` / D2 = 不做日志富化 / D3 = 全量只报警不阻断 / D4 = 本批不涉及）；按 §7 拆分子任务推进：**M43.2a 采集层已闭环（2026-10-12，见 [§3.7](#37-实现期细化m432a2026-10-12)）**、**M43.2b 持久化与 API 已闭环（2026-10-13，见 [§3.8](#38-m432b-落地持久化与-api2026-10-13)）**，M43.2c 待推进。**§9 告警关注集已随 M45.6 落地（2026-10-19）**——在 §5 D3「不引入配置面」之上增量引入仓库级白名单（只降噪，不改阻断语义）。
 > **范围**：`apps/platform`（PR Check 采集 / 聚合 / 展示）+ 可选 provider 日志富化；不改引擎修复与验证逻辑。
 > **目标**：把「修复 PR 的构建 / 部署错误」从单一 `Test` check 扩展为多源聚合，第一时间发现 CI 与预览部署失败。
 > **关联**：[定时扫描与批量处理设计](./platform-scheduled-batch.md)、[运行失败分类与筛选设计](./run-failure-taxonomy.md)、[平台规范](../../standards/platform.md)、`apps/platform/server/services/monitor/`
@@ -184,7 +184,7 @@ interface UnifiedBuildSignal {
 |:---|:---|:---|
 | D1 | 数据模型 | **Option A**（扩展 `PRCheck` 三列；`conclusion` 保留为最坏派生态） |
 | D2 | 日志富化是否首批 | **不做**（留后续增量 / backlog；Layer 5 不在本批） |
-| D3 | 「阻断关注集」配置形态 | **全量只报警不阻断**（任一归一化信号失败即 firing，不引入配置面） |
+| D3 | 「阻断关注集」配置形态 | **全量只报警不阻断**（任一归一化信号失败即 firing，不引入配置面）；**M45.6（2026-10-19）增量**：仓库级白名单「关注集」只降噪（见 §9），不改本条阻断语义 |
 | D4 | provider 凭据承载 | **本批不涉及**（与 D2 联动） |
 
 ## 6. 风险与缓解
@@ -194,7 +194,7 @@ interface UnifiedBuildSignal {
 | 限流（每 PR 3+ API × N 轮） | 增量轮询 + 终态跳过 + 现成退避 |
 | provider 未装 GitHub 集成 → 无信号 | 显式声明边界（不臆造）；provider adapter 兜底 |
 | check run 无原始日志 | Layer 5 provider adapter |
-| 多源 check 噪音 | 「关注集」配置（D3），默认全量只报警不阻断 |
+| 多源 check 噪音 | 「关注集」配置（D3 原裁定 = 默认全量只报警不阻断；M45.6 落地为仓库级白名单，见 §9） |
 | `stale` / fork / 权限 | 归一化显式映射，fail-open（单源失败不阻断其它源） |
 | 非标准响应形态产出伪信号 | 三源均过滤无 `id` 条目（§3.7 实测失效模式） |
 
@@ -204,6 +204,7 @@ interface UnifiedBuildSignal {
 2. **M43.2b 持久化与 API**：`PRCheck` 扩展三列 + migration + 监控器落库（含终态静默窗口跳过）+ `GET /api/pr-checks` 视图字段 + 单测（✅ 2026-10-13）。
 3. **M43.2c UI 展示**：`pr-checks` 多源详情（失败源清单 + 各信号状态 / 链接）+ i18n + e2e + 视觉基线。
 4. **日志富化（可选）**：provider adapter（Vercel 先行）—— 后续增量（D2 裁定本批不做）。
+5. **告警关注集（M45.6，2026-10-19）**：仓库级白名单 + 聚合 / 告警层过滤 + 未关注信号标注（见 §9）。
 
 ## 8. 验收标准
 
@@ -212,8 +213,69 @@ interface UnifiedBuildSignal {
 - [x] Vercel / Cloudflare / 其它 provider 无需额外代码即可识别（`nock` 夹具覆盖三类 `app.slug` / `context`）（M43.2a）。
 - [x] 轮询幂等：同 `headSha` 重跑不重复入库（M43.2b：`(repositoryId, prNumber, headSha)` 唯一索引 + 幂等 UPDATE 用例）。
 - [x] 无 Deployments / 无 status 的仓库不报错（fail-open）（M43.2a）。
+- [x] 未配置关注集时行为与现状完全一致；已配置时只有命中信号进入告警面，未命中信号仍全量落库并可在 UI 查看（M45.6，§9）。
 
-## 9. 关联文档
+## 9. 告警关注集（M45.6，2026-10-19）
+
+> 在 §5 D3「全量只报警不阻断」之上**增量引入仓库级白名单**：只降噪，不改阻断语义（见 §5 D3 行的 M45.6 注记）。
+
+**目标**：让「非关注 check（provider lint-only / preview 构建等）失败」不再进入告警面以降低噪音，同时保持与「全量只报警不阻断」的兼容边界清晰。
+
+**数据形态**：`Repository.prCheckFocus`（text JSON；`null` = 未配置 = 现状）。
+`{ providers?: string[], names?: string[], kinds?: ('check'|'status'|'deployment')[] }`。
+迁移 `AddRepositoryPrCheckFocus2500000000000` 幂等 + 前缀感知加列；存量行 NULL 即「未配置」。
+
+**匹配语义**（单一事实源 `apps/platform/server/utils/pr-check-focus.ts`）：
+
+| 维度 | 取值来源 | 归一化 |
+| :--- | :--- | :--- |
+| `providers` | `check_run.app.slug` / commit status context 前缀 / deployment `creator.login` | trim + 小写 + 大小写不敏感去重 |
+| `names` | check 名 / commit status context / deployment environment | trim + 大小写不敏感去重（保留原始写法） |
+| `kinds` | 信号来源类型（`check` / `status` / `deployment`） | 收敛到枚举，非法值丢弃 |
+
+- 维度内取并集（OR）、维度间取交集（AND）、**空维度不限制**；三维全空等价于未配置。
+- 比较为大小写不敏感的**精确匹配**（不做通配 / 子串——避免「配置看起来生效但匹配面失控」）。
+- 每维度上限 20 项（`provider` ≤ 100 字符 / `name` ≤ 200 字符），越界由 Zod 校验返回 400。
+- **不引入 state 维度**：忽略 `pending` 会把未完成的信号变成假成功；关注集回答「哪些信号算数」，不回答「哪些状态算失败」（失败判据仍由聚合层固定，见 §3.3）。
+
+**生效层（D2 裁定：聚合 / 告警层）**：
+
+| 面 | 关注集已配置时的行为 |
+| :--- | :--- |
+| `overallStatus` / `conclusion` / `failureSources` / `checkRunId` / `errorMessage` | 只由**命中信号**派生 |
+| `alertFiring` | 由关注面 `conclusion` 派生（失败集合不变，仍为 `failure` / `timed_out` / `action_required`） |
+| `signalsJson` | **全量信号**（未命中不丢弃，审计面） |
+| API 视图 | 逐信号 `focused` + 行级 `focusConfigured`；前端对未命中信号标注「未关注」 |
+| 终态节流 / 自动 ack | 沿用 `overallStatus`（关注面）判定，口径不变 |
+
+- 未配置（`null`）时走快照原值路径——与改动前逐字节一致；已配置时才重新派生。
+- **关注面零命中**：按空集聚合视为 `success`（关注面没有任何需要告警的信号），整行仍照常落库。
+  「关注面零命中」与「全部信号 success」在 `overallStatus` 上不可区分，需看 `signals`（已知边界）。
+- 配置变更在**下一轮 polling** 生效，不回溯历史行（历史行的 `alertFiring` 仍是上一轮配置的结果）。
+
+**D 阶段决策（2026-10-19 用户裁定）**：
+
+| 编号 | 决策点 | 裁定 |
+| :--- | :--- | :--- |
+| D1 | 配置粒度 | **仓库级**（不做全局 / 模板 / 继承，与 §2 非目标一致） |
+| D2 | 过滤层与留痕 | **聚合与告警层**过滤；全量采集 + 全量落库 + UI 标注（否决采集层丢弃与展示层过滤） |
+| D3 | 承载形态 | `Repository` JSON 列 + 仓库编辑弹窗（否决独立实体：本条目明确仅单仓库级） |
+| D4 | 匹配模型 | **三维白名单**（否决条目列表自由组合与二维模型） |
+
+**配置入口**：`PUT /api/repos/[id]` 的 `prCheckFocus`（`undefined` = 不修改 / `null` 或三维全空 = 清空 → 回到全量）；
+仓库编辑弹窗「PR Check 关注集」区块；写入门槛沿用 `requireRole(['admin','org_admin'])`。
+重复保存同一配置幂等（规范化后为同一存储值）；清空即「一键恢复默认」。未知维度由 Zod `.strict()` 直接 400
+（避免「配了但静默不生效」）。**不登记 `AuditEvent`**（取择同 `tags` / `sandboxLimits` / `note`：非执行面；
+仅 `verifyCommands` 因等价于远程命令执行面而留痕）。
+
+**已知边界**：
+
+1. **配置变更与历史行的短暂不一致**：`focused` 标注按**读取时**配置实时计算，行级 `overallStatus` / `alertFiring` 是上一次 polling 的产物 → 改配置后到下一轮 polling 之前，可能出现「展开行显示全部未关注但 `alertFiring=true`」的瞬时矛盾（下一轮收敛）。
+2. **关注面零命中 → 终态**：零命中按 `success` 落库后，该 PR 进入终态静默窗口（`TERMINAL_REPOLL_QUIET_MS` = 30 分钟）→ 同 SHA 上迟到的关注信号最长 30 分钟才检出（有界，与既有终态节流同源）。
+3. **状态维度经用户裁定不引入**：原条目验收标准括注「按 check 名 / provider / 状态」落地为 **provider / name / kind**（kind 即信号来源类型）；`state` 不作匹配维度（读 `state` 过滤会把未完成的 `pending` 忽略成假成功），其影响面在展开行与 `signalsJson` 中仍可见。
+4. **无通配 / 子串匹配**：check 被重命名后需同步更新关注集条目，否则该信号转为「未关注」（不告警）。
+
+## 10. 关联文档
 
 - [定时扫描与批量处理设计](./platform-scheduled-batch.md)（`schedule.kind` 与调度的载体）
 - [运行失败分类与筛选设计](./run-failure-taxonomy.md)（本地构建失败面）

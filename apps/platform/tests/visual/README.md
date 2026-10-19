@@ -100,11 +100,24 @@
 - `scans` 的 Tabs 切换态（按仓库聚合视图）与 `schedules` 列表行（视觉库不注入定时计划 fixtures，仅覆盖空态 + 表单浮层）。
 - Toast 的其余 tone（success / danger）与「自动消失」时序。
 
-## 顺序约束：M45.6（PR Check 告警关注集）尚未落地
+## 顺序约束与 M45.6 连带重建记录（2026-10-19）
 
-本轮新增基线建立在「M45.5 先于 M45.6 执行」的决策上（`docs/plan/todo.md` §M45.5 风险 R4 已按此登记）。
-M45.6 会触及平台配置页 / 表单：若其改动落在 `schedules` / `scans` / `alerts` 的可见结构或文案上，
-须按 [测试规范 §6.7](../../../../docs/standards/testing.md) 「改动页面即需重建其基线」连带重建受影响基线，
+视觉基线原建立在「M45.5 先于 M45.6 执行」的决策上（`docs/plan/todo.md` §M45.5 风险 R4）。
+**M45.6（PR Check 告警关注集）已落地**，其实际影响面与当时的预测**不一致**，记录如下：
+
+- **连带重建的基线（2 张）**：`dialog-select-layer.visual.test.ts` 的 `dialog-select-open-light.png` /
+  `dialog-select-open-dark.png`——原因是关注集配置区块加在**仓库编辑弹窗**（`repo-form-dialog.vue`），
+  弹窗变高导致该组「视口级」截图失配；重建后不带 update 连跑两遍均通过。
+- **未受影响的基线（含 M45.5 新增 5 张）**：`pr-checks` 页面仅在**配置了关注集**时才多渲染
+  「关注集生效 / 未关注」两个标签；视觉数据集不写 `prCheckFocus` → 页面 DOM 不变，基线逐字节一致
+  （实测 `pr-checks-light.png` 未变化，无需重建）。
+- **M45.6 的像素盲区**：关注集标注（「关注集生效」/「未关注」）**无视觉基线覆盖**——需要「仓库配好关注集 +
+  该 PR 行含未命中信号」的组合，会连带重建 `pr-checks` 基线且价值低于成本；已由 e2e 可见性用例
+  （`tests/e2e/pr-checks.e2e.test.ts` 的「未命中关注集的信号在展开行标注『未关注』」）承担断言，
+  视觉面登记为本轮已知盲区。
+
+**后续约束**：任何改动 `schedules` / `scans` / `alerts` / `pr-checks` / 仓库编辑弹窗的可见结构或文案，
+都须按 [测试规范 §6.7](../../../../docs/standards/testing.md) 「改动页面即需重建其基线」连带重建受影响基线，
 并**不带 update 连跑两遍**复核。
 
 ## 不做什么
