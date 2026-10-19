@@ -225,6 +225,15 @@
   - **触发条件**：再次出现「基线成功但逐包安装耗尽 30 分钟」的运行；或平台执行预算调整时。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
+- **`sandboxLimits` / `tags` 等存量 JSON 配置列的写入闸门对齐（待评估）** —— 现象：`development.md §5.1.45` 已把「宽容输入 + `.strict()` 拒绝未知键 + 校验常量单一事实源」定为新增 / 修改配置列的 hard requirement，但 `Repository.sandboxLimits` 仍无 `.strict()`（未知键被 Zod 静默 strip）、`tags` 上限是 schema 内裸数字且 `parseTags` 不做 trim / 去重。**待评估点**：① 是否给 `sandboxLimits` 补 `.strict()` 并加未知键 400 用例；② 是否抽 `tags` / `sandboxLimits` 上限常量供 schema 与解析共用；③ 是否需要在 UI 侧提示未知键被拒绝。**触发条件**：下次改动仓库级配置列 / 仓库表单时。
+  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
+
+- **`ai-collaboration.md` / `platform.md` / `git.md` 均处 200 行上限的瘦身（待评估）** —— 现象：三文件行数均恰为 200（规范健康窗口上限），本批增补未越线但已零余量，任何后续增补都会进入 warning 带。**待评估点**：① 逐文件找可合并 / 可下沉段（重复表述、历史注记、可由设计稿承载的实现细节）；② 是否把长期稳定段迁入 design 后留一行指针；③ 瘦身不得删除 hard requirement 的唯一权威声明。**触发条件**：任一文件需再次增补时（先瘦身再增补）。
+  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
+
+- **`check-experience-landing` 按子条目（`###`）逐条校验落点（待评估）** —— 现象：脚本按 `##` 切分经验归档章节，同一 `##` 下多个 `###` 子条目只受「整节任意一条落点非空」保护；本批审计实测自指落点（「本条环境注记」）可假通过。**待评估点**：① 是否把校验粒度改为 `###`（每个子条目必须有非空落点）；② 是否对「本条环境注记」一类自指落点单独告警；③ 存量条目是否需要批量补真实落点。**触发条件**：下次大规模蒸馏 / 经验归档批次。
+  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
+
 ### 待上收候选（评估完成，等待用户决策）
 
 > 本节为「评估完成、等待用户决策」候选的暂存区；候选**不含 `M\d+` 阶段编号**（[规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement)）。
@@ -385,9 +394,9 @@
 
 | 内容类型 | 位置 |
 |:--|:--|
-| 当前阶段活跃任务 | **M45 六原子全部闭环**——运行可靠性与交付链收口（2026-10-19 收口，阶段归档待用户决策；6 原子条目，见 [todo.md §M45](todo.md#m45-运行可靠性与交付链收口-2026-10-15-用户决策方案-a) + [roadmap.md §M45](roadmap.md#m45-运行可靠性与交付链收口-2026-10-15-用户决策方案-a-2026-10-19-六原子全部闭环-归档待决策)） |
+| 当前阶段活跃任务 | **无**——M45 六原子 + 9 批阶段期间插队已于 2026-10-19 闭环归档（见 [todo-archive.md §M45](todo-archive.md#m45-运行可靠性与交付链收口-2026-10-15-用户决策方案-a-2026-10-19-归档) + [roadmap.md §M45](roadmap.md#m45-运行可靠性与交付链收口-2026-10-15-用户决策方案-a-2026-10-19-已闭环-归档)）；插队容量治理（移出低优先级原子而非压缩验证）见 [planning.md §3.1.1](../standards/planning.md#_3-1-1-插队后的阶段容量再平衡-hard-requirement-2026-10-19) |
 | 下一阶段（未授权） | 无——本阶段闭环后按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 评估本文件候选池后由用户决策 |
 | 已完成阶段归档 | [todo-archive.md](todo-archive.md)（主窗口 + [archive/](archive/) 分片） |
-| 里程碑与阶段交付 | [roadmap.md](roadmap.md)（M0-M44 已归档 + M45 六原子全部闭环） |
+| 里程碑与阶段交付 | [roadmap.md](roadmap.md)（M0-M45 已归档） |
 | 长期主线 / 候选 / 待人工验收 / 已知边界 | 本文档（按四象限结构） |
 | 历史归档索引 | [archive/index.md](archive/index.md) |

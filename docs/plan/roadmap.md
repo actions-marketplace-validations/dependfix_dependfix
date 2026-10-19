@@ -50,9 +50,9 @@
 | M40: 运行时可靠性与可观测性深化 | 部署产物版本戳陈旧校验 + 失败 run 落 summary 快照 + 执行超时可配置化 + 队列 worker 崩溃自动重启 + sandbox 降级回退路径落执行日志 + 平台环境变量文档完整性治理 | P2 | 已完成（2026-10-10 用户决策方案 A / D2 以环境变量文档治理替换 M40.6；2026-10-10 已闭环归档，见 [todo-archive.md §M40](./archive/todo-archive-phases-m39-m40.md#m40-运行时可靠性与可观测性深化m401m406-全部已闭环--2026-10-10-归档)） |
 | M41: 规范与经验管理体系重构 | standards 去实现化瘦身 + 经验体系三层收敛与精简 + 规范/经验门禁落地（CI 阻断）+ 文档站导航分层 + 阈值与事实源唯一化 | P2-P3 | 已完成（2026-10-10 用户决策方案 B / 2026-10-10 已闭环归档，见 [todo-archive.md §M41](todo-archive.md#m41-规范与经验管理体系重构m411m415-全部已闭环--2026-10-10-归档)） |
 | M42: 修复交付正确性 + 平台能力与体验补强 | network-audit 出站白名单镜像源扩充与动态发现 + `.gitignore` 幂等判定归一化 + 扫描复用路径误置既有 run 为 failed 修复 + PR Check 手动触发 + 平台列表页表格基础能力补强 + 严重级别展示策略统一 | P2-P3 | 已完成（2026-10-10 用户决策方案 A+B 混合 / 2026-10-11 已闭环归档，见 [todo-archive.md §M42](todo-archive.md#m42-修复交付正确性--平台能力与体验补强m421m426-全部已闭环--2026-10-11-归档)） |
-| M43: PR Check 能力补强 + 运行时可靠性与工程治理 | PR Check 列表仓库标识 + PR 构建/部署错误多源采集（GitHub 三源聚合）+ 容器内 `pnpm install` 环境性失败可观测性与归因口径 + 扫描触发去重合并前端感知 + git 非仓库 / push 钩子边界收口 + 工程脚本加固（门禁产物排除 + 蒸馏计数假阴性） | P2-P3 | 已完成（2026-10-12 用户决策方案 A / 2026-10-14 已闭环归档，见 [todo-archive.md §M43](todo-archive.md#m43-pr-check-能力补强--运行时可靠性与工程治理2026-10-12-用户决策方案-a--2026-10-14-归档)） |
-| M44: 验证链治本 + 文档门禁可信度收口 | 验证命令链纳入 `typecheck`（治本）+ 文档门禁机检缺口收敛（四类静默缺陷）+ 文档口径与命名一致性收口 + 设计文档存量超健康窗口分批拆分 + 站点语言切换器未翻译页 404 兜底 + `tech-stack` 平台依赖表行级一致性 | P2-P3 | 已完成（2026-10-14 用户决策方案 A / 2026-10-15 已闭环归档，见 [todo-archive.md §M44](todo-archive.md#m44-验证链治本--文档门禁可信度收口m441m446-全部已闭环--2026-10-15-归档)） |
-| M45: 运行可靠性与交付链收口 | 自用验证链面差收口 + 零告警仓库修复前基线采样成本 + 队列 worker 按 role 跳过周期插件 + 运行失败受约束重试入口 + 浮层类组件视觉覆盖扩面 + PR Check 告警关注集 | P2-P3 | **六原子全部闭环**（2026-10-15 用户决策方案 A；2026-10-19 收口，阶段归档待用户决策） |
+| M43: PR Check 能力补强 + 运行时可靠性与工程治理 | PR Check 列表仓库标识 + PR 构建/部署错误多源采集（GitHub 三源聚合）+ 容器内 `pnpm install` 环境性失败可观测性与归因口径 + 扫描触发去重合并前端感知 + git 非仓库 / push 钩子边界收口 + 工程脚本加固（门禁产物排除 + 蒸馏计数假阴性） | P2-P3 | 已完成（2026-10-12 用户决策方案 A / 2026-10-14 已闭环归档，见 [todo-archive.md §M43](archive/todo-archive-phases-m43.md#m43-pr-check-能力补强--运行时可靠性与工程治理2026-10-12-用户决策方案-a--2026-10-14-归档)） |
+| M44: 验证链治本 + 文档门禁可信度收口 | 验证命令链纳入 `typecheck`（治本）+ 文档门禁机检缺口收敛（四类静默缺陷）+ 文档口径与命名一致性收口 + 设计文档存量超健康窗口分批拆分 + 站点语言切换器未翻译页 404 兜底 + `tech-stack` 平台依赖表行级一致性 | P2-P3 | 已完成（2026-10-14 用户决策方案 A / 2026-10-15 已闭环归档，见 [todo-archive.md §M44](archive/todo-archive-phases-m44.md#m44-验证链治本--文档门禁可信度收口m441m446-全部已闭环--2026-10-15-归档)） |
+| M45: 运行可靠性与交付链收口 | 自用验证链面差收口 + 零告警仓库修复前基线采样成本 + 队列 worker 按 role 跳过周期插件 + 运行失败受约束重试入口 + 浮层类组件视觉覆盖扩面 + PR Check 告警关注集 | P2-P3 | 已完成（2026-10-15 用户决策方案 A / 2026-10-19 已闭环归档，见 [todo-archive.md §M45](todo-archive.md#m45-运行可靠性与交付链收口-2026-10-15-用户决策方案-a-2026-10-19-归档)） |
 
 > **本路线图定位**：按 [规划规范 §2.1](../standards/planning.md) 仅维护阶段概览（目标 / 优先级 / 状态）。详细实施记录 / commit 引用 / 关键决策 / 经验教训见对应归档段（详见下方"## 详细任务"索引）。
 
@@ -206,7 +206,7 @@
 
 **commits 状态**：阶段启动规划 1 + 前置插队热修 3 + M43.1 3 + M43.2 27 + M43.3 5 + M43.4 3 + M43.5 4 + M43.6 4 = **50 commits**（`git log master --first-parent --oneline 68ad47f^..HEAD` 去重统计）；归档前 `git rev-list HEAD ^origin/master --count` 实测 = 11（`origin/master ^HEAD` = 0 双向核验；M43.1 / M43.2 / M43.3 及其前已推送），待用户推送确认。
 
-> 详细任务与 8 要素见 [todo-archive.md §M43](todo-archive.md#m43-pr-check-能力补强--运行时可靠性与工程治理2026-10-12-用户决策方案-a--2026-10-14-归档)（2026-10-14 已闭环归档；**6 原子 50 commits** + 阶段期间 caomei-ui `0.6.0` 升级回归插队热修 3 commits）；上一阶段（M42）见 [todo-archive.md §M42](todo-archive.md#m42-修复交付正确性--平台能力与体验补强m421m426-全部已闭环--2026-10-11-归档)。
+> 详细任务与 8 要素见 [todo-archive.md §M43](archive/todo-archive-phases-m43.md#m43-pr-check-能力补强--运行时可靠性与工程治理2026-10-12-用户决策方案-a--2026-10-14-归档)（2026-10-14 已闭环归档；**6 原子 50 commits** + 阶段期间 caomei-ui `0.6.0` 升级回归插队热修 3 commits）；上一阶段（M42）见 [todo-archive.md §M42](todo-archive.md#m42-修复交付正确性--平台能力与体验补强m421m426-全部已闭环--2026-10-11-归档)。
 
 ---
 
@@ -235,11 +235,11 @@
 
 **阶段期间插队热修（不占阶段编号）**：entrypoint 双进程信号处置顺序竞态（CI 偶发红；[规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 插队例外清单第 3 类「CI 主链路阻塞」+ 用户 2026-10-14 授权）—— 规则与检查点落 [platform.md §10.6](../standards/platform.md#106-队列执行进程隔离独立-worker-进程)，批次记录见 [archive/index.md §4](archive/index.md)。
 
-> 详细任务与 8 要素见 [todo-archive.md §M44](todo-archive.md#m44-验证链治本--文档门禁可信度收口m441m446-全部已闭环--2026-10-15-归档)；上一阶段（M43）见 [todo-archive.md §M43](todo-archive.md#m43-pr-check-能力补强--运行时可靠性与工程治理2026-10-12-用户决策方案-a--2026-10-14-归档)。
+> 详细任务与 8 要素见 [todo-archive.md §M44](archive/todo-archive-phases-m44.md#m44-验证链治本--文档门禁可信度收口m441m446-全部已闭环--2026-10-15-归档)；上一阶段（M43）见 [todo-archive.md §M43](archive/todo-archive-phases-m43.md#m43-pr-check-能力补强--运行时可靠性与工程治理2026-10-12-用户决策方案-a--2026-10-14-归档)。
 
 ---
 
-## M45: 运行可靠性与交付链收口（2026-10-15 用户决策方案 A / 2026-10-19 六原子全部闭环，归档待决策）
+## M45: 运行可靠性与交付链收口（2026-10-15 用户决策方案 A / 2026-10-19 已闭环 + 归档）
 
 承接 M44 归档后的「**跑得对、跑得省、看得见**」阶段。M44 已把「验证链不含类型检查」与「文档门禁形同虚设」两条假绿链路治本，本阶段转向**交付链自身残留的可靠性、成本与可观测缺口**——① 本仓库自用 `commands` 链与引擎默认链长期存在面差（自用链缺 `test`，且 `--commands` 为整链替换，默认链每扩展一次即漂移一次）——**已由 M45.1 闭环**（补齐测试段 + 新增一致性门禁）；② 零告警仓库虽已跳过 lockfile repair，修复前基线采样仍执行一次完整验证链——**已由 M45.2 闭环**（按需采样 + 无改动即豁免归因）；③ 独立 worker 进程与 HTTP 进程共享同一 Nitro 产物，重复启动 `stale-cleanup` / 启动期引导等周期插件——**已由 M45.3 闭环**（按进程角色跳过 HTTP-only 插件；承接段标记补登）；④ 运行失败已具备「分类 + 筛选 + 展示」，缺设计稿 §5.5 的「受约束重试入口」——**已由 M45.4 闭环**（专用端点 + 双守卫 + 来源列 + 详情弹窗入口与二次确认）；⑤ 浮层类组件落点页无像素门禁——**已由 M45.5 闭环**（4 类落点页纳入视口级像素门禁 + 运行时派生值钉死 + 反例标定；执行顺序改为先于 M45.6，连带重建口径见 [visual/README.md](../../apps/platform/tests/visual/README.md)）；⑥ PR Check「全量只报警不阻断」缺降噪配置面——**已由 M45.6 闭环**（仓库级三维白名单 + 聚合 / 告警层过滤，全量信号仍落库可审计）。经 2026-10-15 用户决策（**方案 A**）从 [backlog.md](backlog.md) §候选评估中上收 6 项候选。
 
@@ -254,9 +254,9 @@
 
 **类型平衡复核**：🛠️ 3（M45.1 / M45.2 / M45.3）+ 🎨 1（M45.4）+ 🚀 1（M45.6）+ 🧪 1（M45.5）——🎨 独立条目 1 项低于建议值 2，本阶段以运行可靠性与成本主线优先，缺口显式标注（候选池内 UX 类可上收项仅「受约束重试入口」与「平台死代码清理」，后者规模不足以独立成原子）。
 
-**建议顺序**：M45.1（最小、隔离面清晰，先消除自用链漂移）→ M45.3（platform 插件守卫，无耦合）→ M45.2（engine 归因，D 阶段先做被跳过步骤语义清单）→ M45.4（平台能力，端点 / 落库形态需裁定）→ M45.6（数据模型 + 配置面，面最广）→ **M45.5 放最后**（视觉基线须在 UI 变更后建立，避免 M45.4 / M45.6 使新基线立即失效）。**实际执行（2026-10-19 用户裁定）**：M45.5 先于 M45.6 落地；顺序偏离的风险与连带重建口径已登记（[todo.md](todo.md) §M45.5 风险 R4 + [visual/README.md](../../apps/platform/tests/visual/README.md)「顺序约束」段）。
+**建议顺序**：M45.1（最小、隔离面清晰，先消除自用链漂移）→ M45.3（platform 插件守卫，无耦合）→ M45.2（engine 归因，D 阶段先做被跳过步骤语义清单）→ M45.4（平台能力，端点 / 落库形态需裁定）→ M45.6（数据模型 + 配置面，面最广）→ **M45.5 放最后**（视觉基线须在 UI 变更后建立，避免 M45.4 / M45.6 使新基线立即失效）。**实际执行（2026-10-19 用户裁定）**：M45.5 先于 M45.6 落地；顺序偏离的风险与连带重建口径已登记（[todo-archive.md §M45](todo-archive.md#m45-运行可靠性与交付链收口-2026-10-15-用户决策方案-a-2026-10-19-归档) §M45.5 风险 R4 + [visual/README.md](../../apps/platform/tests/visual/README.md)「顺序约束」段）。
 
-**条目容量**：6 原子符合 [规划规范 §1.1](../standards/planning.md#11-硬性约束) 的 5-6 项上限；**M45.6 预估 8-12 文件 / 200-380 行**，若 D 阶段裁定含数据模型变更则内部拆「配置承载层 / 生效与展示层」两批（拆分依据登记 [todo.md](todo.md) §M45.6）；其余条目均未超单条阈值。
+**条目容量**：6 原子符合 [规划规范 §1.1](../standards/planning.md#11-硬性约束) 的 5-6 项上限；**M45.6 预估 8-12 文件 / 200-380 行**，若 D 阶段裁定含数据模型变更则内部拆「配置承载层 / 生效与展示层」两批（拆分依据登记 [todo-archive.md §M45.6](todo-archive.md#m45-运行可靠性与交付链收口-2026-10-15-用户决策方案-a-2026-10-19-归档)）；其余条目均未超单条阈值。
 
 **范围边界（不做什么）**：不改引擎默认链条数与顺序（M45.1）；不改 `enforceVerificationGate` 回滚语义与 `preExistingDirty` 保护面（M45.2）；不改插件清理 / 对账逻辑与 entrypoint 看护与信号处置（M45.3）；不做批量重试、不放开非 `transient`、不改 failure taxonomy 分类（M45.4）；不改视觉门禁阈值、不做全站覆盖（M45.5）；不引入阻断语义、不做 provider 日志富化与通知集成（M45.6）。
 
@@ -264,26 +264,26 @@
 
 **审计 depth 预告**：M45.1 / M45.2 / M45.3 / M45.4 → `standard`；M45.5 → `quick`；M45.6 → `standard`（若含数据模型变更建议 2 分区并发）。
 
-**阶段期间追加临时待办（不占阶段条目编号，2026-10-16 用户授权）**：批量日志导出范围口径（默认导出当前页 + 保留「全部筛选结果」入口）——追加于 §M45 段落末尾（标记口径以 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 为唯一权威声明）；规则与检查点落 [development.md §5.1.43](../standards/development.md)，任务与闭环记录见 [todo.md](todo.md)，批次记录见 [archive/index.md §4](archive/index.md)。**不计入本阶段原子条目数与类型平衡**。
+**阶段期间追加临时待办（不占阶段条目编号，2026-10-16 用户授权）**：批量日志导出范围口径（默认导出当前页 + 保留「全部筛选结果」入口）——追加于 §M45 段落末尾（标记口径以 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 为唯一权威声明）；规则与检查点落 [development.md §5.1.43](../standards/development.md)，任务与闭环记录见 [todo-archive.md §M45](todo-archive.md#m45-运行可靠性与交付链收口-2026-10-15-用户决策方案-a-2026-10-19-归档)，批次记录见 [archive/index.md §4](archive/index.md)。**不计入本阶段原子条目数与类型平衡**。
 
-**阶段期间追加临时待办（不占阶段条目编号，2026-10-16 用户授权）**：CI 双红收口（视觉基线连带失配重建 + 自验链代理 env 假红修复 + `quick-verify` 失败留痕）——同为追加于 §M45 段落末尾（标记口径同上）；规则落 [testing.md §6.7](../standards/testing.md)（文案类改动连带失配 + update 落盘帧须由 no-update 连跑复核）与 [dependency-fixer-records.md §12.9](../design/modules/dependency-fixer-records.md)（验证链注入 env 与目标仓库测试断言的冲突面），任务与闭环记录见 [todo.md](todo.md)，批次记录见 [archive/index.md §4](archive/index.md)。**不计入本阶段原子条目数与类型平衡**。
+**阶段期间追加临时待办（不占阶段条目编号，2026-10-16 用户授权）**：CI 双红收口（视觉基线连带失配重建 + 自验链代理 env 假红修复 + `quick-verify` 失败留痕）——同为追加于 §M45 段落末尾（标记口径同上）；规则落 [testing.md §6.7](../standards/testing.md)（文案类改动连带失配 + update 落盘帧须由 no-update 连跑复核）与 [dependency-fixer-records.md §12.9](../design/modules/dependency-fixer-records.md)（验证链注入 env 与目标仓库测试断言的冲突面），任务与闭环记录见 [todo-archive.md §M45](todo-archive.md#m45-运行可靠性与交付链收口-2026-10-15-用户决策方案-a-2026-10-19-归档)，批次记录见 [archive/index.md §4](archive/index.md)。**不计入本阶段原子条目数与类型平衡**。
 
-**阶段期间追加临时待办（不占阶段条目编号，2026-10-17 用户授权）**：执行超时真中断与单仓内存口径 + 依赖升级探针次数与安装超时口径收敛（内核 OOM 实证驱动）——两条同为追加于 §M45 段落末尾（标记口径同上）。处置面：① 执行超时从「放弃等待」升级为「请求运行级取消 + 有界宽限期」（契约落 [executor-process-isolation.md §8](../design/governance/executor-process-isolation.md#_8-执行超时与运行级取消-2026-10-17)）；② 安装类命令超时收敛到单一事实源（缺省 5 分钟，`DEPENDFIX_INSTALL_TIMEOUT_MS` 可覆盖，权威登记见 `.env.full.example` + [平台配置指南](../guide/configuration.md)）；③ 版本化 overrides 合批把单仓安装次数由 K 压到 1（失败回退逐包，语义不变，见 [dependency-fixer-records.md §12.10](../design/modules/dependency-fixer-records.md#_12-10-安装类命令的超时口径与版本化-overrides-合批-2026-10-17)）；④ 工程规则落 [development.md §5.1.44](../standards/development.md)（长命令须异步且可取消）。内存防按用户裁定**仅文档化部署口径**（建议 ≥ 8 GB / 并发 1 / 用容器内存限制而非注入堆上限），不改默认命令注入。任务与闭环记录见 [todo.md](todo.md)，批次记录见 [archive/index.md §4](archive/index.md)。**不计入本阶段原子条目数与类型平衡**。
+**阶段期间追加临时待办（不占阶段条目编号，2026-10-17 用户授权）**：执行超时真中断与单仓内存口径 + 依赖升级探针次数与安装超时口径收敛（内核 OOM 实证驱动）——两条同为追加于 §M45 段落末尾（标记口径同上）。处置面：① 执行超时从「放弃等待」升级为「请求运行级取消 + 有界宽限期」（契约落 [executor-process-isolation.md §8](../design/governance/executor-process-isolation.md#_8-执行超时与运行级取消-2026-10-17)）；② 安装类命令超时收敛到单一事实源（缺省 5 分钟，`DEPENDFIX_INSTALL_TIMEOUT_MS` 可覆盖，权威登记见 `.env.full.example` + [平台配置指南](../guide/configuration.md)）；③ 版本化 overrides 合批把单仓安装次数由 K 压到 1（失败回退逐包，语义不变，见 [dependency-fixer-records.md §12.10](../design/modules/dependency-fixer-records.md#_12-10-安装类命令的超时口径与版本化-overrides-合批-2026-10-17)）；④ 工程规则落 [development.md §5.1.44](../standards/development.md)（长命令须异步且可取消）。内存防按用户裁定**仅文档化部署口径**（建议 ≥ 8 GB / 并发 1 / 用容器内存限制而非注入堆上限），不改默认命令注入。任务与闭环记录见 [todo-archive.md §M45](todo-archive.md#m45-运行可靠性与交付链收口-2026-10-15-用户决策方案-a-2026-10-19-归档)，批次记录见 [archive/index.md §4](archive/index.md)。**不计入本阶段原子条目数与类型平衡**。
 
-**阶段期间追加临时待办（不占阶段条目编号，2026-10-17）**：CI 双红收口（周回归 `security:audit-deps` 阻断 + `entrypoint.test.mjs`「角色归一化」用例竞态）——追加于 §M45 段落末尾（标记口径同上）。处置面：① 依赖链锁文件提升闭合 3 critical / 5 high（`@nuxt/devtools` 3.4.3 已移除 `simple-git` 依赖 + `shell-quote` 1.12.0 + `seroval` 1.6.9，**未新增** `audit.ignore` 豁免）；② 用例在取快照前等待 worker 角色标记（消除「只等 http 标记就断言 worker」的时序窗口，不改 `entrypoint.sh` 的进程编排与信号处置）。任务与闭环记录见 [todo.md](todo.md)，批次记录见 [archive/index.md §5](archive/index.md)。
+**阶段期间追加临时待办（不占阶段条目编号，2026-10-17）**：CI 双红收口（周回归 `security:audit-deps` 阻断 + `entrypoint.test.mjs`「角色归一化」用例竞态）——追加于 §M45 段落末尾（标记口径同上）。处置面：① 依赖链锁文件提升闭合 3 critical / 5 high（`@nuxt/devtools` 3.4.3 已移除 `simple-git` 依赖 + `shell-quote` 1.12.0 + `seroval` 1.6.9，**未新增** `audit.ignore` 豁免）；② 用例在取快照前等待 worker 角色标记（消除「只等 http 标记就断言 worker」的时序窗口，不改 `entrypoint.sh` 的进程编排与信号处置）。任务与闭环记录见 [todo-archive.md §M45](todo-archive.md#m45-运行可靠性与交付链收口-2026-10-15-用户决策方案-a-2026-10-19-归档)，批次记录见 [archive/index.md §5](archive/index.md)。
 
-**阶段期间追加临时待办（不占阶段条目编号，2026-10-18 用户授权）**：交付正确性（零修复不交付 / 修复后安装既有失败不交付 / override 生效校验 / 收敛判定按全部实例）——追加于 §M45 段落末尾（标记口径同上）。处置面：① `app/delivery.ts` + `app/skipped-delivery.ts` 新增交付守卫；② `helpers.ts` / `index.ts` / `repo-fix.ts` / `verify-project.ts` / `fixers/pnpm/index.ts` / `fixers/dependency/**` 接入；③ 拆出 `fixers/dependency/{semver,lockfile-versions,override-verification}.ts` 控制文件行数；④ 设计口径落 [dependency-fixer-records.md §12.12](../design/modules/dependency-fixer-records.md) 与 [pnpm-lockfile-fixer.md §4.1](../design/modules/pnpm-lockfile-fixer.md)。剩余 P1/P2 候选（CI 命令对齐 / draft-issue 降级 / 内存下限 / UI 披露）已登记 [backlog.md](backlog.md)。任务与闭环记录见 [todo.md](todo.md)，批次记录见 [archive/index.md §4](archive/index.md)。**不计入本阶段原子条目数与类型平衡**。
+**阶段期间追加临时待办（不占阶段条目编号，2026-10-18 用户授权）**：交付正确性（零修复不交付 / 修复后安装既有失败不交付 / override 生效校验 / 收敛判定按全部实例）——追加于 §M45 段落末尾（标记口径同上）。处置面：① `app/delivery.ts` + `app/skipped-delivery.ts` 新增交付守卫；② `helpers.ts` / `index.ts` / `repo-fix.ts` / `verify-project.ts` / `fixers/pnpm/index.ts` / `fixers/dependency/**` 接入；③ 拆出 `fixers/dependency/{semver,lockfile-versions,override-verification}.ts` 控制文件行数；④ 设计口径落 [dependency-fixer-records.md §12.12](../design/modules/dependency-fixer-records.md) 与 [pnpm-lockfile-fixer.md §4.1](../design/modules/pnpm-lockfile-fixer.md)。剩余 P1/P2 候选（CI 命令对齐 / draft-issue 降级 / 内存下限 / UI 披露）已登记 [backlog.md](backlog.md)。任务与闭环记录见 [todo-archive.md §M45](todo-archive.md#m45-运行可靠性与交付链收口-2026-10-15-用户决策方案-a-2026-10-19-归档)，批次记录见 [archive/index.md §4](archive/index.md)。**不计入本阶段原子条目数与类型平衡**。
 
 **commits 状态**：阶段启动规划 commit 落地后按 [规划规范 §4.4 第 5 条](../standards/planning.md#44-大批量归档批次操作规范) 用 `git rev-list HEAD ^origin/master --count` 双向核验并动态描述，不写死数字。
 
-> 详细任务与 8 要素见 [todo.md §M45](todo.md#m45-运行可靠性与交付链收口-2026-10-15-用户决策方案-a)；上一阶段（M44）见 [todo-archive.md §M44](todo-archive.md#m44-验证链治本--文档门禁可信度收口m441m446-全部已闭环--2026-10-15-归档)。
+> 详细任务与 8 要素见 [todo-archive.md §M45](todo-archive.md#m45-运行可靠性与交付链收口-2026-10-15-用户决策方案-a-2026-10-19-归档)；上一阶段（M44）见 [todo-archive.md §M44](archive/todo-archive-phases-m44.md#m44-验证链治本--文档门禁可信度收口m441m446-全部已闭环--2026-10-15-归档)。
 
 ---
 
 ## 详细任务
 
-- 当前阶段任务：**M45 六原子全部闭环**——运行可靠性与交付链收口（2026-10-19 收口，阶段归档与沉淀工作流待用户启动；任务与闭环记录见 [todo.md §M45](todo.md#m45-运行可靠性与交付链收口-2026-10-15-用户决策方案-a)）
-- 已归档阶段：[todo-archive.md](todo-archive.md)（主窗口保留最近阶段完整段 + 指针段；M0-M44 全部已归档；早期阶段见 [archive/index.md](archive/index.md) 分片索引）
+- 当前阶段任务：**无**——M45 已于 2026-10-19 闭环并归档；下一阶段启动按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 评估 [backlog.md](backlog.md) 候选池后由用户决策（任务与闭环记录见 [todo-archive.md §M45](todo-archive.md#m45-运行可靠性与交付链收口-2026-10-15-用户决策方案-a-2026-10-19-归档)）
+- 已归档阶段：[todo-archive.md](todo-archive.md)（主窗口保留最近阶段完整段 + 指针段；M0-M45 全部已归档；早期阶段见 [archive/index.md](archive/index.md) 分片索引）
 - 下一阶段（未授权）：无——本阶段闭环后按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 评估 backlog 候选池后由用户决策
 - 后续阶段任务（延期项 + 未排期增强候选）：[backlog.md](backlog.md)
 
