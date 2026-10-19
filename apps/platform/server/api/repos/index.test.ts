@@ -220,6 +220,58 @@ describe('GET /api/repos', () => {
             expect(events).toHaveLength(0)
         })
     })
+
+    describe('prCheckFocus（PR Check 告警关注集）', () => {
+        it('persists prCheckFocus on create and returns the normalized view', async () => {
+            await call('POST', '/api/repos', {
+                owner: 'focus-create',
+                name: 'repo',
+                platform: 'github',
+                packageManager: 'pnpm',
+                defaultBranch: 'main',
+                executorKind: 'container',
+                prCheckFocus: {
+                    providers: [' Vercel ', 'vercel'],
+                    names: [' Test '],
+                    kinds: ['check'],
+                },
+            })
+            const list = await call('GET', '/api/repos') as Record<string, unknown>[]
+            expect(list.find((r) => r.owner === 'focus-create')?.prCheckFocus).toEqual({
+                providers: ['vercel'],
+                names: ['Test'],
+                kinds: ['check'],
+            })
+        })
+
+        it('returns null prCheckFocus when not configured（未配置 = 全量告警）', async () => {
+            await call('POST', '/api/repos', {
+                owner: 'focus-empty',
+                name: 'repo',
+                platform: 'github',
+                packageManager: 'pnpm',
+                defaultBranch: 'main',
+                executorKind: 'container',
+            })
+            const list = await call('GET', '/api/repos') as Record<string, unknown>[]
+            expect(list.find((r) => r.owner === 'focus-empty')?.prCheckFocus).toBeNull()
+        })
+
+        it('rejects prCheckFocus with invalid kind (400)', async () => {
+            await expect(call('POST', '/api/repos', {
+                owner: 'focus-invalid',
+                name: 'repo',
+                platform: 'github',
+                packageManager: 'pnpm',
+                defaultBranch: 'main',
+                executorKind: 'container',
+                prCheckFocus: { kinds: ['bogus'] },
+            })).rejects.toMatchObject({
+                statusCode: 400,
+                data: { code: 'REPO_VALIDATION_FAILED' },
+            })
+        })
+    })
 })
 
 /**

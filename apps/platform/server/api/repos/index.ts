@@ -5,6 +5,7 @@ import { repositorySchema } from '#server/schemas/repository'
 import { requireAuth, requireRole } from '#server/utils/guard'
 import { createLocalizedError } from '#server/utils/localized-error'
 import { resolveOrganizationId } from '#server/utils/organization'
+import { normalizePRCheckFocus, parsePRCheckFocus } from '#server/utils/pr-check-focus'
 import { recordVerifyCommandsAudit } from '#server/services/repository-audit'
 
 const toView = (r: Repository) => ({
@@ -22,6 +23,7 @@ const toView = (r: Repository) => ({
     tags: parseTags(r.tags),
     sandboxLimits: parseSandboxLimits(r.sandboxLimits),
     verifyCommands: parseVerifyCommands(r.verifyCommands),
+    prCheckFocus: parsePRCheckFocus(r.prCheckFocus),
     aiEnabled: r.aiEnabled,
     aiTrigger: r.aiTrigger,
     lastScanAt: r.lastScanAt,
@@ -94,6 +96,9 @@ const createRepository = async (event: H3Event) => {
         ? JSON.stringify(parsed.data.verifyCommands)
         : null
 
+    // prCheckFocus 对象 → JSON 字符串列（三维全空归一为 null = 未配置；规范化负责 trim / 去重 / 小写）
+    const prCheckFocusValue = normalizePRCheckFocus(parsed.data.prCheckFocus)
+
     const entity = repo.create({
         organizationId,
         owner: parsed.data.owner,
@@ -108,6 +113,7 @@ const createRepository = async (event: H3Event) => {
         tags,
         sandboxLimits,
         verifyCommands: verifyCommandsValue,
+        prCheckFocus: prCheckFocusValue ? JSON.stringify(prCheckFocusValue) : null,
     })
     const saved = await repo.save(entity)
 

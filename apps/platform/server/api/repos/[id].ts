@@ -4,6 +4,7 @@ import { ensureDatabaseInitialized } from '#server/database'
 import { repositoryUpdateSchema } from '#server/schemas/repository'
 import { requireAuth, requireOrgResource, requireRole } from '#server/utils/guard'
 import { createLocalizedError } from '#server/utils/localized-error'
+import { normalizePRCheckFocus, parsePRCheckFocus } from '#server/utils/pr-check-focus'
 import { recordVerifyCommandsAudit } from '#server/services/repository-audit'
 
 /** GET /api/repos/[id]：仓库详情 */
@@ -34,6 +35,7 @@ const getRepository = async (event: H3Event, id: string) => {
         tags: parseTags(found.tags),
         sandboxLimits: parseSandboxLimits(found.sandboxLimits),
         verifyCommands: parseVerifyCommands(found.verifyCommands),
+        prCheckFocus: parsePRCheckFocus(found.prCheckFocus),
         lastScanAt: found.lastScanAt,
         createdAt: found.createdAt,
         updatedAt: found.updatedAt,
@@ -100,6 +102,13 @@ const updateRepository = async (event: H3Event, id: string) => {
             : null
     }
 
+    // prCheckFocus 对象 → JSON 字符串列（更新语义：undefined=不修改 / null 或三维全空=清空 → 未配置）
+    let prCheckFocusValue: string | null = found.prCheckFocus
+    if (parsed.data.prCheckFocus !== undefined) {
+        const normalized = normalizePRCheckFocus(parsed.data.prCheckFocus)
+        prCheckFocusValue = normalized ? JSON.stringify(normalized) : null
+    }
+
     Object.assign(found, {
         owner: parsed.data.owner ?? found.owner,
         name: parsed.data.name ?? found.name,
@@ -113,6 +122,7 @@ const updateRepository = async (event: H3Event, id: string) => {
         tags: tagsValue,
         sandboxLimits: sandboxLimitsValue,
         verifyCommands: verifyCommandsValue,
+        prCheckFocus: prCheckFocusValue,
     })
     const saved = await repo.save(found)
 

@@ -125,6 +125,37 @@ describe('GET /api/repos/[id]', () => {
         expect(detail.verifyCommands).toEqual([])
     })
 
+    it('persists prCheckFocus via PUT（规范化 + 重复保存幂等 + undefined 不修改 + null 清空）', async () => {
+        const focus = {
+            providers: [' Vercel ', 'vercel'],
+            names: [' Test '],
+            kinds: ['check', 'deployment'],
+        }
+        await callId('PUT', `/api/repos/${id}`, { prCheckFocus: focus }, { id })
+
+        const expected = { providers: ['vercel'], names: ['Test'], kinds: ['check', 'deployment'] }
+        const readFocus = async () => {
+            const detail = await callId('GET', `/api/repos/${id}`, undefined, { id }) as Record<string, unknown>
+            return detail.prCheckFocus
+        }
+        expect(await readFocus()).toEqual(expected)
+
+        // 重复保存同一配置 → 结果不变（幂等）
+        await callId('PUT', `/api/repos/${id}`, { prCheckFocus: focus }, { id })
+        expect(await readFocus()).toEqual(expected)
+
+        // 未传该字段 → 不修改
+        await callId('PUT', `/api/repos/${id}`, { note: 'unrelated update' }, { id })
+        expect(await readFocus()).toEqual(expected)
+
+        // null / 三维全空 → 清空（回到未配置）
+        await callId('PUT', `/api/repos/${id}`, { prCheckFocus: { providers: [], names: [], kinds: [] } }, { id })
+        expect(await readFocus()).toBeNull()
+        await callId('PUT', `/api/repos/${id}`, { prCheckFocus: focus }, { id })
+        await callId('PUT', `/api/repos/${id}`, { prCheckFocus: null }, { id })
+        expect(await readFocus()).toBeNull()
+    })
+
     it('records verify_commands_update audit only when commands actually change', async () => {
         const ds = await ensureDatabaseInitialized()
         const auditRepo = ds.getRepository(AuditEvent)
