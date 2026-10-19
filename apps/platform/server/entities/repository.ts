@@ -127,6 +127,21 @@ export class Repository extends BaseEntity {
      */
     @Column({ type: 'text', nullable: true })
     verifyCommands!: string | null
+
+    /**
+     * PR Check 告警关注集（JSON 字符串，白名单；null = 未配置 = 全量只报警不阻断）。
+     *
+     * 形态：`{ providers?: string[], names?: string[], kinds?: ('check'|'status'|'deployment')[] }`。
+     * 语义（详见 [pr-build-deploy-signals.md §9](../../../../docs/design/governance/pr-build-deploy-signals.md)）：
+     * - 只有命中关注集的信号参与 `overallStatus` / `conclusion` / `failureSources` / `alertFiring` 判定；
+     *   未命中的信号仍全量落库到 `PRCheck.signalsJson`，并在 UI 中标注「未关注」。
+     * - 维度内取并集、维度间取交集，留空维度不限；三维全空等价于未配置。
+     * - 配置变更在下一轮 polling 生效（不回溯历史行）。
+     *
+     * 解析 / 规范化统一走 `server/utils/pr-check-focus.ts`（与 API 校验共享常量）。
+     */
+    @Column({ type: 'text', nullable: true })
+    prCheckFocus!: string | null
 }
 
 /** 解析 tags JSON 字符串 → 字符串数组（非法/缺失返回空数组，容错不抛错） */

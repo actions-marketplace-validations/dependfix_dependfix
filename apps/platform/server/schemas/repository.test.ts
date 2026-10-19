@@ -254,4 +254,83 @@ describe('repository schemas', () => {
             expect(parseVerifyCommands('["  pnpm test  "]')).toEqual(['pnpm test'])
         })
     })
+
+    describe('prCheckFocus（PR Check 告警关注集）', () => {
+        it('创建：缺省 / null → success（未配置 = 现状）', () => {
+            const ok = repositorySchema.safeParse({ owner: 'a', name: 'b' })
+            expect(ok.success).toBe(true)
+            expect(ok.success && ok.data.prCheckFocus).toBeUndefined()
+            expect(repositorySchema.safeParse({ owner: 'a', name: 'b', prCheckFocus: null }).success).toBe(true)
+        })
+
+        it('创建：三维白名单 → success（逐项 trim）', () => {
+            const ok = repositorySchema.safeParse({
+                owner: 'a',
+                name: 'b',
+                prCheckFocus: {
+                    providers: [' GitHub-Actions ', 'vercel'],
+                    names: [' Test '],
+                    kinds: ['check', 'deployment'],
+                },
+            })
+            expect(ok.success).toBe(true)
+            expect(ok.success && ok.data.prCheckFocus).toEqual({
+                providers: ['GitHub-Actions', 'vercel'],
+                names: ['Test'],
+                kinds: ['check', 'deployment'],
+            })
+        })
+
+        it('创建：部分维度缺省 → success（空维度 = 不限）', () => {
+            expect(repositorySchema.safeParse({
+                owner: 'a',
+                name: 'b',
+                prCheckFocus: { providers: ['vercel'] },
+            }).success).toBe(true)
+        })
+
+        it('创建：单维度超过 20 项 → fail', () => {
+            const bad = repositorySchema.safeParse({
+                owner: 'a',
+                name: 'b',
+                prCheckFocus: { names: Array.from({ length: 21 }, (_, i) => `check-${i}`) },
+            })
+            expect(bad.success).toBe(false)
+        })
+
+        it('创建：空白条目 / 超长条目 → fail', () => {
+            expect(repositorySchema.safeParse({
+                owner: 'a', name: 'b', prCheckFocus: { providers: ['   '] },
+            }).success).toBe(false)
+            expect(repositorySchema.safeParse({
+                owner: 'a', name: 'b', prCheckFocus: { names: ['x'.repeat(201)] },
+            }).success).toBe(false)
+        })
+
+        it('创建：非法 kind → fail（仅接受三源枚举）', () => {
+            expect(repositorySchema.safeParse({
+                owner: 'a', name: 'b', prCheckFocus: { kinds: ['bogus'] },
+            }).success).toBe(false)
+        })
+
+        it('创建：kind 允许前后空白与重复项（宽容输入，写入侧归一 / 去重）', () => {
+            const ok = repositorySchema.safeParse({
+                owner: 'a', name: 'b', prCheckFocus: { kinds: [' check ', 'check', 'status'] },
+            })
+            expect(ok.success).toBe(true)
+            expect(ok.success && ok.data.prCheckFocus?.kinds).toEqual(['check', 'check', 'status'])
+        })
+
+        it('创建：未知维度（如 state）→ fail（strict，避免「配了但静默不生效」）', () => {
+            expect(repositorySchema.safeParse({
+                owner: 'a', name: 'b', prCheckFocus: { names: ['Test'], state: ['failure'] },
+            }).success).toBe(false)
+        })
+
+        it('更新：undefined = 不修改 / null = 清空 / 白名单 = 设置', () => {
+            expect(repositoryUpdateSchema.safeParse({}).success).toBe(true)
+            expect(repositoryUpdateSchema.safeParse({ prCheckFocus: null }).success).toBe(true)
+            expect(repositoryUpdateSchema.safeParse({ prCheckFocus: { names: ['Test'] } }).success).toBe(true)
+        })
+    })
 })

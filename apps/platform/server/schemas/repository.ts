@@ -1,4 +1,10 @@
 import { z } from 'zod'
+import {
+    MAX_PR_CHECK_FOCUS_ENTRIES,
+    MAX_PR_CHECK_FOCUS_NAME_LENGTH,
+    MAX_PR_CHECK_FOCUS_PROVIDER_LENGTH,
+    PR_CHECK_FOCUS_KINDS,
+} from '#server/utils/pr-check-focus'
 
 /**
  * 是否含换行 / 控制字符（含 DEL）。
@@ -50,6 +56,30 @@ export const repositoryBase = z.object({
         z.string().trim().min(1, '验证命令不能为空').max(500, '单条验证命令最长 500 字符')
             .refine((cmd) => !hasControlChar(cmd), '验证命令不能包含换行或控制字符'),
     ).max(20, '最多 20 条验证命令').nullable().optional(),
+    /**
+     * PR Check 告警关注集（仓库级白名单；null / 三维全空 = 未配置 = 全量只报警不阻断）。
+     *
+     * 语义见 `server/utils/pr-check-focus.ts` 与
+     * [pr-build-deploy-signals.md §9](../../../../docs/design/governance/pr-build-deploy-signals.md)。
+     * 限制：每维度最多 20 项；provider ≤ 100 字符、name ≤ 200 字符；kind 仅接受三源枚举。
+     * `.strict()`：未知维度（如 `state`）直接 400，避免「配了但静默不生效」的误解
+     * （模式见 `pr-check-focus.ts` 的注释：关注集只回答「哪些信号算数」，不回答「哪些状态算失败」）。
+     */
+    prCheckFocus: z.object({
+        providers: z.array(
+            z.string().trim().min(1, '关注集 provider 不能为空')
+                .max(MAX_PR_CHECK_FOCUS_PROVIDER_LENGTH, `关注集 provider 最长 ${MAX_PR_CHECK_FOCUS_PROVIDER_LENGTH} 字符`),
+        ).max(MAX_PR_CHECK_FOCUS_ENTRIES, `关注集 provider 最多 ${MAX_PR_CHECK_FOCUS_ENTRIES} 项`).optional(),
+        names: z.array(
+            z.string().trim().min(1, '关注集 name 不能为空')
+                .max(MAX_PR_CHECK_FOCUS_NAME_LENGTH, `关注集 name 最长 ${MAX_PR_CHECK_FOCUS_NAME_LENGTH} 字符`),
+        ).max(MAX_PR_CHECK_FOCUS_ENTRIES, `关注集 name 最多 ${MAX_PR_CHECK_FOCUS_ENTRIES} 项`).optional(),
+        // 先 trim 再收敛枚举：与 providers / names 的「宽容输入、写入归一」口径一致
+        // （`' check '` 属合法输入）；重复项交由 `normalizePRCheckFocus` 去重，故上限沿用条目数常量
+        kinds: z.array(
+            z.string().trim().pipe(z.enum(PR_CHECK_FOCUS_KINDS)),
+        ).max(MAX_PR_CHECK_FOCUS_ENTRIES, `关注集 kind 最多 ${MAX_PR_CHECK_FOCUS_ENTRIES} 项`).optional(),
+    }).strict().nullable().optional(),
 })
 
 /**

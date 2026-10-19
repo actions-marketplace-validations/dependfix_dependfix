@@ -21,6 +21,7 @@ import { AddRepositoryVerifyCommands2100000000000 } from './migrations/210000000
 import { AddScanRunFailureColumns2200000000000 } from './migrations/2200000000000-AddScanRunFailureColumns'
 import { AddPrCheckBuildSignals2300000000000 } from './migrations/2300000000000-AddPrCheckBuildSignals'
 import { AddScanRunRetriedFromRunId2400000000000 } from './migrations/2400000000000-AddScanRunRetriedFromRunId'
+import { AddRepositoryPrCheckFocus2500000000000 } from './migrations/2500000000000-AddRepositoryPrCheckFocus'
 import { runStartupBackup } from './backup'
 import { Account } from '#server/entities/account'
 import { Session } from '#server/entities/session'
@@ -94,6 +95,7 @@ export const createDataSourceOptions = (): DataSourceOptions => {
             AddScanRunFailureColumns2200000000000,
             AddPrCheckBuildSignals2300000000000,
             AddScanRunRetriedFromRunId2400000000000,
+            AddRepositoryPrCheckFocus2500000000000,
         ],
         migrationsRun,
         synchronize,
