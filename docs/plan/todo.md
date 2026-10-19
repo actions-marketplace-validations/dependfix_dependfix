@@ -8,11 +8,11 @@
 
 | 内容类型 | 位置 |
 |:--|:--|
-| 当前阶段任务 | **M45 进行中**——运行可靠性与交付链收口（6 原子条目，见下方 §M45） |
+| 当前阶段任务 | **M45 六原子全部闭环**——运行可靠性与交付链收口（2026-10-19 收口，阶段归档待用户决策；见下方 §M45） |
 | 下一阶段（未授权） | 无——本阶段闭环后按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 评估 [backlog.md](backlog.md) 候选池后由用户决策 |
 | 已完成阶段归档 | [todo-archive.md](todo-archive.md)（主窗口 + [archive/](archive/) 分片；M0-M44 全部已归档） |
 | 未排期 / 延期 / 远期 / 长期主线 / 已知边界 | [backlog.md](backlog.md) |
-| 里程碑与阶段交付 | [roadmap.md](roadmap.md)（M0-M44 已归档 + M45 进行中） |
+| 里程碑与阶段交付 | [roadmap.md](roadmap.md)（M0-M44 已归档 + M45 六原子全部闭环） |
 | 历史归档索引 | [archive/index.md](archive/index.md) |
 
 ---
@@ -126,21 +126,23 @@
 - **闭环记录（2026-10-19）**：**审计**：`quick` 单分区（按 [todo §M45 审计 depth 预告](todo.md#m45-运行可靠性与交付链收口-2026-10-15-用户决策方案-a)）R1 **Pass**（0 blocker / 2 warning / 3 suggest）→ 全部收口后提交（详见 D 阶段定稿的「审计驱动修订」）。**审计方独立复现**：`test:visual` 不带 update 连跑两遍 16 passed ×2；`fixtures.post.test.ts` 9 passed；构建产物 chunk 与工作区源码逐字一致（含新增 `resolveTimestamp` / `id` / `createdAt` / `errorJson` 逻辑）；新基线 PNG 均 1440×900（视口级）；**独立像素解码实证遮蔽生效**（`schedules` 两主题含遮蔽块 6336 px、`alerts` 抽屉 11664 px、`scans` / `toast` 为 0 = 依赖钉死取值而非遮蔽）；对 4 个新画面逐项扫描未发现未钉死的动态来源（`window.lastRunAt` 实测取 `runs[0].createdAt` 而非 `Date.now()`）。**反例标定（testing.md §6.7 反例验证纪律）**：临时 spec 副本注入可见样式改动 → **5/5 如期失败**，像素差分别为 `schedules` light 17627 / dark 17590、`scans` 弹窗 59057（弹窗底色）、`alerts` 抽屉 124588（宽度 560→420）、`pr-checks` Toast 26039；**注入点均落在新增浮层内部**（门户面板底色 / 弹窗底色 / 抽屉宽度 / 提示底色），证明新基线对目标区域敏感而非「页面上有变化」；脚手架（临时 spec + 快照副本）跑完即删，工作区无残留。**证据**：见 AC ④（lint / typecheck / platform 全量 / 文档与 i18n 十项门禁 / 编号标记扫描）。**审计用时实测（宿主时钟）**：R1 发起 `2026-10-19T06:15:36Z` → 返回上界 = 首个 commit 前（≤ 26m，含修复与门禁复跑）；**返回时刻未单独打点**（既有流程缺陷第四次复现，quick 盒 5m 无法据此核验）。**commits 与本条登记见上文标题 + 交付物回填**。
 - **残余与观察项**：① **M45.4「受约束重试入口 + 二次确认层」无像素守卫**（`run-detail-dialog` + `CaomeiConfirmDialog`；需「告警 → `transient` 失败运行」链路，补齐会连带重建 `alerts` 基线）→ 已登记 README 已知盲区，待独立需求时评估；② **`Tabs` 切换态未覆盖**（`scans` 按仓库聚合视图）与 `schedules` 列表行未覆盖（视觉库不注入定时计划 fixtures，仅覆盖空态 + 表单浮层）；③ Toast 其余 tone（success / danger）与「自动消失」时序未覆盖；④ `--update-snapshots` 落盘帧非稳定支仍未评估（本批实测 update 与 no-update 帧一致，但该支不闭环，观察对象仍在 backlog 候选）；⑤ `scans` 底图运行列表的时间文本依赖固定 `locale` / `timezoneId`（与既有基线同源风险，非本批引入）；⑥ 第 4 个失败运行目前只作「底图首行」用途，其失败归因块 / 重试层仍无像素守卫（同 ① ）。
 
-### M45.6 [P3 🚀] PR Check 告警关注集（可配置面）
+### M45.6 [P3 🚀] PR Check 告警关注集（可配置面）（**已闭环** `bf2c8959` + `b751c313` + `30ae9b73` + `62ccaa13` + `57cee745` + 本条登记）
 
 - **目标**：引入仓库级关注集，让「非关注 check（provider lint-only / preview 构建等）失败」不再进入告警面，从而降低噪音；同时保持与「全量只报警不阻断」语义的兼容边界清晰。
 - **优先级**：P3
-- **范围**：`apps/platform/server/entities/pr-check.ts:71-120`（三源归一化快照 / `overallStatus` / `failureSources` 聚合面）；`apps/platform/server/services/monitor/**`（聚合派生与告警触发点）+ `apps/platform/server/entities/repository.ts`（配置承载，D3 裁定：新增 JSON 列 vs 独立实体）+ 设置页 / 表单 + API + i18n 双语；设计稿 [pr-build-deploy-signals.md](../design/governance/pr-build-deploy-signals.md) 新增章节；单测 + e2e。
+- **范围**：`apps/platform/server/entities/pr-check.ts:71-120`（三源归一化快照 / `overallStatus` / `failureSources` 聚合面）；`apps/platform/server/services/monitor/**`（聚合派生与告警触发点）+ `apps/platform/server/entities/repository.ts`（配置承载，D3 裁定：新增 JSON 列 vs 独立实体）+ 设置页 / 表单 + API + i18n 双语；设计稿 [pr-build-deploy-signals.md](../design/governance/pr-build-deploy-signals.md) 新增章节；单测 + e2e。**实际落点（回填）**：`entities/repository.ts` 加列 + `utils/pr-check-focus.ts` 纯函数（解析 / 规范化 / 匹配 / 过滤）+ `services/monitor/action-status-monitor.ts` 聚合过滤 + `utils/pr-check-view.ts` 逐信号标注 + `api/repos/**` 读写 + `repo-form-dialog.vue` / `pr-checks.vue` + 设计稿 §9。
 - **验收标准**：
-  - [ ] ① **向后兼容**：未配置关注集时行为与现状完全一致（全量只报警不阻断；既有 PR Check 用例全绿）。
-  - [ ] ② **过滤口径单一且声明**：关注集匹配（按 check 名 / provider / 状态）在**单一层**生效——采集层过滤 vs 展示层过滤由 D2 裁定并在设计中显式声明；被过滤信号的「是否仍落库 / 是否可审计」口径明确（不得出现「线上看不到、库里也没有」的静默丢弃）。
-  - [ ] ③ **可配置且幂等**：仓库级配置可读写、校验与非法条目处置明确（配置面 UI / API 契约）；重复保存幂等。
-  - [ ] ④ **门禁**：`pnpm --filter @dependfix/platform typecheck` 实测 0 error + 定向 vitest / e2e 通过 + `pnpm run check:i18n` parity 0 + `pnpm run check:docs` exit 0；**含数据模型变更时**e2e 二次运行验证 migration 幂等（前缀感知，[platform.md §3.3](../standards/platform.md)）。
-- **D 阶段决策点**：**D1** 配置粒度（仓库级 vs 全局）；**D2** 过滤层（采集层 vs 展示层）+ 被过滤项是否仍落库；**D3** 承载形态（`Repository` JSON 列 vs 独立实体 + migration）。
+  - [x] ① **向后兼容**：未配置关注集时行为与现状完全一致（全量只报警不阻断；既有 PR Check 用例全绿）。实现走快照原值与关注面派生两条路径，未配置路径由等价性用例逐字段锁定。
+  - [x] ② **过滤口径单一且声明**：关注集匹配在**单一层**（聚合 / 告警层）生效，全量采集与全量落库（`signalsJson` 不裁剪），被过滤信号仍可通过 API / 展开行查看并标注「未关注」——**不含任何静默丢弃**。原括注「按 check 名 / provider / **状态**」按 D4 落地为 **provider / name / kind（信号来源类型）**；`state` 经用户裁定不作匹配维度（读 `state` 过滤会把 `pending` 忽略成假成功），偏差已在设计稿 §9「已知边界」显式对账。
+  - [x] ③ **可配置且幂等**：仓库级 `Repository.prCheckFocus`（JSON 列）+ 仓库编辑弹窗 + `PUT /api/repos/[id]`；Zod 校验（维度上限 / 长度 / 枚举 / `.strict()` 拒绝未知维度）、非法条目 400、重复保存幂等、清空即恢复默认（未传不修改 / `null` 或三维全空清空）。
+  - [x] ④ **门禁**：`pnpm --filter @dependfix/platform typecheck` 实测 0 error；平台全量 vitest 141 文件 / 1925 passed；定向 e2e 14 passed ×2（第二次跑在既有库上 → migration 幂等 / 前缀感知）；`i18n:audit:missing` parity 0；`check:docs` exit 0。
+- **D 阶段定稿（2026-10-19 用户裁定）**：**D1 = 仓库级**（不做全局 / 模板 / 继承）；**D2 = 聚合 / 告警层过滤**（全量采集 + 全量落库 + UI 标注；否决采集层丢弃与展示层过滤）；**D3 = `Repository` JSON 列 + 仓库编辑弹窗**（否决独立实体 / pr-checks 页专用弹窗）；**D4 = 三维白名单**（`providers` / `names` / `kinds`；维度内 OR、维度间 AND、空维度不限、三维全空 = 未配置）。
 - **不做什么**：不引入阻断语义（关注集只降噪，不改「只报警不阻断」）；不改 M43.2 三源采集与聚合判据；不做 provider 原生日志富化（另一独立候选）；不做通知 / webhook 集成；不做关注集的模板 / 继承（仅单仓库级）。
 - **依赖**：M43.2（D3 裁定「全量只报警不阻断」，本条目为其后续增量）；设计稿 [pr-build-deploy-signals.md](../design/governance/pr-build-deploy-signals.md)；backlog §候选评估中条目「PR Check 告警关注集（可配置面）」。
-- **交付物**：预计 3-4 commits——① `feat(platform)` 配置承载 + migration（若需）；② `feat(platform)` 生效层 + API / UI + i18n 双语；③ `test(platform)` 单测 + e2e；④ `docs(design)` 设计稿章节 + 闭环登记。预计 8-12 文件 / 200-380 行；**若含数据模型变更，按「配置承载层 / 生效与展示层」拆两个可独立提交批次**（拆分依据登记本节，各批 ≤ 10 文件 / ≤ 800 行）。
+- **交付物（回填）**：**6 commits / 31 文本文件 + 2 张 PNG 基线资产**（+1508 −77 行量级）——`bf2c8959` `feat(platform)` 数据承载与校验（实体列 + 幂等前缀感知迁移 + 校验 + 纯函数模块，8 文件）；`b751c313` `feat(platform)` 仓库 API 读写（4 文件）；`30ae9b73` `feat(platform)` 聚合 / 告警层过滤 + 视图标注（8 文件）；`62ccaa13` `feat(platform)` 仓库表单配置 + 连带视觉基线（6 文件，含 2 张基线资产）；`57cee745` `docs(design)` 设计章节 + 视觉 README（2 文件）；本条 `docs(plan)` 闭环登记（todo / roadmap / archive-index / backlog / 文档首页，5 文件）。**拆分依据**：按「配置承载层（前 2 commits）/ 生效与展示层（第 3-4 commits）/ 设计章节 / 闭环登记」拆分，各 commit 均 ≤ 8 文件、≤ 800 行；符合本节「含数据模型变更时拆两个可独立提交批次」的既定要求。**估算偏差说明**：预估 8-12 文件 / 200-380 行，实际上浮来自三处原估算未预见的面：① **测试面**（新增纯函数 / 迁移 / 视图容错 / 等价性护栏 / 三维校验用例合计约占新增行多数）；② **配置面 UI**（三维输入 + 多选 + 回显/清空 + e2e）与**连带视觉基线**（仓库编辑弹窗变高，2 张视口级基线重建）；③ **设计章节**（§9 含决策表 / 已知边界 / AC 偏差对账）。
 - **风险与缓解**：**R1 过滤层选错致漏报真实失败** → D 阶段先定过滤层与可见性口径（AC ②），并要求「被过滤项仍可审计」；**R2 降噪过度致用户看不到失败** → 默认不配置 = 现状 + UI 明示当前生效口径 + 一键恢复默认；**R3 新增 migration 幂等 / 前缀感知**（平台历史 blocker 同族）→ [platform.md §3.3](../standards/platform.md) 口径 + e2e 二次运行；**R4 与 M45.4 同触平台 UI** → 顺序相邻，M45.5 基线在其后建立。
+- **闭环记录（2026-10-19）**：**审计** `standard` **三分区并发** R1 **均 Pass**（P1 数据与校验层 0 blocker / 0 warning / 4 suggest；P2 API 与生效层 0 blocker / 2 warning / 6 suggest；P3 UI / i18n / e2e / 视觉基线 / 设计稿 0 blocker / 5 warning / 3 suggest）→ 全部 warning 与可落地 suggest 收口 → **R2 quick Pass**（修复点逐条 closed，无新增 blocker / warning）。**审计驱动修订**：`kinds` 补 trim 与重复项容忍、`prCheckFocus` 加 `.strict()` 拒绝未知维度（避免「配了但静默不生效」）、`matchesPRCheckFocus` 改防御式读取 + 视图丢弃非对象脏元素（单条脏行不再可能打挂列表）、补「未配置路径逐字段沿用快照值」等价性用例（并实测两个 null 分支 mutant 由存活变击杀）、设计稿补三条已知边界（零命中→终态静默窗口 / 读时 `focused` 与落库聚合的瞬时差 / 不登记 `AuditEvent` 的取择）、两个新迁移文件的章节指针与相对路径修正、`focusKind` 选项改显式 i18n 键并统一术语、新增 PR Check 页「未关注」标注 e2e、AC ② 的「状态」口径显式对账。**审计方独立复验**：三分区各自重跑定向 vitest / typecheck / eslint / 文档与 i18n 门禁；P2 实测「合法数组 + 脏元素」修复前后行为与 mutant 击杀；P3 独立重建后复跑视觉与 e2e、逐像素确认基线差异仅限弹窗区域。**mutation 6/6 击杀**（关闭关注集过滤 / 去 kind 维度 / 视图恒 `focused:true` / API 忽略 `prCheckFocus` / null 路径 `checkRunId` 改派生 / null 路径 `overallStatus` 改派生；均临时改动后还原并核验一致）。**审计用时实测（宿主时钟）**：R1 发起 `2026-10-19T11:48:24Z` → 分区证据落盘 `12:05:15Z` / `12:11:40Z`（≈17m / ≈23m，超出 `standard` ≤10m 时间盒 → 记为分级校准数据：分区内自行执行了构建与实验，实际按 `deep` 用时）；R2 发起 ≈`12:36Z` → 返回 `12:42Z`（≈6m，`quick` 盒略超）。
+- **残余与观察项**：① **既有迁移目录的相对路径死链**——同目录 4 个存量迁移文件用 4 级 `../`（应为 5 级），本批新增文件已按正确深度书写；存量属既有约定错误，建议后续单独 `chore` 批量修正；② **条目数上限作用在去重前**——`kinds` 允许重复项交由规范化去重，但 `.max(20)` 在去重前判定（API 客户端传 21 个重复项会 400；UI 多选无法产生重复项）；③ **关注集标注无视觉基线**（「关注集生效」/「未关注」需「仓库已配关注集 + 该行含未命中信号」的组合，会连带重建 `pr-checks` 基线）→ 已由 e2e 可见性用例承担断言，视觉面登记为 [visual/README.md](../../apps/platform/tests/visual/README.md) 已知盲区；④ **视觉测试库残留污染事件**——审计探针在 `apps/platform/data/visual.sqlite` 创建了 3 个非 fixtures 仓库，使 `/repos` 与弹窗基线的背景行数变化（差异集中在表格区，与代码无关）；已按主键清理并复跑视觉两遍通过；已登记 backlog 候选「视觉套件测试库残留非 fixtures 仓库导致基线失配」；⑤ 匹配为大小写不敏感**精确**匹配（无通配 / 子串），check 重命名后需同步改配置；⑥ 配置变更到下一轮 polling 之间，展开行 `focused` 标注与行级聚合存在瞬时不一致（下轮收敛）；⑦ 关注面零命中会被视为终态并进入 30 分钟静默窗口（同 SHA 迟到关注信号最长 30 分钟才检出）；⑧ 关注集变更不登记 `AuditEvent`（取择同 `tags` / `sandboxLimits`；仅 `verifyCommands` 因属执行面留痕）。**阶段状态**：M45 六原子全部闭环，阶段归档与沉淀工作流待用户启动。
 
 ### M45 追加临时待办（不占阶段条目编号，2026-10-16 用户授权）：批量日志导出范围口径
 
