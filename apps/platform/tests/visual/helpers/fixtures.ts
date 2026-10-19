@@ -9,8 +9,8 @@ import { type FixturesPayload, seedCustomFixtures } from '../../e2e/helpers/fixt
  * - e2e 数据集的 `firstSeenAt` / `lastSeenAt` 缺省 → fixtures 端点填 `now()`，每次运行不同；
  *   视觉基线需要**逐像素可复现**，故本数据集显式钉死时间戳。
  *
- * 数据规模遵循 minimum fixture 原则：3 仓库（2 个带标签 + 1 个无标签）+ 3 次扫描 + 9 条告警
- * + 5 条 PRCheck（pr-checks 页行级基线）。
+ * 数据规模遵循 minimum fixture 原则：3 仓库（2 个带标签 + 1 个无标签）+ 4 次扫描（3 成功 + 1 transient 失败）
+ * + 9 条告警 + 5 条 PRCheck（pr-checks 页行级基线）。
  *
  * 数据集含一个**跨 severity 的包**（nodemailer = high + medium），用于锁定「一个包一组」契约：
  * alerts 页默认按 severity 降序，若按**行级** severity 排序，同包跨档行会被拆到不同 severity 区块、
@@ -18,6 +18,13 @@ import { type FixturesPayload, seedCustomFixtures } from '../../e2e/helpers/fixt
  * 只渲染一个分组头。其余包保持单档（lodash=high / node-fetch=medium / axios=critical / minimist=low），
  * 视觉基线取「分组连续」的形态，覆盖分组头 + 展开行 + 4 档 severity 标签 + 4 种 source +
  * 5 种 fixStatus 呈现。不要扩展本集合，除非新增视觉用例确实需要。
+ *
+ * **浮层落点页（schedules 表单 / scans 弹窗 / alerts 运行抽屉 / pr-checks Toast）另需确定性取值**：
+ * 运行主键（以短 ID 渲染）、`createdAt`（列表排序 + 「最近运行」统计）、`startedAt` / `finishedAt`
+ * （列表 / 弹窗 / 抽屉的时间与时长列）全部显式钉死，否则基线随注入时刻逐次漂移。第 4 个运行是
+ * **transient 失败**（clone 阶段超时），作用是让运行列表首行（按 `createdAt` 降序）为「失败 · 仓库克隆」，
+ * 用例据此锁定时间戳覆盖已生效；其失败归因块与受约束重试入口 / 二次确认层**本轮未覆盖**
+ * （见 `tests/visual/README.md`「已知盲区」）。
  */
 export const VISUAL_FIXTURES: FixturesPayload = {
     repos: [
@@ -27,6 +34,7 @@ export const VISUAL_FIXTURES: FixturesPayload = {
     ],
     scanRuns: [
         {
+            id: '19b1c2d3e4f5a001',
             repositoryOwner: 'acme',
             repositoryName: 'web-app',
             mode: 'fix-and-pr',
@@ -34,8 +42,12 @@ export const VISUAL_FIXTURES: FixturesPayload = {
             executorKind: 'container',
             status: 'completed',
             summary: { alertsFound: 4, alertsFixed: 2 },
+            createdAt: '2026-08-20T01:59:50.000Z',
+            startedAt: '2026-08-20T02:00:00.000Z',
+            finishedAt: '2026-08-20T02:00:12.000Z',
         },
         {
+            id: '19b1c2d3e4f5a002',
             repositoryOwner: 'acme',
             repositoryName: 'api-gateway',
             mode: 'report-only',
@@ -43,8 +55,12 @@ export const VISUAL_FIXTURES: FixturesPayload = {
             executorKind: 'container',
             status: 'completed',
             summary: { alertsFound: 2, alertsFixed: 0 },
+            createdAt: '2026-08-21T03:00:00.000Z',
+            startedAt: '2026-08-21T03:00:00.000Z',
+            finishedAt: '2026-08-21T03:00:05.000Z',
         },
         {
+            id: '19b1c2d3e4f5a003',
             repositoryOwner: 'acme',
             repositoryName: 'unlabeled-tool',
             mode: 'report-only',
@@ -52,6 +68,27 @@ export const VISUAL_FIXTURES: FixturesPayload = {
             executorKind: 'container',
             status: 'completed',
             summary: { alertsFound: 1, alertsFixed: 0 },
+            createdAt: '2026-08-22T04:00:00.000Z',
+            startedAt: '2026-08-22T04:00:00.000Z',
+            finishedAt: '2026-08-22T04:00:02.000Z',
+        },
+        // 第 4 个运行：transient 失败（列表按 createdAt 降序 → 该行是 runs 分区首行），
+        // 覆盖运行详情弹窗的失败归因块（阶段 / 处置建议 / 失败码 / 执行级错误）与重试二次确认
+        {
+            id: '19b1c2d3e4f5a004',
+            repositoryOwner: 'acme',
+            repositoryName: 'web-app',
+            mode: 'fix-and-pr',
+            severityThreshold: 'high',
+            executorKind: 'container',
+            status: 'failed',
+            failureCode: 'ETIMEDOUT',
+            failureStage: 'clone',
+            failureKind: 'transient',
+            error: { code: 'ETIMEDOUT', message: '连接 GitHub 拉取仓库超时' },
+            createdAt: '2026-08-23T05:00:00.000Z',
+            startedAt: '2026-08-23T05:00:00.000Z',
+            finishedAt: '2026-08-23T05:00:30.000Z',
         },
     ],
     scanResults: [

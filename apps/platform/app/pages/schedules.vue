@@ -534,12 +534,15 @@ watch(toastMessage, (v) => {
                     <small class="text-muted">
                         {{ t('schedules.fieldCronHint') }}
                     </small>
-                    <!-- cron 实时预览（合法=next 3 次触发时间；非法=错误提示；空=无显示） -->
+                    <!-- cron 实时预览（合法=next 3 次触发时间；非法=错误提示；空=无显示）：
+                         触发时间由当前时刻 + cron 派生（逐日/逐周变化），属视觉回归的动态区域，
+                         以 data-visual-mask 显式遮蔽，不依赖像素容差兜底（selector 见
+                         apps/platform/tests/visual/helpers/visual.ts） -->
                     <section
                         v-if="cronPreview.isValid && cronPreview.nextRuns"
                         :aria-label="t('schedules.cronPreviewTitle')"
                     >
-                        <ul class="schedule-form__cron-preview">
+                        <ul class="schedule-form__cron-preview" data-visual-mask>
                             <li
                                 v-for="(date, idx) in cronPreview.nextRuns"
                                 :key="idx"

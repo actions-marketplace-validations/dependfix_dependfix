@@ -1,4 +1,4 @@
-import { expect, type Page, test } from '@playwright/test'
+import { expect, type Locator, type Page, test } from '@playwright/test'
 import { waitForHydration } from '../e2e/helpers/hydration.helper'
 import { VISUAL_FIXTURES } from './helpers/fixtures'
 import {
@@ -8,6 +8,7 @@ import {
     expectLocatorScreenshot,
     expectPageScreenshot,
     expectThemeApplied,
+    expectViewportScreenshot,
     waitForVisualStable,
 } from './helpers/visual'
 
@@ -19,7 +20,8 @@ import {
  * （独立 SQLite 库 + 固定时间戳，见 helpers/fixtures.ts）。
  *
  * 覆盖：亮色 5 张（alerts / repos / pr-checks / dialog-import-repos / login）+
- * 暗色 2 张（alerts / repos）。基线快照入仓库（`tests/visual/__screenshots__/`）。
+ * 暗色 2 张（alerts / repos）+ 浮层落点页 5 张（todo.md §M45.5：schedules 表单浮层 light / dark、
+ * scans 运行详情弹窗、alerts 运行抽屉、pr-checks Toast）。基线快照入仓库（`tests/visual/__screenshots__/`）。
  *
  * 不做的：不做全量页面 × 多浏览器 × 多 viewport 矩阵；不替代 ui-validator 的交互 /
  * 可用性审查；不为让用例变绿而放宽阈值或用 mask 掩盖真实差异。
@@ -78,6 +80,52 @@ async function openRepos(page: Page): Promise<void> {
     await waitForVisualStable(page)
 }
 
+/**
+ * 取视觉 fixtures 里已钉死的运行 ID（单一事实源）。
+ *
+ * 运行 ID 会以短 ID 形式渲染在运行列表详情弹窗与运行抽屉上，未钉死时基线随注入时刻漂移 →
+ * 这里 fail-fast，避免 fixtures 被改动后静默落成不可复现的基线。
+ */
+function pinnedRunId(index: number): string {
+    const id = VISUAL_FIXTURES.scanRuns[index]?.id
+    if (!id) {
+        throw new Error(`视觉 fixtures 的 scanRuns[${index}] 未钉死 id：详情弹窗 / 运行抽屉基线依赖确定性取值`)
+    }
+    return id
+}
+
+/** 打开定时计划页并展开「新建计划」弹窗（表单首个 Select 为业务类型，含门户面板）。 */
+async function openScheduleForm(page: Page): Promise<Locator> {
+    await page.goto('/schedules')
+    await waitForHydration(page)
+    const table = page.locator('.caomei-data-table')
+    await expect(table).toBeVisible({ timeout: 15000 })
+    /* 前置断言（假绿防护）：空态文案说明列表已渲染（视觉库不注入定时计划 fixtures，
+       若列表落成加载态则基线会截成「只有骨架」形态仍全绿）。 */
+    await expect(table).toContainText('暂无定时计划，点击右上角新建')
+
+    await page.getByRole('button', { name: '新建计划' }).click()
+    const dialog = page.locator('.caomei-dialog__content')
+    await expect(dialog).toBeVisible({ timeout: 15000 })
+    await expect(dialog.locator('.caomei-dialog__header')).toContainText('新建定时计划')
+    return dialog
+}
+
+/** 打开 alerts 页的「原始列表」视图并展开指定行的运行抽屉。 */
+async function openAlertsRunDrawer(page: Page): Promise<Locator> {
+    await page.goto('/alerts')
+    await waitForHydration(page)
+    await page.locator('#view-mode').click()
+    await page.locator('.caomei-select__content .caomei-select__item').filter({ hasText: '原始列表' }).click()
+    const row = page.locator('.caomei-data-table__row').filter({ hasText: 'lodash' }).first()
+    await expect(row).toBeVisible({ timeout: 15000 })
+    await row.locator('button[aria-label="详情"]').click()
+
+    const drawer = page.locator('.caomei-drawer__content')
+    await expect(drawer).toBeVisible({ timeout: 15000 })
+    return drawer
+}
+
 test.describe('平台页面视觉基线', () => {
     for (const theme of VISUAL_THEMES) {
         test(`alerts 分组与多列排序（${theme}）`, async ({ page }) => {
@@ -110,6 +158,29 @@ test.describe('平台页面视觉基线', () => {
             await openRepos(page)
             await expectThemeApplied(page, theme)
             await expectPageScreenshot(page, `repos-${theme}.png`)
+        })
+
+        /* 浮层落点页（todo.md §M45.5）：定时计划表单弹窗 + 业务类型 Select 门户面板。
+           门户面板挂在 body 上（不在弹窗子树内），故用视口级截图覆盖「弹窗 + 遮罩 + 面板」的合成结果；
+           表单的 cron 预览是「当前时刻 + cron」派生值，已在 schedules.vue 标 `data-visual-mask`。 */
+        test(`schedules 计划表单浮层（${theme}）`, async ({ page }) => {
+            await applyTheme(page, theme)
+            const dialog = await openScheduleForm(page)
+
+            const kindTrigger = dialog.locator('.caomei-select').first()
+            await expect(kindTrigger).toBeEnabled()
+            await kindTrigger.click()
+            const panel = page.locator('.caomei-select__content')
+            await expect(panel).toBeVisible({ timeout: 10000 })
+            await expect(panel.locator('[role="option"]')).toHaveCount(2)
+            await expect(panel).toContainText('定时批量扫描')
+            /* 前置断言：面板确实门户挂载（不是弹窗后代）——否则面板未挂载时基线会被落成
+               「只有弹窗 + 遮罩」的形态而仍全绿（同 dialog-select-layer 的口径）。 */
+            await expect(page.locator('.caomei-dialog__content .caomei-select__content')).toHaveCount(0)
+
+            await waitForVisualStable(page)
+            await expectThemeApplied(page, theme)
+            await expectViewportScreenshot(page, `schedules-form-layer-${theme}.png`)
         })
     }
 
@@ -164,6 +235,66 @@ test.describe('平台页面视觉基线', () => {
         await expectThemeApplied(page, 'light')
         /* 浮层用元素级截图：避免整页截图下 fixed 定位元素与背景叠加带来的不稳定 */
         await expectLocatorScreenshot(dialog, 'dialog-import-repos-light.png')
+    })
+
+    /* scans 页的运行详情弹窗（`/scans?run=` 深链触发的 repo-history-dialog，页面唯一弹窗落点）。
+       弹窗为 modal + 遮罩，故按视口级截图；运行 ID / 时间戳均取自 fixtures 的钉死取值。 */
+    test('scans 运行详情弹窗（light）', async ({ page }) => {
+        await applyTheme(page, 'light')
+        await page.goto(`/scans?run=${pinnedRunId(0)}`)
+        await waitForHydration(page)
+
+        const dialog = page.getByRole('dialog', { name: /扫描历史/ })
+        await expect(dialog).toBeVisible({ timeout: 15000 })
+        /* 前置断言（假绿防护）：
+           - 弹窗内容主体 = 结果表（run 模式的详情视图不渲染运行元信息块），行数取自 fixtures 的 run 0 结果集，
+             未就绪时弹窗停在加载态会让基线落成缺内容形态仍全绿；
+           - 底图运行列表按 createdAt 降序 → 首行为钉死的 transient 失败运行，据此锁定 fixtures 的
+             时间戳覆盖确实生效（未生效时该断言失败，而不是截出一张逐次漂移的基线）。 */
+        const runResults = VISUAL_FIXTURES.scanResults.filter((result) => result.scanRunIndex === 0)
+        await expect(dialog.locator('tbody .caomei-data-table__row')).toHaveCount(runResults.length)
+        await expect(dialog).toContainText('lodash')
+        await expect(page.locator('.caomei-data-table__row').filter({ hasText: '失败 · 仓库克隆' })).toHaveCount(1)
+
+        await waitForVisualStable(page)
+        await expectThemeApplied(page, 'light')
+        await expectViewportScreenshot(page, 'scans-run-detail-light.png')
+    })
+
+    /* alerts 页的运行抽屉（alert-run-sidebar 的 CaomeiDrawer，含遮罩与右侧滑入面板）。 */
+    test('alerts 运行抽屉浮层（light）', async ({ page }) => {
+        await applyTheme(page, 'light')
+        const drawer = await openAlertsRunDrawer(page)
+
+        /* 前置断言（假绿防护）：抽屉内运行表取自 fixtures 的钉死运行 ID 与时间戳，
+           若断言列未渲染则基线会落成空抽屉形态。 */
+        await expect(drawer).toContainText(pinnedRunId(0).slice(0, 8))
+        await expect(drawer).toContainText('12 秒')
+
+        await waitForVisualStable(page)
+        await expectThemeApplied(page, 'light')
+        await expectViewportScreenshot(page, 'alerts-run-drawer-light.png')
+    })
+
+    /* pr-checks Toast 轻提示（CaomeiToastProvider 的门户浮层）。
+       触发方式取「立即检查」在监测未启用时的 warning 提示（视觉环境未设
+       ACTION_STATUS_MONITOR_ENABLED → 端点返回 skipped，不触网、不改库）→ 本用例可与其它用例同批串行。 */
+    test('pr-checks Toast 轻提示（light）', async ({ page }) => {
+        await applyTheme(page, 'light')
+        await page.goto('/pr-checks')
+        await waitForHydration(page)
+        const table = page.locator('.caomei-data-table')
+        await expect(table).toBeVisible({ timeout: 15000 })
+        await expect(table.locator('tbody .caomei-data-table__row')).toHaveCount(VISUAL_FIXTURES.prChecks?.length ?? 0)
+
+        await page.getByRole('button', { name: '立即检查' }).click()
+        const toast = page.locator('.caomei-toast')
+        await expect(toast).toBeVisible({ timeout: 10000 })
+        await expect(toast).toContainText('PR Check 监测未启用')
+
+        await waitForVisualStable(page)
+        await expectThemeApplied(page, 'light')
+        await expectViewportScreenshot(page, 'pr-checks-toast-light.png')
     })
 })
 
