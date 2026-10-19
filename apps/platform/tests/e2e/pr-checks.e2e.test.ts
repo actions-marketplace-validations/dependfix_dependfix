@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { seedCustomFixtures } from './helpers/fixtures.helper'
+import { authedCookieHeader } from './helpers/auth-cookie.helper'
 import { waitForHydration } from './helpers/hydration.helper'
 
 /**
@@ -220,5 +221,87 @@ test.describe('PR Check 列表行内仓库辨识度', () => {
             return metrics
         })
         expect(truncation.scroll).toBeGreaterThan(truncation.client)
+    })
+})
+
+test.describe('PR Check 关注集标注', () => {
+    test('未命中关注集的信号在展开行标注「未关注」', async ({ page }) => {
+        // 自包含：种一个专属仓库 + 一行「关注面 success / 非关注面 failure」的 PR，
+        // 通过 API 配置关注集（只关注 Test），再断言展开行的标注（覆盖「被过滤信号仍可在 UI 看到」的可见性面）
+        const seed = await page.request.post('/api/e2e/fixtures', {
+            data: {
+                repos: [{ owner: 'focus-e2e', name: 'repo' }],
+                scanRuns: [],
+                scanResults: [],
+                prChecks: [
+                    {
+                        repositoryOwner: 'focus-e2e',
+                        repositoryName: 'repo',
+                        prNumber: 393,
+                        headSha: 'e'.repeat(40),
+                        authorLogin: 'dependfix[bot]',
+                        conclusion: 'success',
+                        overallStatus: 'success',
+                        signals: [
+                            {
+                                kind: 'check',
+                                provider: 'github-actions',
+                                name: 'Test',
+                                state: 'success',
+                                rawState: 'success',
+                                sourceId: '9101',
+                            },
+                            {
+                                kind: 'check',
+                                provider: 'github-actions',
+                                name: 'Lint',
+                                state: 'failure',
+                                rawState: 'failure',
+                                sourceId: '9102',
+                                summary: 'lint failed',
+                            },
+                        ],
+                        alertFiring: false,
+                        lastPolledAt: '2026-08-29T02:00:00.000Z',
+                    },
+                ],
+            },
+            maxRetries: 2,
+        })
+        expect(seed.ok()).toBeTruthy()
+        const seeded = await seed.json() as { repos: { id: string, owner: string }[] }
+        const repoId = seeded.repos.find((item) => item.owner === 'focus-e2e')!.id
+
+        const cookieHeader = await authedCookieHeader(page)
+        const headers = { cookie: cookieHeader, origin: 'http://127.0.0.1:3101' }
+        const configured = await page.request.put(`/api/repos/${repoId}`, {
+            headers,
+            data: { prCheckFocus: { names: ['Test'] } },
+        })
+        expect(configured.ok()).toBeTruthy()
+
+        try {
+            await page.goto('/pr-checks')
+            await waitForHydration(page)
+
+            const table = page.locator('.caomei-data-table')
+            await expect(table).toBeVisible({ timeout: 15000 })
+            const row = table.locator('tbody .caomei-data-table__row').filter({ hasText: '#393' }).first()
+            await expect(row).toBeVisible()
+
+            await row.locator('button.caomei-data-table__row-expander').click()
+            const panel = table.locator('.pr-checks__signals')
+            await expect(panel).toBeVisible()
+            await expect(panel).toContainText('关注集生效')
+
+            // 未命中（Lint）标注「未关注」；命中（Test）不标注
+            await expect(panel.locator('.pr-checks__signal').filter({ hasText: 'Lint' }))
+                .toContainText('未关注')
+            await expect(panel.locator('.pr-checks__signal').filter({ hasText: 'Test' }))
+                .not.toContainText('未关注')
+        } finally {
+            // 复位：避免影响同库其它用例（e2e 库跨 run 复用）
+            await page.request.put(`/api/repos/${repoId}`, { headers, data: { prCheckFocus: null } })
+        }
     })
 })

@@ -2,6 +2,16 @@
  * 平台前后端共享类型（app 侧视图类型，与 server/api 返回结构对齐）。
  */
 
+/**
+ * PR Check 关注集视图（`Repository.prCheckFocus` 的 JSON 解析结果；null = 未配置）。
+ * 语义见 docs/design/governance/pr-build-deploy-signals.md §9。
+ */
+export interface PRCheckFocusView {
+    providers: string[]
+    names: string[]
+    kinds: ('check' | 'status' | 'deployment')[]
+}
+
 /** 仓库视图（server/api/repos 返回结构；日期经 Nuxt 序列化为 ISO 字符串） */
 export interface RepoView {
     id: string
@@ -21,6 +31,8 @@ export interface RepoView {
      * 安全：等价于远程命令执行面，写入门槛 admin / org_admin，变更登记 audit_event。
      */
     verifyCommands: string[]
+    /** PR Check 告警关注集（null = 未配置 = 全量只报警不阻断；见设计稿 §9） */
+    prCheckFocus: PRCheckFocusView | null
     /** AI 研判开关（todo.md §M26.1 + M25.2a 实体扩展；与 POST /api/repos/[id]/ai-config 联动） */
     aiEnabled: boolean
     /** AI 研判触发范围（failure / major / both） */

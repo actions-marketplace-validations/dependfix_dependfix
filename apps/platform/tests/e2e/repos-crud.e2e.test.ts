@@ -96,6 +96,63 @@ test.describe('仓库管理 CRUD', () => {
             .toHaveValue('pnpm install --frozen-lockfile\npnpm test')
     })
 
+    test('PR Check 关注集：Dialog 填写 → 保存 → API 落库 → 编辑回显', async ({ page }) => {
+        await page.goto('/repos')
+        await waitForHydration(page)
+        await page.locator('button:has-text("添加仓库")').click()
+        await expect(page.locator('.caomei-dialog__header')).toContainText('添加仓库', { timeout: 15000 })
+
+        const stamp = Date.now()
+        const owner = `repos-focus-${stamp}`
+        await page.locator('input#owner').fill(owner)
+        await page.locator('input#name').fill(`repo-${stamp}`)
+        await page.locator('input#focusProviders').fill('Vercel, github-actions')
+        await page.locator('input#focusNames').fill('Test, Preview')
+        // 来源类型：多选（选中后点标题收合面板，避免 Escape 连带关闭弹窗）
+        await page.locator('#focusKinds').click()
+        await page.getByRole('option', { name: 'Check', exact: true }).click()
+        await page.locator('.repo-form__focus-title').click()
+
+        await page.locator('.caomei-dialog__content button:has-text("保存")').click()
+        await expect(page.locator('.caomei-message--success')).toContainText('仓库已添加', { timeout: 15000 })
+
+        // API 落库：provider / kind 归一为小写，条目顺序保持
+        const cookieHeader = await authedCookieHeader(page)
+        const response = await page.request.get('/api/repos', {
+            headers: { cookie: cookieHeader, origin: 'http://127.0.0.1:3101' },
+        })
+        const repos = await response.json() as { owner: string, prCheckFocus: unknown }[]
+        expect(repos.find((r) => r.owner === owner)?.prCheckFocus).toEqual({
+            providers: ['vercel', 'github-actions'],
+            names: ['Test', 'Preview'],
+            kinds: ['check'],
+        })
+
+        // 编辑弹窗回显（数组 join(', ') 还原为文本；归一后的 provider 小写）
+        const row = page.locator('.caomei-data-table__row', { hasText: owner })
+        await row.locator('button[aria-label="编辑"]').click()
+        await expect(page.locator('.caomei-dialog__header')).toContainText('编辑仓库', { timeout: 15000 })
+        await expect(page.locator('input#focusProviders')).toHaveValue('vercel, github-actions')
+        await expect(page.locator('input#focusNames')).toHaveValue('Test, Preview')
+        // kinds 多选回显：id 挂在内层 input，断言读 tag chip 文本（innerText 恒为空）
+        const kindsField = page.locator('.repo-form__focus .caomei-multi-select')
+        await expect(kindsField.locator('.caomei-multi-select__tag')).toHaveCount(1)
+        await expect(kindsField).toContainText('Check')
+
+        // 清空三维 → 保存 → prCheckFocus 回到 null（一键恢复默认）
+        await page.locator('input#focusProviders').fill('')
+        await page.locator('input#focusNames').fill('')
+        await kindsField.locator('.caomei-multi-select__tag-remove').click()
+        await page.locator('.caomei-dialog__content button:has-text("保存")').click()
+        await expect(page.locator('.caomei-message--success')).toContainText('仓库已更新', { timeout: 15000 })
+
+        const afterClear = await page.request.get('/api/repos', {
+            headers: { cookie: cookieHeader, origin: 'http://127.0.0.1:3101' },
+        })
+        const clearedRepos = await afterClear.json() as { owner: string, prCheckFocus: unknown }[]
+        expect(clearedRepos.find((r) => r.owner === owner)?.prCheckFocus).toBeNull()
+    })
+
     test('编辑仓库：点击编辑 → 改 defaultBranch → 保存 → 列表更新', async ({ page }) => {
         const stamp = Date.now()
         const owner = `repos-edit-${stamp}`

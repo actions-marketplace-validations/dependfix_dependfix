@@ -4,7 +4,7 @@
 // 表单状态与提交逻辑内聚在组件内；保存成功 emit `saved`（父组件刷新列表 + 成功提示），
 // 保存失败 emit `failed`（父组件按 repos.errors.saveFailed 包装后展示）。
 import { Check } from '@lucide/vue'
-import type { RepoView } from '~/types/platform'
+import type { PRCheckFocusView, RepoView } from '~/types/platform'
 
 const props = defineProps<{
     visible: boolean
@@ -35,7 +35,25 @@ interface RepoForm {
     tags: string[]
     /** 自定义验证命令（多行文本，一行一条；提交时拆分为数组，空行忽略 → 空数组走默认链） */
     verifyCommands: string
+    /** PR Check 关注集（逗号 / 换行分隔的文本；提交时拆分为数组，空 = 该维度不限） */
+    focusProviders: string
+    focusNames: string
+    /** 关注集来源类型（空数组 = 不限） */
+    focusKinds: string[]
 }
+
+/** 关注集来源类型选项（与 server/utils/pr-check-focus.ts 的 PR_CHECK_FOCUS_KINDS 同值域） */
+const FOCUS_KINDS = ['check', 'status', 'deployment'] as const
+type FocusKind = (typeof FOCUS_KINDS)[number]
+
+const isFocusKind = (value: string): value is FocusKind =>
+    (FOCUS_KINDS as readonly string[]).includes(value)
+
+/** 文本 → 关注集条目数组（支持中英文逗号与换行；空项丢弃） */
+const splitFocusList = (raw: string): string[] =>
+    raw.split(/[\n,，]/u)
+        .map((item) => item.trim())
+        .filter(Boolean)
 
 const emptyForm = (): RepoForm => ({
     owner: '',
@@ -48,10 +66,30 @@ const emptyForm = (): RepoForm => ({
     note: '',
     tags: [],
     verifyCommands: '',
+    focusProviders: '',
+    focusNames: '',
+    focusKinds: [],
 })
 
 const form = ref<RepoForm>(emptyForm())
 const saving = ref(false)
+
+/** 关注集来源类型选项（显式键逐一列出：与 pr-checks.vue 同口径，避免动态 i18n 键绕过缺词门禁） */
+const focusKindOptions = computed(() => [
+    { value: 'check', label: t('repos.focusKind.check') },
+    { value: 'status', label: t('repos.focusKind.status') },
+    { value: 'deployment', label: t('repos.focusKind.deployment') },
+])
+
+/** 表单关注集 → 请求体（三维全空归一为 null = 不启用；服务端仍会做 trim / 去重 / 小写规范化） */
+const buildFocusPayload = (): PRCheckFocusView | null => {
+    const providers = splitFocusList(form.value.focusProviders)
+    const names = splitFocusList(form.value.focusNames)
+    const kinds = form.value.focusKinds.filter(isFocusKind)
+    return providers.length > 0 || names.length > 0 || kinds.length > 0
+        ? { providers, names, kinds }
+        : null
+}
 
 /**
  * 打开时按「编辑对象 / 新增」重置表单——父组件只切换 visible 与 repo，
@@ -74,6 +112,9 @@ watch(() => props.visible, (open) => {
                 note: repo.note ?? '',
                 tags: [...(repo.tags ?? [])],
                 verifyCommands: (repo.verifyCommands ?? []).join('\n'),
+                focusProviders: (repo.prCheckFocus?.providers ?? []).join(', '),
+                focusNames: (repo.prCheckFocus?.names ?? []).join(', '),
+                focusKinds: [...(repo.prCheckFocus?.kinds ?? [])],
             }
         : emptyForm()
 })
@@ -95,6 +136,7 @@ const submit = async () => {
                 .split('\n')
                 .map((line) => line.trim())
                 .filter(Boolean),
+            prCheckFocus: buildFocusPayload(),
         }
         if (props.repo) {
             await $fetch(`/api/repos/${props.repo.id}`, {
@@ -219,6 +261,39 @@ const submit = async () => {
                 />
                 <small class="text-muted">{{ t('repos.fieldVerifyCommandsHint') }}</small>
             </div>
+            <div class="repo-form__focus">
+                <div class="repo-form__focus-title">
+                    {{ t('repos.fieldPrCheckFocus') }}
+                </div>
+                <div class="repo-form__field">
+                    <label for="focusProviders">{{ t('repos.fieldPrCheckFocusProviders') }}</label>
+                    <CaomeiInput
+                        id="focusProviders"
+                        v-model="form.focusProviders"
+                        :placeholder="t('repos.fieldPrCheckFocusProvidersPlaceholder')"
+                    />
+                </div>
+                <div class="repo-form__field">
+                    <label for="focusNames">{{ t('repos.fieldPrCheckFocusNames') }}</label>
+                    <CaomeiInput
+                        id="focusNames"
+                        v-model="form.focusNames"
+                        :placeholder="t('repos.fieldPrCheckFocusNamesPlaceholder')"
+                    />
+                </div>
+                <div class="repo-form__field">
+                    <label for="focusKinds">{{ t('repos.fieldPrCheckFocusKinds') }}</label>
+                    <CaomeiMultiSelect
+                        id="focusKinds"
+                        v-model="form.focusKinds"
+                        :options="focusKindOptions"
+                        option-label="label"
+                        option-value="value"
+                        :placeholder="t('repos.fieldPrCheckFocusKindsPlaceholder')"
+                    />
+                </div>
+                <small class="text-muted">{{ t('repos.fieldPrCheckFocusHint') }}</small>
+            </div>
             <div class="repo-form__field">
                 <label for="note">{{ t('repos.fieldNote') }}</label>
                 <CaomeiTextarea
@@ -288,6 +363,19 @@ const submit = async () => {
         justify-content: flex-end;
         gap: $space-2;
         margin-top: $space-2;
+    }
+
+    &__focus {
+        display: flex;
+        flex-direction: column;
+        gap: $space-3;
+        padding-top: $space-3;
+        border-top: 1px solid $color-border;
+    }
+
+    &__focus-title {
+        font-size: $font-size-sm;
+        font-weight: 600;
     }
 }
 </style>
