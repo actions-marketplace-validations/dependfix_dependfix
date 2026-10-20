@@ -31,7 +31,12 @@ const toView = (r: Repository) => ({
     updatedAt: r.updatedAt,
 })
 
-/** GET /api/repos：仓库列表（含关联凭据名称） */
+/**
+ * GET /api/repos：仓库列表（含关联凭据名称）。
+ *
+ * 注意：视觉回归的仓库集合门禁（`tests/visual/helpers/visual-db.ts`）依赖本端点返回**全量**仓库；
+ * 若未来引入分页 / 默认过滤，需同步调整门禁的集合真值来源（否则窗口外的多余仓库不可见、门禁假绿）。
+ */
 const listRepositories = async (event: H3Event) => {
     await requireAuth(event)
     const ds = await ensureDatabaseInitialized()
