@@ -11,6 +11,11 @@
   否则比对的是过期产物（可能假绿）。
 - 数据：`tests/visual/global-setup.ts` 每次运行前重置并注入 `helpers/fixtures.ts` 的确定性数据集
   （独立 SQLite 库 `data/visual.sqlite`，与 e2e 库隔离）。
+- 库内仓库集合：global-setup 会在注入后断言 `data/visual.sqlite` 的仓库集合**必须等于**
+  `VISUAL_FIXTURES.repos`。默认先按该白名单清理多余仓库（走 `DELETE /api/e2e/fixtures`，仅作用于视觉库）；
+  残留不一致时在截图前失败并列出「多余 / 缺失」，不进入像素比对。`VISUAL_FIXTURES_AUTO_CLEAN=0`
+  可关闭自动清理（此时仍会重置并注入 fixtures，只是不删除多余仓库，便于保留现场 / 查看差异清单；
+  集合不一致时套件仍会在截图前中止）。不要在视觉库手工新增仓库；需要新仓库时扩展 `VISUAL_FIXTURES.repos`。
 - 端口：config 使用 `reuseExistingServer: false`，端口 3102 被残留进程占用时（如上次会话被强行中断）会直接报
   `http://127.0.0.1:3102 is already used` —— 结束残留的 `.output/server/index.mjs` 进程后重跑即可。
 
@@ -93,6 +98,13 @@
 | 瞬时时刻（cron 预览、`now()` 派生文案） | 随运行时刻变化 | 页面侧 `data-visual-mask` 遮蔽（加遮蔽必须重生成基线） |
 
 用例侧以 `pinnedRunId(index)` 读取钉死取值并 **fail-fast**：fixtures 被改动去掉 `id` 时用例直接失败，而不是静默产出一张不可复现的基线。
+
+### 集合校验的已知边界
+
+- 集合按 `owner/name` 比较（视觉库为单平台测试库）；同 key 不同 `platform` 的仓库在视觉库中不会出现，若出现会被清理端点按 owner/name 一并删除。
+- 清理走 repository 级联（PRCheck → ScanResult → ScanRun → Repository），不级联 `schedule.repositoryIds`（JSON 引用）。视觉库不应创建定时计划；若探针创建过 schedule，需手工清理该行。
+- 集合真值来自 `GET /api/repos` 的全量返回；该端点未来若引入分页 / 默认过滤，需同步调整门禁的集合来源（`server/api/repos/index.ts` 已留注释）。
+- 清理作用于视觉服务进程当前 `DATABASE_PATH` 指向的库（config 固定 `data/visual.sqlite`）；不要把该 env 指向主库运行视觉套件。
 
 ### 已知盲区（本轮未覆盖，登记观察项）
 
