@@ -116,11 +116,6 @@
   - **触发条件**：该基线在**不带 update** 的复跑中失败（即超出容差）；或用户要求清理视觉基线噪声。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
-- **视觉套件测试库残留非 fixtures 仓库导致基线失配（待评估）** —— 现象：`apps/platform/data/visual.sqlite`（gitignored）在本地多次运行或外部探针写入后会累积非 fixtures 仓库（2026-10-19 批次实测残留 3 条 `parp3-*` 记录），使 `/repos` 与「弹窗内首个 Select」两张**视口级**基线的背景行数 / 表格几何变化 → 与代码无关的失配（差异集中在表格区）。CI 每次全新库不受影响，仅本地复跑与探针场景命中。
-  - **待评估点**：① 视觉 `global-setup` 增加「库内仓库集合 == fixtures 集合」前置断言（不匹配时给出明确提示而非像素差异）；② 或新增清理通道（按 allowlist 删除非 fixtures 仓库）；③ 或文档化「本地跑视觉前重建视觉库」的操作约定。
-  - **触发条件**：再次出现「基线与代码无关的整表差异」；或本地视觉复跑频率上升时。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
-
 - **归档索引表格行的成对错位强调（`**；**` 形态，待评估）** —— 现象：`docs/plan/archive/index.md` 的 M16 / M17 等历史归档行内含 `` `**；**` ``（成对但无强调语义，渲染为加粗分号），系早期批次书写惯例遗留；此类 `**` 计数为**偶数**，`check-docs` 的 `emphasis` 规则按定义只覆盖**未配对**（奇数计数）形态（[文档规范 §2](../standards/documentation.md) 已把「成对但语义错位」声明为显式盲区）。
   - **待评估点**：① 是否统一清理（涉及多行同形，宜独立批次以保持归档排版一致）；② 或维持现状并在规范注释中作为盲区实例保留。
   - **触发条件**：归档索引再次批量编辑时；或用户要求清理归档排版。
@@ -164,25 +159,9 @@
   - **触发条件**：下次改动上述规范文件 / 文档门禁扩面 / 阶段归档批次。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
-- **环境性失败的可见性口径：不归因 ≠ 不可见（待评估，P1 🛠️）** —— 现象（2026-10-17 生产实证）：13 个仓库「有可修告警 / 0 修复」在运行列表显示为**已完成**，平台侧无任何"本来要修但没修成"的信号。链路：`ENVIRONMENT_ERROR` 判定（`packages/engine/src/fixers/pnpm/index.ts` + `fixers/process-signals.ts`，**环境性判定仍以 stderr 为空 / 信号 / 超时为准；证据采集已补 stdout，见下方 ①**）→ `SKIPPED_AUDIT_CATEGORIES` 不计入错误（`packages/engine/src/app/result-assembly.ts:152-157`）→ `environmentalFailure` 不计入失败动作（同文件 `:181`） → 平台 `exitCode=1 + result` 走 `completed`（`apps/platform/server/services/scan-run-state.ts:136` 注释口径 + `:157` 兜底返回），且**引擎 exit code 未落库**（`apps/platform/server/entities/scan-run.ts` 无该列）。
-  - **待评估点**：① **证据采集已补 stdout 尾部**（2026-10-18，`getInstallDiagnostics` 读取 stderr+stdout 并脱敏，见 [dependency-fixer-records.md §12.11](../design/modules/dependency-fixer-records.md)）——但**分类语义未变**（stderr 为空 / 信号 / 超时仍判环境性），真实安装失败仍可能被并入环境性，保留待评估；② 引擎 exit code 与「环境性失败计数」落库；③ 运行列表 / 详情展示已合并至「跨 major / 截断 / 子目录跳过的用户可见披露」条目（P2），含 `needs-review` 标与 `failure_kind=transient` 重试衔接；④ 超时失败 run（`result` 为 undefined）不 reconcile 告警明细（`apps/platform/server/services/scan-orchestrator.service.ts:411-417`）⇒ 列表"告警数 0"，是否补落快照。
-  - **触发条件**：已命中；或用户再次以「列表显示成功但告警未修」形式报告现象。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
-
-- **基线采样「首失败即停」与门禁回滚粒度的假阴性面（待评估，P2 🛠️）** —— 现象（2026-10-17 生产实证）：nest-template（5 告警）4 个探针中 3 个已 `passed verification`，但基线链在第一条 `pnpm install` 处即失败 ⇒ **`pnpm test` 从未进基线**（`packages/engine/src/app/verify-project.ts:100` 首失败即停 + `:172-175` 仅豁免基线内已失败命令）⇒ 修复后 jest `No tests found, exiting with code 1` 被判「本次引入」⇒ 门禁 `git reset --hard`（`packages/engine/src/runners/verification-gate.ts:41-43`）**整仓回滚**，该批次同类共 4 个成功探针一起丢弃。另一例 picgo-plugin-optimization 为真实回归（`TS2503: Cannot find namespace 'sharp'`）但连带回滚 2 个已通过探针。
-  - **待评估点**：① 基线改为**跑完整条链**（各段独立记录，不早停）或对「工具链缺失 / 无测试文件（`No tests found` / `--passWithNoTests` 语义）」设立与 `SCRIPT_NOT_FOUND` 同族的豁免类；② 门禁按**变更单元**回滚（已验证通过的探针先落 commit，失败单元单独回滚）而非整仓 `reset --hard`；③ 与「探针合批」候选的回滚粒度取舍联动。
-  - **触发条件**：已命中；或再次出现「探针通过但被无关红链整仓回滚」的 run。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
-
 - **运行日志的语义订正与构建版本回执（待评估，P2 📚）** —— 现象（2026-10-17 生产实证）：① `Lockfile repaired for <repo> (strategy: N/A)` 的实际语义是**诊断步发现 lockfile 本就合规、未做任何改动**（`packages/engine/src/fixers/pnpm/index.ts:439-451` 直接 `return { success: true, diff: null }` ⇒ 无 `strategy`；日志行 `packages/engine/src/app/helpers.ts:564-568`），该文案与紧随其后的 `No changes to commit` 组合后被读成"修好了但没提交"；② 本次复盘的首要动作变成"反推线上构建是否含某提交"——`todo.md` §M45 追加临时待办②/③ 的留痕提交（`7f01d3bc` / `701f55f7`）已入库但当日批次日志无对应行，仅能靠时间线推断构建陈旧。
   - **待评估点**：① 文案改为「lockfile 已合规 — 无需修复」类中性表述（并核对报告 / PR 正文契约串的消费者）；② 引擎运行起始输出**构建版本 + commit**（或平台在 run 记录落构建版本），使"日志缺留痕"可一眼区分「构建旧」与「代码路径未覆盖」；③ 与用户计划中的 Jenkins webhook 镜像推送部署联动（部署回执与 run 记录对齐）。
   - **触发条件**：用户计划引入自动构建/部署（Jenkins webhook → 镜像推送）时；或下次需要判定"线上是否含某提交"时。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
-
-- **跨 major / 截断 / 子目录跳过的用户可见披露（待评估，P2 🎨 用户体验）** —— 现象（2026-10-17 生产实证，2026-10-18 用户报告补充）：2026-10-16 批次中多处「有告警 / 0 修复」实为**设计性跳过**——`allowMajorUpgrade` 在平台侧硬编码为 `false`（`apps/platform/server/services/scan-orchestrator.service.ts:265`）⇒ rss-impact-server 6/15、rss-resources-download 5/8、nuxt-latest-template 4/6、afdian-linker 4/6、auto-backup-database 5/5 等告警因「线内无修复」被跳过；另有单仓 20 条截断（`maxAlertsPerRepository: 20`，同文件 `:266`；cookie-cloudflare 截 9 / caomei-auth 截 3）与子目录 / 根直接依赖 manifest 跳过（momei 的 `quill`、tauri-template 的 `Cargo.lock` ×3）。这些在 UI 上与"环境性失败导致 0 修复"外观相同。
-  - **待评估点**：① 是否提供仓库级「允许跨线升级」开关（走完整验证 + AI 研判兜底）或维持一律人工；② 若维持人工，UI 是否必须明示「N 条因跨 major 跳过，需人工处理」；③ 截断 / 子目录跳过是否同样需要在运行详情给可点开的清单（当前只有引擎 WARN 日志）；④ 运行摘要是否持久化 `alertsTruncated` 与按原因分组的 `alertsSkipped`，并在列表 / 详情以 `20/26（6 截断，4 跨大版本）` 形式展示（当前 `alertsCount` 只统计截断后的数量，用户无法从 UI 判断差异）。
-  - **触发条件**：用户对"有可修告警却未修"再次要求解释时；或跨 major 告警占比升高时。
-  - **2026-10-18 补充**：`undici` 最高版本误判（`cookie-cloudflare` 报 `Converged` 但 5.x 仍脆弱）已由 P0 交付正确性批次修复（收敛按全部实例 + `alertsSkipped`）；本条剩余待评估点 = **①（仍开放：是否提供仓库级 `allowMajorUpgrade` 开关，或维持一律人工；平台当前仍硬编码 `false`）+ ②③④ 的 UI / PR 正文展示**——运行详情与 PR 正文仍需展示 `alertsTruncated`、按原因分组的 `alertsSkipped` 与「未关闭告警」计数，避免用户把「部分修复」读成「全部修复」。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
 - **验证链与目标仓库 CI 命令对齐 / 默认分支 workflow 健康预检（待评估，P2 🛠️）** —— 现象（2026-10-18 生产复盘）：dependfix 的验证链是固定默认链（`install → lint → build → typecheck → test`），不读取目标仓库 `.github/workflows/*.yml`；`rss-image-download#103` 的 CI 不跑 `pnpm test`，dependfix 却因「No test files found」把 test 标成既有失败；`hexo-cloudflare-counter#114` 的 CI 不跑 typecheck，dependfix 却因 TS 6 的 `TS5101 baseUrl` 标红；`cookie-cloudflare#84` 的 CI 只跑 install/lint/build，而合并后的 `Publish Docker` 失败（阿里 ACR OCI attestation）完全不在验证面内。结果：PR 正文的红字与 GitHub CI 的绿/红不是同一口径，用户难以判断「PR 是否真的过 CI」。
@@ -193,11 +172,6 @@
 - **基线红 / 安装失败的交付降级策略（draft PR / issue / 人工确认）（待评估，P2 🎨）** —— 现象（2026-10-18 生产复盘）：P0 交付正确性批次已实现「修复后安装仍既有失败 → 不建普通 PR」，但被跳过的告警仍只剩报告与日志，用户没有「可跟踪的待办载体」。`nest-template#2421` 的基线 lockfile 本身损坏，正确处置可能是开 issue / draft PR 说明「先修 lockfile」，而不是静默跳过。
   - **待评估点**：① 是否支持 `DEPENDFIX_ON_BASELINE_RED=skip|issue|draft`（默认 skip，保持当前行为）；② issue / draft PR 的标题、正文、标签与去重键（复用 `findDependfixOpenPR` 还是新 issue 查询）；③ 与 `PRE_EXISTING_FAILURE` / `alertsSkipped` 记账的衔接，避免同一原因反复开单；④ 交付被跳过仍为 exit-code 中性（`PRE_EXISTING_FAILURE` 在跳过类白名单），CI 无法从退出码感知「要求交付但未交付」——是否补一个**非归因但可见**的交付跳过信号（summary 字段 / 平台 run 状态 / UI 标记）。
   - **触发条件**：用户要求「0 修复也要有可跟踪记录」；或 baseline 红仓库占比持续升高时。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
-
-- **执行容器内存下限与 OOM 归因（待评估，P1 🛠️）** —— 现象（2026-10-18 生产复盘）：多仓 `pnpm install` 以 `signal SIGKILL` / `exit code -1` 失败（tinyfish-mcp / rss-to-memos-sync / sharp-cloud-uploader / push-all-in-cloud / momei / rss-impact-server 等），结合 2026-10-17 内核 OOM 实证（41 次终止、时间戳与引擎日志同秒对齐）与「4 核 4 GB 主机」记录，内存是当前最大的单点环境瓶颈。**口径冲突**：治理设计 [executor-process-isolation.md §8.4](../design/governance/executor-process-isolation.md#_8-执行超时与运行级取消-2026-10-17) 建议容器 / 主机内存 **≥ 8 GB**（4 GB 已验证会 OOM），而用户可见的 [deployment.md](../guide/deployment.md) 仍写「至少 1 CPU / 1GB（推荐 2GB+）」，两份口径相差约 4 倍；按部署指南部署会直接落进 OOM 场景。当前缺少启动期 / 运行期的内存可观测断言。
-  - **待评估点**：① 平台启动时记录 cgroup / 宿主机内存与并发，低于建议值时 warn（不阻断）；② 运行记录落 `memory.max` / 峰值 RSS / OOM 计数，便于把 SIGKILL 归因到 OOM 而非超时；③ 是否把「并发 1 + 内存 ≥ 8 GB」写成部署门禁 / compose 默认；④ 与 pnpm store 持久化、独立 installer 容器的联动；⑤ **首要处置**：同步 `docs/guide/deployment.md` 的前置要求（区分控制面最低规格与执行面 ≥ 8 GB），或明确「1 GB 仅控制面、执行面另计」。
-  - **触发条件**：再次出现批量 SIGKILL / 0 修复；或部署环境调整内存规格时。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
 - **交付类同步调用未纳入运行级取消面（待评估，P2 🛠️）** —— 现象（2026-10-17 审计派生）：本轮把安装 / 锁文件修复 / 验证三类长命令迁到受管异步执行并纳入取消面，但 `github/pr-creator.ts` 的 `git push` / `git commit` 与 `app/helpers.ts` 的仓库状态查询仍是同步子进程调用 —— 弱网下 `git push` 会持续阻塞事件循环（平台执行超时定时器、队列锁续期与 HTTP 同族阻塞面的残留），且不受取消守卫覆盖（[executor-process-isolation.md §8.5](../design/governance/executor-process-isolation.md#_8-执行超时与运行级取消-2026-10-17) 已声明覆盖边界）。
@@ -232,6 +206,21 @@
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
 - **`check-experience-landing` 按子条目（`###`）逐条校验落点（待评估）** —— 现象：脚本按 `##` 切分经验归档章节，同一 `##` 下多个 `###` 子条目只受「整节任意一条落点非空」保护；本批审计实测自指落点（「本条环境注记」）可假通过。**待评估点**：① 是否把校验粒度改为 `###`（每个子条目必须有非空落点）；② 是否对「本条环境注记」一类自指落点单独告警；③ 存量条目是否需要批量补真实落点。**触发条件**：下次大规模蒸馏 / 经验归档批次。
+  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
+
+- **环境性失败分类语义收窄（待评估，P2 🛠️）** —— 现象：M46.1 只把「环境性失败」变成可见，不改变分类；`ENVIRONMENT_ERROR` 仍以 stderr 为空 / 信号 / 超时判定，真实安装失败仍可能被并入环境性（源候选在 M46 上收时保留的残余点）。
+  - **待评估点**：① 是否引入更细的分类（有 stderr / 有输出但失败 → 非环境性）；② 与 `failure_kind=transient` 的衔接；③ 历史数据是否回填。
+  - **触发条件**：环境性失败计数持续高但实际可修；或再次出现「环境性失败掩盖真实安装失败」。
+  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
+
+- **仓库级 `allowMajorUpgrade` 开关（待评估，P2 🚀）** —— 现象：平台侧硬编码 `false`，跨 major 告警一律跳过；M46.2 只做披露，不放开升级（源候选在 M46 上收时保留的残余点）。
+  - **待评估点**：① 仓库级开关（默认关）+ 完整验证 + AI 研判兜底；② 与交付守卫 / 基线的交互；③ 风险阈值与回滚边界。
+  - **触发条件**：用户要求自动处理跨 major；或跨 major 告警占比持续升高。
+  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
+
+- **升级探针合批与门禁回滚粒度联动（待评估，P2 🛠️）** —— 现象：M46.3 只做基线完整链与按变更单元回滚，不做探针合批；合批会改变回滚单元、验证次数与失败回退语义。
+  - **待评估点**：① 合批后的回滚单元（batch vs probe）；② 与 `verificationBlocking` 归因的衔接；③ 失败回退逐包的语义保持。
+  - **触发条件**：单仓安装次数成为主要耗时；或 M46.3 落地后回滚粒度仍不足。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
 ### 待上收候选（评估完成，等待用户决策）
@@ -394,9 +383,9 @@
 
 | 内容类型 | 位置 |
 |:--|:--|
-| 当前阶段活跃任务 | **无**——M45 六原子 + 9 批阶段期间插队已于 2026-10-19 闭环归档（见 [todo-archive.md §M45](todo-archive.md#m45-运行可靠性与交付链收口-2026-10-15-用户决策方案-a-2026-10-19-归档) + [roadmap.md §M45](roadmap.md#m45-运行可靠性与交付链收口-2026-10-15-用户决策方案-a-2026-10-19-已闭环-归档)）；插队容量治理（移出低优先级原子而非压缩验证）见 [planning.md §3.1.1](../standards/planning.md#_3-1-1-插队后的阶段容量再平衡-hard-requirement-2026-10-19) |
+| 当前阶段活跃任务 | **M46**「运行结果可信度与可观测性」6 原子条目（2026-10-20 用户决策方案 A，见 [todo.md](todo.md) + [roadmap.md §M46](roadmap.md)）；插队容量治理（移出低优先级原子而非压缩验证）见 [planning.md §3.1.1](../standards/planning.md#_3-1-1-插队后的阶段容量再平衡-hard-requirement-2026-10-19) |
 | 下一阶段（未授权） | 无——本阶段闭环后按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 评估本文件候选池后由用户决策 |
 | 已完成阶段归档 | [todo-archive.md](todo-archive.md)（主窗口 + [archive/](archive/) 分片） |
-| 里程碑与阶段交付 | [roadmap.md](roadmap.md)（M0-M45 已归档） |
+| 里程碑与阶段交付 | [roadmap.md](roadmap.md)（M0-M45 已归档，M46 进行中） |
 | 长期主线 / 候选 / 待人工验收 / 已知边界 | 本文档（按四象限结构） |
 | 历史归档索引 | [archive/index.md](archive/index.md) |
