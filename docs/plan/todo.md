@@ -30,7 +30,7 @@
 - **M46.3** [P2 🛠️] 基线采样完整链与门禁回滚粒度
 - **M46.4** [P1 🛠️] 执行容器内存下限与 OOM 归因
 - **M46.5** [P2 🚀] 平台通知与邮件推送（issue #190）
-- **M46.6** [P3 🧪] 视觉套件测试库 fixtures 前置断言
+- **M46.6** [P3 🧪] 视觉套件测试库 fixtures 前置断言 —— **已闭环**
 
 **建议执行顺序**：M46.6（最小、先清本地噪声）→ M46.1（P1 可见性，先落数据层）→ M46.2（复用同一 summary 承载）→ M46.5（通知消费未修复高危口径）→ M46.3（引擎基线，独立）→ M46.4（部署口径，独立）。若阶段容量收紧，M46.6 与 M46.5 的 B5 周汇总可优先移出。
 
@@ -134,17 +134,19 @@
 - **交付物**：预计 5 个批次 / 41-58 文件 / 1800-2850 行（B1-B5 求和，文件跨批复用；不含 B5 为 36-50 文件 / 1600-2500 行）——① B1 迁移 + 实体字段（6-8 / 200-300）；② B2 策略纯函数 + 单测（10-14 / 450-700）；③ B3 投递入口 / 幂等 / 模板 / 触发点（10-14 / 450-700）；④ B4 API + 个人卡片 + `/notifications` 管理员页 + i18n（10-14 / 500-800）；⑤ B5 周汇总（5-8 / 200-350，可选，可按容量移出）。
 - **风险与缓解**：**R1 邮件风暴** → 批次合并 + 24 小时窗口 + 每小时上限；**R2 漏发关键告警** → 窗口可调至 0 + 周汇总兜底；**R3 收件人扩散** → 仅触发者 + 管理员，上限与去重；**R4 触发点重复** → 条件写回成功 + `deliveryKey` 唯一；**R5 迁移风险** → 幂等迁移 + 启动备份 + 二次执行测试。
 
-### M46.6 [P3 🧪] 视觉套件测试库 fixtures 前置断言
+### M46.6 [P3 🧪] 视觉套件测试库 fixtures 前置断言（**已闭环** `d2b64886` + `00eacfce` + 本条登记）
 
 - **目标**：本地视觉复跑前校验 `visual.sqlite` 的仓库集合与 fixtures 集合一致，残留非 fixtures 仓库时在像素比对前失败并给出可操作提示，避免把「库污染」误判为代码回归。
 - **优先级**：P3
-- **范围**：`apps/platform/tests/visual/global-setup.ts`（集合断言）；`apps/platform/tests/visual/helpers/fixtures.ts`（允许集合单一事实源 + 清理通道）；`apps/platform/tests/visual/README.md`（操作约定）；脚本级测试。
+- **范围**：`apps/platform/server/utils/visual-repository-set.ts`（纯集合比较 / 清理编排 / 允许集合防线）+ 单测；`apps/platform/server/utils/visual-repository-client.test.ts`（HTTP 适配器异常分支）；`apps/platform/tests/visual/helpers/visual-db.ts`（Playwright 适配器）；`apps/platform/tests/visual/global-setup.ts`（清理 → 注入 → 断言）；`apps/platform/tests/visual/README.md`（操作约定与已知边界）；`docs/standards/testing.md §6.7`（一行指针）；`apps/platform/server/api/repos/index.ts`（全量返回依赖注释）。
 - **验收标准**：
-  - [ ] ① 残留非 fixtures 仓库时，在截图前失败并列出多余 / 缺失仓库，不进入像素比对。
-  - [ ] ② 清理通道只允许删除视觉库内、非 fixtures 白名单仓库；幂等且不触碰主库。
-  - [ ] ③ CI 全新库行为不变；本地污染库按提示清理后复跑通过。
-  - [ ] ④ 测试覆盖集合比较与清理边界（幂等 / 非白名单拒绝）。
+  - [x] ① 残留非 fixtures 仓库时，在截图前失败并列出多余 / 缺失仓库，不进入像素比对。
+  - [x] ② 清理通道只允许删除视觉库内、非 fixtures 白名单仓库；幂等且不触碰主库。
+  - [x] ③ CI 全新库行为不变；本地污染库按提示清理后复跑通过。
+  - [x] ④ 测试覆盖集合比较与清理边界（幂等 / 非白名单拒绝 / 空与非法 allowlist / 适配器异常）。
 - **不做什么**：不改视觉阈值与基线；不做全站覆盖；不改 `resetVisualFixtures` 的既有注入语义（仅补前置断言与清理通道）。
-- **依赖**：2026-10-19 M45.6 审计探针实测残留 3 条 `parp3-*` 记录（复现：`sqlite3 apps/platform/data/visual.sqlite 'select owner,name from repository'`）导致视口级基线失配；M45.5 / M45.6 视觉工程。
-- **交付物**：预计 2 commits / 4-6 文件 / 120-200 行——① `test(platform)` 前置集合断言 + 清理通道（2-3 文件 / 60-100 行）；② `docs(test)` 视觉 README 操作约定（2-3 / 60-100）。
-- **风险与缓解**：**R1 误删视觉库数据** → 仅 allowlist + 备份 + 只读断言优先；**R2 误作用主库** → 路径校验限定 `data/visual.sqlite`；**R3 CI 行为变化** → 全新库空集场景纳入测试。
+- **依赖**：2026-10-19 M45.6 审计探针实测残留 3 条 `parp3-*` 记录（复现：`sqlite3 apps/platform/data/visual.sqlite 'select owner,name from dependfix_repository'`）导致视口级基线失配；M45.5 / M45.6 视觉工程。
+- **交付物**：2 commits / 8 文件——`d2b64886` 实现 6 文件（纯集合逻辑 + 2 个测试文件 + Playwright 适配器 + global-setup + repos 端点注释）；`00eacfce` 文档 2 文件（visual README + testing.md 指针）；本条登记 1 文件。
+- **风险与缓解**：**R1 误删视觉库数据** → 空 / 非法 allowlist 在删除前拒绝 + 只删 extra + 幂等用例；**R2 误作用主库** → 清理作用于视觉服务进程当前 `DATABASE_PATH`（config 固定 `data/visual.sqlite`），README 明示不得指向主库；**R3 CI 行为变化** → 全新库空集场景纳入测试；**R4 集合真值依赖 `GET /api/repos` 全量返回** → 端点注释 + README 已登记，分页化时须同步调整。
+- **闭环记录（2026-10-20）**：**审计** R1 `quick` **Pass**（0 blocker / 2 warning：空 allowlist 可清库、适配器零测试）→ 收口（空 / 非法 allowlist 防线 + 适配器 7 例 fail-fast 测试 + README / testing.md 指针）→ R2 `quick` **Pass**（0 blocker / 0 warning；5 suggest 中 4 项收口，测试文件位置注释 / allowlist 条目校验 / JSON 解析包装 / README 措辞）。**门禁**：`pnpm run lint` 0 error（2 条存量 max-lines warning）；`pnpm run typecheck` 7 包 Done；定向单测 26 passed；`test:visual` 16 passed（日志含 `repository set verified`）；污染实证：向视觉库插入 `parp3/probe` 后重跑自动清理并 16 passed，事后库内仅 3 条 fixtures；`check:docs` / `check:doc-size` / `lint:md:check` OK；改动源文件编号标记扫描 0 命中。
+- **残余与观察项**：① 清理不级联 `schedule.repositoryIds`（JSON 引用），视觉库不应创建定时计划；② 集合按 `owner/name` 比较，同 key 不同 platform 属不可达路径；③ 测试文件因 vitest 排除 `tests/visual` 而放在 `server/utils`，文件头已注明原因。
