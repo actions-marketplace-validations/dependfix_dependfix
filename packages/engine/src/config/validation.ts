@@ -121,6 +121,14 @@ export function validateRuntimeConfig(config: RuntimeConfig): RuntimeConfig {
         throw new AppError('CONFIG_VALIDATION_ERROR', 'commit cannot be enabled together with createPullRequest. Use fix-and-pr mode instead.')
     }
 
+    // 回滚粒度：只允许 unit / repo（程序化配置也要 fail-fast）
+    if (config.rollbackGranularity !== undefined && config.rollbackGranularity !== 'unit' && config.rollbackGranularity !== 'repo') {
+        throw new AppError(
+            'CONFIG_VALIDATION_ERROR',
+            `rollbackGranularity must be one of: unit, repo (got ${String(config.rollbackGranularity)}).`,
+        )
+    }
+
     // 工具链 pnpm 版本格式校验（用户显式输入 fail-fast；格式非法拒绝，防命令注入）
     if (config.toolchainPnpmVersion !== undefined && !isValidPnpmVersion(config.toolchainPnpmVersion)) {
         throw new AppError(

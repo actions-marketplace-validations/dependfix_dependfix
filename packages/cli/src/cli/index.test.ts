@@ -89,6 +89,7 @@ describe('parseCliArgs', () => {
             codeScanningEnabled: false,
             codeQualityEnabled: false,
             allowMajorUpgrade: false,
+            rollbackGranularity: 'unit',
             maxAlertsPerRepository: 3,
             maxConcurrency: 1,
             maxRetries: 3,
@@ -215,6 +216,13 @@ describe('parseCliArgs', () => {
             .configOverrides.allowMajorUpgrade).toBe(true)
         expect(parseCliArgs(['report-only', '--repo', 'foo/bar', '--no-allow-major-upgrade'])
             .configOverrides.allowMajorUpgrade).toBe(false)
+    })
+
+    it('parses rollback granularity and rejects invalid values', () => {
+        expect(parseCliArgs(['report-only', '--repo', 'foo/bar', '--rollback-granularity', 'REPO'])
+            .configOverrides.rollbackGranularity).toBe('repo')
+        expect(() => parseCliArgs(['report-only', '--repo', 'foo/bar', '--rollback-granularity', 'batch']))
+            .toThrow('--rollback-granularity must be one of: unit, repo')
     })
 
     it('reads toolchainPnpmVersion from env and CLI', () => {

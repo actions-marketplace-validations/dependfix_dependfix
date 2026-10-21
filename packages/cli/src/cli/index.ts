@@ -125,6 +125,10 @@ export const argsDef = {
         description: '跨线告警（推荐版本跨大版本，当前线内无修复版本）显式授权自动升级：仅根 package.json 直接依赖（workspace 成员独占声明维持人工）且 lockfile 单版本的告警自动跨线升级，升级后复核脆弱实例、强制完整验证（install+lint+build+typecheck+test），失败自动回滚；间接依赖 / 多版本共存跨线告警维持人工处理。仅 CLI 可用，Action 不支持',
         negativeDescription: '不自动升级跨线告警（默认，维持人工处理）',
     },
+    'rollback-granularity': {
+        type: 'string' as const,
+        description: '验证失败回滚粒度：unit（默认，回退最近一个已通过 probe 的变更单元并重验一次）/ repo（保持整仓 git reset --hard）',
+    },
     'max-alerts-per-repository': {
         type: 'string' as const,
         description: '每个仓库最多处理的告警数',
@@ -392,6 +396,15 @@ function parsedArgsToCliOverrides(parsed: ParsedArgs<typeof argsDef>): CliConfig
     // allow-major-upgrade (three-state: true / false / undefined; 无 env 通道，仅 CLI)
     if (parsed['allow-major-upgrade'] !== undefined) {
         overrides.allowMajorUpgrade = parsed['allow-major-upgrade']
+    }
+
+    // rollback-granularity（unit / repo；config 校验兜底）
+    const rollbackGranularity = parsed['rollback-granularity']?.trim().toLowerCase()
+    if (rollbackGranularity) {
+        if (rollbackGranularity !== 'unit' && rollbackGranularity !== 'repo') {
+            throw new AppError('ARGUMENT_PARSE_ERROR', '--rollback-granularity must be one of: unit, repo')
+        }
+        overrides.rollbackGranularity = rollbackGranularity
     }
 
     // max-alerts-per-repository

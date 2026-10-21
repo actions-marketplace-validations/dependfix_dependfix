@@ -42,6 +42,8 @@ export function readEnv(env: NodeJS.ProcessEnv, name: string): string | undefine
 export type RuntimeMode = typeof RUNTIME_MODES[number]
 export type { SeverityThreshold, AlertSourceKind }
 
+export type RollbackGranularity = 'unit' | 'repo'
+
 export interface RuntimeConfig {
     mode: RuntimeMode
     severityThreshold: SeverityThreshold
@@ -125,6 +127,11 @@ export interface RuntimeConfig {
      * 间接依赖 / 多版本共存跨线告警维持人工处理（skipped + warn）。
      */
     allowMajorUpgrade: boolean
+    /**
+     * 验证失败回滚粒度：`unit`（默认）回退最近一个已通过 probe 的变更单元并重验一次；
+     * `repo` 保持既有整仓 `git reset --hard` 逃生语义。
+     */
+    rollbackGranularity?: RollbackGranularity
     /**
      * Dependabot alerts 专用 token（可选）。
      * 提供时仅用于拉取 Dependabot alerts（GITHUB_TOKEN 无法读取该 API，
@@ -248,6 +255,8 @@ export interface CliConfigOverrides {
      * 无 env 通道；Action 不支持）。详见 RuntimeConfig.allowMajorUpgrade。
      */
     allowMajorUpgrade?: boolean
+    /** 验证失败回滚粒度（unit / repo；默认 unit） */
+    rollbackGranularity?: RollbackGranularity
     /** Dependabot alerts 专用 token（可选，最小权限；缺省回退 githubToken） */
     alertsToken?: string
     maxAlertsPerRepository?: number
@@ -310,6 +319,7 @@ export const DEFAULT_RUNTIME_CONFIG: Omit<RuntimeConfig, 'githubToken' | 'reposi
     codeScanningEnabled: false,
     codeQualityEnabled: false,
     allowMajorUpgrade: false,
+    rollbackGranularity: 'unit',
     maxAlertsPerRepository: 20,
     maxConcurrency: 1,
     maxRetries: 3,
@@ -509,6 +519,19 @@ function readSeverityThreshold(value: string | undefined, fieldName: string): Se
     return value
 }
 
+const ROLLBACK_GRANULARITIES: readonly RollbackGranularity[] = ['unit', 'repo']
+
+function readRollbackGranularity(value: string | undefined, fieldName: string): RollbackGranularity | undefined {
+    if (value === undefined || value.trim() === '') {
+        return undefined
+    }
+    const normalized = value.trim().toLowerCase()
+    if (!ROLLBACK_GRANULARITIES.includes(normalized as RollbackGranularity)) {
+        throw new AppError('CONFIG_VALIDATION_ERROR', `${fieldName} must be one of: ${ROLLBACK_GRANULARITIES.join(', ')}`)
+    }
+    return normalized as RollbackGranularity
+}
+
 function readAlertSource(value: string | undefined, fieldName: string): AlertSourceKind | undefined {
     if (value === undefined || value.trim() === '') {
         return undefined
@@ -542,6 +565,7 @@ export function readEnvConfig(env: NodeJS.ProcessEnv = process.env): CliConfigOv
         alertSource: readAlertSource(readEnv(env, 'ALERTS_SOURCE'), `${ENV_PREFIX}ALERTS_SOURCE`),
         codeScanningEnabled: normalizeBoolean(readEnv(env, 'CODE_SCANNING'), `${ENV_PREFIX}CODE_SCANNING`),
         codeQualityEnabled: normalizeBoolean(readEnv(env, 'CODE_QUALITY'), `${ENV_PREFIX}CODE_QUALITY`),
+        rollbackGranularity: readRollbackGranularity(readEnv(env, 'ROLLBACK_GRANULARITY'), `${ENV_PREFIX}ROLLBACK_GRANULARITY`),
         maxAlertsPerRepository: normalizeInteger(readEnv(env, 'MAX_ALERTS_PER_REPOSITORY'), `${ENV_PREFIX}MAX_ALERTS_PER_REPOSITORY`),
         maxConcurrency: normalizeInteger(readEnv(env, 'MAX_CONCURRENCY'), `${ENV_PREFIX}MAX_CONCURRENCY`),
         maxRetries: normalizeNonNegativeInteger(readEnv(env, 'MAX_RETRIES'), `${ENV_PREFIX}MAX_RETRIES`),
@@ -708,6 +732,7 @@ export function resolveRuntimeConfig(options: ResolveRuntimeConfigOptions = {}):
         codeScanningEnabled: cliOverrides.codeScanningEnabled ?? envConfig.codeScanningEnabled ?? DEFAULT_RUNTIME_CONFIG.codeScanningEnabled,
         codeQualityEnabled: cliOverrides.codeQualityEnabled ?? envConfig.codeQualityEnabled ?? DEFAULT_RUNTIME_CONFIG.codeQualityEnabled,
         allowMajorUpgrade: cliOverrides.allowMajorUpgrade ?? DEFAULT_RUNTIME_CONFIG.allowMajorUpgrade,
+        rollbackGranularity: cliOverrides.rollbackGranularity ?? envConfig.rollbackGranularity ?? DEFAULT_RUNTIME_CONFIG.rollbackGranularity,
         maxAlertsPerRepository: cliOverrides.maxAlertsPerRepository ?? envConfig.maxAlertsPerRepository ?? DEFAULT_RUNTIME_CONFIG.maxAlertsPerRepository,
         maxConcurrency: cliOverrides.maxConcurrency ?? envConfig.maxConcurrency ?? DEFAULT_RUNTIME_CONFIG.maxConcurrency,
         maxRetries: cliOverrides.maxRetries ?? envConfig.maxRetries ?? DEFAULT_RUNTIME_CONFIG.maxRetries,

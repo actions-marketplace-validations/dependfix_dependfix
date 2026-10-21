@@ -28,6 +28,7 @@ describe('resolveRuntimeConfig', () => {
             codeScanningEnabled: false,
             codeQualityEnabled: false,
             allowMajorUpgrade: false,
+            rollbackGranularity: 'unit',
             maxAlertsPerRepository: 20,
             maxConcurrency: 1,
             maxRetries: 3,
@@ -360,6 +361,29 @@ describe('resolveRuntimeConfig', () => {
         expect(config.allowMajorUpgrade).toBe(false)
     })
 
+
+    it('defaults rollbackGranularity to unit and reads repo via env', () => {
+        expect(resolveRuntimeConfig({
+            env: { GITHUB_TOKEN: 't', DEPENDFIX_REPOSITORIES: 'foo/bar' },
+        }).rollbackGranularity).toBe('unit')
+        expect(resolveRuntimeConfig({
+            env: {
+                GITHUB_TOKEN: 't',
+                DEPENDFIX_REPOSITORIES: 'foo/bar',
+                DEPENDFIX_ROLLBACK_GRANULARITY: 'repo',
+            },
+        }).rollbackGranularity).toBe('repo')
+    })
+
+    it('rejects invalid rollbackGranularity', () => {
+        expect(() => resolveRuntimeConfig({
+            env: {
+                GITHUB_TOKEN: 't',
+                DEPENDFIX_REPOSITORIES: 'foo/bar',
+                DEPENDFIX_ROLLBACK_GRANULARITY: 'batch',
+            },
+        })).toThrow('ROLLBACK_GRANULARITY must be one of: unit, repo')
+    })
 
     it('defaults toolchainPnpmVersion to undefined (resolved from packageManager at repair time)', () => {
         const config = resolveRuntimeConfig({
