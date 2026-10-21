@@ -97,7 +97,17 @@ const installRoutes = async (
 test.describe('alerts 去重视图受影响运行 Sidebar', () => {
     test('展示运行元数据并打开详情', async ({ page }) => {
         const run = makeRun({
-            summary: { alertsFound: 2, alertsFixed: 1, environmentalFailures: 1 },
+            summary: {
+                alertsFound: 20,
+                alertsFixed: 0,
+                alertsUnfixed: 20,
+                alertsConverged: 0,
+                environmentalFailures: 1,
+                alertsSkipped: 4,
+                alertsSkippedByReason: { 'cross-major': 4 },
+                alertsTruncated: 6,
+                alertsTruncatedBySeverity: { critical: 2, high: 4 },
+            },
             exitCode: 1,
             environmentalFailureCount: 1,
         })
@@ -117,7 +127,7 @@ test.describe('alerts 去重视图受影响运行 Sidebar', () => {
         // 阈值展示口径已统一（级别首字母大写，与扫描选项 / 运行列表同源）
         await expect(sidebar).toContainText('High')
         await expect(sidebar).toContainText('GitHub Action')
-        await expect(sidebar).toContainText('2')
+        await expect(sidebar).toContainText('20')
 
         await sidebar.locator('button[aria-label="详情"]').click()
         const detail = page.locator('.caomei-dialog__content')
@@ -128,6 +138,10 @@ test.describe('alerts 去重视图受影响运行 Sidebar', () => {
         await expect(detail).toContainText('未修复告警')
         await expect(detail).toContainText('环境性失败')
         await expect(detail).toContainText('退出码')
+        const breakdown = detail.locator('.run-outcome-breakdown')
+        await expect(breakdown).toContainText('未修复 20 / 26')
+        await expect(breakdown).toContainText('跨大版本 / 人工复核 4')
+        await expect(breakdown).toContainText('Critical 2')
         await expect(page.locator('.run-detail__run-url')).toHaveAttribute('href', String(run.runUrl))
     })
 

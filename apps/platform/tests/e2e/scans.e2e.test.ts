@@ -322,30 +322,50 @@ test('case 8: /scans 结果可信度 — 未修复 / 环境性失败 / 退出码
                 repositoryOwner: owner,
                 repositoryName: name,
                 status: 'completed',
-                summary: { alertsFound: 4, alertsFixed: 2, alertsConverged: 1, environmentalFailures: 1 },
+                summary: {
+                    alertsFound: 20,
+                    alertsFixed: 0,
+                    alertsUnfixed: 20,
+                    alertsConverged: 0,
+                    environmentalFailures: 1,
+                    alertsSkipped: 4,
+                    alertsSkippedByReason: { 'cross-major': 4 },
+                    alertsTruncated: 6,
+                    alertsTruncatedBySeverity: { critical: 2, high: 4 },
+                },
                 exitCode: 1,
                 environmentalFailureCount: 1,
             }],
         },
     })
     expect(created.status()).toBe(200)
-    const { scanRuns } = await created.json() as { scanRuns: { id: string }[] }
+    const { scanRuns } = await created.json() as { scanRuns: { id: string, repositoryId: string }[] }
     const runId = scanRuns[0]!.id
+    const repositoryId = scanRuns[0]!.repositoryId
 
-    await page.goto('/scans')
+    // 按仓库过滤，避免全量套件累积大量 run 时目标行被分页挤到后续页（首轮曾因此重试）
+    await page.goto(`/scans?repository=${repositoryId}`)
     await waitForHydration(page)
     const row = page.locator('.scans__run-list .caomei-data-table__row').filter({ hasText: owner })
     await expect(row).toBeVisible({ timeout: 15000 })
     await expect(row).toContainText('环境性失败 1')
-    await expect(row).toContainText('未修复 1')
+    await expect(row).toContainText('未修复 20')
+    await expect(row).toContainText('截断 6 / 跳过 4')
 
     await page.goto(`/scans?run=${runId}`)
     await waitForHydration(page)
     const dialog = page.locator('.caomei-dialog__content')
     await expect(dialog).toBeVisible({ timeout: 15000 })
-    await expect(dialog.locator('.repo-history__outcome')).toContainText('未修复 1')
+    await expect(dialog.locator('.repo-history__outcome')).toContainText('未修复 20')
     await expect(dialog.locator('.repo-history__outcome')).toContainText('环境性失败 1')
     await expect(dialog.locator('.repo-history__outcome')).toContainText('退出码: 1')
+    const breakdown = dialog.locator('.run-outcome-breakdown')
+    await expect(breakdown).toContainText('未修复 20 / 26')
+    await expect(breakdown).toContainText('截断 6')
+    await expect(breakdown).toContainText('跳过 4')
+    await expect(breakdown).toContainText('跨大版本 / 人工复核 4')
+    await expect(breakdown).toContainText('Critical 2')
+    await expect(breakdown).toContainText('High 4')
 
     const missingName = `${name}-missing`
     const missing = await page.request.post('/api/e2e/fixtures', {

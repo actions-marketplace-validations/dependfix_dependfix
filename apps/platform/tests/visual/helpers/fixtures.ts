@@ -41,9 +41,19 @@ export const VISUAL_FIXTURES: FixturesPayload = {
             severityThreshold: 'high',
             executorKind: 'container',
             status: 'completed',
-            // run 0 同时覆盖「未修复告警」（4 − 2 − 1 = 1，含 converged 排除）、环境性失败与退出码，
-            // 使运行详情弹窗基线包含结果可信度区块（前置断言见 visual 用例）。
-            summary: { alertsFound: 4, alertsFixed: 2, alertsConverged: 1, environmentalFailures: 1 },
+            // run 0 同时覆盖「未修复 20 / 总数 26」（含 6 截断、4 跨大版本）、环境性失败与退出码，
+            // 使运行详情弹窗基线包含结果可信度与跳过 / 截断分组（前置断言见 visual 用例）。
+            summary: {
+                alertsFound: 20,
+                alertsFixed: 0,
+                alertsUnfixed: 20,
+                alertsConverged: 0,
+                environmentalFailures: 1,
+                alertsSkipped: 4,
+                alertsSkippedByReason: { 'cross-major': 4 },
+                alertsTruncated: 6,
+                alertsTruncatedBySeverity: { critical: 2, high: 4 },
+            },
             exitCode: 1,
             environmentalFailureCount: 1,
             createdAt: '2026-08-20T01:59:50.000Z',

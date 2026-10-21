@@ -255,11 +255,22 @@ test.describe('平台页面视觉基线', () => {
         await expect(dialog.locator('tbody .caomei-data-table__row')).toHaveCount(runResults.length)
         await expect(dialog).toContainText('lodash')
         await expect(page.locator('.caomei-data-table__row').filter({ hasText: '失败 · 仓库克隆' })).toHaveCount(1)
-        /* 结果可信度：fixtures 为 run 0 钉死 unfixed=1 / environmental=1 / exitCode=1，
-           若派生函数或序列化失效则基线会落成缺区块形态——先断言语义再截图。 */
-        await expect(dialog).toContainText('未修复 1')
+        /* 结果可信度：fixtures 为 run 0 钉死 unfixed=20 / total=26（6 截断 / 4 跨大版本）/
+           environmental=1 / exitCode=1；先把分组语义断言住，再截图，避免基线落成缺区块形态。 */
+        await expect(dialog).toContainText('未修复 20 / 26')
+        await expect(dialog).toContainText('截断 6')
+        await expect(dialog).toContainText('跳过 4')
+        await expect(dialog).toContainText('跨大版本 / 人工复核 4')
+        await expect(dialog).toContainText('Critical 2')
+        await expect(dialog).toContainText('High 4')
         await expect(dialog).toContainText('环境性失败 1')
         await expect(dialog).toContainText('退出码: 1')
+        const outcomeRow = page.locator('.scans__run-list .caomei-data-table__row')
+            .filter({ hasText: 'acme/web-app' })
+            .filter({ hasText: '截断 6 / 跳过 4' })
+            .first()
+        await expect(outcomeRow).toBeVisible()
+        await expect(outcomeRow).toContainText('未修复 20')
 
         await waitForVisualStable(page)
         await expectThemeApplied(page, 'light')
