@@ -101,7 +101,7 @@
 - **闭环记录（2026-10-21）**：**审计** R1 `standard` 两分区（A 基线 / B 回滚）：A **Pass**（3 warning / 3 suggest）；B **Reject**（1 blocker：平台 `RuntimeConfig` 未贯通 `rollbackGranularity`，CI rebuild 后平台 tsc 必红且平台静默维持整仓回滚；8 warning / 6 suggest）→ 收口（平台生产 config + env 逃生、executor 夹具、optional 字段 + 引擎缺省 unit、no-checkpoint / later-failed 降级审计、平台分类映射、taxonomy 章节归位、en 配置行、真实 tsc 用例、`preExistingDirty` 禁用选择性、CLI 大小写、repair 重做仅变更时、回调异常兜底）→ R2 `quick` **Pass**（0 blocker；3 新 warning：平台 env 大小写 / allErrors 归因文案 / 陈旧注释；2 suggest：repair 失败 action / CLI 大写用例）→ 逐项收口（trim+lowercase + 非法告警、文案、陈旧注释、repair 失败跳过选择性、`REPO` 用例）。**门禁**：engine **1437 passed / 1 skipped**（81 文件）；platform **2039 passed / 9 skipped**（154 文件）；root `pnpm test` 复跑 exit 0（首轮并行临时失败未复现）；`pnpm run typecheck` 7 包 Done；`pnpm run lint` 0 error（3 条存量 max-lines warning）；engine build exit 0；`check:docs` / `check:doc-size`（warning 0）/ `lint:md` / `lint:i18n` / `check:orphan-ids`（0）/ `check:verify-chain` 通过。**残余**：① 基线完整链最坏 5×10min，仅对「有工作」仓库采样，长 install 失败 + 超时可能挤压单仓预算（未做真实 repo 计时）；② 选择性回滚只尝试最近单元一次，失败并非最近单元 / 后续失败单元 / 无 checkpoint → 显式降级整仓；③ checkpoint 仅已跟踪文件，AI 新建未跟踪文件 / 用户 staged vs unstaged 区分不在回退面；④ Windows / LFS / submodule / shallow clone 未实机；⑤ 平台 env 非法值回退 unit 并 console.warn（不 fail-fast）；⑥ 真实 nest-template / picgo 目标仓库端到端未跑（由 mock 分层 + 真实 tsc 覆盖）。
 - **风险与缓解**：**R1 回滚粒度变更影响交付安全** → 设计先行 + 反例测试 + 逃生开关，默认行为变更须在 D 阶段向用户确认；**R2 共享 workDir 限制**（多仓共享目录无法天然按仓回滚）→ 先做「按已通过探针提交 / 失败单元回滚」的可行性探测，做不到则显式降级并保留 repo 级；**R3 基线耗时上升** → 仅对已确定有工作的仓库采样，沿用 M45.2 豁免。
 
-### M46.4 [P1 🛠️] 执行容器内存下限与 OOM 归因
+### M46.4 [P1 🛠️] 执行容器内存下限与 OOM 归因（**已闭环** `baed892c` + `dafec407` + `36cecf81` + `cd0f9585` + `530bee03` + 本条登记）
 
 - **目标**：统一控制面与执行面的内存口径，并在启动期 / 运行期留下可观测信号，使 `SIGKILL` 可归因到 OOM 而非超时或代码缺陷。
 - **优先级**：P1
@@ -111,13 +111,14 @@
   - 运行期：`apps/platform/server/entities/scan-run.ts` 新增 `memory_max_bytes` / `peak_rss_bytes` / `oom_killed`（或 `resource_json`）；`services/executor/**` 采集（Linux cgroup，其他平台降级）。
   - 设计口径同步：`docs/design/governance/executor-process-isolation.md` §8.4。
 - **验收标准**：
-  - [ ] ① 部署文档与治理设计口径一致：控制面最低规格与执行面 ≥ 8GB 分列，不再出现「按 1GB 部署即执行安装」的误导。
-  - [ ] ② 启动日志包含检测到的内存上限与并发；低于建议值时 warn，不阻断启动。
-  - [ ] ③ 运行记录可查询峰值内存与 OOM 标记；不可采集时明确降级为 `NULL` 并记录原因，不伪造 0。
-  - [ ] ④ 单测覆盖阈值判定与跨平台降级；文档链接 / i18n / 构建门禁通过。
+  - [x] ① 部署文档与治理设计口径一致：控制面最低规格与执行面 ≥ 8GB 分列，不再出现「按 1GB 部署即执行安装」的误导。
+  - [x] ② 启动日志包含检测到的内存上限与并发；低于建议值时 warn，不阻断启动。
+  - [x] ③ 运行记录可查询峰值内存与 OOM 标记；不可采集时明确降级为 `NULL` 并记录原因，不伪造 0。
+  - [x] ④ 单测覆盖阈值判定与跨平台降级；文档链接 / i18n / 构建门禁通过。
 - **不做什么**：不自动调高容器限制；不做 K8s 资源模板（T705 暂缓，见 [backlog.md](backlog.md)）；不改变 `Repository.sandboxLimits` 默认 2048MB（若 D 阶段裁定调整则单列）；不做实时监控面板。
 - **依赖**：2026-10-17 内核 OOM 实证（41 次 `SIGKILL`，`journalctl -k` 实测）；`executor-process-isolation.md` §8.4 建议值；`Repository.sandboxLimits` 既有按仓限额。
-- **交付物**：预计 3 commits / 10-14 文件 / 250-400 行——① `docs(guide)` 双语口径 + compose 默认（4-6 文件 / 80-120 行）；② `feat(platform)` 启动期探测 + 运行期采集 + 迁移（4-5 / 120-200）；③ `test` 阈值判定 / 跨平台降级（2-3 / 50-80）。
+- **交付物（实际）**：5 commits / 36 文件 / 1331 插入（+ 本条登记）。拆分：`baed892c` 启动期探测 + cgroup 采集（8）；`dafec407` 落库 + 容器接线 + API（10）；`36cecf81` 三态 / 降级 / 迁移测试（5）；`cd0f9585` 运行详情展示（5）；`530bee03` 资源口径 / OOM 归因文档（8）。**超原估**主因：跨 cgroup v1/v2、启动 / 运行期双面探测、四列迁移 + API + UI 三态、以及 R1 审计后的角色阈值 / catch-all 保真修复。
+- **闭环记录（2026-10-21）**：**审计** R1 `standard` 两分区均 **Pass**（A：3 warning / 6 suggest；B：3 warning / 5 suggest，无 blocker）→ 收口：①平台规范 §10.6 补 `resource-probe` 分类；②启动阈值按 `plane=control|execution` 区分（纯 HTTP 1GiB / 执行面 8GiB），并补控制面测试；③文档明示引擎超时也会渲染 SIGKILL、不能反推 OOM；④OOM `null` 且峰值可采时 UI 显示不可采集 + 原因；⑤catch-all 保留已采集快照；⑥API / 迁移 / parse 补 false / partial / 非法 JSON 用例；⑦bigint 精度守门 + 相对链接层级 + env 排版。R2 `quick` **Pass**（0 blocker；2 warning：Redis 同步降级时 HTTP 也执行安装、日志样例缺 `plane` / 阈值文案）→ 文档补同步降级例外、样例补 `plane=execution`、阈值改为「执行面 <8GB / 控制面 <1GB」。**门禁**：platform **2063 passed / 9 skipped**（158 文件）；visual **17 passed**（不更新基线）；platform typecheck Done；`pnpm run lint` 0 error（3 条存量 max-lines warning）；`check:docs` / `check:doc-size`（warning 0）/ `lint:md` / `lint:i18n` / `check:orphan-ids`（0）通过。**残余**：①MySQL / PostgreSQL 迁移未实机（仅 SQLite + TypeORM transformer 推断）；②真实 cgroup v1/v2 + `mem_limit` OOM 未复现（仅注入文件单测）；③宿主级 OOM（未设容器 limit）不保证增加 cgroup `oom_kill`，`sigkillDetected` 与引擎超时同形；④sandbox / github-action 执行器未接入采集（落 NULL + executor 原因）；⑤`executeRun` 抛错时监控快照丢弃，orchestrator 记「before resource snapshot」；⑥同步降级路径的 HTTP 进程无法由启动探测预知，需部署侧按执行面准备；⑦未做 K8s 资源模板 / 实时监控面板（非目标）。
 - **风险与缓解**：**R1 跨平台采集差异**（Windows dev 无 cgroup）→ 仅 Linux 采集，其他平台降级并记录；**R2 指标开销** → 采样阈值与只读 cgroup 文件；**R3 文档口径再次漂移** → 以治理设计为权威源，配置指南与 compose 单点引用。
 
 ### M46.5 [P2 🚀] 平台通知与邮件推送（issue #190）（**B1-B4 已闭环；B5 延期** `eea2c581` + `104952f6` + `3aa8955f` + `4a65d9e5` + `253ea52b` + `61354f99` + `23cf9f79` + `b3c6cf49` + `19d69f1a` + `fd731c28` + `e0ac9a15` + `13c69da2` + `8210ec60` + 本条登记）
