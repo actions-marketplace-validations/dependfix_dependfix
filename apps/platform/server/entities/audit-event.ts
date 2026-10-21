@@ -39,6 +39,7 @@ export type AuditEventType =
     | 'container_unavailable'
     | 'ai_config_update'
     | 'verify_commands_update'
+    | 'notification_settings_update'
 
 /** 审计事件类型枚举（API 校验用） */
 export const AUDIT_EVENT_TYPES: readonly AuditEventType[] = [
@@ -47,6 +48,7 @@ export const AUDIT_EVENT_TYPES: readonly AuditEventType[] = [
     'container_unavailable',
     'ai_config_update',
     'verify_commands_update',
+    'notification_settings_update',
 ] as const
 
 /** 审计事件严重级别（与 alerts.severity 解耦：审计事件是系统信号，告警是业务信号） */

@@ -177,6 +177,13 @@ describe('createLocalizedError', () => {
         ORG_NOT_FOUND: true,
         AI_CONFIG_VALIDATION_FAILED: true,
         AI_KEY_REQUIRED: true,
+        NOTIFICATION_VIEWER_FORBIDDEN: true,
+        NOTIFICATION_PREFERENCE_VALIDATION_FAILED: true,
+        NOTIFICATION_PREFERENCE_EMPTY: true,
+        NOTIFICATION_CATEGORY_DISABLED: true,
+        NOTIFICATION_QUERY_INVALID: true,
+        NOTIFICATION_SETTINGS_VALIDATION_FAILED: true,
+        NOTIFICATION_TEST_FAILED: true,
         UNKNOWN: true,
     } satisfies Record<ServerErrorCode, true>) as ServerErrorCode[]
 

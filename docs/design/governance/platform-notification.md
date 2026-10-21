@@ -1,6 +1,6 @@
 # 平台通知与邮件推送设计
 
-> 状态：🔶 设计中（2026-10-20，已上收 M46.5；来源 [issue #190](https://github.com/dependfix/dependfix/issues/190)）
+> 状态：✅ 已落地（2026-10-21，B1-B4；B5 周汇总延期至 backlog；来源 [issue #190](https://github.com/dependfix/dependfix/issues/190)）
 > 关联：[系统架构](./architecture-platform.md) · [定时扫描与批量处理设计](./platform-scheduled-batch.md) · [运行失败分类与筛选设计](./run-failure-taxonomy.md) · [平台规范](../../standards/platform.md) · [安全规范](../../standards/security.md)
 
 ## 1. 背景与现状
@@ -12,7 +12,7 @@
 | 渠道抽象 | `NotificationChannel` 接口 + 注册表；当前仅 email 实现，Slack / Webhook 为 stub | `apps/platform/server/services/notification/channel.ts` |
 | 环境事件通知 | `notifyEnvEvent()`：策略判定 → 收件人解析 → 渠道投递 → 回写 `audit_event.notified` | `apps/platform/server/services/notification/index.ts` |
 | 事件策略 | 白名单仅 `sandbox_unavailable` / `sandbox_degraded` / `container_unavailable` | `apps/platform/server/services/notification/policy.ts` |
-| 收件人 | 默认 admin / org_admin 全员；`DEPENDFIX_ENV_ALERT_RECIPIENTS` 可覆盖 | `apps/platform/server/services/notification/notification-recipients.ts` |
+| 收件人 | 默认 admin / org_admin 全员；`DEPENDFIX_ENV_ALERT_RECIPIENTS` 可覆盖 | `apps/platform/server/services/notification/recipients.ts` |
 | 邮件投递 | nodemailer + 双语模板 + fail-closed；SMTP 未配置时 noop | `apps/platform/server/services/mailer/` |
 | 业务结果 | `ScanResult.severity` / `fixStatus` + `BatchRun.summaryJson.severityCounts` 已落库 | `apps/platform/server/entities/`、`services/batch/batch-aggregate.ts` |
 
@@ -85,6 +85,7 @@ ORG_KEY = {
 ```
 
 - 必选类别忽略组织与个人开关，仅受部署总开关约束。
+- B1-B4 的组织冷却默认值固定为 24（组织可在 0-168 内覆盖）；周报触发小时随 B5 落地时再新增部署变量。
 - `weekly_digest` 与其余可选类别走同一优先级：组织开启是前提，个人可再关闭。
 - **个人偏好缺行 = 取角色默认值**（admin / org_admin：`security_high` / `run_failure` 开，`run_completed` / `weekly_digest` 关；viewer 全关）；组织开关是前提条件，不替代个人默认。不写默认行，避免存量用户迁移。
 - 渠道可用性在**投递阶段**判定（`deliverable` 仅用于 UI / 测试展示，投递侧唯一落点是 §6.4 的 ⑤）；SMTP 未配置时记录 `noop` 且不占投递键，便于管理员在投递记录中看到「渠道不可用」。
@@ -131,8 +132,6 @@ interface NotificationPreference {
 | `DEPENDFIX_NOTIFICATION_ENABLED` | `true` | 总开关（紧急熔断） |
 | `DEPENDFIX_ENV_ALERT_RECIPIENTS` | — | 平台事件收件人覆盖（保持既有语义） |
 | `DEPENDFIX_NOTIFICATION_RECIPIENT_CAP` | `50` | 单封邮件收件人上限 |
-| `DEPENDFIX_NOTIFICATION_COOLDOWN_HOURS` | `24` | 组织未配置冷却窗口时的部署级默认值（组织可在 0-168 内覆盖） |
-| `DEPENDFIX_WEEKLY_DIGEST_HOUR` | `9` | 周报触发小时（0-23，服务器时区） |
 
 ## 5. 收件人路由
 
@@ -272,7 +271,7 @@ AND scanRunId IN (<scope run ids>)
 
 **UI**
 
-- 个人：`/settings` 新增「通知偏好」卡片（邮件开关、类别列表、必选类别置灰说明、退订入口即本页）。
+- 个人：`/settings` 新增「通知偏好」卡片（邮件渠道的类别列表、必选类别置灰说明、退订入口即本页；B1-B4 不提供单独的渠道总开关，SMTP 不可用时由渠道状态提示）。
 - 全局：新增管理员页 `/notifications`（导航项仅 admin / org_admin 可见），包含类别默认、阈值、冷却、每小时上限、额外收件人、测试发送与最近 20 条投递记录。
 - 文案双语（zh-CN / en-US），与既有 `i18n/locales` 同源；不新增独立语言文件。
 
