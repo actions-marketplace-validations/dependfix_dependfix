@@ -26,7 +26,7 @@
 **6 原子条目**（覆盖 🎨 2 + 🛠️ 2 + 🚀 1 + 🧪 1，满足 [规划规范 §1.1](../standards/planning.md#11-硬性约束) 类型平衡建议）：
 
 - **M46.1** [P1 🎨] 环境性失败与「有告警未修」的可见性 —— **已闭环**
-- **M46.2** [P2 🎨] 跨 major / 截断 / 子目录跳过的披露
+- **M46.2** [P2 🎨] 跨 major / 截断 / 子目录跳过的披露 —— **已闭环**
 - **M46.3** [P2 🛠️] 基线采样完整链与门禁回滚粒度
 - **M46.4** [P1 🛠️] 执行容器内存下限与 OOM 归因
 - **M46.5** [P2 🚀] 平台通知与邮件推送（issue #190）
@@ -64,22 +64,23 @@
 - **风险与缓解**：**R1 双源判定漂移**（内存 exitCode 与落库计数不一致）→ `resolveScanRunOutcome` 纯函数单一映射 + 映射用例；**R2 UI 误读**（把「环境性失败」读成仓库代码问题）→ 文案与 tooltip 明确「不归因」；**R3 报告契约变更**（summary 新字段影响快照）→ core 类型契约测试 + 旧报告降级；**R4 无 result 的执行器合成 exitCode=2 污染** → 仅在 result.summary 存在时落两列；**R5 视觉基线阈值内假绿**（单字符差异低于 100px）→ 删除基线重建 + 截图前断言语义 + 两次 no-update。
 - **闭环记录（2026-10-21）**：**审计** R1 `standard` 三分区并发（A core/engine/数据层 · B API/fixtures · C UI/视觉/文档）均 **Pass**（0 blocker；A 4 warning / B 3 warning / C 4 warning）→ 收口（无 result 两列 NULL、reuse 用例改为 catch-all 生效、主链路覆盖边界收窄 + backlog 候选、B 模式哨兵注释、0 值落库断言、repo-history 空态、已修复列归一、英文文案、结果缺失隐藏告警 0、converged 视觉覆盖等）→ R2 `quick` **Pass**（0 blocker / 1 warning：告警侧栏详情无断言）→ 补 `alerts-sidebar` e2e 的未修复 / 环境性失败 / 退出码 / 结果缺失断言 → 复跑通过。**门禁**：定向单测 141 passed（另 core/report 98 passed）；`test:visual` 16 passed（update 后连续两次 no-update；基线人工查看「未修复 1 / 环境性失败 1 / 退出码 1」，另以 `maxDiffPixels:0` 严格配置复验逐像素一致）；e2e 全量 198 passed + 2 flaky（repos-crud 删除 / scan-config 记住上次选择，单独重跑均通过），新增列表 / 两详情 / 结果缺失用例通过；`pnpm run lint` 0 error（3 warning：alerts.vue / scans.vue 存量 max-lines + scan-orchestrator.test max-lines-per-function）；`pnpm run typecheck` 7 包 Done；core / engine / platform build exit 0；`check:docs` / `check:doc-size`（warning 0）/ `lint:md:check` / `lint:i18n` / `check:orphan-ids`（0 命中）通过。**残余**：① 常规分组 / 逐包升级路径尚未消费 `environmental` 标记，计数可能低于真实环境性失败数（backlog「常规升级链路的环境性失败归因对齐」）；② `dispatched`（B 模式结果未就绪）仍显示「告警 0」，R1 接受为既有设计；③ `exit_code` 的 mysql / postgres 分支未实测（与既有同类迁移同风险）；④ 告警侧栏详情新增断言已覆盖，`run-detail-dialog` 的窄屏布局未单独验证。
 
-### M46.2 [P2 🎨] 跨 major / 截断 / 子目录跳过的披露
+### M46.2 [P2 🎨] 跨 major / 截断 / 子目录跳过的披露（**已闭环** `90034946` + `54942da9` + `37c93068` + `2673e044` + `73252ad7` + `05006854` + `966ea01e` + 本条登记）
 
 - **目标**：运行详情与 PR 正文展示 `alertsTruncated`、按原因分组的 `alertsSkipped` 与未关闭告警数，避免「部分修复」被读成「全部修复」。
 - **优先级**：P2
 - **范围**：
   - `packages/core/src/report/types.ts:35-48`（新增 `alertsSkippedByReason`（不含截断）+ `alertsTruncatedBySeverity`，保持 `alertsSkipped` / `alertsTruncated` 总数兼容）；`packages/engine/src/app/repo-fix.ts:231,276,673,752` / `repo-report.ts:27`（按原因 / 严重级别累加）；`packages/core/src/report/markdown-generator.ts:59-61`（报告表）；`packages/engine/src/github/pr-creator.ts:540-724`（`generatePRBody` 的跳过区块）。
-  - `apps/platform/app/components/run-detail-dialog.vue` + `pages/scans.vue`（展示）；`apps/platform/server/services/batch/batch-aggregate.ts`（可选批次汇总）；`apps/platform/i18n/locales/{zh-CN,en-US}.json`。
+  - `apps/platform/app/components/run-detail-dialog.vue` + `components/run-outcome-breakdown.vue`（新增）+ `components/repo-history-dialog.vue` + `pages/scans.vue`（展示）；`apps/platform/i18n/locales/{zh-CN,en-US}.json`；e2e / 视觉 fixtures。**批次汇总未做**（条目内可选）。
 - **验收标准**：
-  - [ ] ① 详情显示 `20/26（6 截断，4 跨大版本）` 形式的分组；无跳过时不显示空区块。
-  - [ ] ② PR 正文含同样的分组与「未关闭告警」计数；zh / en 文案成对。
-  - [ ] ③ 旧 `summaryJson` 缺分组字段时降级显示总数，不抛错；`sum(alertsSkippedByReason) === alertsSkipped`、`sum(alertsTruncatedBySeverity) === alertsTruncated`。
-  - [ ] ④ 单测覆盖分组累加与文案；报告快照 / 视觉基线按变化更新。
+  - [x] ① 详情显示 `未修复 20 / 26 · 截断 6（未评估）· 跳过 4` 形式的分组；无跳过 / 截断时不显示空区块；列表增加紧凑 Tag。
+  - [x] ② PR 正文含 Summary 的 Skipped / Truncated / Unfixed 与 `Not Fixed / Skipped` 分组表；Markdown 报告同口径；zh / en 文案成对。
+  - [x] ③ 旧 `summaryJson` 缺分组字段时回退 `other` 总数，不抛错；`sum(alertsSkippedByReason) === alertsSkipped`、`sum(alertsTruncatedBySeverity) === alertsTruncated`，并有 helper / 引擎真实路径断言。
+  - [x] ④ 单测覆盖分组累加、告警级未修复、旧数据回退与 PR / Markdown 文案；视觉基线按新增分组更新并连续两次无更新比对。
 - **不做什么**：不改跳过策略与跨 major 判定；不放开 `allowMajorUpgrade`（仓库级开关见 backlog「仓库级 `allowMajorUpgrade` 开关」）；不改 PR 正文的既有指纹与去重逻辑。
 - **依赖**：`report/types.ts` 既有 `alertsSkipped` / `alertsTruncated`；`repo-fix.ts` 累加点；M46.1 的未修复口径可复用；M46.5 消费 `alertsTruncatedBySeverity` 披露截断高危。
-- **交付物**：预计 2-3 commits / 8-12 文件 / 250-400 行——① `feat(core/engine)` 分组字段 + PR 正文（4-5 文件 / 120-180 行）；② `feat(platform)` 详情 / 列表展示 + i18n（3-4 / 100-150）；③ `test` 快照 / 视觉基线（1-3 / 30-70）。
-- **风险与缓解**：**R1 分组口径漂移**（引擎累加点与展示口径不一致）→ 原因常量单一事实源 + 分组求和断言；**R2 PR 正文膨胀** → 单封 / 正文最多列 50 条，其余折叠；**R3 旧数据降级遗漏** → 纯函数防御式解析 + 用例。
+- **交付物（实际）**：7 commits（不含本条登记）/ 47 文件 / 1090 插入。拆分：`90034946` core 分组字段 + Markdown（9 文件）；`54942da9` engine 跳过归组 + 告警级未修复（10）；`37c93068` engine PR 正文 + summary 夹具（8）；`2673e044` platform 详情 / 列表 / i18n（8）；`73252ad7` 失败快照重算 + fixtures schema（5）；`05006854` e2e + 视觉基线（5）；`966ea01e` 设计与标准文档（2）。**超原估**（8-12 文件 / 250-400 行）的主因：R1 审计发现 `alertsFixed` 是 action 数，修复为告警级 `alertsUnfixed`（同包多 GHSA / 跨 major 部分满足）并补 converged 告警级计数；`/scans?run=` 实际挂载 `repo-history-dialog`（与 alerts 侧栏 `run-detail-dialog` 为两套详情），两者都需披露；另补列表 / 两详情 / 结果缺失的 e2e 与视觉前置断言。
+- **风险与缓解**：**R1 分组口径漂移**（引擎累加点与展示口径不一致）→ 原因常量单一事实源 + 分组求和断言 + 与 core 枚举同序单测；**R2 PR 正文膨胀** → 分组表最多约 9 行，且紧跟 Summary、尾部截断不吞披露；**R3 旧数据降级遗漏** → 纯函数防御式解析 + `other` 回退用例；**R4 未修复用 action 数冒充告警数** → 新增告警级 `alertsUnfixed`，同包多告警 / 跨 major 部分满足用例；**R5 失败快照保留内存未修复数** → `alertsFixed=0` 时同步按 `found − converged` 重算。
+- **闭环记录（2026-10-21）**：**审计** R1 `standard` 两分区（A core/engine · B UI/视觉/文档）：B **Pass**（4 warning），A **Reject**（1 blocker：unfixed 用 action 数冒充告警数；5 warning：not-fixable 吞 dedupe 已修复告警 / code-quality 落子目录桶 / 未修复分母含截断语义误导 / PR 分组区块过靠后 / 覆盖不足）→ 收口（新增 `alertsUnfixed` + 告警级 converged、not-fixable 逐条残差、code-quality 排除、文案改为「已评估 / 截断未评估」、PR 区块紧跟 Summary、补同包多告警 / 跨 major / not-fixable / 分组求和用例）→ R2 `quick` **Reject**（B1 残差：converged 仍包级；失败快照保留内存 `alertsUnfixed`；§5.7 / JSDoc 旧公式）→ 收口（converged 改告警级 + 同包两告警收敛用例、失败快照重算、文档/JSDoc 同步）→ R3 `quick` **Pass**（0 blocker；1 warning：versioned overrides 收敛分支当前不可达，已加防御性注释；2 suggest 已收口）。**门禁**：定向 vitest 257 passed（含 summary-counters / result-assembly / non-fixable / index-isolation / scan-orchestrator / pr-creator / run-view）；全量 e2e 干净库 200 passed + 1 flaky（scan-config 记住上次选择，单独重跑通过）；`test:visual` 16 passed ×2（update 后连续两次 no-update；基线人工查看 `未修复 20 / 26 · 截断 6（未评估）· 跳过 4`、`Critical 2` / `High 4` / `跨大版本 / 人工复核 4`）；`pnpm run lint` 0 error（3 warning：alerts.vue / scans.vue / scan-orchestrator.test 存量 max-lines）；`pnpm run typecheck` 7 包 Done；core / engine / platform build exit 0；`check:docs` / `check:doc-size`（warning 0）/ `lint:md:check` / `lint:i18n` / `check:orphan-ids`（0 命中）通过。**残余**：① 批次汇总 `batch-aggregate` 未扩展（条目内可选）；② `versioned overrides` 的 `alertsConverged` 告警级累加分支当前不可达（上游已按 overrides 非空过滤，保留防御性注释）；③ code-quality findings 现在计入未修复但不进入跳过原因（与 code-scanning 同源，由 Code Quality Findings 区展示）；④ B 模式 artifact 仍为 `as RunResult` 断言，缺 `summary` 的畸形 result 可能被外层 catch 归为 `orchestration_failed`（低概率既有风险）。
 
 ### M46.3 [P2 🛠️] 基线采样完整链与门禁回滚粒度
 
