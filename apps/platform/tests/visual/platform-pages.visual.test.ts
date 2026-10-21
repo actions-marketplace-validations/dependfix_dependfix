@@ -277,6 +277,21 @@ test.describe('平台页面视觉基线', () => {
         await expectViewportScreenshot(page, 'scans-run-detail-light.png')
     })
 
+    /* 通知管理员页：组织设置卡片 + 投递记录表；数据由真实 API 读取默认值。 */
+    test('notifications 管理员页（light）', async ({ page }) => {
+        await applyTheme(page, 'light')
+        await page.goto('/notifications')
+        await waitForHydration(page)
+        await expect(page.getByRole('heading', { name: '通知与邮件' })).toBeVisible()
+        await expect(page.getByText('事件类别')).toBeVisible()
+        await expect(page.getByText('投递策略')).toBeVisible()
+        await expect(page.getByText('最近投递记录')).toBeVisible()
+
+        await waitForVisualStable(page)
+        await expectThemeApplied(page, 'light')
+        await expectPageScreenshot(page, 'notifications-light.png')
+    })
+
     /* alerts 页的运行抽屉（alert-run-sidebar 的 CaomeiDrawer，含遮罩与右侧滑入面板）。 */
     test('alerts 运行抽屉浮层（light）', async ({ page }) => {
         await applyTheme(page, 'light')
