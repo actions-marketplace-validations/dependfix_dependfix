@@ -168,6 +168,17 @@ describe('scan-orchestrator.service', () => {
             expect(run.id).toBeTruthy()
         })
 
+        it('persists triggeredByUserId for notification routing', async () => {
+            const run = await createPendingScanRun(
+                repositoryId,
+                { mode: 'fix', severityThreshold: 'high' },
+                { triggeredByUserId: 'user-1' },
+            )
+            const ds = await ensureDatabaseInitialized()
+            const persisted = await ds.getRepository(ScanRun).findOne({ where: { id: run.id } })
+            expect(persisted?.triggeredByUserId).toBe('user-1')
+        })
+
         it('resolves github-action executor from explicit request', async () => {
             const run = await createPendingScanRun(repositoryId, { mode: 'report-only', severityThreshold: 'all', executorKind: 'github-action' })
             expect(run.executorKind).toBe('github-action')

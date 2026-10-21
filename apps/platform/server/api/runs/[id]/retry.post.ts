@@ -28,7 +28,7 @@ import { createLocalizedError } from '#server/utils/localized-error'
  * 以 409 `RUN_RETRY_NOT_ALLOWED` 拒绝并落 warn 日志留痕（不静默降级、不 500）。
  */
 export default defineEventHandler(async (event) => {
-    await requireRole(event, ['admin', 'org_admin'])
+    const { user } = await requireRole(event, ['admin', 'org_admin'])
 
     const id = getRouterParam(event, 'id') as string
     if (!id) {
@@ -88,7 +88,7 @@ export default defineEventHandler(async (event) => {
         const { run: retriedRun, merged } = await triggerScanForRepository(
             run.repositoryId,
             parsedParams.data,
-            { retriedFromRunId: run.id },
+            { retriedFromRunId: run.id, triggeredByUserId: user.id },
         )
         return { ...serializeScanRun(retriedRun), ...(merged ? { merged } : {}) }
     } catch (error) {

@@ -89,7 +89,7 @@ describe('POST /api/repos/[id]/scan', () => {
     it('runs scan synchronously when queue is in sync mode', async () => {
         const result = await call({ mode: 'fix', severityThreshold: 'high' }, { id: repositoryId }) as Record<string, unknown>
         expect(result).toMatchObject({ id: 'run-1', status: 'completed', summary: { alertsTotal: 2 } })
-        expect(runScanForRepository).toHaveBeenCalledWith(repositoryId, { mode: 'fix', severityThreshold: 'high' })
+        expect(runScanForRepository).toHaveBeenCalledWith(repositoryId, { mode: 'fix', severityThreshold: 'high' }, { triggeredByUserId: 'u1' })
         expect(createPendingScanRun).not.toHaveBeenCalled()
     })
 
@@ -104,7 +104,7 @@ describe('POST /api/repos/[id]/scan', () => {
 
         const result = await call({ mode: 'fix', severityThreshold: 'high' }, { id: repositoryId }) as Record<string, unknown>
         expect(result).toMatchObject({ id: 'pending-1', status: 'pending' })
-        expect(createPendingScanRun).toHaveBeenCalledWith(repositoryId, { mode: 'fix', severityThreshold: 'high' })
+        expect(createPendingScanRun).toHaveBeenCalledWith(repositoryId, { mode: 'fix', severityThreshold: 'high' }, { triggeredByUserId: 'u1' })
         expect(queue.add).toHaveBeenCalledWith(repositoryId, { mode: 'fix', severityThreshold: 'high' }, expect.objectContaining({ priority: 1 }))
     })
 
@@ -147,7 +147,7 @@ describe('POST /api/repos/[id]/scan', () => {
         expect(runScanForRepository).toHaveBeenCalledWith(
             repositoryId,
             { mode: 'fix', severityThreshold: 'high' },
-            { runId: 'pending-3', reuse: false },
+            { runId: 'pending-3', reuse: false, triggeredByUserId: 'u1' },
         )
     })
 
@@ -182,7 +182,7 @@ describe('POST /api/repos/[id]/scan', () => {
         expect(runScanForRepository).toHaveBeenCalledWith(
             repositoryId,
             { mode: 'fix', severityThreshold: 'high', reuseScanRunId: existing.id },
-            { runId: existing.id, reuse: true },
+            { runId: existing.id, reuse: true, triggeredByUserId: 'u1' },
         )
         // 复用路径不新建 pending run
         expect(createPendingScanRun).not.toHaveBeenCalled()
@@ -219,7 +219,7 @@ describe('POST /api/repos/[id]/scan', () => {
         expect(runScanForRepository).toHaveBeenCalledWith(
             repositoryId,
             { mode: 'fix', severityThreshold: 'high', reuseScanRunId: existing.id },
-            { runId: existing.id, reuse: true },
+            { runId: existing.id, reuse: true, triggeredByUserId: 'u1' },
         )
         expect(createPendingScanRun).not.toHaveBeenCalled()
     })

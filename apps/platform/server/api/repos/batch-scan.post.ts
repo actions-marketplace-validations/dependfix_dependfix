@@ -16,7 +16,7 @@ import { ensureDatabaseInitialized } from '#server/database'
  * sync 串行），聚合进度在批量运行详情页轮询查看。
  */
 export default defineEventHandler(async (event) => {
-    await requireRole(event, ['admin', 'org_admin'])
+    const { user } = await requireRole(event, ['admin', 'org_admin'])
 
     const body = await readBody<Record<string, unknown>>(event)
     const parsed = batchScanSchema.safeParse(body)
@@ -52,6 +52,7 @@ export default defineEventHandler(async (event) => {
             severityThreshold: parsed.data.severityThreshold,
         },
         organizationId,
+        triggeredByUserId: user.id,
     })
 
     return { batchRunId: result.batchRunId, repositoryCount: result.repositoryCount }

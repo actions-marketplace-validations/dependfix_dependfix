@@ -31,6 +31,8 @@ export interface TriggerScanOptions {
     reuseExisting?: ScanRun | null
     /** 「受约束重试入口」的来源 run id（写入新 run 的 `retriedFromRunId`，供审计与来源链追溯） */
     retriedFromRunId?: string
+    /** 手动触发 / 重试操作者（写入 triggeredByUserId，供业务通知定向投递） */
+    triggeredByUserId?: string
 }
 
 export interface TriggerScanOutcome {
@@ -103,6 +105,7 @@ export const triggerScanForRepository = async (
 ): Promise<TriggerScanOutcome> => {
     const reuseExisting = options.reuseExisting ?? null
     const retriedFromRunId = options.retriedFromRunId
+    const triggeredByUserId = options.triggeredByUserId
     const queueService = await getQueueService()
 
     if (queueService.mode === 'async' && queueService.queue) {
@@ -112,9 +115,9 @@ export const triggerScanForRepository = async (
         if (reuseExisting) {
             pendingRun = reuseExisting
         } else if (retriedFromRunId === undefined) {
-            pendingRun = await createPendingScanRun(repositoryId, params)
+            pendingRun = await createPendingScanRun(repositoryId, params, { triggeredByUserId })
         } else {
-            pendingRun = await createPendingScanRun(repositoryId, params, { retriedFromRunId })
+            pendingRun = await createPendingScanRun(repositoryId, params, { retriedFromRunId, triggeredByUserId })
         }
         try {
             const { reused } = await enqueueScanJob(queueService.queue, repositoryId, params, pendingRun, {
@@ -161,6 +164,7 @@ export const triggerScanForRepository = async (
             const run = await runScanForRepository(repositoryId, params, {
                 runId: pendingRun.id,
                 reuse: !!reuseExisting,
+                triggeredByUserId,
             })
             return { run }
         }
@@ -169,12 +173,16 @@ export const triggerScanForRepository = async (
     // 同步降级：请求内完成扫描（既有行为；reuse 路径传 runId + reuse:true 让 orchestrator
     // 绕过终态校验并重置既有 record 的 finishedAt / errorJson / summaryJson）
     if (reuseExisting) {
-        const reusedRun = await runScanForRepository(repositoryId, params, { runId: reuseExisting.id, reuse: true })
+        const reusedRun = await runScanForRepository(repositoryId, params, {
+            runId: reuseExisting.id,
+            reuse: true,
+            triggeredByUserId,
+        })
         return { run: reusedRun }
     }
     const run = retriedFromRunId === undefined
-        ? await runScanForRepository(repositoryId, params)
-        : await runScanForRepository(repositoryId, params, { retriedFromRunId })
+        ? await runScanForRepository(repositoryId, params, { triggeredByUserId })
+        : await runScanForRepository(repositoryId, params, { retriedFromRunId, triggeredByUserId })
     return { run }
 }
 

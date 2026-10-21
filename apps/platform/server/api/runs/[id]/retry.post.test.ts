@@ -132,7 +132,7 @@ describe('POST /api/runs/[id]/retry', () => {
         expect(triggerMock.triggerScanForRepository).toHaveBeenCalledWith(
             repositoryId,
             { mode: 'fix', severityThreshold: 'high', executorKind: 'container' },
-            { retriedFromRunId: run.id },
+            { retriedFromRunId: run.id, triggeredByUserId: 'u1' },
         )
         expect(response).toMatchObject({ id: 'retry-run-1', retriedFromRunId: 'source-run' })
     })

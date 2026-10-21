@@ -10,6 +10,7 @@ import { ActionTriggerExecutor } from './executor/action-trigger-executor'
 import { ActionResultFetcher } from './executor/action-result-fetcher'
 import type { ScanExecutorContext } from './executor/types'
 import { notifyEnvEvent } from './notification'
+import { notifyRunTerminal } from './notification/run-notification.service'
 import type { NotificationEvent } from './notification/channel'
 import { reconcileAlerts } from './scan-reconcile'
 import { resolveAiConfig } from './ai-config-resolver'
@@ -70,6 +71,8 @@ export interface ScanRunOptions {
      * 仅新建路径生效；runId 续用 / reuse 路径不覆写既有 record 的来源字段。
      */
     retriedFromRunId?: string
+    /** 手动触发 / 重试操作者；写入 ScanRun.triggeredByUserId 供业务通知定向投递。 */
+    triggeredByUserId?: string
 }
 
 /** 执行器选择：请求显式指定优先 > 仓库 executorKind 字段 > actionWorkflowFile 自动（B 模式） > 默认 container */
@@ -94,7 +97,7 @@ const resolveExecutorKind = (
 export const createPendingScanRun = async (
     repositoryId: string,
     request: ScanRequest,
-    options?: { batchRunId?: string, retriedFromRunId?: string },
+    options?: { batchRunId?: string, retriedFromRunId?: string, triggeredByUserId?: string },
 ): Promise<ScanRun> => {
     const ds = await ensureDatabaseInitialized()
     const repoRepo = ds.getRepository(Repository)
@@ -114,6 +117,7 @@ export const createPendingScanRun = async (
         startedAt: null,
         batchRunId: options?.batchRunId ?? null,
         retriedFromRunId: options?.retriedFromRunId ?? null,
+        triggeredByUserId: options?.triggeredByUserId ?? null,
     })
     return runRepo.save(run)
 }
@@ -208,6 +212,8 @@ const runScanInternal = async (
             existing.mode = request.mode
             existing.severityThreshold = request.severityThreshold
             existing.executorKind = executorKind
+            // 复用既有 run 作为新执行载体时，触发者更新为本次操作者（未提供则保留历史值）
+            existing.triggeredByUserId = options.triggeredByUserId ?? existing.triggeredByUserId
             // reuse 时也刷新 AI 配置快照（apiKey 不写入快照；hasApiKey 标记替代）
             existing.aiConfigSnapshot = aiConfigResolution.snapshot
                 ? JSON.stringify(aiConfigResolution.snapshot)
@@ -224,6 +230,7 @@ const runScanInternal = async (
             startedAt: new Date(),
             batchRunId: options?.batchRunId ?? null,
             retriedFromRunId: options?.retriedFromRunId ?? null,
+            triggeredByUserId: options?.triggeredByUserId ?? null,
             // AI 配置快照（apiKey 不写入；hasApiKey 标记替代）；见 resolveAiConfig
             aiConfigSnapshot: aiConfigResolution.snapshot
                 ? JSON.stringify(aiConfigResolution.snapshot)
@@ -478,6 +485,11 @@ const runScanInternal = async (
         // 不阻塞扫描主流程：失败仅日志 + audit_event 落库
         await recordEnvAuditEvent(persistedRun, decision, degradedReason, error)
 
+        // 业务通知 fire-and-forget：批次内 run 由批次终态合并；失败不阻断扫描
+        void notifyRunTerminal(persistedRun).catch((notifyError) => {
+            console.error('[notification] run terminal notify failed:', notifyError)
+        })
+
         return persistedRun
     } catch (error) {
         savedRun.status = 'failed'
@@ -489,7 +501,11 @@ const runScanInternal = async (
         savedRun.errorJson = JSON.stringify(orchestrationFailure)
         // 编排 catch-all 失败同样落失败分类（与状态机失败路径同源）
         applyFailureClassification(savedRun, { status: 'failed', error: orchestrationFailure })
-        return await runRepo.save(savedRun)
+        const persisted = await runRepo.save(savedRun)
+        void notifyRunTerminal(persisted).catch((notifyError) => {
+            console.error('[notification] run terminal notify failed:', notifyError)
+        })
+        return persisted
     }
 }
 

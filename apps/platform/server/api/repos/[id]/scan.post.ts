@@ -23,7 +23,7 @@ import { createLocalizedError } from '#server/utils/localized-error'
  * - 校验归属（repositoryId 必须等于 [id]）+ 校验不与进行中任务冲突（running → 409）
  */
 export default defineEventHandler(async (event) => {
-    await requireRole(event, ['admin', 'org_admin'])
+    const { user } = await requireRole(event, ['admin', 'org_admin'])
 
     const id = getRouterParam(event, 'id') as string
     if (!id) {
@@ -75,7 +75,7 @@ export default defineEventHandler(async (event) => {
     }
 
     try {
-        const { run, merged } = await triggerScanForRepository(id, parsed.data, { reuseExisting })
+        const { run, merged } = await triggerScanForRepository(id, parsed.data, { reuseExisting, triggeredByUserId: user.id })
         return { ...serializeScanRun(run), ...(merged ? { merged } : {}) }
     } catch (error) {
         if (error instanceof ScanAlreadyCompletedError) {
