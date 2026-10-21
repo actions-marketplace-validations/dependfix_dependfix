@@ -82,7 +82,7 @@
 - **风险与缓解**：**R1 分组口径漂移**（引擎累加点与展示口径不一致）→ 原因常量单一事实源 + 分组求和断言 + 与 core 枚举同序单测；**R2 PR 正文膨胀** → 分组表最多约 9 行，且紧跟 Summary、尾部截断不吞披露；**R3 旧数据降级遗漏** → 纯函数防御式解析 + `other` 回退用例；**R4 未修复用 action 数冒充告警数** → 新增告警级 `alertsUnfixed`，同包多告警 / 跨 major 部分满足用例；**R5 失败快照保留内存未修复数** → `alertsFixed=0` 时同步按 `found − converged` 重算。
 - **闭环记录（2026-10-21）**：**审计** R1 `standard` 两分区（A core/engine · B UI/视觉/文档）：B **Pass**（4 warning），A **Reject**（1 blocker：unfixed 用 action 数冒充告警数；5 warning：not-fixable 吞 dedupe 已修复告警 / code-quality 落子目录桶 / 未修复分母含截断语义误导 / PR 分组区块过靠后 / 覆盖不足）→ 收口（新增 `alertsUnfixed` + 告警级 converged、not-fixable 逐条残差、code-quality 排除、文案改为「已评估 / 截断未评估」、PR 区块紧跟 Summary、补同包多告警 / 跨 major / not-fixable / 分组求和用例）→ R2 `quick` **Reject**（B1 残差：converged 仍包级；失败快照保留内存 `alertsUnfixed`；§5.7 / JSDoc 旧公式）→ 收口（converged 改告警级 + 同包两告警收敛用例、失败快照重算、文档/JSDoc 同步）→ R3 `quick` **Pass**（0 blocker；1 warning：versioned overrides 收敛分支当前不可达，已加防御性注释；2 suggest 已收口）。**门禁**：定向 vitest 257 passed（含 summary-counters / result-assembly / non-fixable / index-isolation / scan-orchestrator / pr-creator / run-view）；全量 e2e 干净库 200 passed + 1 flaky（scan-config 记住上次选择，单独重跑通过）；`test:visual` 16 passed ×2（update 后连续两次 no-update；基线人工查看 `未修复 20 / 26 · 截断 6（未评估）· 跳过 4`、`Critical 2` / `High 4` / `跨大版本 / 人工复核 4`）；`pnpm run lint` 0 error（3 warning：alerts.vue / scans.vue / scan-orchestrator.test 存量 max-lines）；`pnpm run typecheck` 7 包 Done；core / engine / platform build exit 0；`check:docs` / `check:doc-size`（warning 0）/ `lint:md:check` / `lint:i18n` / `check:orphan-ids`（0 命中）通过。**残余**：① 批次汇总 `batch-aggregate` 未扩展（条目内可选）；② `versioned overrides` 的 `alertsConverged` 告警级累加分支当前不可达（上游已按 overrides 非空过滤，保留防御性注释）；③ code-quality findings 现在计入未修复但不进入跳过原因（与 code-scanning 同源，由 Code Quality Findings 区展示）；④ B 模式 artifact 仍为 `as RunResult` 断言，缺 `summary` 的畸形 result 可能被外层 catch 归为 `orchestration_failed`（低概率既有风险）。
 
-### M46.3 [P2 🛠️] 基线采样完整链与门禁回滚粒度
+### M46.3 [P2 🛠️] 基线采样完整链与门禁回滚粒度（**已闭环** `d76dcea8` + `a0b5adf8` + `dd195219` + `e1fb087c` + `532552d7` + `87f0c0d6` + 本条登记）
 
 - **目标**：修复前基线不再因首条命令失败而漏采后续（尤其 `test`）；门禁不再整仓回滚连带丢弃已验证通过的探针。目标可证伪：同一仓库的基线结果包含全部命令段；失败单元回滚后已通过探针仍可交付。
 - **优先级**：P2
@@ -91,13 +91,14 @@
   - `packages/engine/src/runners/verification-gate.ts:41-43`（回滚粒度）；`packages/engine/src/app/repo-fix*.ts`（探针边界与提交点）。
   - 设计口径同步：`docs/design/modules/dependency-fixer-records.md` + `docs/design/governance/run-failure-taxonomy.md`（基线 / 回滚语义）。
 - **验收标准**：
-  - [ ] ① 基线即使首条命令失败，仍记录后续命令结果；`test` 进入基线，`No tests found` 不再被误判为本次引入。
-  - [ ] ② 修复后仅对「本次引入失败」的变更单元回滚；已通过探针不被整仓回滚，或在不支持细粒度时显式记录降级原因与影响范围。
-  - [ ] ③ 用例覆盖 nest-template 形态（install 失败 + jest `No tests found`）与 picgo 形态（真实 TS 回归 + 已通过探针）；负例证明修复前会被整仓回滚。
-  - [ ] ④ `preExistingDirty` 保护面不变；整仓回滚保留为逃生开关；回滚语义变更登记风险与审计。
+  - [x] ① 基线即使首条命令失败，仍记录后续命令结果；`test` 进入基线，`No tests found` 不再被误判为本次引入。
+  - [x] ② 修复后仅对「本次引入失败」的变更单元回滚；已通过探针不被整仓回滚，或在不支持细粒度时显式记录降级原因与影响范围。
+  - [x] ③ 用例覆盖 nest-template 形态（install 失败 + jest `No tests found`）与 picgo 形态（真实 TS 回归 + 已通过探针）；负例证明修复前会被整仓回滚。
+  - [x] ④ `preExistingDirty` 保护面不变；整仓回滚保留为逃生开关；回滚语义变更登记风险与审计。
 - **不做什么**：不做探针合批（见 backlog「升级探针合批与门禁回滚粒度联动」）；不改默认验证命令链；不改既有失败基线归因；不动 `preExistingDirty` 的用户改动保护。
 - **依赖**：M44.1 归档风险 R1（基线前缀覆盖）；2026-10-17 生产实证（nest-template / picgo）；本阶段从 backlog 上收「基线采样首失败即停」候选。
-- **交付物**：预计 3-4 commits / 8-12 文件 / 300-500 行——① `feat(engine)` 基线完整链 + 豁免类（2-3 文件 / 80-140 行）；② `feat(engine)` 回滚粒度 + 逃生开关（2-3 / 100-170）；③ `test(engine)` 两类反例（2-3 / 80-140）；④ `docs(design)` 语义同步（2-3 / 40-50）。D 阶段先落设计结论再改实现。
+- **交付物（实际）**：6 commits / 29 文件 / 926 插入（+ 本条登记）。拆分：`d76dcea8` 基线完整链（4）；`a0b5adf8` 回滚粒度配置 / CLI（5）；`dd195219` 单元 checkpoint / 选择性回滚 / 降级审计（10）；`e1fb087c` 平台配置贯通 / 分类映射（3）；`532552d7` 设计 / 配置文档（6）；`87f0c0d6` 门禁边界说明（1）。**D 阶段确认**：用户 2026-10-21 选择「单元 checkpoint + 单次重验」（默认 `unit`；`repo` 为逃生）。**超原估**主因：checkpoint 恢复需同步 actions / errors / progress / summary，且需覆盖真实 TS 回归、dirty 跳过、降级审计与平台配置贯通。
+- **闭环记录（2026-10-21）**：**审计** R1 `standard` 两分区（A 基线 / B 回滚）：A **Pass**（3 warning / 3 suggest）；B **Reject**（1 blocker：平台 `RuntimeConfig` 未贯通 `rollbackGranularity`，CI rebuild 后平台 tsc 必红且平台静默维持整仓回滚；8 warning / 6 suggest）→ 收口（平台生产 config + env 逃生、executor 夹具、optional 字段 + 引擎缺省 unit、no-checkpoint / later-failed 降级审计、平台分类映射、taxonomy 章节归位、en 配置行、真实 tsc 用例、`preExistingDirty` 禁用选择性、CLI 大小写、repair 重做仅变更时、回调异常兜底）→ R2 `quick` **Pass**（0 blocker；3 新 warning：平台 env 大小写 / allErrors 归因文案 / 陈旧注释；2 suggest：repair 失败 action / CLI 大写用例）→ 逐项收口（trim+lowercase + 非法告警、文案、陈旧注释、repair 失败跳过选择性、`REPO` 用例）。**门禁**：engine **1437 passed / 1 skipped**（81 文件）；platform **2039 passed / 9 skipped**（154 文件）；root `pnpm test` 复跑 exit 0（首轮并行临时失败未复现）；`pnpm run typecheck` 7 包 Done；`pnpm run lint` 0 error（3 条存量 max-lines warning）；engine build exit 0；`check:docs` / `check:doc-size`（warning 0）/ `lint:md` / `lint:i18n` / `check:orphan-ids`（0）/ `check:verify-chain` 通过。**残余**：① 基线完整链最坏 5×10min，仅对「有工作」仓库采样，长 install 失败 + 超时可能挤压单仓预算（未做真实 repo 计时）；② 选择性回滚只尝试最近单元一次，失败并非最近单元 / 后续失败单元 / 无 checkpoint → 显式降级整仓；③ checkpoint 仅已跟踪文件，AI 新建未跟踪文件 / 用户 staged vs unstaged 区分不在回退面；④ Windows / LFS / submodule / shallow clone 未实机；⑤ 平台 env 非法值回退 unit 并 console.warn（不 fail-fast）；⑥ 真实 nest-template / picgo 目标仓库端到端未跑（由 mock 分层 + 真实 tsc 覆盖）。
 - **风险与缓解**：**R1 回滚粒度变更影响交付安全** → 设计先行 + 反例测试 + 逃生开关，默认行为变更须在 D 阶段向用户确认；**R2 共享 workDir 限制**（多仓共享目录无法天然按仓回滚）→ 先做「按已通过探针提交 / 失败单元回滚」的可行性探测，做不到则显式降级并保留 repo 级；**R3 基线耗时上升** → 仅对已确定有工作的仓库采样，沿用 M45.2 豁免。
 
 ### M46.4 [P1 🛠️] 执行容器内存下限与 OOM 归因
