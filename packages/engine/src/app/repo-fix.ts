@@ -47,6 +47,7 @@ import { fetchDefaultBranch, fetchRepoAlerts, truncatedWarning } from './repo-al
 import { alertsFetchTokenHint } from './token-hints'
 import { recordUpgradeFailure } from './upgrade-failure'
 import { ensureVerificationBaseline, finalizeRepoFix, recordInstallBaselineFailure } from './repo-fix-finalize'
+import { recordVerificationCheckpoint, type VerificationCheckpoint } from './verification-checkpoint'
 
 // ---------------------------------------------------------------------------
 // 单仓库修复管线（fix / fix-and-pr 模式共用）
@@ -88,6 +89,13 @@ export interface RepoFixCtx extends AppContext {
      */
     /** `repo` = 采样时的仓库（运行级首采只对采样仓库自身可信，多仓复用不用于快速失败判定） */
     verificationBaseline?: { repo?: string, value?: CommandResult[] }
+    /**
+     * 单元回滚 checkpoint 持有器（run 级；由 index.ts 创建并跨仓库传递）。
+     * 每个依赖修复单元 probe 开始前记录；终验失败时 finalizeRepoFix 取当前仓库最近一个。
+     */
+    verificationCheckpoints?: VerificationCheckpoint[]
+    /** 运行前工作区已有未提交改动：沿用门禁保护面，禁用选择性回滚。 */
+    preExistingDirty?: boolean
 }
 
 /** lockfile 依赖告警分区产物（供 lockfile / 成员 / 常规升级步骤共用）。 */
@@ -376,6 +384,7 @@ async function applyLockfileFixes(
             break
         }
         const snapshot = snapshotTrackedFiles(ctx.workDir)
+        recordVerificationCheckpoint(ctx, repo, progress, `versioned-override:${alert.packageName}`)
         ctx.logger.info(`[multi-version] ${alert.packageName}: applying versioned overrides`, { overrides: versionedOverrides })
         const result = await applyVersionedOverrides({
             packageName: alert.packageName,
@@ -474,6 +483,7 @@ async function applyLockfileFixes(
             continue
         }
         const majorSnapshot = snapshotTrackedFiles(ctx.workDir)
+        recordVerificationCheckpoint(ctx, repo, progress, `major-upgrade:${alert.packageName}`)
         ctx.logger.warn(
             `[major-upgrade] ${alert.packageName}: applying cross-major upgrade → ${alert.recommendedVersion} (explicit --allow-major-upgrade; full verification required)`,
         )
@@ -643,6 +653,7 @@ async function applyGroupUpgrades(
 
     for (const group of groups) {
         snapshot = snapshotTrackedFiles(ctx.workDir)
+        recordVerificationCheckpoint(ctx, repo, progress, `group:${group.name}`)
 
         const pendingActions: FixAction[] = []
         const upgradedInGroup: NormalizedSecurityAlert[] = []
@@ -731,6 +742,7 @@ async function applyGroupUpgrades(
         }
 
         for (const alert of upgradedInGroup) {
+            recordVerificationCheckpoint(ctx, repo, progress, `group:${group.name}:${alert.packageName}`)
             const action = await upgradeAlert(ctx, alert)
             ctx.allActions.push(action)
             if (!action.success) {

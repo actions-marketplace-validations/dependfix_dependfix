@@ -270,6 +270,24 @@ describe('computeExitCode', () => {
         expect(exitCode).toBe(0)
     })
 
+    it('does not count ROLLBACK_GRANULARITY_DEGRADED as a failure (audit-only)', () => {
+        const exitCode = computeExitCode(makeCtx({
+            allErrors: [{
+                repository: 'foo/bar',
+                stage: 'verify',
+                category: 'ROLLBACK_GRANULARITY_DEGRADED',
+                message: 'Unit-level rollback degraded to repository-level rollback: no unit checkpoint available',
+            } as never],
+            repoResults: [{
+                alertsCount: 1,
+                fixed: 1,
+                verificationPassed: true,
+                verificationBlocking: false,
+            } as never],
+        }))
+        expect(exitCode).toBe(0)
+    })
+
     // 回归：既有失败仓库仍计为「成功仓库」→ 与真实失败仓库并存时返回 1（而非 2）
     // 判定用归因口径 verificationBlocking，而非原始口径 verificationPassed
     it('counts a pre-existing-only verification failure as repo success (exit 1, not 2)', () => {

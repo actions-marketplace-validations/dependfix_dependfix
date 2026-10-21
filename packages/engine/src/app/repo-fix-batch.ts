@@ -15,6 +15,7 @@ import { applyVersionedOverridesBatch, type VersionedOverridesPlan } from '../fi
 import { quickVerifyProject, restoreTrackedFiles, snapshotTrackedFiles } from '../helpers'
 import { getAbortReason, isAbortRequested } from '../runners/process-control'
 import type { RepoFixCtx, RepoFixProgress } from './repo-fix'
+import { recordVerificationCheckpoint } from './verification-checkpoint'
 
 /** 合批条目（一个包一条；`targets` 用于动作的 `toVersion` 展示，与逐包路径同口径）。 */
 export interface VersionedOverrideBatchItem {
@@ -48,6 +49,7 @@ export async function tryBatchVersionedOverrides(
 ): Promise<VersionedOverrideBatchOutcome> {
     const snapshot = snapshotTrackedFiles(ctx.workDir)
     const packages = items.map((item) => item.alert.packageName)
+    recordVerificationCheckpoint(ctx, repo, progress, `versioned-override-batch:${packages.join(',')}`)
     ctx.logger.info(
         `[multi-version] 合批 ${items.length} 个包：${packages.join(', ')}（一次安装 + 组级验证）`,
     )

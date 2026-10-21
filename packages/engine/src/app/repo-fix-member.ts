@@ -6,6 +6,7 @@ import { compareSemver, readLockfileVersions, upgradeDependency } from '../fixer
 import { quickVerifyProject, restoreTrackedFiles, snapshotTrackedFiles, type MemberManifestAlert } from '../helpers'
 import { isAbortRequested } from '../runners/process-control'
 import type { LockfileAlertSets, RepoFixCtx, RepoFixProgress } from './repo-fix'
+import { recordVerificationCheckpoint } from './verification-checkpoint'
 import { recordUpgradeFailure } from './upgrade-failure'
 
 /**
@@ -60,6 +61,7 @@ export async function applyMemberUpgrades(
             continue
         }
         const memberSnapshot = snapshotTrackedFiles(ctx.workDir, [memberManifestPath])
+        recordVerificationCheckpoint(ctx, repo, progress, `member-upgrade:${alert.packageName}`)
         ctx.logger.warn(
             `[member-upgrade] ${alert.packageName}: upgrading member declaration in ${memberManifestPath} → ${alert.recommendedVersion}`,
         )

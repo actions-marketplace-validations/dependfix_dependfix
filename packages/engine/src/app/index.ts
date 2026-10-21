@@ -43,6 +43,7 @@ import { requestAbort, resetProcessControlState } from '../runners/process-contr
 import { collectSupplyChainWarnings } from '../supply-chain'
 import { loadRulesConfigFromEnv, resetActiveRulesConfig, setActiveRulesConfig } from '../code-scanning/rule-config'
 import type { CommandResult } from '../runners/verification-runner'
+import type { VerificationCheckpoint } from './verification-checkpoint'
 import { fetchDefaultBranch } from './repo-alerts'
 import { abortAwareRepoTask, abortBlocksDelivery, logSkippedRepos, recordRunAbort } from './abort'
 import { processRepoForReport } from './repo-report'
@@ -193,11 +194,10 @@ export class DependfixApp {
     private finishedAt: string = ''
     /** 运行前工作区是否已有未提交改动（验证门禁回滚保护：避免销毁用户本地工作） */
     private preExistingDirty = false
-    /**
-     * 运行级「修复前验证基线」持有器（跨仓库复用；首次修复前惰性采样）。
-     * 惰性而非启动即采样：无需修复的仓库不额外付出一次完整验证链开销。
-     */
+    /** 运行级修复前基线（跨仓库复用；惰性首采，零告警不采样）。 */
     private verificationBaseline: { value?: CommandResult[] } = {}
+    /** 单元回滚 checkpoint（单元 probe 开始前记录，跨仓库传递）。 */
+    private readonly verificationCheckpoints: VerificationCheckpoint[] = []
 
     constructor(options: DependfixAppOptions) {
         this.workDir = options.workDir ?? process.cwd()
@@ -464,7 +464,13 @@ export class DependfixApp {
 
     private async processRepoForFix(client: Octokit | null, repo: string): Promise<void> {
         await processRepoFix(
-            { ...this.ctx, aiUsageRef: this.aiUsageRef, verificationBaseline: this.verificationBaseline },
+            {
+                ...this.ctx,
+                aiUsageRef: this.aiUsageRef,
+                verificationBaseline: this.verificationBaseline,
+                verificationCheckpoints: this.verificationCheckpoints,
+                preExistingDirty: this.preExistingDirty,
+            },
             client,
             repo,
         )

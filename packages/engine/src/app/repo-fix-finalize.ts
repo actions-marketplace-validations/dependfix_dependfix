@@ -8,6 +8,7 @@ import { formatVerificationError, type CommandResult } from '../runners/verifica
 import { tryLockfileRepair } from './helpers'
 import type { RepoFixCtx, RepoFixProgress } from './repo-fix'
 import { findInstallBaselineFailure, sampleVerificationBaseline, verifyProject } from './verify-project'
+import { attemptSelectiveUnitRollback } from './verification-checkpoint'
 
 /**
  * 惰性取得本次运行修复前的验证基线（每运行一次），并返回本仓库的归因豁免判定。
@@ -99,28 +100,64 @@ export async function finalizeRepoFix(
     progress: RepoFixProgress,
     options: { exemptAttribution?: boolean } = {},
 ): Promise<void> {
+    let lockfileRepairFailed = false
     if (progress.alertsCount > 0) {
         const repairAction = await tryLockfileRepair(ctx, repo)
         ctx.allActions.push(repairAction)
+        lockfileRepairFailed = !repairAction.success && !repairAction.noOp
         if (repairAction.success && !repairAction.noOp) {
             progress.lockfileRepaired = true
         }
     } else {
         ctx.logger.info(`[skip] No alerts for ${repo} — skipping lockfile repair`)
     }
+    // 仅当首次 repair 真正改了文件时，选择性回滚后才需要重做；noOp 不额外跑安装
+    const lockfileRepairChanged = progress.lockfileRepaired
 
     if (!ctx.config.dryRun) {
-        const verifyActions = await verifyProject(ctx, repo, {
+        const verifyOptions = {
             baseline: currentBaseline(ctx),
             // 「无改动即豁免」：零告警仓库未采样基线（无任何写操作）——其失败一律视为既有失败，
             // 与「基线中同命令也失败」等价（同命令 + 同一 pristine 工作区），故归因口径零退化
             noChanges: options.exemptAttribution === true,
-        })
+        }
+        let verifyActions = await verifyProject(ctx, repo, verifyOptions)
+        let blocking = verifyActions.some((a) => !a.success && !a.preExisting)
+
+        // 终验存在本次引入失败时，默认先尝试回退最近一个已通过 probe 的单元并重验一次。
+        // 通过 → 保留更早单元继续交付；仍失败 / 无 checkpoint → 原 actions 保持不变，门禁整仓回滚。
+        if (blocking && (ctx.config.rollbackGranularity ?? 'unit') === 'unit' && !options.exemptAttribution
+            && !ctx.preExistingDirty && !lockfileRepairFailed) {
+            const outcome = await attemptSelectiveUnitRollback(
+                ctx,
+                repo,
+                progress,
+                () => verifyProject(ctx, repo, verifyOptions),
+                {
+                    beforeVerify: async () => {
+                        // checkpoint 在 lockfile repair 之前：恢复后重做 repair，避免把「安装已合规」
+                        // 这一修复一并回退导致重验假红。
+                        if (lockfileRepairChanged && progress.alertsCount > 0) {
+                            const repairAction = await tryLockfileRepair(ctx, repo)
+                            ctx.allActions.push(repairAction)
+                            if (repairAction.success && !repairAction.noOp) {
+                                progress.lockfileRepaired = true
+                            }
+                        }
+                    },
+                },
+            )
+            if (outcome.applied) {
+                verifyActions = outcome.verifyActions
+                blocking = outcome.blocking
+            }
+        }
+
         ctx.allActions.push(...verifyActions)
         // 原始口径：修复后链路是否全绿（报告与「成功交付」启发式沿用）
         progress.verificationPassed = verifyActions.every((a) => a.success)
         // 归因口径：是否存在**本次引入**的失败（门禁据此回滚；既有失败不归因）
-        progress.verificationBlocking = verifyActions.some((a) => !a.success && !a.preExisting)
+        progress.verificationBlocking = blocking
     } else {
         ctx.logger.info(`[dry-run] Skipping verification for ${repo}`)
         progress.verificationPassed = undefined

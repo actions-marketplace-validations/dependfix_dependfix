@@ -162,12 +162,14 @@ export function mergeAiUsage(
  *   [docs/design/modules/dependency-fixer-records.md 既有失败基线]）
  * - `ENVIRONMENT_ERROR`：环境性安装失败（诊断步无 stderr 诊断：被信号杀死 / 超时 / 静默非零退出），
  *   无法归因目标仓库（与既有失败基线同族口径；对应 action 的 `environmentalFailure` 标记）
+ * - `ROLLBACK_GRANULARITY_DEGRADED`：单元级回滚不可用，显式降级整仓回滚（审计性，不归因失败）
  */
 const SKIPPED_AUDIT_CATEGORIES = new Set<string>([
     'OVERRIDE_PROTECTED', // 保护名单命中，主动跳过 override 写入
     'SCRIPT_NOT_FOUND', // 无 test 脚本，跳过 pnpm test 验证
     'PRE_EXISTING_FAILURE', // 既有基线失败（本次改动前即为红），不归因本次运行
     'ENVIRONMENT_ERROR', // 环境性安装失败（无 lockfile 诊断），不归因本次运行
+    'ROLLBACK_GRANULARITY_DEGRADED', // 单元回滚不可用，显式降级为整仓回滚（审计性，不归因失败）
 ])
 
 /**
