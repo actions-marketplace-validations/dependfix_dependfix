@@ -2,6 +2,8 @@ import { In, IsNull, LessThan, MoreThanOrEqual } from 'typeorm'
 import { applyFailureClassification } from '../run-failure-classify'
 import { isTerminalScanRunStatus } from '../scan-run-status'
 import { isTerminalScanJobState, type ScanJobInspection } from '../queue/scan-queue'
+import { notifyBatchTerminal } from '../notification/batch-notification.service'
+import { notifyRunTerminal } from '../notification/run-notification.service'
 import { persistBatchFailedIfRunning } from './batch-writeback'
 import { ScanRun } from '#server/entities/scan-run'
 import { BatchRun } from '#server/entities/batch-run'
@@ -231,6 +233,9 @@ export const cleanupStaleRuns = async (options: CleanupOptions = {}): Promise<Cl
         }
         failedRuns.push(run)
         scanRunsFailed++
+        void notifyRunTerminal(run).catch((notifyError) => {
+            console.error('[notification] run terminal notify failed:', notifyError)
+        })
     }
 
     const orphanedRuns: OrphanedRunRef[] = failedRuns.map((run) => ({
@@ -266,6 +271,9 @@ export const cleanupStaleRuns = async (options: CleanupOptions = {}): Promise<Cl
         })
         if (persisted) {
             batchRunsFailed++
+            void notifyBatchTerminal(batch).catch((notifyError) => {
+                console.error('[notification] batch terminal notify failed:', notifyError)
+            })
         }
     }
 

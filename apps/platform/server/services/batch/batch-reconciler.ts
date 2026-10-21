@@ -1,4 +1,5 @@
 import { In } from 'typeorm'
+import { notifyBatchTerminal } from '../notification/batch-notification.service'
 import { aggregateScanRuns } from './batch-aggregate'
 import { persistBatchAggregation, persistBatchFailedIfRunning } from './batch-writeback'
 import { ensureDatabaseInitialized } from '#server/database'
@@ -125,6 +126,9 @@ export const reconcileRunningBatchRuns = async (options: ReconcileOptions = {}):
                 // 不动计数与 summary 快照），避免「整行 save」类写法在并发下覆盖聚合结果
                 if (await persistBatchFailedIfRunning(batchRepo, batch, { finishedAt: now, fillEmptySummary: true })) {
                     orphaned++
+                    void notifyBatchTerminal(batch).catch((notifyError) => {
+                        console.error('[notification] batch terminal notify failed:', notifyError)
+                    })
                 }
             }
             continue
@@ -136,6 +140,9 @@ export const reconcileRunningBatchRuns = async (options: ReconcileOptions = {}):
         if (persisted) {
             if (aggregation.status === 'completed') {
                 completed++
+                void notifyBatchTerminal(batch).catch((notifyError) => {
+                    console.error('[notification] batch terminal notify failed:', notifyError)
+                })
             } else {
                 progressUpdated++
             }

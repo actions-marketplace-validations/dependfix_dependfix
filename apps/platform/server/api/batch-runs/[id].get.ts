@@ -7,6 +7,7 @@ import { requireAuth, requireOrgResource } from '#server/utils/guard'
 import { createLocalizedError } from '#server/utils/localized-error'
 import { aggregateScanRuns, isUndecidedZeroChildRunning } from '#server/services/batch/batch-aggregate'
 import { persistBatchAggregation } from '#server/services/batch/batch-writeback'
+import { notifyBatchTerminal } from '#server/services/notification/batch-notification.service'
 
 /**
  * GET /api/batch-runs/[id]：批量运行详情（含聚合统计 + 下属 ScanRun 列表）。
@@ -45,6 +46,11 @@ export default defineEventHandler(async (event) => {
     // 未落库（含「无字段变化」）一律重读库中状态，保证响应与库一致（含瞬时窗口）。
     const aggregation = aggregateScanRuns(runs, results)
     const { persisted } = await persistBatchAggregation(batchRepo, batchRun, aggregation, runs)
+    if (persisted && batchRun.status !== 'running') {
+        void notifyBatchTerminal(batchRun).catch((notifyError) => {
+            console.error('[notification] batch terminal notify failed:', notifyError)
+        })
+    }
     if (!persisted) {
         // 未落库（无字段变化，或条件写回被并发终态保护性跳过）：以库中实际状态为准。
         // 否则「无字段变化 + 并发 force-fail」下响应会停留在读取时的旧状态（库已 failed，响应仍 running）
