@@ -255,6 +255,11 @@ test.describe('平台页面视觉基线', () => {
         await expect(dialog.locator('tbody .caomei-data-table__row')).toHaveCount(runResults.length)
         await expect(dialog).toContainText('lodash')
         await expect(page.locator('.caomei-data-table__row').filter({ hasText: '失败 · 仓库克隆' })).toHaveCount(1)
+        /* 结果可信度：fixtures 为 run 0 钉死 unfixed=1 / environmental=1 / exitCode=1，
+           若派生函数或序列化失效则基线会落成缺区块形态——先断言语义再截图。 */
+        await expect(dialog).toContainText('未修复 1')
+        await expect(dialog).toContainText('环境性失败 1')
+        await expect(dialog).toContainText('退出码: 1')
 
         await waitForVisualStable(page)
         await expectThemeApplied(page, 'light')

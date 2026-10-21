@@ -308,6 +308,66 @@ test.describe('/scans 独立页面', () => {
 })
 
 /**
+ * 结果可信度（列表 + `/scans?run=` 实际挂载的 repo-history 详情）：
+ * completed + 有 summary 时展示未修复 / 环境性失败 / 退出码；failed + 无 summary 时展示结果缺失。
+ */
+test('case 8: /scans 结果可信度 — 未修复 / 环境性失败 / 退出码 / 结果缺失', async ({ page }) => {
+    const stamp = Date.now()
+    const owner = `e2e-scans-outcome-${stamp}`
+    const name = `app-${stamp}`
+    const created = await page.request.post('/api/e2e/fixtures', {
+        data: {
+            repos: [{ owner, name }],
+            scanRuns: [{
+                repositoryOwner: owner,
+                repositoryName: name,
+                status: 'completed',
+                summary: { alertsFound: 4, alertsFixed: 2, alertsConverged: 1, environmentalFailures: 1 },
+                exitCode: 1,
+                environmentalFailureCount: 1,
+            }],
+        },
+    })
+    expect(created.status()).toBe(200)
+    const { scanRuns } = await created.json() as { scanRuns: { id: string }[] }
+    const runId = scanRuns[0]!.id
+
+    await page.goto('/scans')
+    await waitForHydration(page)
+    const row = page.locator('.scans__run-list .caomei-data-table__row').filter({ hasText: owner })
+    await expect(row).toBeVisible({ timeout: 15000 })
+    await expect(row).toContainText('环境性失败 1')
+    await expect(row).toContainText('未修复 1')
+
+    await page.goto(`/scans?run=${runId}`)
+    await waitForHydration(page)
+    const dialog = page.locator('.caomei-dialog__content')
+    await expect(dialog).toBeVisible({ timeout: 15000 })
+    await expect(dialog.locator('.repo-history__outcome')).toContainText('未修复 1')
+    await expect(dialog.locator('.repo-history__outcome')).toContainText('环境性失败 1')
+    await expect(dialog.locator('.repo-history__outcome')).toContainText('退出码: 1')
+
+    const missingName = `${name}-missing`
+    const missing = await page.request.post('/api/e2e/fixtures', {
+        data: {
+            repos: [{ owner, name: missingName }],
+            scanRuns: [{
+                repositoryOwner: owner,
+                repositoryName: missingName,
+                status: 'failed',
+                error: { code: 'execution_timeout', message: '执行超时' },
+            }],
+        },
+    })
+    expect(missing.status()).toBe(200)
+    const missingRuns = (await missing.json() as { scanRuns: { id: string }[] }).scanRuns
+    await page.goto(`/scans?run=${missingRuns[0]!.id}`)
+    await waitForHydration(page)
+    await expect(dialog.locator('.repo-history__outcome')).toContainText('结果缺失')
+    await expect(dialog.locator('.repo-history__outcome')).not.toContainText('告警数')
+})
+
+/**
  * viewer 角色可见性：阶段扫描历史是只读数据，viewer 应可见（与 batch-runs 一致）；
  * 菜单项 + 页面均可访问。
  */

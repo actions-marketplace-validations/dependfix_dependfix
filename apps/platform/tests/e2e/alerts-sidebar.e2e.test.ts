@@ -96,7 +96,11 @@ const installRoutes = async (
 
 test.describe('alerts 去重视图受影响运行 Sidebar', () => {
     test('展示运行元数据并打开详情', async ({ page }) => {
-        const run = makeRun()
+        const run = makeRun({
+            summary: { alertsFound: 2, alertsFixed: 1, environmentalFailures: 1 },
+            exitCode: 1,
+            environmentalFailureCount: 1,
+        })
         await installRoutes(page, [run])
 
         await page.goto('/alerts')
@@ -120,7 +124,38 @@ test.describe('alerts 去重视图受影响运行 Sidebar', () => {
         await expect(detail).toContainText('扫描详情')
         await expect(detail).toContainText('仅报告')
         await expect(detail).toContainText('12.3 秒')
+        // 结果可信度：未修复 / 环境性失败 / 退出码（run-detail-dialog 是 alerts 侧栏实际挂载的详情）
+        await expect(detail).toContainText('未修复告警')
+        await expect(detail).toContainText('环境性失败')
+        await expect(detail).toContainText('退出码')
         await expect(page.locator('.run-detail__run-url')).toHaveAttribute('href', String(run.runUrl))
+    })
+
+    test('结果缺失时详情显示结果缺失而非告警 0', async ({ page }) => {
+        const run = makeRun({
+            status: 'failed',
+            summary: null,
+            error: { code: 'execution_timeout', message: '执行超时' },
+            runUrl: null,
+        })
+        await installRoutes(page, [run])
+
+        await page.goto('/alerts')
+        await waitForHydration(page)
+        await page.locator('#view-mode').click()
+        await page.locator('.caomei-select__content .caomei-select__item').filter({ hasText: '原始列表' }).click()
+        const row = page.locator('.caomei-data-table__row').filter({ hasText: 'lodash' }).first()
+        await expect(row).toBeVisible()
+        await row.locator('button[aria-label="详情"]').click()
+        const sidebar = page.locator('.caomei-drawer__content')
+        await expect(sidebar).toContainText('12345678')
+        await sidebar.locator('button[aria-label="详情"]').click()
+
+        const detail = page.locator('.caomei-dialog__content')
+        await expect(detail).toContainText('扫描详情')
+        const alertsMeta = detail.locator('.run-detail__meta-item').filter({ hasText: '告警数' })
+        await expect(alertsMeta).toContainText('结果缺失')
+        await expect(alertsMeta).not.toContainText('0')
     })
 
     test('容器执行不显示内部 Run URL', async ({ page }) => {

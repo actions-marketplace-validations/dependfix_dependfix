@@ -41,7 +41,11 @@ export const VISUAL_FIXTURES: FixturesPayload = {
             severityThreshold: 'high',
             executorKind: 'container',
             status: 'completed',
-            summary: { alertsFound: 4, alertsFixed: 2 },
+            // run 0 同时覆盖「未修复告警」（4 − 2 − 1 = 1，含 converged 排除）、环境性失败与退出码，
+            // 使运行详情弹窗基线包含结果可信度区块（前置断言见 visual 用例）。
+            summary: { alertsFound: 4, alertsFixed: 2, alertsConverged: 1, environmentalFailures: 1 },
+            exitCode: 1,
+            environmentalFailureCount: 1,
             createdAt: '2026-08-20T01:59:50.000Z',
             startedAt: '2026-08-20T02:00:00.000Z',
             finishedAt: '2026-08-20T02:00:12.000Z',
