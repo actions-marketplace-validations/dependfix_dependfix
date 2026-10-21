@@ -53,8 +53,11 @@ export function rollbackChanges(workDir: string): void {
  *   `ROLLBACK_FAILED` 掩盖真实失败原因（结论仍为「应中止交付」）
  * - 判定用 `verificationBlocking`（本次改动引入的失败）；修复前即红的既有失败
  *   （`PRE_EXISTING_FAILURE`）不阻断交付
- * - 注意：验证的是"修复后工作区"而非"修复增量"；多仓库共享 workDir 时，
- *   任一仓库失败会全量回滚（多仓库共享 `workDir` 时按 run 级归因，无法逐仓库区分）
+ * - 注意：验证的是"修复后工作区"而非"修复增量"；`finalizeRepoFix` 会先尝试
+ *   回退最近一个已通过 probe 的单元并重验一次（默认 `rollbackGranularity=unit`）；
+ *   本函数仍是最终逃生路径——选择性回滚不可用 / 重验仍失败时执行整仓 `git reset --hard`
+ * - 多仓库共享 workDir 时文件级改动无法按仓拆分；选择性回滚按当前仓库最近 checkpoint 处理，
+ *   失败时显式记录 `ROLLBACK_GRANULARITY_DEGRADED` 后退回整仓回滚
  */
 export function enforceVerificationGate(
     ctx: Pick<AppContext, 'logger' | 'workDir' | 'allErrors' | 'repoResults'>,
