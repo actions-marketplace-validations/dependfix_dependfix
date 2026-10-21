@@ -152,6 +152,39 @@ describe('POST /api/e2e/fixtures 双门控（todo.md §M22.6）', () => {
         expect(plain?.failureKind).toBeNull()
     })
 
+    /**
+     * scanRuns[].exitCode / environmentalFailureCount：0 是有效值（成功 / 有结果但无环境性失败），
+     * 缺省才写 null。防止 `?? null` 被误改成 `|| null` 后把 0 折成「结果缺失」。
+     */
+    it('scanRuns[].outcome columns preserve explicit 0 and default to null', async () => {
+        vi.stubEnv('E2E_TEST', 'true')
+        vi.stubGlobal('useRuntimeConfig', () => ({ encryptionKey: 'test-encryption-key-32-bytes!!', e2eFixturesAllowed: true }))
+        await fixturesPostHandler(makeEvent('POST', '/api/e2e/fixtures', {
+            repos: [{ owner: 'fixture-outcome', name: 'zero' }],
+            scanRuns: [
+                {
+                    repositoryOwner: 'fixture-outcome',
+                    repositoryName: 'zero',
+                    status: 'completed',
+                    summary: { alertsFound: 0, alertsFixed: 0, environmentalFailures: 0 },
+                    exitCode: 0,
+                    environmentalFailureCount: 0,
+                },
+                { repositoryOwner: 'fixture-outcome', repositoryName: 'zero', status: 'completed' },
+            ],
+        }))
+
+        const ds = await ensureDatabaseInitialized()
+        const repo = await ds.getRepository(Repository).findOneByOrFail({ owner: 'fixture-outcome', name: 'zero' })
+        const runs = await ds.getRepository(ScanRun).find({ where: { repositoryId: repo.id } })
+        const zero = runs.find((r) => r.summaryJson !== null)
+        const omitted = runs.find((r) => r.summaryJson === null)
+        expect(zero?.exitCode).toBe(0)
+        expect(zero?.environmentalFailureCount).toBe(0)
+        expect(omitted?.exitCode).toBeNull()
+        expect(omitted?.environmentalFailureCount).toBeNull()
+    })
+
     it('scanRuns[].failureStage 非法值 → 400', async () => {
         vi.stubEnv('E2E_TEST', 'true')
         vi.stubGlobal('useRuntimeConfig', () => ({ encryptionKey: 'test-encryption-key-32-bytes!!', e2eFixturesAllowed: true }))

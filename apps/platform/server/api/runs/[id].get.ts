@@ -48,6 +48,9 @@ export default defineEventHandler(async (event) => {
         finishedAt: run.finishedAt,
         runUrl: run.runUrl,
         summary: run.summaryJson ? JSON.parse(run.summaryJson) as Record<string, unknown> : null,
+        // 运行结果可信度：与列表同一口径；旧数据 exitCode 为 null，B 模式不传递 exitCode
+        exitCode: run.exitCode,
+        environmentalFailureCount: run.environmentalFailureCount,
         error: run.errorJson ? JSON.parse(run.errorJson) as { code: string, message: string } : null,
         // 失败分类三列 + 重试来源：详情视图据此展示失败归因与「重试入口 / 来源链」
         // （口径见 docs/design/governance/run-failure-taxonomy.md §5.5）

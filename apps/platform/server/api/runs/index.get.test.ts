@@ -41,6 +41,8 @@ const seedRun = async (repositoryId: string, overrides: {
     status?: 'pending' | 'running' | 'completed' | 'failed' | 'dispatched' | 'degraded'
     summaryJson?: string | null
     errorJson?: string | null
+    exitCode?: number | null
+    environmentalFailureCount?: number | null
     failureCode?: string | null
     failureStage?: 'source' | 'clone' | 'install' | 'fix' | 'verify' | 'deliver' | 'runtime' | 'cleanup' | 'unknown' | null
     failureKind?: 'transient' | 'deterministic' | 'unknown' | null
@@ -54,6 +56,8 @@ const seedRun = async (repositoryId: string, overrides: {
         status: overrides.status ?? 'completed',
         summaryJson: overrides.summaryJson ?? JSON.stringify({ alertsTotal: 2 }),
         errorJson: overrides.errorJson ?? null,
+        exitCode: overrides.exitCode ?? null,
+        environmentalFailureCount: overrides.environmentalFailureCount ?? null,
         failureCode: overrides.failureCode ?? null,
         failureStage: overrides.failureStage ?? null,
         failureKind: overrides.failureKind ?? null,
@@ -100,6 +104,36 @@ describe('GET /api/runs', () => {
             name: 'app',
             status: 'completed',
             summary: { alertsTotal: 2 },
+            // 旧数据 / 未写入 → null（消费方降级；不得伪造成 0 成功）
+            exitCode: null,
+            environmentalFailureCount: null,
+        })
+    })
+
+    it('serializes exitCode and environmentalFailureCount when persisted', async () => {
+        const seeded = await seedRun(repositoryId, {
+            status: 'completed',
+            summaryJson: JSON.stringify({ alertsFound: 3, environmentalFailures: 2 }),
+            exitCode: 1,
+            environmentalFailureCount: 2,
+        })
+        const zero = await seedRun(repositoryId, {
+            status: 'completed',
+            summaryJson: JSON.stringify({ alertsFound: 0, environmentalFailures: 0 }),
+            exitCode: 0,
+            environmentalFailureCount: 0,
+        })
+
+        const res = await call('GET', '/api/runs') as PaginatedRunsResponse
+        expect(res.items.find((r) => r.id === seeded.id)).toMatchObject({
+            exitCode: 1,
+            environmentalFailureCount: 2,
+            summary: { alertsFound: 3, environmentalFailures: 2 },
+        })
+        // 0 必须原样返回，不得被折叠为 null（否则 UI 会误判「结果缺失」）
+        expect(res.items.find((r) => r.id === zero.id)).toMatchObject({
+            exitCode: 0,
+            environmentalFailureCount: 0,
         })
     })
 

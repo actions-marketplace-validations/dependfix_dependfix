@@ -37,6 +37,11 @@ const toView = (r: ScanRun) => ({
     finishedAt: r.finishedAt,
     runUrl: r.runUrl,
     summary: r.summaryJson ? JSON.parse(r.summaryJson) as Record<string, unknown> : null,
+    // 运行结果可信度：exitCode 为进程级事实；环境性失败计数与 summary 同源落库。
+    // 旧数据 exitCode 为 null；B 模式执行器不传递 exitCode（触发受理哨兵），但环境性失败计数仍可落库。
+    // 消费方须按 null 降级，不得把 null 推断为 0 成功。
+    exitCode: r.exitCode,
+    environmentalFailureCount: r.environmentalFailureCount,
     error: r.errorJson ? JSON.parse(r.errorJson) as { code: string, message: string } | null : null,
     // 失败分类（非失败终态为 null；落库口径见 run-failure-classify.ts）
     failureCode: r.failureCode,

@@ -89,7 +89,15 @@ const scanRunSchema = z.object({
     summary: z.object({
         alertsFound: z.number().int().min(0),
         alertsFixed: z.number().int().min(0),
+        /** 已收敛（未修复口径排除项） */
+        alertsConverged: z.number().int().min(0).optional(),
+        /** 环境性失败事件数（UI 在列缺失时回退该值） */
+        environmentalFailures: z.number().int().min(0).optional(),
     }).optional(),
+    /** 进程级退出码（缺省 null；视觉基线可钉死非 null 值） */
+    exitCode: z.number().int().min(0).max(255).nullable().optional(),
+    /** 环境性失败计数列（缺省 null；与 summary.environmentalFailures 同源） */
+    environmentalFailureCount: z.number().int().min(0).nullable().optional(),
     /** 失败分类（运行失败筛选 e2e 基线；与 ScanRun.failureCode / failureStage / failureKind 对齐） */
     failureCode: z.string().max(64).optional(),
     failureStage: z.enum(RUN_FAILURE_STAGES).optional(),
@@ -302,6 +310,8 @@ export default defineEventHandler(async (event) => {
                 startedAt,
                 finishedAt,
                 summaryJson: sr.summary ? JSON.stringify(sr.summary) : null,
+                exitCode: sr.exitCode ?? null,
+                environmentalFailureCount: sr.environmentalFailureCount ?? null,
                 errorJson: sr.error ? JSON.stringify(sr.error) : null,
                 failureCode: sr.failureCode ?? null,
                 failureStage: sr.failureStage ?? null,

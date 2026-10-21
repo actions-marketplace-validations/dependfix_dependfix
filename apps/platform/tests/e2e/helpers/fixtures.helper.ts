@@ -41,7 +41,18 @@ export interface ScanRunFixture {
     severityThreshold?: 'low' | 'medium' | 'high' | 'critical'
     executorKind?: 'container' | 'github-action' | 'sandbox'
     status?: 'pending' | 'running' | 'completed' | 'failed'
-    summary?: { alertsFound: number, alertsFixed: number }
+    summary?: {
+        alertsFound: number
+        alertsFixed: number
+        /** 已收敛（未修复口径排除项） */
+        alertsConverged?: number
+        /** 环境性失败事件数（UI 在列缺失时回退该值） */
+        environmentalFailures?: number
+    }
+    /** 进程级退出码（缺省 null） */
+    exitCode?: number | null
+    /** 环境性失败计数列（缺省 null） */
+    environmentalFailureCount?: number | null
     /** 执行级错误（写入 `errorJson`；详情弹窗失败横幅据此渲染，与 `failureCode` 同源） */
     error?: { code: string, message: string }
     /** 失败分类三列（复用服务端枚举，避免与端点校验的类型漂移） */

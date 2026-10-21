@@ -37,7 +37,9 @@ describe('GET /api/runs/[id]', () => {
             severityThreshold: 'high',
             executorKind: 'container',
             status: 'completed',
-            summaryJson: JSON.stringify({ alertsTotal: 1 }),
+            summaryJson: JSON.stringify({ alertsTotal: 1, environmentalFailures: 1 }),
+            exitCode: 1,
+            environmentalFailureCount: 1,
         }))
         runId = run.id
 
@@ -101,7 +103,9 @@ describe('GET /api/runs/[id]', () => {
             owner: 'demo',
             name: 'app',
             status: 'completed',
-            summary: { alertsTotal: 1 },
+            summary: { alertsTotal: 1, environmentalFailures: 1 },
+            exitCode: 1,
+            environmentalFailureCount: 1,
         })
         expect((detail.results as Record<string, unknown>[])).toHaveLength(1)
         expect((detail.results as Record<string, unknown>[])[0]).toMatchObject({
@@ -134,6 +138,9 @@ describe('GET /api/runs/[id]', () => {
         const detail = await call('GET', `/api/runs/${noMeta.id}`, { id: noMeta.id }) as Record<string, unknown>
         expect(detail.summary).toBeNull()
         expect(detail.error).toBeNull()
+        // 无 result 的失败：结果可信度两列为 null（UI 显示「结果缺失」，不显示「告警 0」）
+        expect(detail.exitCode).toBeNull()
+        expect(detail.environmentalFailureCount).toBeNull()
     })
 
     it('returns parsed error when errorJson is set', async () => {
