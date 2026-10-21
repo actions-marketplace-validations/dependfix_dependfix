@@ -6,6 +6,7 @@ import {
     environmentalFailureCount,
     failureKindLabel,
     failureStageLabel,
+    formatBytes,
     formatRunDuration,
     isRunResultMissing,
     runExecutorLabel,
@@ -42,6 +43,16 @@ interface RunDetailView {
     /** 运行结果可信度：旧数据 / B 模式为 null */
     exitCode: number | null
     environmentalFailureCount: number | null
+    /** 执行资源 / OOM 归因：null = 不可采集（原因在 resource.degradedReason） */
+    memoryMaxBytes: number | null
+    peakRssBytes: number | null
+    oomKilled: boolean | null
+    resource: {
+        source?: string
+        degradedReason?: string
+        samples?: number
+        sigkillDetected?: boolean
+    } | null
     error: { code: string, message: string } | null
     /** 失败分类三列（口径见 docs/design/governance/run-failure-taxonomy.md §5.5）：非失败终态为 null */
     failureCode: string | null
@@ -309,6 +320,43 @@ watch(() => props.runId, (runId) => {
                 <div v-if="!isRunResultMissing(detail) && detail.exitCode !== null && detail.exitCode !== undefined" class="run-detail__meta-item">
                     <span class="run-detail__meta-label">{{ t('runs.exitCode') }}</span>
                     <strong>{{ detail.exitCode }}</strong>
+                </div>
+                <div v-if="detail.memoryMaxBytes !== null" class="run-detail__meta-item">
+                    <span class="run-detail__meta-label">{{ t('runs.memoryLimit') }}</span>
+                    <strong>{{ formatBytes(detail.memoryMaxBytes) }}</strong>
+                </div>
+                <div v-if="detail.peakRssBytes !== null || detail.oomKilled !== null || detail.resource?.degradedReason" class="run-detail__meta-item">
+                    <span class="run-detail__meta-label">{{ t('runs.peakMemory') }}</span>
+                    <strong
+                        v-if="detail.peakRssBytes !== null"
+                        :title="t('runs.peakMemoryHint')"
+                    >
+                        {{ formatBytes(detail.peakRssBytes) }}
+                    </strong>
+                    <strong
+                        v-else
+                        class="text-muted"
+                        :title="detail.resource?.degradedReason || ''"
+                    >
+                        {{ t('runs.resourceUnavailable') }}
+                    </strong>
+                </div>
+                <div v-if="detail.oomKilled !== null || detail.resource?.degradedReason" class="run-detail__meta-item">
+                    <span class="run-detail__meta-label">{{ t('runs.oomKilled') }}</span>
+                    <CaomeiTag
+                        v-if="detail.oomKilled !== null"
+                        :tone="detail.oomKilled ? 'danger' : 'neutral'"
+                        :title="t('runs.oomKilledHint')"
+                    >
+                        {{ detail.oomKilled ? t('common.yes') : t('common.no') }}
+                    </CaomeiTag>
+                    <strong
+                        v-else
+                        class="text-muted"
+                        :title="detail.resource?.degradedReason || ''"
+                    >
+                        {{ t('runs.resourceUnavailable') }}
+                    </strong>
                 </div>
                 <div class="run-detail__meta-item">
                     <span class="run-detail__meta-label">{{ t('alerts.detailRunStartedAt') }}</span>

@@ -98,6 +98,24 @@ interface RunOutcomeView {
     environmentalFailureCount?: number | null
 }
 
+/** 字节数 → 人类可读（UI；null / 非法值显示 —，不伪造成 0 B）。 */
+export const formatBytes = (bytes: number | null | undefined): string => {
+    if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes < 0) {
+        return '—'
+    }
+    if (bytes < 1024) {
+        return `${bytes} B`
+    }
+    const units = ['KiB', 'MiB', 'GiB', 'TiB', 'PiB']
+    let value = bytes / 1024
+    let unitIndex = 0
+    while (value >= 1024 && unitIndex < units.length - 1) {
+        value /= 1024
+        unitIndex++
+    }
+    return `${value.toFixed(1)} ${units[unitIndex]}`
+}
+
 /**
  * 环境性失败事件数：优先读落库列（新数据），回退 summary 快照（旧数据 / 测试）。
  * 两处都缺失 → 0；该口径不归因目标仓库，UI 只提示「可见」。

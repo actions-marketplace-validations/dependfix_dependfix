@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
     alertsFound,
     environmentalFailureCount,
+    formatBytes,
     isRunResultMissing,
     SEVERITY_DISPLAY_ORDER,
     SKIP_REASON_ORDER,
@@ -160,5 +161,16 @@ describe('展示顺序与 core 枚举同步', () => {
     it('跳过原因 / 严重级别顺序与 core 单一事实源一致', () => {
         expect(SKIP_REASON_ORDER).toEqual(SKIP_REASONS)
         expect(SEVERITY_DISPLAY_ORDER).toEqual(ALERT_SEVERITIES)
+    })
+})
+
+describe('formatBytes', () => {
+    it('formats byte counts and keeps null / invalid as em dash', () => {
+        expect(formatBytes(0)).toBe('0 B')
+        expect(formatBytes(1024)).toBe('1.0 KiB')
+        expect(formatBytes(8 * 1024 ** 3)).toBe('8.0 GiB')
+        expect(formatBytes(null)).toBe('—')
+        expect(formatBytes(Number.NaN)).toBe('—')
+        expect(formatBytes(-1)).toBe('—')
     })
 })
