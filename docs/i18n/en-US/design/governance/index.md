@@ -33,7 +33,7 @@
 | [Platform Execution Model Isolation Design](https://github.com/dependfix/dependfix/blob/master/docs/design/governance/executor-process-isolation.md) | Special design (M38 design first: BullMQ lock renewal failure root cause + three-option selection) | ✅ Landed (2026-10-09, M38 archived; option ①′ standalone worker process) |
 | [PR Build & Deploy Signals Design](https://github.com/dependfix/dependfix/blob/master/docs/design/governance/pr-build-deploy-signals.md) | Special design (PR build / deploy multi-source aggregation: GitHub Checks + Commit Statuses + Deployments, optional provider log enrichment) | 🔶 Design draft (backlog candidate, 2026-10-10) |
 | [Queue Stale Recovery Design](https://github.com/dependfix/dependfix/blob/master/docs/design/governance/queue-stale-recovery.md) | Special design (pending/running convergence after host restart + BullMQ dedupe key release + trigger self-healing + worker slow retry) | ✅ Landed (2026-10-18, Review Gate R2 Pass) |
-| [Platform Notification & Email Delivery Design](https://github.com/dependfix/dependfix/blob/master/docs/design/governance/platform-notification.md) | Special design (event tiers + org / personal configuration + recipient routing + merge and noise reduction; issue #190) | 🔶 Designing (2026-10-20, taken into M46.5) |
+| [Platform Notification & Email Delivery Design](https://github.com/dependfix/dependfix/blob/master/docs/design/governance/platform-notification.md) | Special design (event tiers + org / personal configuration + recipient routing + merge and noise reduction; issue #190) | ✅ Landed (2026-10-22, M46 archived; B1-B4 closed, B5 weekly digest deferred) |
 
 ## Usage conventions
 
