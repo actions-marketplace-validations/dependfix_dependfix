@@ -11,6 +11,7 @@
 import type { DataTableColumn, DataTablePageEvent } from 'caomei-ui'
 import { ArrowLeft, Copy, Download, ExternalLink, Eye } from '@lucide/vue'
 import { scanSeverityLabel } from '~/utils/scan-options'
+import { alertsFound, environmentalFailureCount, isRunResultMissing, unfixedAlerts } from '~/utils/run-view'
 import { downloadFile } from '~/utils/download'
 
 const props = withDefaults(defineProps<{
@@ -68,6 +69,9 @@ interface DetailView {
     finishedAt?: string | null
     runUrl?: string | null
     summary?: Record<string, unknown> | null
+    /** 运行结果可信度：旧数据 / B 模式为 null */
+    exitCode?: number | null
+    environmentalFailureCount?: number | null
     error: { code: string, message: string } | null
     results: unknown[]
     logs?: Array<{ timestamp: string, level: string, message: string }>
@@ -375,6 +379,41 @@ watch(() => route.query[props.queryKey], async (newVal) => {
                     {{ t('alerts.detailRunOpen') }}
                 </a>
             </div>
+            <!-- 运行结果可信度：让「有告警未修 / 环境性失败 / 结果缺失」在详情可见，
+                 而不是只显示结果表；计数为 0 时不渲染噪音标记。 -->
+            <div class="repo-history__outcome">
+                <span
+                    v-if="isRunResultMissing(detail)"
+                    class="text-muted"
+                    :title="t('runs.resultMissingHint')"
+                >
+                    {{ t('runs.resultMissing') }}
+                </span>
+                <template v-else>
+                    <CaomeiTag tone="neutral">
+                        {{ t('alerts.detailRunAlertsFound') }}: {{ alertsFound(detail.summary ?? null) }}
+                    </CaomeiTag>
+                    <span
+                        v-if="unfixedAlerts(detail.summary ?? null) > 0"
+                        :title="t('runs.unfixedAlertsHint')"
+                    >
+                        <CaomeiTag tone="warning">
+                            {{ t('runs.unfixedAlerts', {count: unfixedAlerts(detail.summary ?? null)}) }}
+                        </CaomeiTag>
+                    </span>
+                </template>
+                <span
+                    v-if="!isRunResultMissing(detail) && environmentalFailureCount(detail) > 0"
+                    :title="t('runs.environmentalFailuresHint')"
+                >
+                    <CaomeiTag tone="warning">
+                        {{ t('runs.environmentalFailures', {count: environmentalFailureCount(detail)}) }}
+                    </CaomeiTag>
+                </span>
+                <CaomeiTag v-if="!isRunResultMissing(detail) && detail.exitCode !== null && detail.exitCode !== undefined" tone="neutral">
+                    {{ t('runs.exitCode') }}: {{ detail.exitCode }}
+                </CaomeiTag>
+            </div>
             <!-- 日志区域（原生滚动容器 + CSS） -->
             <div v-if="detail.logs && detail.logs.length > 0" class="repo-history__logs">
                 <div class="repo-history__logs-header">
@@ -424,7 +463,7 @@ watch(() => route.query[props.queryKey], async (newVal) => {
                 :data="detailResults"
                 :columns="detailColumns"
                 striped
-                :empty-text="t('runs.detailEmpty')"
+                :empty-text="isRunResultMissing(detail) ? t('runs.resultMissing') : t('runs.detailEmpty')"
             >
                 <template #cell-severity="{row}">
                     <CaomeiTag
@@ -556,6 +595,15 @@ watch(() => route.query[props.queryKey], async (newVal) => {
         flex-wrap: wrap;
         align-items: center;
         gap: $space-2;
+    }
+
+    &__outcome {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: $space-2;
+        margin: $space-3 0;
+        font-size: $font-size-sm;
     }
 
     &__run-url {

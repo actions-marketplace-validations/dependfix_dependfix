@@ -3,12 +3,15 @@ import type { DataTableColumn } from 'caomei-ui'
 import { Copy, Download, RefreshCw } from '@lucide/vue'
 import {
     alertsFound,
+    environmentalFailureCount,
     failureKindLabel,
     failureStageLabel,
     formatRunDuration,
+    isRunResultMissing,
     runExecutorLabel,
     runModeLabel,
     shortRunId,
+    unfixedAlerts,
 } from '~/utils/run-view'
 import { scanSeverityLabel } from '~/utils/scan-options'
 import { downloadFile } from '~/utils/download'
@@ -36,6 +39,9 @@ interface RunDetailView {
     finishedAt: string | null
     runUrl: string | null
     summary: Record<string, unknown> | null
+    /** 运行结果可信度：旧数据 / B 模式为 null */
+    exitCode: number | null
+    environmentalFailureCount: number | null
     error: { code: string, message: string } | null
     /** 失败分类三列（口径见 docs/design/governance/run-failure-taxonomy.md §5.5）：非失败终态为 null */
     failureCode: string | null
@@ -283,7 +289,26 @@ watch(() => props.runId, (runId) => {
                 </div>
                 <div class="run-detail__meta-item">
                     <span class="run-detail__meta-label">{{ t('alerts.detailRunAlertsFound') }}</span>
-                    <strong>{{ alertsFound(detail.summary) }}</strong>
+                    <strong v-if="!isRunResultMissing(detail)">{{ alertsFound(detail.summary) }}</strong>
+                    <strong
+                        v-else
+                        class="text-muted"
+                        :title="t('runs.resultMissingHint')"
+                    >
+                        {{ t('runs.resultMissing') }}
+                    </strong>
+                </div>
+                <div v-if="!isRunResultMissing(detail) && unfixedAlerts(detail.summary) > 0" class="run-detail__meta-item">
+                    <span class="run-detail__meta-label">{{ t('runs.unfixedAlertsLabel') }}</span>
+                    <strong>{{ unfixedAlerts(detail.summary) }}</strong>
+                </div>
+                <div v-if="!isRunResultMissing(detail) && environmentalFailureCount(detail) > 0" class="run-detail__meta-item">
+                    <span class="run-detail__meta-label">{{ t('runs.environmentalFailuresLabel') }}</span>
+                    <strong>{{ environmentalFailureCount(detail) }}</strong>
+                </div>
+                <div v-if="!isRunResultMissing(detail) && detail.exitCode !== null && detail.exitCode !== undefined" class="run-detail__meta-item">
+                    <span class="run-detail__meta-label">{{ t('runs.exitCode') }}</span>
+                    <strong>{{ detail.exitCode }}</strong>
                 </div>
                 <div class="run-detail__meta-item">
                     <span class="run-detail__meta-label">{{ t('alerts.detailRunStartedAt') }}</span>
@@ -339,6 +364,16 @@ watch(() => props.runId, (runId) => {
             >
                 {{ t('alerts.detailRunOpen') }}
             </a>
+            <CaomeiMessage
+                v-if="isRunResultMissing(detail)"
+                tone="warning"
+                :closable="false"
+            >
+                <strong>{{ t('runs.resultMissing') }}</strong>
+                <p class="run-detail__error-message text-muted">
+                    {{ t('runs.resultMissingHint') }}
+                </p>
+            </CaomeiMessage>
             <CaomeiMessage
                 v-if="detail.status === 'failed'"
                 tone="danger"
@@ -468,7 +503,7 @@ watch(() => props.runId, (runId) => {
                 :columns="resultColumns"
                 row-key="id"
                 striped
-                :empty-text="t('runs.detailEmpty')"
+                :empty-text="isRunResultMissing(detail) ? t('runs.resultMissing') : t('runs.detailEmpty')"
             >
                 <template #cell-severity="{row}">
                     <CaomeiTag

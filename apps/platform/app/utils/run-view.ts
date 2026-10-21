@@ -4,9 +4,59 @@ type Translator = (key: string, params?: Record<string, string | number>) => str
 
 export const shortRunId = (id: string) => id.slice(0, 8)
 
-export const alertsFound = (summary: Record<string, unknown> | null) => {
-    const value = summary?.alertsFound
-    return typeof value === 'number' && Number.isFinite(value) ? value : 0
+/** 读取 summary 中的正数；0 / 负数 / 非数字 / 缺失一律降级为 0（旧 summaryJson 兼容）。 */
+export const summaryNumber = (summary: Record<string, unknown> | null, key: string) => {
+    const value = summary?.[key]
+    return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0
+}
+
+export const alertsFound = (summary: Record<string, unknown> | null) => summaryNumber(summary, 'alertsFound')
+
+/**
+ * 未修复告警数 = found − fixed − converged（下限 0）。
+ *
+ * 归因原则与 [platform-notification.md §7.1](../../../docs/design/governance/platform-notification.md#71-高危与未修复口径)
+ * 一致（本函数读运行期 summary 快照，后续 supersede 不回溯）：`converged`（本地已满足、无需升级）不计入未修复；`failed` / `skipped` / 不可自动修复
+ * 都属于「本次未修复」，在 UI 中可见但不改变 exit code / 运行状态。
+ *
+ * 截断告警不在此口径内（引擎只把 `limited` 写入 `alertsFound`），由后续条目的
+ * `alertsTruncatedBySeverity`（规划中）单独披露，避免把截断算成「已修复」或「未修复」。
+ */
+export const unfixedAlerts = (summary: Record<string, unknown> | null) =>
+    Math.max(0, alertsFound(summary) - summaryNumber(summary, 'alertsFixed') - summaryNumber(summary, 'alertsConverged'))
+
+interface RunOutcomeView {
+    status: string
+    summary?: Record<string, unknown> | null
+    error?: { code?: string | null } | null
+    environmentalFailureCount?: number | null
+}
+
+/**
+ * 环境性失败事件数：优先读落库列（新数据），回退 summary 快照（旧数据 / 测试）。
+ * 两处都缺失 → 0；该口径不归因目标仓库，UI 只提示「可见」。
+ */
+export const environmentalFailureCount = (run: RunOutcomeView) => {
+    const persisted = run.environmentalFailureCount
+    if (typeof persisted === 'number' && Number.isFinite(persisted)) {
+        return Math.max(0, persisted)
+    }
+    return summaryNumber(run.summary ?? null, 'environmentalFailures')
+}
+
+/**
+ * 运行是否「结果缺失」（不能展示告警数 / 已修复数）。
+ *
+ * - `failed` / `completed` / `degraded` 但无 `summaryJson`（如执行超时、编排失败）
+ * - 或明确 `execution_timeout`（即使意外带了半截 summary，也按缺失展示，避免「0 告警」误导）
+ *
+ * `pending` / `running` / `dispatched` 属于「尚未就绪」，不是缺失，返回 false。
+ */
+export const isRunResultMissing = (run: RunOutcomeView) => {
+    if (run.status === 'pending' || run.status === 'running' || run.status === 'dispatched') {
+        return false
+    }
+    return run.summary === null || run.summary === undefined || run.error?.code === 'execution_timeout'
 }
 
 /**

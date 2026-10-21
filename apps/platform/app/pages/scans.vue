@@ -21,12 +21,16 @@ import type { DataTableColumn, DataTablePageEvent, SplitButtonMenuItem } from 'c
 import {
     alertsFound,
     buildExportScopeItems,
+    environmentalFailureCount,
     failureKindLabel,
     failureStageLabel,
+    isRunResultMissing,
     RUN_FAILURE_KIND_OPTIONS,
     RUN_FAILURE_STAGE_OPTIONS,
     runExecutorLabel,
     runModeLabel,
+    summaryNumber,
+    unfixedAlerts,
 } from '~/utils/run-view'
 import { scanSeverityLabel } from '~/utils/scan-options'
 import { downloadFile } from '~/utils/download'
@@ -91,6 +95,8 @@ interface RunView {
     finishedAt: string | null
     runUrl: string | null
     summary: Record<string, unknown> | null
+    /** 运行结果可信度：环境性失败计数（旧数据 / B 模式为 null） */
+    environmentalFailureCount: number | null
     error: { code: string, message: string } | null
     failureCode: string | null
     failureStage: string | null
@@ -749,21 +755,31 @@ onMounted(refresh)
                             <span v-else class="text-muted">—</span>
                         </template>
                         <template #cell-status="{row}">
-                            <span
-                                v-if="row.error"
-                                class="scans__status-wrap"
-                                :title="row.error.message"
-                            >
-                                <CaomeiTag :tone="statusTone(row.status)">
+                            <div class="scans__status-tags">
+                                <span
+                                    v-if="row.error"
+                                    class="scans__status-wrap"
+                                    :title="row.error.message"
+                                >
+                                    <CaomeiTag :tone="statusTone(row.status)">
+                                        {{ statusLabelWithStage(row.status, row.failureStage) }}
+                                    </CaomeiTag>
+                                </span>
+                                <CaomeiTag
+                                    v-else
+                                    :tone="statusTone(row.status)"
+                                >
                                     {{ statusLabelWithStage(row.status, row.failureStage) }}
                                 </CaomeiTag>
-                            </span>
-                            <CaomeiTag
-                                v-else
-                                :tone="statusTone(row.status)"
-                            >
-                                {{ statusLabelWithStage(row.status, row.failureStage) }}
-                            </CaomeiTag>
+                                <span
+                                    v-if="environmentalFailureCount(row) > 0"
+                                    :title="t('runs.environmentalFailuresHint')"
+                                >
+                                    <CaomeiTag tone="warning">
+                                        {{ t('runs.environmentalFailures', {count: environmentalFailureCount(row)}) }}
+                                    </CaomeiTag>
+                                </span>
+                            </div>
                         </template>
                         <template #cell-mode="{row}">
                             {{ runModeLabel(row.mode, t) }}
@@ -780,10 +796,28 @@ onMounted(refresh)
                             {{ row.startedAt ? d(new Date(row.startedAt), 'long') : '—' }}
                         </template>
                         <template #cell-alerts="{row}">
-                            {{ alertsFound(row.summary) }}
+                            <span
+                                v-if="isRunResultMissing(row)"
+                                class="text-muted"
+                                :title="t('runs.resultMissingHint')"
+                            >
+                                {{ t('runs.resultMissing') }}
+                            </span>
+                            <span v-else class="scans__alerts-wrap">
+                                <span>{{ alertsFound(row.summary) }}</span>
+                                <span
+                                    v-if="unfixedAlerts(row.summary) > 0"
+                                    :title="t('runs.unfixedAlertsHint')"
+                                >
+                                    <CaomeiTag tone="warning">
+                                        {{ t('runs.unfixedAlerts', {count: unfixedAlerts(row.summary)}) }}
+                                    </CaomeiTag>
+                                </span>
+                            </span>
                         </template>
                         <template #cell-fixed="{row}">
-                            {{ (row.summary as Record<string, number> | null)?.alertsFixed ?? 0 }}
+                            <span v-if="isRunResultMissing(row)" class="text-muted">—</span>
+                            <span v-else>{{ summaryNumber(row.summary, 'alertsFixed') }}</span>
                         </template>
                         <template #cell-actions="{row}">
                             <CaomeiButton
@@ -924,6 +958,14 @@ onMounted(refresh)
     &__status-wrap {
         display: inline-flex;
         cursor: help;
+    }
+
+    &__status-tags,
+    &__alerts-wrap {
+        display: inline-flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: $space-1;
     }
 }
 
