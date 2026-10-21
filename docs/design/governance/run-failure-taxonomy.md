@@ -185,10 +185,18 @@
 
 - **落库**：`scan_run.exit_code`（integer NULL）保存引擎进程级退出码（0 / 1 / 2）；**仅在执行器产出 result 时落库**——无 result 的执行器合成码 2（超时 / 容器不可用 / 交付失败）不是引擎进程码，不落库；B 模式（github-action）的 0 / 2 是触发受理哨兵，编排层不传递；旧数据为 NULL。`scan_run.environmental_failure_count`（integer NULL）保存 `RunSummary.environmentalFailures` 快照；**无 result 或 result 缺 summary 时为 NULL**，与「0 次环境性失败」区分。映射单一事实源 `scan-run-state.ts#resolveScanRunOutcome`；`reuse=true` 时两列随 `summaryJson` 一并清空。
 - **不归因**：环境性失败由 `computeSummary` 按 `FixError.category === 'ENVIRONMENT_ERROR'` 的审计条目计数（不按 action 的 `environmentalFailure` 标记重复计数），不计入 `alertsFailed`、不驱动 `status=failed`、不参与 exit code；运行即使 `completed` 也可显示「环境性失败 N」，tooltip 必须说明「不归因本次运行但可见」。
-- **未修复告警**：UI 派生 `unfixed = alertsFound − alertsFixed − alertsConverged`（下限 0）；`converged`（本地已满足）不计入，`failed` / `skipped` / 不可自动修复计入。截断告警不在 `alertsFound` 内，由后续 `alertsTruncatedBySeverity`（规划中）单独披露。
+- **未修复告警**：UI 优先读 `alertsUnfixed`（告警级 canonical，逐条 `isAlertFixedByActions` 判定）；旧 summary 缺 `alertsUnfixed` 字段时回退 `alertsFound − alertsFixed − alertsConverged`（action 级近似，下限 0）。`converged`（本地已满足）不计入，`failed` / `skipped` / 不可自动修复计入。截断告警不在 `alertsFound` 内，由 §5.8 的 `alertsTruncatedBySeverity` 单独披露。
 - **结果缺失**：`failed` / `completed` / `degraded` 且 `summaryJson` 为空，或 `error.code === 'execution_timeout'` → UI 显示「结果缺失」，不展示「告警 0」；该 run 不参与告警明细 reconcile（`failed` 分支既有契约）。
 - **覆盖边界**：当前计数只覆盖已落 `ENVIRONMENT_ERROR` 的路径（lockfile 诊断 / 多版本 / 合批）；常规分组 / 逐包升级与 major 路径尚未消费 `environmental` 标记（见 backlog「常规升级链路的环境性失败归因对齐」）。本字段已进入 `RunResult` JSON，CLI Markdown / PR 正文摘要表暂未新增行（平台可见性为本条目范围）。
 - **迁移与降级**：迁移 `2600000000000-AddScanRunOutcomeColumns` 幂等（前缀感知 + 列缺失才 ALTER）；旧数据两列为 NULL，API 原样返回 NULL，UI 按 0 / 结果缺失降级，不抛错。
+
+### 5.8 跳过与截断披露
+
+- **数据模型**：`RunSummary.alertsUnfixed` 为告警级未修复数（逐条 `isAlertFixedByActions` 判定，converged 不计入；不能直接用 `alertsFixed` action 数做减法）。`RunSummary.alertsSkippedByReason` 按 `subdirectory-manifest` / `cross-major` / `not-fixable` / `override-protected` 分组，满足 `sum(values) === alertsSkipped`；`RunSummary.alertsTruncatedBySeverity` 按 `critical` / `high` / `medium` / `low` / `unknown` 分组，满足 `sum(values) === alertsTruncated`。枚举唯一源为 `SKIP_REASONS` / `ALERT_SEVERITIES`；所有累加点经 `addSkipped` / `addTruncatedBySeverity`，禁止直接自增。
+- **累加点**：`repo-fix.ts` 的子目录 / 根直接依赖 lockfile 桶 → `subdirectory-manifest`；跨大版本人工 review（含收敛判定后的低实例残留）→ `cross-major`；常规链路不可自动修复 / 缺推荐版本 → `not-fixable`；`override-protect.ts` 命中保护名单 → `override-protected`。`limitAlerts` 丢弃集合在 fix / report 两条抓取路径统一按 severity 累计。
+- **展示口径**：UI 详情显示 `未修复 X / 总数 Y · 截断 Z（未评估）· 跳过 W`，其中 `Y = alertsFound + alertsTruncated`、`X` 取 `alertsUnfixed`；分组 chips 固定顺序。列表只显示紧凑总数。PR 正文与 Markdown 报告输出 `Not Fixed / Skipped` 表，含跳过原因、截断严重级别与 `Failed / other not fixed` 残差；`Unfixed` 的分子分母按「已评估告警」表述，截断明确标注未评估。
+- **旧数据降级**：缺分组字段时按 `total - sum(known)` 补 `other` 行，不抛错且总数不丢；分组和大于总数时不再补 `other`（分组优先，异常数据原样展示）。
+- **不做什么**：不改跳过策略 / 跨 major 判定 / `allowMajorUpgrade`；不改 PR 指纹与去重；截断告警不伪造逐条明细，只披露分组计数。
 
 ## 6. 验收标准（草案 → 实现结果）
 

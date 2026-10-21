@@ -69,16 +69,22 @@ interface RunSummary {
     alertsFound: number
     /** 可修复告警数 */
     alertsFixable: number
-    /** 成功修复数 */
+    /** 成功修复的 action 数（同包多告警可能共用一个 action） */
     alertsFixed: number
+    /** 未修复告警数（告警级；converged 不计入；旧数据缺失时消费方回退近似公式） */
+    alertsUnfixed: number
     /** 修复失败数 */
     alertsFailed: number
-    /** 跳过的告警数（不可修复 + 超过阈值 + major 限制） */
+    /** 跳过的告警数（不可修复 / 子目录清单 / 跨大版本 / 保护名单） */
     alertsSkipped: number
     /** 已收敛（当前锁定版本已满足推荐版本，无需升级；不计入未修复） */
     alertsConverged: number
     /** 环境性失败事件数（不归因目标仓库：安装信号 / 超时 / 静默非零退出） */
     environmentalFailures: number
+    /** 按原因分组的跳过计数（sum = alertsSkipped） */
+    alertsSkippedByReason: Partial<Record<SkipReason, number>>
+    /** 按严重级别分组的截断计数（sum = alertsTruncated） */
+    alertsTruncatedBySeverity: Partial<Record<AlertSeverity, number>>
     /** lockfile 修复执行次数 */
     lockfileRepairs: number
     /** 验证通过次数 */
@@ -177,7 +183,9 @@ interface FixError {
 
 ## 3. Markdown 报告模板
 
-### 3.1 报告结构（6 节）
+### 3.1 报告结构（6 节 + 条件性 Skipped & Truncated）
+
+> 条件性第 7 节 `Skipped & Truncated`（有跳过 / 截断 / 失败残差时渲染）见 [run-failure-taxonomy.md §5.8](../governance/run-failure-taxonomy.md#58-跳过与截断披露)。
 
 ```
 # dependfix Report
@@ -195,7 +203,10 @@ interface FixError {
 | Fixable | {n} |
 | Fixed | {n} |
 | Failed | {n} |
+| Unfixed | {n} |
 | Skipped | {n} |
+| Converged | {n} |
+| Truncated | {n} |
 | Lockfile repairs | {n} |
 | Verifications passed | {n} |
 | Verifications failed | {n} |
@@ -238,6 +249,7 @@ interface FixError {
 
 - **分组**：同一仓库的告警和动作聚合在一起，按仓库名称排序
 - **状态图标**：成功 `✅` 失败 `❌` 跳过 `⏭️`
+- **Skipped & Truncated**：仅当存在跳过 / 截断 / 失败残差时渲染；旧 `summaryJson` 缺分组字段时按 `total - known` 补 `Other / unclassified`，不抛错
 - **版本列**：仅 `dependency-upgrade` 动作显示 from/to 版本；lockfile-repair 显示 strategy^；verification 显示 `—`，但**既有失败**（`FixAction.preExisting`，修复前即红、未归因本次改动）显示「既有失败（修复前即红，未归因本次改动）」
 - **环境性安装失败**：`lockfile-repair` 的环境性失败（`FixAction.environmentalFailure === true`）在 **Fix Actions 表的失败原因**（渲染自 `FixAction.error`，见 `markdown-generator.ts` 的 `actionDetails`）展示进程信号（如 `signal SIGKILL` / `exit code 1`）与 `diagnostics: <stderr+stdout 尾部>`（无诊断时为 `no stderr/stdout diagnostics`），供审计定位；`environmentalFailure` 字段本身不被渲染器消费，仅作非归因标记（见 [pnpm-lockfile-fixer.md §2.4](./pnpm-lockfile-fixer.md) 与 [dependency-fixer-records.md §12.11](./dependency-fixer-records.md)）
 - **空数据处理**：
