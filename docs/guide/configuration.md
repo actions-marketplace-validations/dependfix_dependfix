@@ -327,6 +327,8 @@ export DEPENDFIX_ALERTS_SOURCE=pnpm-audit
 | `ACTION_STATUS_MONITOR_ENABLED` | — | `false` | 依赖更新 PR check 状态监测总开关；启用前需 PAT credential + 有 PR 活动 |
 | `DEPENDFIX_AI_PROVIDER` / `_MODEL` / `_BASE_URL` / `_API_URL` / `_API_KEY` / `_TRIGGER` | — | 空 | 平台扫描内引擎的 AI 研判配置（按组织级 AI 配置注入） |
 
+> **资源建议**：控制面（仅 UI / API）最低 1 CPU / 1 GB；默认单容器 / worker 执行安装与验证时建议 ≥ 2 CPU / 8 GB（4 GB 已验证会 OOM）。启动日志 `[resource]` 会打印 cgroup / 宿主内存上限与并发；低于建议仅 `warn`，不阻断。运行记录 `scan_run` 的 `memory_max_bytes` / `peak_rss_bytes` / `oom_killed` 可查询，不可采集时为 `NULL` 且原因见 `resource_json.degradedReason`。Redis 不可用 / 入队失败时 HTTP 进程会降级同步执行，此时同样按执行面 8 GB 准备。详见 [Docker 部署 → 资源规格](./deployment.md#资源规格)。
+
 ### 通知
 
 | 变量 | 必填 | 默认值 | 说明 |

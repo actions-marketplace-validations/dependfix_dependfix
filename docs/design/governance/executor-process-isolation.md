@@ -244,12 +244,35 @@ scan-queue.add(jobId = scan-<repositoryId>)   [scan-queue.ts]
 
 **快速失败收敛（2026-10-18）**：上述最坏次数只在"环境可装、单个 override 有问题"时才有归因价值。以下三条短路把环境性失败的预算压到常数级：① pristine 安装基线失败 → 跳过依赖安装链（版本化 overrides / 跨线 / 成员 / 分组），仍保留 lockfile repair 与修复后验证；② 合批安装以信号 / 超时失败 → 跳过逐包重试（记 `ENVIRONMENT_ERROR`，不归因）；③ 逐包安装以信号 / 超时失败 → 记录该包后立即停止本仓库剩余安装尝试。普通 exit 1 仍保留逐包回退，用于隔离单个坏 override。
 
-### 8.4 资源口径与部署建议（2026-10-17 用户裁定：仅文档化，不改默认注入）
+### 8.4 资源口径与部署建议（2026-10-17 用户裁定：仅观测，不改默认注入；2026-10-21 补启动 / 运行期信号）
 
-- 单次安装进程常驻内存可达约 1 GB 量级；**容器 / 主机内存建议 ≥ 8 GB**（4 GB 已验证会 OOM）。
-- 队列并发保持 1（单机同时至多一个引擎运行）。
-- 如需硬上限，用**容器内存限制**而非在命令上注入堆大小（后者会把偶发 OOM 换成对大仓构建的确定性误杀）。
+**规格分列（不再用「1GB 即可」误导单容器部署）**
+
+- **控制面最低**：1 CPU / 1 GB —— 仅 UI / API / 队列生产，不执行安装与验证。
+- **执行面建议**：≥ 2 CPU / **8 GB** —— 默认单容器（`QUEUE_WORKER=1` 仍与 HTTP 同容器）内执行 clone / 安装 / 验证；单次安装常驻约 1 GB 量级，**4 GB 已验证会 OOM**。需要隔离时把 worker 拆到独立主机（compose 预留 `worker` 段）。
+- 队列并发保持 1（`DEFAULT_SCAN_CONCURRENCY`，单机同时至多一个引擎运行）。
+- 如需硬上限，用**容器内存限制**而非在命令上注入堆大小（后者会把偶发 OOM 换成对大仓构建的确定性误杀）。本批次**不自动调高**任何容器限制、不生成 K8s 资源模板。
 - `DEPENDFIX_INSTALL_TIMEOUT_MS`（缺省 5 分钟，越界 / 非法回退默认）可按部署算力调整；权威登记见 `apps/platform/.env.full.example` + [平台配置指南](../../guide/configuration.md)。
+
+**启动期观测（只读、不阻断）**
+
+- Nitro 插件 `server/plugins/resource-probe.ts` 在 HTTP 与 worker 两个进程都执行，输出单行：
+  `[resource] role=worker plane=execution memoryLimit=4.0 GiB source=cgroup-v2 hostTotal=16.0 GiB concurrency=1 recommended=8.0 GiB status=low`。
+- 上限优先读 cgroup v2 `memory.max`，回退 v1 `memory/memory.limit_in_bytes`；无限制 / 不可读时回退宿主 `os.totalmem()` 并标记 `source=host` / `limitReason`。
+- 执行面低于 8 GB / 纯控制面低于 1 GB → `warn` 提示提高容器 / 宿主内存或拆分 worker；**不阻断启动**。
+- **同步降级例外**：Redis 不可用 / 入队失败时 HTTP 进程会降级为同步执行（`scan-trigger.service.ts`），此时它不再是「纯控制面」，同样需要执行面 8 GB 规格；启动探测无法预知该运行时降级，部署时应按执行面准备。
+
+**运行期采集（Linux cgroup；其他平台显式降级）**
+
+- 容器执行器在 `execute()` 包装层启动 `startResourceMonitor()`：每 5 秒采样 `memory.current` 跟踪峰值，执行前后读取 `memory.events` 的 `oom_kill` 计数增量；cgroup v1 对应 `memory.usage_in_bytes` / `memory.oom_control`。
+- 落库 `scan_run` 四列：
+  - `memory_max_bytes` bigint NULL：cgroup 上限；无限制 / 不可读为 NULL（`limitReason`）。
+  - `peak_rss_bytes` bigint NULL：执行窗口 `memory.current` 采样峰值（cgroup working set，**含页缓存**，不是单进程 RSS）。
+  - `oom_killed` boolean NULL：`oom_kill` 计数增加为 true，未增加为 false，不可采集为 **NULL**（不得推断 false）。
+  - `resource_json` text NULL：`source` / `samples` / `degradedReason` / `limitReason` / `sigkillDetected`。
+- 非 Linux、无 cgroup、权限不足、字段缺失一律写 NULL + `degradedReason`；**不伪造 0**。B 模式（github-action）/ sandbox 执行器未接入采集时写 `executor does not collect resource usage: <kind>`。
+- 归因边界：容器 cgroup 的 `oom_kill` 只覆盖 cgroup 限额触发的 OOM；**宿主级 OOM（未设容器 memory limit）不保证增加该计数**。此时结合 `resource_json.sigkillDetected`（引擎错误文本中的 SIGKILL）与宿主 `journalctl -k`；不把 SIGKILL 单独断言为 OOM。**注意**：引擎自身的安装 / 验证超时也会渲染 `signal SIGKILL, timed out`，因此 `sigkillDetected=true` 不能反推 OOM。
+- 采集开销：只读小文件 + 5 秒定时器（`unref`），不进入引擎热路径；启动监控不改变安装 / 验证命令与堆参数。
 
 ### 8.5 不做什么
 

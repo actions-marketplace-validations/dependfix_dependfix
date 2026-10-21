@@ -205,6 +205,14 @@
 - **逃生开关**：`--rollback-granularity=repo` / `DEPENDFIX_ROLLBACK_GRANULARITY=repo` 恢复整仓回滚；`preExistingDirty` 保护面不变。
 - **映射**：`ROLLBACK_GRANULARITY_DEGRADED` → `verify` + `deterministic`（审计性降级，非失败动作；用于解释「为何回退粒度退回整仓」）。
 
+### 5.10 执行资源与 OOM 归因（M46.4）
+
+- `scan_run` 新增 `memory_max_bytes` / `peak_rss_bytes` / `oom_killed` / `resource_json`（迁移 `2800000000000-AddScanRunResourceColumns`，前缀感知 + 幂等）。
+- 采集口径：Linux cgroup v2 `memory.max` / `memory.current` / `memory.events`，回退 v1 `memory/memory.limit_in_bytes` / `memory.usage_in_bytes` / `memory.oom_control`；`peak_rss_bytes` 是执行窗口 `memory.current` 采样峰值（含页缓存），不是单进程 RSS。
+- `oom_killed` 三态：true = 执行前后 `oom_kill` 计数增加；false = 计数可读且未增加；**null = 不可采集**。非 Linux / 无 cgroup / B 模式 / sandbox 未接入 → null + `resource_json.degradedReason`，不伪造 0 / false。
+- 归因边界：cgroup `oom_kill` 只覆盖容器限额触发的 OOM；宿主级 OOM（未设容器 memory limit）不保证被捕获。`resource_json.sigkillDetected` 仅表示引擎错误文本出现 SIGKILL，**不单独断言 OOM**；引擎自身安装 / 验证超时也会产生 `signal SIGKILL, timed out`，需结合宿主 `journalctl -k` 与峰值 / 上限判断。
+- API `GET /api/runs` / `GET /api/runs/[id]` 返回三列与解析后的 `resource`；运行详情展示内存上限 / 峰值 / OOM 标记，不可采集时显示「不可采集」+ 原因 tooltip。
+
 ## 6. 验收标准（草案 → 实现结果）
 
 - [x] `classifyRunFailure` 纯函数 + 单测覆盖全部已知 code / category（含 `unknown` 兜底）——`server/services/run-failure-classify.ts` + 全映射表逐码用例。

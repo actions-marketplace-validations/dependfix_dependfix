@@ -7,9 +7,29 @@ This page explains how to self-host the dependfix management platform (Nuxt cont
 ## Prerequisites
 
 - Docker 20.10+ and Docker Compose v2 (the `docker compose` subcommand)
-- At least 1 CPU / 1GB RAM (2GB+ recommended; the container runs dependency installs and verification)
+- **Control plane minimum**: 1 CPU / 1 GB (UI / API only; no installs)
+- **Execution plane recommended**: ≥ 2 CPU / **8 GB** (the default single container runs clone / dependency installs / verification; 4 GB has been verified to OOM)
 - Host port `3000` (override with `PORT`)
 - A non-root container identity is recommended (see [Volumes and permissions](#volumes-and-permissions))
+
+## Resource sizing
+
+By default dependfix runs the control plane (Nuxt / queue producer) and the execution plane (engine clone / install / verification) in the same container. Their memory requirements differ:
+
+| Role | Minimum | Recommended | Notes |
+|:---|:---|:---|:---|
+| Control plane (UI / API only) | 1 CPU / 1 GB | 2 CPU / 2 GB | No installs; use when the worker runs on a separate host |
+| Execution plane (default single container) | 2 CPU / **8 GB** | 4 CPU / 16 GB (large repos) | A single install can use ~1 GB; 4 GB has been verified to OOM |
+
+Startup logs print the detected memory limit and queue concurrency (one line per process: HTTP and worker):
+
+```text
+[resource] role=worker plane=execution memoryLimit=4.0 GiB source=cgroup-v2 hostTotal=16.0 GiB concurrency=1 recommended=8.0 GiB status=low
+```
+
+`status=low` only warns; startup is not blocked. **Exception**: when Redis is unavailable / enqueue fails, the HTTP process degrades to synchronous execution and runs installs / verification too, so it must be sized as an execution plane (8 GB); the startup probe cannot predict this runtime degradation. For isolation, use the commented `worker` service in compose to move the worker to a separate container / host (requires PostgreSQL or another multi-writer database; SQLite across hosts is not recommended). Use container `mem_limit` / orchestrator resource limits for a hard cap; do not inject a Node heap limit into commands.
+
+Run details expose `memory_max_bytes` / `peak_rss_bytes` / `oom_killed`; when unavailable they are `NULL` and the reason is stored in `resource_json.degradedReason`. Host-level OOM (without a container memory limit) is not guaranteed to be captured by cgroup `oom_kill`; correlate with `journalctl -k`.
 
 ## Quick start
 

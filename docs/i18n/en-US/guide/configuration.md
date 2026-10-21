@@ -209,6 +209,8 @@ The management platform (`apps/platform`) is configured via env vars injected by
 | `ACTION_STATUS_MONITOR_ENABLED` | — | `false` | Dependabot PR-check status monitor master switch; requires a PAT credential and PR activity |
 | `DEPENDFIX_AI_PROVIDER` / `_MODEL` / `_BASE_URL` / `_API_URL` / `_API_KEY` / `_TRIGGER` | — | empty | AI triage config for the engine inside platform scans (injected from org-level AI config) |
 
+> **Resource sizing**: the control plane (UI / API only) needs at least 1 CPU / 1 GB; the default single container / worker that runs installs and verification should have ≥ 2 CPU / 8 GB (4 GB has been verified to OOM). The `[resource]` startup log prints the cgroup / host memory limit and concurrency; below the recommendation it only warns and does not block startup. Run records expose `scan_run.memory_max_bytes` / `peak_rss_bytes` / `oom_killed`; when unavailable they are `NULL` with the reason in `resource_json.degradedReason`. When Redis is unavailable / enqueue fails, the HTTP process degrades to synchronous execution and must also be sized as an execution plane (8 GB). See [Docker deployment → Resource sizing](./deployment.md#resource-sizing).
+
 ### Notification
 
 | Variable | Required | Default | Description |

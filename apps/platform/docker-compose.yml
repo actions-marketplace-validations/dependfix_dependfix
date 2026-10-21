@@ -17,6 +17,10 @@ services:
   platform:
     # 默认已发布镜像（Docker Hub）；本地构建见 docker-compose.build.yml 覆盖文件
     image: ${DEPENDFIX_IMAGE:-caomeiyouren/dependfix:latest}
+    # 资源建议：默认单容器同时跑控制面与执行面（clone / 安装 / 验证），建议 ≥ 2 CPU / 8GB；
+    # 控制面单独部署（worker 拆出）最低 1 CPU / 1GB。4GB 已验证会 OOM。
+    # 需要硬上限时取消下行注释（不要在命令上注入 Node 堆大小）：
+    # mem_limit: 8g
     ports:
       - "${PORT:-3000}:3000"
     environment:

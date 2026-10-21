@@ -7,9 +7,29 @@
 ## 前置要求
 
 - Docker 20.10+ 与 Docker Compose v2（`docker compose` 子命令）
-- 至少 1 CPU / 1GB 内存（推荐 2GB+；容器内会执行依赖安装与验证）
+- **控制面最低**：1 CPU / 1 GB（仅 UI / API，不执行安装）
+- **执行面建议**：≥ 2 CPU / **8 GB**（默认单容器会执行 clone / 依赖安装 / 验证；4 GB 已验证会 OOM）
 - 宿主机端口 `3000`（可用 `PORT` 覆盖）
 - 建议使用非 root 的容器运行身份（见[数据卷与权限](#数据卷与权限)）
+
+## 资源规格
+
+dependfix 默认把控制面（Nuxt / 队列生产）与执行面（引擎 clone / 安装 / 验证）放在同一容器内，二者内存口径不同：
+
+| 角色 | 最低 | 建议 | 说明 |
+|:---|:---|:---|:---|
+| 控制面（仅 UI / API） | 1 CPU / 1 GB | 2 CPU / 2 GB | 不执行安装；适用于 worker 已拆到独立主机 |
+| 执行面（单容器默认） | 2 CPU / **8 GB** | 4 CPU / 16 GB（大仓） | 单次安装常驻约 1 GB；4 GB 已验证会 OOM |
+
+启动日志会打印检测到的内存上限与队列并发（HTTP / worker 两个进程各一行）：
+
+```text
+[resource] role=worker plane=execution memoryLimit=4.0 GiB source=cgroup-v2 hostTotal=16.0 GiB concurrency=1 recommended=8.0 GiB status=low
+```
+
+`status=low` 时仅 `warn`，不阻断启动。**例外**：Redis 不可用 / 入队失败时 HTTP 进程会降级为同步执行，此时它也会跑安装 / 验证，必须按执行面 8 GB 准备（启动探测无法预知该运行时降级）。需要资源隔离时，按 compose 内预留的 `worker` 段把 worker 拆到独立容器 / 主机（要求 PostgreSQL 等多写数据库；SQLite 不推荐跨主机）。硬上限请用容器 `mem_limit` / 编排资源限制，不要在命令上注入 Node 堆大小。
+
+运行详情会展示 `memory_max_bytes` / `peak_rss_bytes` / `oom_killed`；不可采集时为 `NULL`，原因记录在 `resource_json.degradedReason`。宿主级 OOM（未设容器内存限制）不保证被 cgroup `oom_kill` 捕获，需结合 `journalctl -k`。
 
 ## 快速开始
 
