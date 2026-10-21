@@ -8,7 +8,7 @@ import { ContainerExecutor } from './executor/container-executor'
 import { SandboxExecutor } from './executor/sandbox-executor'
 import { ActionTriggerExecutor } from './executor/action-trigger-executor'
 import { ActionResultFetcher } from './executor/action-result-fetcher'
-import type { ScanExecutorContext } from './executor/types'
+import type { ExecutorResourceUsage, ScanExecutorContext } from './executor/types'
 import { notifyEnvEvent } from './notification'
 import { notifyRunTerminal } from './notification/run-notification.service'
 import type { NotificationEvent } from './notification/channel'
@@ -20,6 +20,7 @@ import { ScanRun } from '#server/entities/scan-run'
 import { Organization } from '#server/entities/organization'
 import { AuditEvent, type AuditEventType } from '#server/entities/audit-event'
 import { ensureDatabaseInitialized } from '#server/database'
+import { detectSigkill, unavailableResourceUsage } from '#server/utils/resource-usage'
 
 /**
  * 扫描编排：触发 → 执行 → 落库（同步执行模型 Q2，请求内完成）。
@@ -208,6 +209,10 @@ const runScanInternal = async (
             // 运行结果可信度两列同属「上一次执行」快照，复用为本次执行载体时一并清空
             existing.exitCode = null
             existing.environmentalFailureCount = null
+            existing.memoryMaxBytes = null
+            existing.peakRssBytes = null
+            existing.oomKilled = null
+            existing.resourceJson = null
             // 同时更新 mode / severityThreshold 以匹配本次请求（用户从 report-only 切到 fix）
             existing.mode = request.mode
             existing.severityThreshold = request.severityThreshold
@@ -296,6 +301,8 @@ const runScanInternal = async (
         workDir: savedRun.id,
     }
 
+    // 执行窗口资源快照：catch-all 也需保留已采集的真实值（不因后续落库失败清空审计事实）
+    let resource: ExecutorResourceUsage | undefined
     try {
         // 执行器路由
         let result: RunResult | undefined
@@ -355,6 +362,7 @@ const runScanInternal = async (
                 result = execResult.result
                 error = execResult.error
                 exitCode = execResult.exitCode
+                resource = execResult.resource
             } else {
                 // A 场景：启动时不可用 → 记录降级原因 + 走 ContainerExecutor
                 degradedReason = {
@@ -371,6 +379,7 @@ const runScanInternal = async (
                 result = execResult.result
                 error = execResult.error
                 exitCode = execResult.exitCode
+                resource = execResult.resource
                 runUrl = execResult.runUrl
                 // 降级回退同样走 ContainerExecutor + MemoryLogger，落 logsJson 让 degraded run 可查执行日志（与主路由同口径）
                 logsJson = execResult.logsJson
@@ -386,6 +395,7 @@ const runScanInternal = async (
             result = execResult.result
             error = execResult.error
             exitCode = execResult.exitCode
+            resource = execResult.resource
             // A 模式（container）：fix / fix-and-pr 完成后 executor 端推送修复分支，
             // runUrl 指向 GitHub branch tree 页（参见 container-executor.pushFixBranch 后置）
             runUrl = execResult.runUrl
@@ -406,6 +416,22 @@ const runScanInternal = async (
         const outcome = resolveScanRunOutcome(result, exitCode)
         savedRun.exitCode = outcome.exitCode
         savedRun.environmentalFailureCount = outcome.environmentalFailureCount
+        // 资源 / OOM 归因：不可采集一律 NULL + 原因，不伪造 0 / false。
+        const resourceSnapshot = resource ?? unavailableResourceUsage(
+            executorKind === 'container'
+                ? 'container executor did not return resource usage'
+                : `executor does not collect resource usage: ${executorKind}`,
+        )
+        if (!resourceSnapshot.sigkillDetected) {
+            resourceSnapshot.sigkillDetected = detectSigkill([
+                ...(result?.errors ?? []).map((item) => item.message),
+                error?.message,
+            ])
+        }
+        savedRun.memoryMaxBytes = resourceSnapshot.memoryMaxBytes
+        savedRun.peakRssBytes = resourceSnapshot.peakRssBytes
+        savedRun.oomKilled = resourceSnapshot.oomKilled
+        savedRun.resourceJson = JSON.stringify(resourceSnapshot)
         // 失败分类落库（单一事实源 run-failure-classify）：failed / dispatched 写三列，其余清空。
         // errorJson 口径与下方落库一致（优先状态机决策的 errorJson，回退执行器 error）；
         // engineCategories 供「errorJson 缺失但引擎已产出 result.errors」时回退细分。
@@ -509,6 +535,11 @@ const runScanInternal = async (
             message: error instanceof Error ? error.message : String(error),
         }
         savedRun.errorJson = JSON.stringify(orchestrationFailure)
+        const resourceSnapshot = resource ?? unavailableResourceUsage('orchestration failed before resource snapshot')
+        savedRun.memoryMaxBytes = resourceSnapshot.memoryMaxBytes
+        savedRun.peakRssBytes = resourceSnapshot.peakRssBytes
+        savedRun.oomKilled = resourceSnapshot.oomKilled
+        savedRun.resourceJson = JSON.stringify(resourceSnapshot)
         // 编排 catch-all 失败同样落失败分类（与状态机失败路径同源）
         applyFailureClassification(savedRun, { status: 'failed', error: orchestrationFailure })
         const persisted = await runRepo.save(savedRun)
@@ -535,6 +566,7 @@ async function runContainerExecutor(
     exitCode: number | undefined
     runUrl: string | null
     logsJson: string | null
+    resource: ExecutorResourceUsage | undefined
 }> {
     if (!(await executor.isAvailable())) {
         return {
@@ -546,6 +578,7 @@ async function runContainerExecutor(
             exitCode: undefined,
             runUrl: null,
             logsJson: null,
+            resource: undefined,
         }
     }
     const execResult = await executor.execute(ctx)
@@ -555,6 +588,7 @@ async function runContainerExecutor(
         exitCode: execResult.exitCode,
         runUrl: execResult.runUrl ?? null,
         logsJson: execResult.logsJson ?? null,
+        resource: execResult.resource,
     }
 }
 

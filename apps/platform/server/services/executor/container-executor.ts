@@ -22,6 +22,7 @@ import {
 } from './platform-delivery'
 import { ABORT_GRACE_MS, ExecutionTimeoutError, settleWithin, withTimeout } from './engine-run'
 import { MemoryLogger } from '#server/utils/memory-logger'
+import { detectSigkill, startResourceMonitor } from '#server/utils/resource-usage'
 import { sanitizeString } from '#server/utils/sanitize'
 
 const execFileAsync = promisify(execFile)
@@ -266,6 +267,23 @@ export class ContainerExecutor implements ScanExecutor {
     }
 
     async execute(ctx: ScanExecutorContext): Promise<ScanExecutorResult> {
+        const monitor = startResourceMonitor()
+        try {
+            const result = await this.executeRun(ctx)
+            const resource = monitor.stop()
+            resource.sigkillDetected = detectSigkill([
+                ...(result.result?.errors ?? []).map((item) => item.message),
+                result.error?.message,
+            ])
+            result.resource = resource
+            return result
+        } finally {
+            // 异常路径也停止采样；stop 幂等，不覆盖已生成的快照
+            monitor.stop()
+        }
+    }
+
+    private async executeRun(ctx: ScanExecutorContext): Promise<ScanExecutorResult> {
         const startedAt = new Date().toISOString()
         const { owner, name, defaultBranch } = ctx.repository
         const workDir = join(this.workRoot, ctx.runId)

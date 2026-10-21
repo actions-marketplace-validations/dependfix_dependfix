@@ -4,10 +4,26 @@ import {
     Index,
     JoinColumn,
     ManyToOne,
+    type ValueTransformer,
 } from 'typeorm'
 import type { RunFailureKind, RunFailureStage } from '../services/run-failure-classify'
 import { BaseEntity } from './base-entity'
 import { Repository } from './repository'
+
+/**
+ * bigint 列 → number 转换：跨 SQLite / MySQL / PostgreSQL 统一返回 number。
+ * 内存上限 / 峰值可达 8GB 以上（> 2^31），不能用 integer。
+ */
+const bigintNumberTransformer: ValueTransformer = {
+    to: (value: number | null | undefined) => value ?? null,
+    from: (value: string | number | null | undefined) => {
+        if (value === null || value === undefined || value === '') {
+            return null
+        }
+        const numeric = Number(value)
+        return Number.isSafeInteger(numeric) ? numeric : null
+    },
+}
 
 /** 扫描运行状态 */
 export type ScanRunStatus = 'pending' | 'running' | 'completed' | 'failed' | 'dispatched' | 'degraded'
@@ -80,6 +96,28 @@ export class ScanRun extends BaseEntity {
      */
     @Column({ type: 'integer', nullable: true })
     environmentalFailureCount!: number | null
+
+    /**
+     * 执行窗口 cgroup 内存上限（字节）；无限制 / 不可采集 / 旧数据为 null。
+     * 口径见 [executor-process-isolation.md §8.4](../../../../docs/design/governance/executor-process-isolation.md)。
+     */
+    @Column({ type: 'bigint', nullable: true, transformer: bigintNumberTransformer })
+    memoryMaxBytes!: number | null
+
+    /** 执行窗口 cgroup `memory.current` 采样峰值（字节）；不可采集为 null。 */
+    @Column({ type: 'bigint', nullable: true, transformer: bigintNumberTransformer })
+    peakRssBytes!: number | null
+
+    /**
+     * 执行前后 cgroup `oom_kill` 计数是否增加：true = OOM；false = 已采集且未增加；
+     * null = 不可采集 / 旧数据（不得推断为 false）。
+     */
+    @Column({ type: 'boolean', nullable: true })
+    oomKilled!: boolean | null
+
+    /** 资源采集明细（来源 / 采样次数 / 降级原因 / SIGKILL 辅助信号），JSON 字符串。 */
+    @Column({ type: 'text', nullable: true })
+    resourceJson!: string | null
 
     /** 执行级错误（executor error.code/message，非业务失败） */
     @Column({ type: 'text', nullable: true })

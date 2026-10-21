@@ -6,6 +6,7 @@ import { requireAuth } from '#server/utils/guard'
 import { createLocalizedError } from '#server/utils/localized-error'
 import { resolveOrganizationId } from '#server/utils/organization'
 import { buildRunsWhere, runsFilterSchema, runsPaginationShape } from '#server/utils/runs-query'
+import { parseRunResource } from '#server/utils/run-resource'
 
 /**
  * 查询参数 schema（todo.md §M14.2 UX-R1 + §M16.1）：
@@ -42,6 +43,11 @@ const toView = (r: ScanRun) => ({
     // 消费方须按 null 降级，不得把 null 推断为 0 成功。
     exitCode: r.exitCode,
     environmentalFailureCount: r.environmentalFailureCount,
+    // 资源 / OOM 归因：列与 resourceJson 同源；null = 不可采集（原因在 resource.degradedReason）
+    memoryMaxBytes: r.memoryMaxBytes,
+    peakRssBytes: r.peakRssBytes,
+    oomKilled: r.oomKilled,
+    resource: parseRunResource(r.resourceJson),
     error: r.errorJson ? JSON.parse(r.errorJson) as { code: string, message: string } | null : null,
     // 失败分类（非失败终态为 null；落库口径见 run-failure-classify.ts）
     failureCode: r.failureCode,

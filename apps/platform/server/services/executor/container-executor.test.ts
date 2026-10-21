@@ -1,9 +1,5 @@
 /**
  * ContainerExecutor 补单测（2026-09-10）
- *
- * 现有 container-executor.test.ts 仅覆盖基础场景（isAvailable + report-only + 超时）
- * + sanitizeErrorMessage + parsePositiveInt + extractGitErrorMessage + clone config 环境变量。
- *
  * 本文件扩展覆盖 ContainerExecutor.execute 主体分支（fix / fix-and-pr 模式 + 失败路径）+
  * cloneRepository 重试 / 超时 / 认证 / 网络中断 + pushFixBranch token / AuthProvider / 无凭据
  * + extractBranchName detached HEAD + extractBranchName exec throws + pushFixBranch stderr 错误。
@@ -191,6 +187,10 @@ describe('ContainerExecutor.execute - report-only mode', () => {
         expect(result.exitCode).toBe(0)
         expect(result.result).toBe(runResult)
         expect(result.runUrl).toBeUndefined()
+        // 资源快照由 execute 包装层注入（不可采集时也返回对象 + 原因，不伪造 0）
+        expect(result.resource).toBeDefined()
+        expect(result.resource?.sigkillDetected).toBe(false)
+        expect(['cgroup-v2', 'cgroup-v1', 'none']).toContain(result.resource?.source)
         // report-only 不调用 clone / push / PR
         expect(childProcessMock.execFile).not.toHaveBeenCalled()
         expect(platformDeliveryMock.deliverFixAndPr).not.toHaveBeenCalled()
