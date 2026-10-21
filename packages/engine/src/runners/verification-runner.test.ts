@@ -935,6 +935,43 @@ describe('formatVerificationError', () => {
     })
 })
 
+describe('runVerification complete-chain baseline mode', () => {
+    it('stopOnFailure=false executes later commands and keeps the first failure', async () => {
+        mockSpawn
+            .mockImplementationOnce(() => failedCp(1, 'ERR_PNPM_BROKEN_LOCKFILE'))
+            .mockImplementationOnce(() => failedCp(1, 'No tests found'))
+        mockDiscoverRegistryHosts.mockReturnValue({ hosts: [] })
+
+        const result = await runVerification({
+            workDir: '/tmp/complete-chain',
+            commands: ['pnpm install --frozen-lockfile', 'pnpm test'],
+            stopOnFailure: false,
+            networkAuditDisabled: true,
+        })
+
+        expect(result.success).toBe(false)
+        expect(result.commandResults).toHaveLength(2)
+        expect(result.commandResults[0]?.stderr).toContain('BROKEN_LOCKFILE')
+        expect(result.commandResults[1]?.stderr).toContain('No tests found')
+        expect(result.failedCommand).toBe('pnpm install --frozen-lockfile')
+        expect(result.failure).toContain('exited with code 1')
+    })
+
+    it('default mode still stops at the first failure', async () => {
+        mockSpawn.mockImplementationOnce(() => failedCp(1, 'install failed'))
+        mockDiscoverRegistryHosts.mockReturnValue({ hosts: [] })
+
+        const result = await runVerification({
+            workDir: '/tmp/stop-on-failure',
+            commands: ['pnpm install --frozen-lockfile', 'pnpm test'],
+            networkAuditDisabled: true,
+        })
+
+        expect(result.commandResults).toHaveLength(1)
+        expect(result.failedCommand).toBe('pnpm install --frozen-lockfile')
+    })
+})
+
 // ---------------------------------------------------------------------------
 // DEFAULT_VERIFY_COMMANDS（唯一事实源：app 层经此导入，消除副本漂移）
 // ---------------------------------------------------------------------------

@@ -60,6 +60,12 @@ export interface VerificationParams {
      * 仅当环境无既有代理时注入（覆盖用户代理会破坏其网络行为）。
      */
     networkAuditDisabled?: boolean
+    /**
+     * 遇首个失败命令后是否立即停止（默认 true，保持修复后验证的短路语义）。
+     * 修复前基线采样传 false：完整执行整条链并逐段记录，避免 install 失败遮蔽
+     * test 的既有失败（nest-template 形态）。
+     */
+    stopOnFailure?: boolean
 }
 
 /**
@@ -88,8 +94,8 @@ export interface VerificationResult {
  * - typecheck 必须排在 build 之后：workspace 包的 `tsc` 依赖前置包已发射的 `dist` 声明
  *   （实测移出 `packages/{core,engine,cli}/dist` 后 `pnpm --filter @dependfix/platform typecheck`
  *   报大量 `TS2307 Cannot find module`）。
- * - typecheck 排在 test 之前：基线采样随首个失败命令中止（见 `sampleVerificationBaseline`），
- *   靠前可最大化「既有失败」的采样覆盖率。
+ * - typecheck 排在 test 之前：类型错误优先于测试运行短路；修复前基线使用
+ *   完整链（`stopOnFailure:false`），不再受首失败前缀覆盖。
  *
  * **为何纳入 typecheck**：改动前的四条命令互不重叠地都不做类型检查——lint 只跑规则
  * （类型解析失败通常降级为规则告警而非错误）、tsdown 的 `dts` 只发射声明、vitest 走 esbuild
@@ -107,8 +113,8 @@ export interface VerificationResult {
  * 不会误伤未配置对应脚本的仓库。
  *
  * **已知边界**：脚本语义不实（如 `"typecheck": "tsc --noEmit || true"`）无法机检；
- * 「typecheck / test 长期为红」的仓库由命令级既有失败基线豁免，但基线随首个失败命令中止
- * （前缀覆盖）——靠前命令先红会遮蔽后续命令的采样（见 `sampleVerificationBaseline`）；
+ * 「typecheck / test 长期为红」的仓库由命令级既有失败基线豁免；基线完整链采样全部命令
+ * （`sampleVerificationBaseline` 传 `stopOnFailure:false`），修复后验证仍首失败即停；
  * 需 `nuxt prepare` 之类前置步骤的仓库默认链不成立，走 `--commands` / 平台 `verifyCommands` /
  * action `commands` 逃生舱。
  */
@@ -195,7 +201,9 @@ export function formatVerificationError(cr: CommandResult): string {
  */
 export async function runVerification(params: VerificationParams): Promise<VerificationResult> {
     const commands = params.commands ?? DEFAULT_VERIFY_COMMANDS
+    const stopOnFailure = params.stopOnFailure !== false
     const commandResults: CommandResult[] = []
+    let firstFailure: { command: string, failure: string } | undefined
 
     // 执行期网络外联审计（默认开启；代理仅在环境无既有代理时注入，防覆盖用户代理）。
     // 白名单 = 默认清单 + 环境变量扩展 + workDir 配置面动态发现的 registry host——
@@ -249,20 +257,34 @@ export async function runVerification(params: VerificationParams): Promise<Verif
             }
 
             if (result.exitCode !== 0 || result.timedOut) {
-                return {
-                    success: false,
-                    commandResults,
-                    failedCommand: command,
-                    failure: result.timedOut
-                        ? `command "${command}" timed out after ${result.durationMs}ms`
-                        : `command "${command}" exited with code ${result.exitCode}`,
-                    ...(audit ? { networkAudit: audit.entries, networkViolations: audit.violations } : {}),
+                const failure = result.timedOut
+                    ? `command "${command}" timed out after ${result.durationMs}ms`
+                    : `command "${command}" exited with code ${result.exitCode}`
+                firstFailure ??= { command, failure }
+                if (stopOnFailure) {
+                    return {
+                        success: false,
+                        commandResults,
+                        failedCommand: command,
+                        failure,
+                        ...(audit ? { networkAudit: audit.entries, networkViolations: audit.violations } : {}),
+                    }
                 }
             }
         }
     } finally {
         if (audit) {
             await audit.stop().catch(() => { /* 停止失败静默 */ })
+        }
+    }
+
+    if (firstFailure) {
+        return {
+            success: false,
+            commandResults,
+            failedCommand: firstFailure.command,
+            failure: firstFailure.failure,
+            ...(audit ? { networkAudit: audit.entries, networkViolations: audit.violations } : {}),
         }
     }
 

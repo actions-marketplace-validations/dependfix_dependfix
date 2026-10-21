@@ -82,7 +82,7 @@ function resolveVerifyCommands(
  *
  * 约定：
  * - **只测量**：失败与网络违规只记日志（warn），不写 `allErrors`（避免把既有状态渲染成本次运行的问题）
- * - `runVerification` 遇首个失败即停 → 基线可能只覆盖到失败命令为止；调用方对
+ * - 基线使用完整链（`stopOnFailure:false`），各命令独立记录；调用方仍对
  *   「基线中缺失的命令」**不适用豁免**（保守归因：未知不算既有）
  * - 采样异常（无 package.json / spawn 失败等）返回 `undefined`，调用方退回原始口径（全量归因）
  */
@@ -98,7 +98,9 @@ export async function sampleVerificationBaseline(
 
     logger.info(`[baseline] Sampling pre-fix verification baseline for ${repo} (${commands.join(' → ')})`)
     try {
-        const result = await runVerification({ workDir, commands })
+        // 完整链：首条失败后继续采样后续命令，避免 install 失败遮蔽 test 的既有失败
+        // （nest-template：install 红 + jest No tests found）。
+        const result = await runVerification({ workDir, commands, stopOnFailure: false })
         // 基线同样走 deny-by-default 外联审计代理：拦截记录必须留痕（只 warn、不入报告错误区），
         // 否则既有状态下的越权外联会成为审计盲区
         for (const violation of result.networkViolations ?? []) {
