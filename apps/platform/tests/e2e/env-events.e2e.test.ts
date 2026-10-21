@@ -29,7 +29,7 @@ test.describe('C-ENV env-events UI', () => {
         await expect(filters).toHaveCount(5)
     })
 
-    test('类型下拉与 audit_event 全量 5 类口径一致（含 container_unavailable / 配置留痕类，不含已移除的 docker_daemon_down）', async ({ page }) => {
+    test('类型下拉与 audit_event 全量 6 类口径一致（含 container_unavailable / 配置留痕类，不含已移除的 docker_daemon_down）', async ({ page }) => {
         // 必须在 goto 前注册：env-events.vue 在 onMounted 立即调用 fetchEvents()
         await page.route('**/api/audit-events*', (route) => route.fulfill({
             status: 200, contentType: 'application/json', body: JSON.stringify([]),
@@ -38,11 +38,12 @@ test.describe('C-ENV env-events UI', () => {
         await waitForHydration(page)
         await page.locator('#type').click()
         const items = page.locator('.caomei-select__item')
-        await expect(items).toHaveCount(6) // 全部类型 + 5 类
+        await expect(items).toHaveCount(7) // 全部类型 + 6 类
         const optionsText = (await items.allInnerTexts()).join('\n')
         expect(optionsText).toContain('容器执行器不可用')
         expect(optionsText).toContain('AI 配置更新')
         expect(optionsText).toContain('验证命令更新')
+        expect(optionsText).toContain('通知设置更新')
         expect(optionsText).not.toContain('Docker 守护进程停止')
     })
 
