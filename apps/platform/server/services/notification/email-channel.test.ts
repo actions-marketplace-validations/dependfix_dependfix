@@ -119,8 +119,8 @@ describe('EmailNotificationChannel', () => {
         const ch = new EmailNotificationChannel()
         await ch.send(sampleEvent, ['admin@example.com'])
         const callArgs = vi.mocked(sendMail).mock.calls[0]?.[0]
-        expect(callArgs?.subject).toContain('[错误]')
-        expect(callArgs?.subject).not.toContain('[Error]')
+        expect(callArgs?.subject).toContain('错误')
+        expect(callArgs?.subject).not.toContain('Error')
     })
 
     it('send() event.locale = en-US → subject 含 [Error]', async () => {
@@ -129,8 +129,8 @@ describe('EmailNotificationChannel', () => {
         const ch = new EmailNotificationChannel()
         await ch.send({ ...sampleEvent, locale: 'en-US' }, ['admin@example.com'])
         const callArgs = vi.mocked(sendMail).mock.calls[0]?.[0]
-        expect(callArgs?.subject).toContain('[Error]')
-        expect(callArgs?.subject).not.toContain('[错误]')
+        expect(callArgs?.subject).toContain('Error')
+        expect(callArgs?.subject).not.toContain('错误')
     })
 
     it('send() DEPENDFIX_LOCALE = en-US → 默认英文模板', async () => {
@@ -140,7 +140,7 @@ describe('EmailNotificationChannel', () => {
         const ch = new EmailNotificationChannel()
         await ch.send(sampleEvent, ['admin@example.com'])
         const callArgs = vi.mocked(sendMail).mock.calls[0]?.[0]
-        expect(callArgs?.subject).toContain('[Error]')
+        expect(callArgs?.subject).toContain('Error')
         delete process.env.DEPENDFIX_LOCALE
     })
 
@@ -151,7 +151,7 @@ describe('EmailNotificationChannel', () => {
         const ch = new EmailNotificationChannel()
         await ch.send(sampleEvent, ['admin@example.com'])
         const callArgs = vi.mocked(sendMail).mock.calls[0]?.[0]
-        expect(callArgs?.subject).toContain('[错误]') // 回退 zh-CN
+        expect(callArgs?.subject).toContain('错误') // 回退 zh-CN
         delete process.env.DEPENDFIX_LOCALE
     })
 
@@ -163,7 +163,7 @@ describe('EmailNotificationChannel', () => {
         // event.locale 显式中文，覆盖 env
         await ch.send({ ...sampleEvent, locale: 'zh-CN' }, ['admin@example.com'])
         const callArgs = vi.mocked(sendMail).mock.calls[0]?.[0]
-        expect(callArgs?.subject).toContain('[错误]')
+        expect(callArgs?.subject).toContain('错误')
         delete process.env.DEPENDFIX_LOCALE
     })
 })

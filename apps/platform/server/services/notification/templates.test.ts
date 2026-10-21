@@ -13,22 +13,24 @@ const baseData = {
 describe('renderEnvAlertTemplate', () => {
     it('zh-CN 默认 locale：subject 含 [错误] 前缀', () => {
         const out = renderEnvAlertTemplate(baseData)
-        expect(out.subject).toContain('[错误] 环境告警')
+        expect(out.subject).toContain('[dependfix][平台]')
+        expect(out.subject).toContain('错误')
         expect(out.subject).toContain('sandbox_unavailable')
         expect(out.subject).toContain('demo/app')
     })
 
     it('en-US locale：subject 含 [Error] 前缀', () => {
         const out = renderEnvAlertTemplate(baseData, 'en-US')
-        expect(out.subject).toContain('[Error] Env Alert')
+        expect(out.subject).toContain('[dependfix][Platform]')
+        expect(out.subject).toContain('Error')
         expect(out.subject).toContain('sandbox_unavailable')
         expect(out.subject).toContain('demo/app')
     })
 
     it('severity 驱动 subject 前缀', () => {
-        expect(renderEnvAlertTemplate({ ...baseData, severity: 'critical' }).subject).toContain('[严重]')
-        expect(renderEnvAlertTemplate({ ...baseData, severity: 'warn' }, 'en-US').subject).toContain('[Warn]')
-        expect(renderEnvAlertTemplate({ ...baseData, severity: 'info' }, 'en-US').subject).toContain('[Info]')
+        expect(renderEnvAlertTemplate({ ...baseData, severity: 'critical' }).subject).toContain('严重')
+        expect(renderEnvAlertTemplate({ ...baseData, severity: 'warn' }, 'en-US').subject).toContain('Warn')
+        expect(renderEnvAlertTemplate({ ...baseData, severity: 'info' }, 'en-US').subject).toContain('Info')
     })
 
     it('无 repository 时 subject 不含括号', () => {

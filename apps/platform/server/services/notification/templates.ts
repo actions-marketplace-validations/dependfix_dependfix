@@ -36,7 +36,7 @@ export interface RenderedEnvAlert {
 }
 
 interface LocaleStrings {
-    subjectPrefix: Record<EnvAlertTemplateData['severity'], string>
+    subject: (severity: EnvAlertTemplateData['severity'], type: string, repository?: string) => string
     title: string
     severityLabel: Record<EnvAlertTemplateData['severity'], string>
     typeLabel: string
@@ -54,14 +54,23 @@ const SEVERITY_COLOR: Record<EnvAlertTemplateData['severity'], string> = {
     info: '#2563eb', // blue-600
 }
 
+const severityLabelZh = (severity: EnvAlertTemplateData['severity']): string => ({
+    critical: '严重',
+    error: '错误',
+    warn: '警告',
+    info: '提示',
+})[severity]
+
+const severityLabelEn = (severity: EnvAlertTemplateData['severity']): string => ({
+    critical: 'Critical',
+    error: 'Error',
+    warn: 'Warn',
+    info: 'Info',
+})[severity]
+
 const LOCALES: Record<NotificationLocale, LocaleStrings> = {
     'zh-CN': {
-        subjectPrefix: {
-            critical: '[严重] 环境告警',
-            error: '[错误] 环境告警',
-            warn: '[警告] 环境告警',
-            info: '[提示] 环境告警',
-        },
+        subject: (severity, type, repository) => `[dependfix][平台] ${severityLabelZh(severity)} ${type}${repository ? ` (${repository})` : ''}`,
         title: 'Dependfix 环境变化告警',
         severityLabel: {
             critical: '严重',
@@ -77,12 +86,7 @@ const LOCALES: Record<NotificationLocale, LocaleStrings> = {
         footer: '此邮件由 Dependfix 平台自动发送。请登录平台查看完整事件列表与建议处理动作。',
     },
     'en-US': {
-        subjectPrefix: {
-            critical: '[Critical] Env Alert',
-            error: '[Error] Env Alert',
-            warn: '[Warn] Env Alert',
-            info: '[Info] Env Alert',
-        },
+        subject: (severity, type, repository) => `[dependfix][Platform] ${severityLabelEn(severity)} ${type}${repository ? ` (${repository})` : ''}`,
         title: 'Dependfix Environment Alert',
         severityLabel: {
             critical: 'Critical',
@@ -105,7 +109,7 @@ const LOCALES: Record<NotificationLocale, LocaleStrings> = {
 export function renderEnvAlertTemplate(data: EnvAlertTemplateData, locale: NotificationLocale = DEFAULT_NOTIFICATION_LOCALE): RenderedEnvAlert {
     const strings = LOCALES[locale]
     const color = SEVERITY_COLOR[data.severity]
-    const subject = `${strings.subjectPrefix[data.severity]} ${data.type} ${data.repository ? `(${data.repository})` : ''}`
+    const subject = strings.subject(data.severity, data.type, data.repository)
 
     const repoRow = data.repository
         ? `<tr><td style="padding: 8px; font-weight: 600;">${strings.repositoryLabel}</td><td style="padding: 8px;">${escapeHtml(data.repository)}</td></tr>`
@@ -151,7 +155,7 @@ export function renderEnvAlertTemplate(data: EnvAlertTemplateData, locale: Notif
 }
 
 /** HTML 转义（防 XSS） */
-function escapeHtml(s: string): string {
+export function escapeHtml(s: string): string {
     return s
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')

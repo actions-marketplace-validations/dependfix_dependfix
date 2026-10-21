@@ -51,6 +51,13 @@ export interface NotificationEvent {
     locale?: SupportedLocale
 }
 
+/** 已渲染的通知邮件（业务模板 / 平台事件共用）。 */
+export interface RenderedNotification {
+    subject: string
+    html: string
+    text: string
+}
+
 /** 渠道发送结果 */
 export interface NotificationResult {
     /** 是否真正投递（false = noop 降级） */
@@ -83,4 +90,6 @@ export interface NotificationChannel {
     readonly name: string
     isAvailable(): boolean
     send(event: NotificationEvent, recipients: string[]): Promise<NotificationResult>
+    /** 可选：发送已渲染消息（业务通知使用；未实现的渠道不参与业务投递）。 */
+    sendMessage?(message: RenderedNotification, recipients: string[]): Promise<NotificationResult>
 }
