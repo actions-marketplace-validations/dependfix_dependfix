@@ -64,6 +64,7 @@ const makeLegalRunResultJson = (ctx: ScanExecutorContext, exitCode = 0): string 
             alertsFailed: 0,
             alertsSkipped: 0,
             alertsConverged: 0,
+            environmentalFailures: 0,
             alertsTruncated: 0,
             lockfileRepairs: 0,
             verificationsPassed: 0,

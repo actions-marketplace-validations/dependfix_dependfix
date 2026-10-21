@@ -15,11 +15,19 @@ import type { AppContext } from './helpers'
 // Result assembly
 // ---------------------------------------------------------------------------
 
-/** 汇总所有动作到 summary（alertsSkipped 已在 repo-fix 修复管线中累加）。 */
+/**
+ * 汇总所有动作到 summary（alertsSkipped / alertsConverged 已在 repo-fix 修复管线中累加）。
+ *
+ * `environmentalFailures` 取 `ENVIRONMENT_ERROR` 审计条目数：该类别是环境性失败的单一审计事实
+ * （lockfile-repair 与合批 / 多版本安装路径均落此类别），避免同时按 action 标记计数造成同一事件
+ * 双计（lockfile-repair 失败会同时产生 action.environmentalFailure 与一条 ENVIRONMENT_ERROR）。
+ * 覆盖边界：常规分组 / 逐包升级与 major 路径尚未消费安装结果的 `environmental` 标记，
+ * 因此计数可能低于真实环境性失败数（见 backlog「常规升级链路的环境性失败归因对齐」）。
+ */
 export function computeSummary(
-    ctx: Pick<AppContext, 'allActions' | 'allAlerts' | 'alertsDisabled' | 'repoResults' | 'summary'>,
+    ctx: Pick<AppContext, 'allActions' | 'allAlerts' | 'allErrors' | 'alertsDisabled' | 'repoResults' | 'summary'>,
 ): void {
-    const { allActions, allAlerts, alertsDisabled, repoResults, summary } = ctx
+    const { allActions, allAlerts, allErrors, alertsDisabled, repoResults, summary } = ctx
 
     let fixed = 0
     let failed = 0
@@ -65,6 +73,8 @@ export function computeSummary(
     summary.alertsFixable = fixable
     summary.alertsFixed = fixed
     summary.alertsFailed = failed
+    // 环境性失败可见性（不归因）：按审计条目计数，与 exitCode / alertsFailed 保持独立口径。
+    summary.environmentalFailures = allErrors.filter((error) => error.category === 'ENVIRONMENT_ERROR').length
     // 方案 A：未启用 ≠ 失败，单列计数（不计入 alertsFailed / errors）。
     // 按仓库去重（而非源级记录数）：同仓库多源未启用只计 1 次，与表头「(repos)」口径一致
     summary.reposWithAlertsDisabled = new Set(alertsDisabled.map((r) => r.repository)).size

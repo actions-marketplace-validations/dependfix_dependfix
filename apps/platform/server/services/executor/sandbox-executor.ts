@@ -170,6 +170,7 @@ export class SandboxExecutor implements ScanExecutor {
                 alertsFailed: 0,
                 alertsSkipped: 0,
                 alertsConverged: 0,
+                environmentalFailures: 0,
                 alertsTruncated: 0,
                 reposWithAlertsDisabled: 0,
                 lockfileRepairs: 0,
