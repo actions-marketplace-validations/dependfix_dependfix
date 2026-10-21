@@ -330,6 +330,8 @@ export DEPENDFIX_ALERTS_SOURCE=pnpm-audit
 
 | 变量 | 必填 | 默认值 | 说明 |
 |:---|:---:|:---|:---|
+| `DEPENDFIX_NOTIFICATION_ENABLED` | — | `true` | 通知总开关；`false` 熔断全部邮件（含平台事件） |
+| `DEPENDFIX_NOTIFICATION_RECIPIENT_CAP` | — | `50` | 单封邮件收件人上限 |
 | `DEPENDFIX_ENV_ALERT_RECIPIENTS` | — | 组织内 admin/org_admin 邮箱 | 环境告警邮件收件人（逗号分隔，覆盖默认） |
 | `DEPENDFIX_LOCALE` | — | `zh-CN` | 通知邮件语言（`zh-CN` / `en-US`） |
 
