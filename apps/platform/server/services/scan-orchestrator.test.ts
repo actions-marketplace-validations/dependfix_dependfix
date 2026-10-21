@@ -237,6 +237,72 @@ describe('scan-orchestrator.service', () => {
             expect(repo?.lastScanAt).toBeTruthy()
         })
 
+        it('persists exitCode and environmental failure count as queryable outcome facts', async () => {
+            containerExecute.mockResolvedValue({
+                result: makeResult({ summary: { alertsFound: 3, alertsFixed: 1, environmentalFailures: 2 } }),
+                error: undefined,
+                exitCode: 1,
+            })
+
+            const run = await runScanForRepository(repositoryId, { mode: 'fix', severityThreshold: 'high' })
+            expect(run.status).toBe('completed')
+            expect(run.exitCode).toBe(1)
+            expect(run.environmentalFailureCount).toBe(2)
+
+            const ds = await ensureDatabaseInitialized()
+            const persisted = await ds.getRepository(ScanRun).findOne({ where: { id: run.id } })
+            expect(persisted?.exitCode).toBe(1)
+            expect(persisted?.environmentalFailureCount).toBe(2)
+        })
+
+        it('keeps outcome columns null for a failed run without result', async () => {
+            containerExecute.mockResolvedValue({
+                result: undefined,
+                error: { code: 'execution_timeout', message: '执行超时' },
+                // 真实执行器在无 result 的执行级失败时返回合成码 2；不得落库为引擎进程码
+                exitCode: 2,
+            })
+
+            const run = await runScanForRepository(repositoryId, { mode: 'fix', severityThreshold: 'high' })
+            expect(run.status).toBe('failed')
+            expect(run.exitCode).toBeNull()
+            expect(run.environmentalFailureCount).toBeNull()
+            // 超时分类保留（UI「结果缺失」不覆盖失败归因）
+            expect(run.failureCode).toBe('execution_timeout')
+            expect(run.failureStage).toBe('runtime')
+        })
+
+        it('clears outcome columns when reusing a terminal run for a new execution', async () => {
+            containerExecute.mockResolvedValue({
+                result: makeResult({ summary: { alertsFound: 1, environmentalFailures: 4 } }),
+                error: undefined,
+                exitCode: 1,
+            })
+            const first = await runScanForRepository(repositoryId, { mode: 'fix', severityThreshold: 'high' })
+            expect(first.environmentalFailureCount).toBe(4)
+
+            const ds = await ensureDatabaseInitialized()
+            const runRepo = ds.getRepository(ScanRun)
+            const terminal = await runRepo.findOne({ where: { id: first.id } })
+            expect(terminal).not.toBeNull()
+            terminal!.status = 'completed'
+            terminal!.finishedAt = new Date()
+            await runRepo.save(terminal!)
+
+            // 复用后、执行 outcome 写入前抛错 → 只有 reuse 分支的清空能让旧值不残留；
+            // 若删掉清空逻辑，catch-all 保存会把上一次的 exitCode/count 带到新执行。
+            containerExecute.mockRejectedValue(new Error('executor exploded'))
+            const second = await runScanForRepository(
+                repositoryId,
+                { mode: 'fix', severityThreshold: 'high' },
+                { runId: first.id, reuse: true },
+            )
+            expect(second.id).toBe(first.id)
+            expect(second.status).toBe('failed')
+            expect(second.exitCode).toBeNull()
+            expect(second.environmentalFailureCount).toBeNull()
+        })
+
         // 同步新建路径同样落「重试来源」；runId 续用（worker / 队列续跑）不得覆写历史来源
         it('persists retriedFromRunId on the synchronously created run', async () => {
             containerExecute.mockResolvedValue({ result: makeResult(), error: undefined })
@@ -302,7 +368,7 @@ describe('scan-orchestrator.service', () => {
             // engine_delivery_failed（COMMIT_FAILED）：result 存在但交付失败 → failed
             containerExecute.mockResolvedValue({
                 result: makeResult({
-                    summary: { alertsFound: 5, alertsFixed: 3 },
+                    summary: { alertsFound: 5, alertsFixed: 3, environmentalFailures: 2 },
                     errors: [{ repository: 'demo/app', stage: 'fix', category: 'COMMIT_FAILED', message: 'git commit failed' }],
                 }),
                 error: undefined,
@@ -315,6 +381,8 @@ describe('scan-orchestrator.service', () => {
             // 失败前已扫到的告警数如实落库；已修复归零（失败未交付，fixStatus 不可信）
             expect(summary.alertsFound).toBe(5)
             expect(summary.alertsFixed).toBe(0)
+            // 环境性失败计数随 summary 快照保留（失败未交付也不丢可见性）
+            expect(summary.environmentalFailures).toBe(2)
             // 仅快照：failed 分支不调用 reconcileAlerts，无告警明细写入
             const ds = await ensureDatabaseInitialized()
             const alerts = await ds.getRepository(ScanResult).find({ where: { scanRunId: run.id } })

@@ -1,5 +1,39 @@
 import type { FixError, RunResult } from '@dependfix/core'
 
+/** 运行结果可信度字段（与状态机决策分离：只有拿到 result 时才写）。 */
+export interface ScanRunOutcomeFields {
+    /** 引擎进程级退出码；无 result / B 模式触发受理哨兵 / 编排失败均为 null。 */
+    exitCode: number | null
+    /** 环境性失败事件数；无 result（含执行器合成码 2 的超时 / 失败）为 null（UI 按 0 降级）。 */
+    environmentalFailureCount: number | null
+}
+
+/**
+ * 把执行结果映射为 ScanRun 的可查询事实（纯函数，避免编排层双源判定）。
+ *
+ * - **只有拿到 result 才落库两列**：执行器在超时 / 容器不可用 / 交付失败时会返回合成 `exitCode=2`
+ *   （见 container-executor / sandbox-executor），它不是引擎进程退出码；无 result 时若原样落库，
+ *   会让「结果缺失」的 run 同时显示 `退出码 2`，形成自相矛盾。B 模式执行器的 0/2 同理是触发受理
+ *   哨兵，编排层不传递。
+ * - `exitCode` 有 result 时原样落库（undefined → null；0 是有效值，不得用 `||` 折叠）。
+ * - `environmentalFailureCount`：result.summary 存在时取 `environmentalFailures`（旧引擎 / action
+ *   报告缺字段按 0，表示「有结果但没报环境性失败」）；result 存在但 summary 缺失（畸形 action 报告）
+ *   与无 result 同归 null，供 UI 统一判「结果缺失」。
+ */
+export function resolveScanRunOutcome(
+    result: RunResult | undefined,
+    exitCode: number | undefined,
+): ScanRunOutcomeFields {
+    if (!result?.summary || typeof result.summary !== 'object') {
+        return { exitCode: null, environmentalFailureCount: null }
+    }
+    const count = result.summary.environmentalFailures
+    return {
+        exitCode: exitCode ?? null,
+        environmentalFailureCount: typeof count === 'number' && Number.isFinite(count) ? count : 0,
+    }
+}
+
 /** 状态机决策结果 */
 export interface ScanRunStateDecision {
     status: 'completed' | 'failed' | 'dispatched' | 'degraded'

@@ -55,9 +55,31 @@ export class ScanRun extends BaseEntity {
     @Column({ type: 'datetime', nullable: true })
     finishedAt!: Date | null
 
-    /** 汇总统计（JSON：{repositoriesScanned, alertsFound, alertsFixed, ...}） */
+    /** 汇总统计（JSON：{repositoriesScanned, alertsFound, alertsFixed, environmentalFailures, ...}） */
     @Column({ type: 'text', nullable: true })
     summaryJson!: string | null
+
+    /**
+     * 引擎进程级退出码（0 成功 / 1 部分成功 / 2 全失败或全量回滚）。
+     *
+     * 仅当执行器产出 result 时落库；无 result 的执行器合成码 2（超时 / 容器不可用 / 交付失败）
+     * 不是引擎进程码，不落库。B 模式（github-action）执行器返回的 0 / 2 是触发受理哨兵，
+     * 编排层不传递；旧数据同样为 null——消费方须按 null 降级，不得推断为 0。
+     */
+    @Column({ type: 'integer', nullable: true })
+    exitCode!: number | null
+
+    /**
+     * 环境性失败事件数（`RunSummary.environmentalFailures` 快照）。
+     *
+     * 语义为「不归因本次运行的安装环境失败」（信号杀死 / 超时 / 静默非零退出），
+     * 与 `status=failed` / `alertsFailed` 独立：completed run 也可能 > 0。
+     * 计数只覆盖已落 `ENVIRONMENT_ERROR` 审计条目的路径（lockfile 诊断 / 多版本 / 合批）；
+     * 常规分组 / 逐包升级路径尚未分类（见 backlog 候选），计数可能低于真实环境性失败数。
+     * 无 result 的失败（如执行超时）为 null；旧数据同为 null，UI 按 0 降级。
+     */
+    @Column({ type: 'integer', nullable: true })
+    environmentalFailureCount!: number | null
 
     /** 执行级错误（executor error.code/message，非业务失败） */
     @Column({ type: 'text', nullable: true })

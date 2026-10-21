@@ -1,5 +1,5 @@
 import type { RunResult } from '@dependfix/core'
-import { resolveScanRunState } from './scan-run-state'
+import { resolveScanRunOutcome, resolveScanRunState } from './scan-run-state'
 import { isTerminalScanRunStatus } from './scan-run-status'
 import { applyFailureClassification } from './run-failure-classify'
 import { withRepoLock } from './repo-lock'
@@ -201,6 +201,9 @@ const runScanInternal = async (
             existing.failureCode = null
             existing.failureStage = null
             existing.failureKind = null
+            // 运行结果可信度两列同属「上一次执行」快照，复用为本次执行载体时一并清空
+            existing.exitCode = null
+            existing.environmentalFailureCount = null
             // 同时更新 mode / severityThreshold 以匹配本次请求（用户从 report-only 切到 fix）
             existing.mode = request.mode
             existing.severityThreshold = request.severityThreshold
@@ -381,6 +384,11 @@ const runScanInternal = async (
         // - sandbox 启动时降级（A 场景，详见 executor-sandbox-implementation.md §7.8）：degraded + summaryJson + runUrl + errorJson
         //   （业务结果完整，路径偏离；errorJson 保留 sandbox_unavailable 错误码便于审计）
         const decision = resolveScanRunState(executorKind, error, result, degradedReason, exitCode)
+        // 运行结果可信度落库（纯函数映射）：exit_code 独立于终态；环境性失败计数只在有 result 时写，
+        // 无 result 的失败保持 null，供 UI 判「结果缺失」而不是显示误导性的「告警 0」。
+        const outcome = resolveScanRunOutcome(result, exitCode)
+        savedRun.exitCode = outcome.exitCode
+        savedRun.environmentalFailureCount = outcome.environmentalFailureCount
         // 失败分类落库（单一事实源 run-failure-classify）：failed / dispatched 写三列，其余清空。
         // errorJson 口径与下方落库一致（优先状态机决策的 errorJson，回退执行器 error）；
         // engineCategories 供「errorJson 缺失但引擎已产出 result.errors」时回退细分。
