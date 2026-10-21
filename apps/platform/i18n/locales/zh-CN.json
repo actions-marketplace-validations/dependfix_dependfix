@@ -9,6 +9,7 @@
             "envEvents": "环境事件",
             "prChecks": "PR Checks",
             "schedules": "定时计划",
+            "notifications": "通知",
             "batchRuns": "批量运行",
             "credentials": "凭据",
             "users": "用户",
@@ -412,6 +413,26 @@
         "scanPreferenceSourceDefault": "显式默认",
         "scanPreferenceSourceLast": "上次选择",
         "scanPreferenceSourceFallback": "系统兜底",
+        "notifications": {
+            "card": "通知偏好",
+            "hint": "邮件通知；平台自身问题始终发送，不可关闭。组织关闭的类别无法在个人开启。",
+            "platformIncident": "平台自身问题",
+            "platformIncidentHint": "执行器 / 环境异常始终发送给管理员，不可关闭。",
+            "securityHigh": "高危告警",
+            "runFailure": "运行失败",
+            "runCompleted": "完成摘要",
+            "weeklyDigest": "每周汇总",
+            "viewer": "当前角色无接收权限",
+            "orgDisabled": "组织已关闭该类别",
+            "channelUnavailable": "SMTP 未配置，通知暂不会实际发送。",
+        "weeklyDigestUnavailable": "每周汇总将在后续版本提供，当前开关暂不生效。",
+        "deploymentDisabled": "部署层已熔断通知（DEPENDFIX_NOTIFICATION_ENABLED=false）。",
+            "deploymentDisabled": "部署层已熔断通知（DEPENDFIX_NOTIFICATION_ENABLED=false）。",
+            "weeklyDigestUnavailable": "每周汇总将在后续版本提供，当前开关暂不生效。",
+            "saved": "通知偏好已保存",
+            "loadFailed": "通知偏好加载失败：{message}",
+            "saveFailed": "通知偏好保存失败：{message}"
+        },
         "unlink": "解绑",
         "credentialProvider": "邮箱密码",
         "errors": {
@@ -432,6 +453,58 @@
         "confirm": {
             "unlinkAccount": "确认解绑 {provider} 账号？"
         }
+    },
+    "notifications": {
+        "title": "通知与邮件",
+        "subtitle": "配置组织级通知策略、收件人与投递记录。",
+        "test": "发送测试邮件",
+        "categoriesCard": "事件类别",
+        "deliveryCard": "投递策略",
+        "category": {
+            "platform_incident": "平台自身问题",
+            "security_high": "高危告警",
+            "run_failure": "运行失败",
+            "run_completed": "完成摘要",
+            "weekly_digest": "每周汇总"
+        },
+        "platformIncidentNote": "平台自身问题为必选，始终发送给管理员，不可关闭。",
+        "severity": "高危阈值",
+        "severityHigh": "Critical + High",
+        "severityCritical": "仅 Critical",
+        "cooldownHours": "冷却窗口（小时）",
+        "maxPerHour": "每小时上限",
+        "extraRecipients": "额外管理员收件人",
+        "extraRecipientsHint": "逗号或换行分隔，最多 20 个。",
+        "save": "保存设置",
+        "saved": "通知设置已保存",
+        "testDelivered": "测试邮件已投递",
+        "testNoop": "SMTP 未配置，测试邮件未实际发送",
+        "testFailed": "测试邮件失败：{message}",
+        "weeklyDigestUnavailable": "每周汇总将在后续版本提供，当前开关暂不生效。",
+        "deploymentDisabled": "部署层已熔断通知（DEPENDFIX_NOTIFICATION_ENABLED=false）。",
+        "logsCard": "最近投递记录",
+        "logsHint": "最近 20 条；仅显示状态与收件人，不记录邮件正文。",
+        "refresh": "刷新",
+        "emptyLogs": "暂无投递记录",
+        "colTime": "时间",
+        "colCategory": "类别",
+        "colScope": "范围",
+        "colStatus": "状态",
+        "colRecipients": "收件人",
+        "colError": "错误",
+        "status": {
+            "sending": "发送中",
+            "sent": "已发送",
+            "noop": "未配置 / 跳过",
+            "failed": "失败",
+            "skipped_duplicate": "重复跳过",
+            "skipped_cooldown": "冷却跳过",
+            "skipped_throttled": "限流跳过",
+            "skipped_no_recipient": "无收件人"
+        },
+        "loadFailed": "通知设置加载失败：{message}",
+        "saveFailed": "通知设置保存失败：{message}",
+        "channelUnavailable": "SMTP 未配置，通知暂不会实际发送。"
     },
     "users": {
         "title": "用户管理",
@@ -618,6 +691,7 @@
         "typeContainerUnavailable": "容器执行器不可用",
         "typeAiConfigUpdate": "AI 配置更新",
         "typeVerifyCommandsUpdate": "验证命令更新",
+        "typeNotificationSettingsUpdate": "通知设置更新",
         "expand": "展开",
         "collapse": "收起",
         "errors": {
@@ -1039,6 +1113,34 @@
         "AI_KEY_REQUIRED": {
             "zh-CN": "Organization 未配置 AI API Key，请先在设置中添加",
             "en": "Organization has no AI API Key configured. Please add one in settings"
+        },
+        "NOTIFICATION_VIEWER_FORBIDDEN": {
+            "zh-CN": "当前角色无接收业务通知的权限",
+            "en": "Your role cannot receive business notifications"
+        },
+        "NOTIFICATION_PREFERENCE_VALIDATION_FAILED": {
+            "zh-CN": "通知偏好参数无效",
+            "en": "Invalid notification preference payload"
+        },
+        "NOTIFICATION_PREFERENCE_EMPTY": {
+            "zh-CN": "至少需要修改一个通知偏好",
+            "en": "At least one notification preference is required"
+        },
+        "NOTIFICATION_CATEGORY_DISABLED": {
+            "zh-CN": "该通知类别已被组织关闭",
+            "en": "This notification category is disabled by the organization"
+        },
+        "NOTIFICATION_QUERY_INVALID": {
+            "zh-CN": "通知记录查询参数无效",
+            "en": "Invalid notification log query"
+        },
+        "NOTIFICATION_SETTINGS_VALIDATION_FAILED": {
+            "zh-CN": "通知设置参数无效",
+            "en": "Invalid notification settings"
+        },
+        "NOTIFICATION_TEST_FAILED": {
+            "zh-CN": "测试邮件发送失败",
+            "en": "Test email failed"
         },
         "UNKNOWN": {
             "zh-CN": "未知错误",

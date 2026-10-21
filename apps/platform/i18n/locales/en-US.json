@@ -9,6 +9,7 @@
             "envEvents": "Env Events",
             "prChecks": "PR Checks",
             "schedules": "Schedules",
+            "notifications": "Notifications",
             "batchRuns": "Batch Runs",
             "credentials": "Credentials",
             "users": "Users",
@@ -412,6 +413,26 @@
         "scanPreferenceSourceDefault": "explicit default",
         "scanPreferenceSourceLast": "last choice",
         "scanPreferenceSourceFallback": "system fallback",
+        "notifications": {
+            "card": "Notification preferences",
+            "hint": "Email notifications. Platform incidents are always sent and cannot be disabled. Categories disabled by the organization cannot be enabled personally.",
+            "platformIncident": "Platform incidents",
+            "platformIncidentHint": "Executor / environment incidents are always sent to administrators and cannot be disabled.",
+            "securityHigh": "High-risk alerts",
+            "runFailure": "Run failures",
+            "runCompleted": "Completion summaries",
+            "weeklyDigest": "Weekly digest",
+            "viewer": "Your role cannot receive business notifications",
+            "orgDisabled": "Disabled by the organization",
+            "channelUnavailable": "SMTP is not configured; notifications will not be delivered yet.",
+        "weeklyDigestUnavailable": "Weekly digest will be available in a later release; the switch currently has no effect.",
+        "deploymentDisabled": "Notifications are disabled at deployment level (DEPENDFIX_NOTIFICATION_ENABLED=false).",
+            "deploymentDisabled": "Notifications are disabled at deployment level (DEPENDFIX_NOTIFICATION_ENABLED=false).",
+            "weeklyDigestUnavailable": "Weekly digest will be available in a later release; the switch currently has no effect.",
+            "saved": "Notification preferences saved",
+            "loadFailed": "Failed to load notification preferences: {message}",
+            "saveFailed": "Failed to save notification preferences: {message}"
+        },
         "unlink": "Unlink",
         "credentialProvider": "Email & password",
         "errors": {
@@ -432,6 +453,58 @@
         "confirm": {
             "unlinkAccount": "Unlink the {provider} account?"
         }
+    },
+    "notifications": {
+        "title": "Notifications & Email",
+        "subtitle": "Configure organization-level notification policy, recipients and delivery logs.",
+        "test": "Send test email",
+        "categoriesCard": "Event categories",
+        "deliveryCard": "Delivery policy",
+        "category": {
+            "platform_incident": "Platform incidents",
+            "security_high": "High-risk alerts",
+            "run_failure": "Run failures",
+            "run_completed": "Completion summaries",
+            "weekly_digest": "Weekly digest"
+        },
+        "platformIncidentNote": "Platform incidents are mandatory and always sent to administrators; they cannot be disabled.",
+        "severity": "High-risk threshold",
+        "severityHigh": "Critical + High",
+        "severityCritical": "Critical only",
+        "cooldownHours": "Cooldown window (hours)",
+        "maxPerHour": "Max per hour",
+        "extraRecipients": "Extra admin recipients",
+        "extraRecipientsHint": "Comma or newline separated, up to 20.",
+        "save": "Save settings",
+        "saved": "Notification settings saved",
+        "testDelivered": "Test email delivered",
+        "testNoop": "SMTP is not configured; the test email was not delivered",
+        "testFailed": "Test email failed: {message}",
+        "weeklyDigestUnavailable": "Weekly digest will be available in a later release; the switch currently has no effect.",
+        "deploymentDisabled": "Notifications are disabled at deployment level (DEPENDFIX_NOTIFICATION_ENABLED=false).",
+        "logsCard": "Recent deliveries",
+        "logsHint": "Latest 20 entries; status and recipients only, no email body.",
+        "refresh": "Refresh",
+        "emptyLogs": "No delivery records",
+        "colTime": "Time",
+        "colCategory": "Category",
+        "colScope": "Scope",
+        "colStatus": "Status",
+        "colRecipients": "Recipients",
+        "colError": "Error",
+        "status": {
+            "sending": "Sending",
+            "sent": "Sent",
+            "noop": "Not configured / skipped",
+            "failed": "Failed",
+            "skipped_duplicate": "Duplicate skipped",
+            "skipped_cooldown": "Cooldown skipped",
+            "skipped_throttled": "Throttled",
+            "skipped_no_recipient": "No recipient"
+        },
+        "loadFailed": "Failed to load notification settings: {message}",
+        "saveFailed": "Failed to save notification settings: {message}",
+        "channelUnavailable": "SMTP is not configured; notifications will not be delivered yet."
     },
     "users": {
         "title": "User management",
@@ -618,6 +691,7 @@
         "typeContainerUnavailable": "Container executor unavailable",
         "typeAiConfigUpdate": "AI config updated",
         "typeVerifyCommandsUpdate": "Verify commands updated",
+        "typeNotificationSettingsUpdate": "Notification settings updated",
         "expand": "Expand",
         "collapse": "Collapse",
         "errors": {
@@ -1039,6 +1113,34 @@
         "AI_KEY_REQUIRED": {
             "zh-CN": "Organization 未配置 AI API Key，请先在设置中添加",
             "en": "Organization has no AI API Key configured. Please add one in settings"
+        },
+        "NOTIFICATION_VIEWER_FORBIDDEN": {
+            "zh-CN": "当前角色无接收业务通知的权限",
+            "en": "Your role cannot receive business notifications"
+        },
+        "NOTIFICATION_PREFERENCE_VALIDATION_FAILED": {
+            "zh-CN": "通知偏好参数无效",
+            "en": "Invalid notification preference payload"
+        },
+        "NOTIFICATION_PREFERENCE_EMPTY": {
+            "zh-CN": "至少需要修改一个通知偏好",
+            "en": "At least one notification preference is required"
+        },
+        "NOTIFICATION_CATEGORY_DISABLED": {
+            "zh-CN": "该通知类别已被组织关闭",
+            "en": "This notification category is disabled by the organization"
+        },
+        "NOTIFICATION_QUERY_INVALID": {
+            "zh-CN": "通知记录查询参数无效",
+            "en": "Invalid notification log query"
+        },
+        "NOTIFICATION_SETTINGS_VALIDATION_FAILED": {
+            "zh-CN": "通知设置参数无效",
+            "en": "Invalid notification settings"
+        },
+        "NOTIFICATION_TEST_FAILED": {
+            "zh-CN": "测试邮件发送失败",
+            "en": "Test email failed"
         },
         "UNKNOWN": {
             "zh-CN": "未知错误",

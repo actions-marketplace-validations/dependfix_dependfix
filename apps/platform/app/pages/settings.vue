@@ -267,6 +267,84 @@ const loadCurrentOrganization = async () => {
     }
 }
 onMounted(loadCurrentOrganization)
+
+interface NotificationPreferenceRow {
+    category: 'security_high' | 'run_failure' | 'run_completed' | 'weekly_digest'
+    enabled: boolean
+    editable: boolean
+    reason?: 'viewer' | 'org_disabled'
+}
+
+const notificationPreferences = ref<NotificationPreferenceRow[]>([])
+const notificationChannelAvailable = ref(true)
+const notificationDeploymentEnabled = ref(true)
+const notificationLoading = ref(true)
+const notificationSaving = ref(false)
+
+const NOTIFICATION_CATEGORY_LABELS: Record<NotificationPreferenceRow['category'], string> = {
+    security_high: 'settings.notifications.securityHigh',
+    run_failure: 'settings.notifications.runFailure',
+    run_completed: 'settings.notifications.runCompleted',
+    weekly_digest: 'settings.notifications.weeklyDigest',
+}
+
+const notificationCategoryLabel = (category: NotificationPreferenceRow['category']) =>
+    t(NOTIFICATION_CATEGORY_LABELS[category])
+
+const notificationReason = (row: NotificationPreferenceRow) => {
+    if (row.reason === 'viewer') {
+        return t('settings.notifications.viewer')
+    }
+    if (row.reason === 'org_disabled') {
+        return t('settings.notifications.orgDisabled')
+    }
+    return ''
+}
+
+const loadNotificationPreferences = async () => {
+    notificationLoading.value = true
+    try {
+        const data = await $fetch<{
+            categories: NotificationPreferenceRow[]
+            channelAvailable: boolean
+            deploymentEnabled: boolean
+        }>('/api/notification-preferences')
+        notificationPreferences.value = data.categories
+        notificationChannelAvailable.value = data.channelAvailable
+        notificationDeploymentEnabled.value = data.deploymentEnabled
+    } catch (e: any) {
+        error.value = t('settings.notifications.loadFailed', { message: e?.data?.message ?? e?.message ?? t('common.errors.unknown') })
+    } finally {
+        notificationLoading.value = false
+    }
+}
+
+const onNotificationToggle = (row: NotificationPreferenceRow, enabled: boolean) => {
+    void updateNotificationPreference(row, enabled)
+}
+
+const updateNotificationPreference = async (row: NotificationPreferenceRow, enabled: boolean) => {
+    if (!row.editable || notificationSaving.value) {
+        return
+    }
+    notificationSaving.value = true
+    error.value = ''
+    try {
+        const data = await $fetch<{ categories: NotificationPreferenceRow[] }>('/api/notification-preferences', {
+            method: 'PATCH',
+            body: { preferences: { [row.category]: enabled } },
+        })
+        notificationPreferences.value = data.categories
+        success.value = t('settings.notifications.saved')
+    } catch (e: any) {
+        error.value = t('settings.notifications.saveFailed', { message: e?.data?.message ?? e?.message ?? t('common.errors.unknown') })
+    } finally {
+        notificationSaving.value = false
+    }
+}
+
+onMounted(loadNotificationPreferences)
+
 // 扫描偏好为设备级（localStorage）：挂载后再读，避免 SSR 首帧与客户端值不一致
 onMounted(() => {
     scanPreferences.refresh()
@@ -492,6 +570,44 @@ onMounted(() => {
                 </div>
             </CaomeiCard>
 
+            <CaomeiCard :title="t('settings.notifications.card')">
+                <div v-if="notificationLoading" class="text-muted">
+                    {{ t('common.empty.loading') }}
+                </div>
+                <div v-else class="settings-form">
+                    <div class="settings-form__field">
+                        <label>{{ t('settings.notifications.platformIncident') }}</label>
+                        <small class="text-muted">{{ t('settings.notifications.platformIncidentHint') }}</small>
+                    </div>
+                    <div
+                        v-for="row in notificationPreferences"
+                        :key="row.category"
+                        class="settings-notifications__row"
+                    >
+                        <div>
+                            <label :for="`notification-${row.category}`">{{ notificationCategoryLabel(row.category) }}</label>
+                            <small v-if="notificationReason(row)" class="text-muted">{{ notificationReason(row) }}</small>
+                        </div>
+                        <CaomeiSwitch
+                            :id="`notification-${row.category}`"
+                            :model-value="row.enabled"
+                            :disabled="!row.editable || notificationSaving || row.category === 'weekly_digest'"
+                            @update:model-value="value => onNotificationToggle(row, value)"
+                        />
+                        <small v-if="row.category === 'weekly_digest'" class="text-muted">
+                            {{ t('settings.notifications.weeklyDigestUnavailable') }}
+                        </small>
+                    </div>
+                    <small class="text-muted">{{ t('settings.notifications.hint') }}</small>
+                    <small v-if="!notificationChannelAvailable" class="text-muted">
+                        {{ t('settings.notifications.channelUnavailable') }}
+                    </small>
+                    <small v-if="!notificationDeploymentEnabled" class="text-muted">
+                        {{ t('settings.notifications.deploymentDisabled') }}
+                    </small>
+                </div>
+            </CaomeiCard>
+
             <ai-config-form
                 v-if="currentOrganizationId"
                 :organization-id="currentOrganizationId"
@@ -557,6 +673,23 @@ onMounted(() => {
             display: flex;
             align-items: center;
             gap: $space-2;
+        }
+    }
+}
+
+.settings-notifications {
+    &__row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: $space-3;
+        padding: $space-2 0;
+        border-bottom: 1px solid var(--caomei-color-border);
+
+        div {
+            display: flex;
+            flex-direction: column;
+            gap: $space-1;
         }
     }
 }

@@ -96,6 +96,14 @@ const canAccessAdmin = computed(() => session.value?.user?.role !== 'viewer')
                     {{ t('common.nav.schedules') }}
                 </NuxtLink>
                 <NuxtLink
+                    v-if="canAccessAdmin"
+                    to="/notifications"
+                    class="platform__nav-link"
+                    active-class="platform__nav-link--active"
+                >
+                    {{ t('common.nav.notifications') }}
+                </NuxtLink>
+                <NuxtLink
                     to="/batch-runs"
                     class="platform__nav-link"
                     active-class="platform__nav-link--active"

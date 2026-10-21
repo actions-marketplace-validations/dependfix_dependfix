@@ -2,7 +2,7 @@
 // 环境/容器审计事件视图（env-events）
 // 数据源：GET /api/audit-events（执行器/环境异常 + 配置留痕事件 + 通知状态）
 // 过滤维度：type / severity / notified / repositoryId
-// 类型下拉与共享 audit_event 全量类型（AUDIT_EVENT_TYPES）口径一致（5 类）
+// 类型下拉与共享 audit_event 全量类型（AUDIT_EVENT_TYPES）口径一致（6 类）
 import { computed } from 'vue'
 import { ChevronDown, ChevronUp, Funnel } from '@lucide/vue'
 import type { DataTableColumn, InputType } from 'caomei-ui'
@@ -58,6 +58,7 @@ const typeOptions = computed(() => [
     { label: t('envEvents.typeContainerUnavailable'), value: 'container_unavailable' },
     { label: t('envEvents.typeAiConfigUpdate'), value: 'ai_config_update' },
     { label: t('envEvents.typeVerifyCommandsUpdate'), value: 'verify_commands_update' },
+    { label: t('envEvents.typeNotificationSettingsUpdate'), value: 'notification_settings_update' },
 ])
 
 const severityOptions = computed(() => [
@@ -101,6 +102,8 @@ const typeLabel = (type: string) => {
             return t('envEvents.typeAiConfigUpdate')
         case 'verify_commands_update':
             return t('envEvents.typeVerifyCommandsUpdate')
+        case 'notification_settings_update':
+            return t('envEvents.typeNotificationSettingsUpdate')
         default:
             return type
     }
