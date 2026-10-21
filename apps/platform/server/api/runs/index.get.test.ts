@@ -43,6 +43,10 @@ const seedRun = async (repositoryId: string, overrides: {
     errorJson?: string | null
     exitCode?: number | null
     environmentalFailureCount?: number | null
+    memoryMaxBytes?: number | null
+    peakRssBytes?: number | null
+    oomKilled?: boolean | null
+    resourceJson?: string | null
     failureCode?: string | null
     failureStage?: 'source' | 'clone' | 'install' | 'fix' | 'verify' | 'deliver' | 'runtime' | 'cleanup' | 'unknown' | null
     failureKind?: 'transient' | 'deterministic' | 'unknown' | null
@@ -58,6 +62,10 @@ const seedRun = async (repositoryId: string, overrides: {
         errorJson: overrides.errorJson ?? null,
         exitCode: overrides.exitCode ?? null,
         environmentalFailureCount: overrides.environmentalFailureCount ?? null,
+        memoryMaxBytes: overrides.memoryMaxBytes ?? null,
+        peakRssBytes: overrides.peakRssBytes ?? null,
+        oomKilled: overrides.oomKilled ?? null,
+        resourceJson: overrides.resourceJson ?? null,
         failureCode: overrides.failureCode ?? null,
         failureStage: overrides.failureStage ?? null,
         failureKind: overrides.failureKind ?? null,
@@ -134,6 +142,57 @@ describe('GET /api/runs', () => {
         expect(res.items.find((r) => r.id === zero.id)).toMatchObject({
             exitCode: 0,
             environmentalFailureCount: 0,
+        })
+    })
+
+    it('serializes resource / OOM columns and parsed resource JSON', async () => {
+        const seeded = await seedRun(repositoryId, {
+            status: 'failed',
+            memoryMaxBytes: 8 * 1024 ** 3,
+            peakRssBytes: 6 * 1024 ** 3,
+            oomKilled: true,
+            resourceJson: JSON.stringify({
+                source: 'cgroup-v2',
+                samples: 7,
+                degradedReason: 'memory.events oom_kill unavailable',
+            }),
+        })
+
+        const falseRun = await seedRun(repositoryId, {
+            status: 'completed',
+            memoryMaxBytes: 8 * 1024 ** 3,
+            peakRssBytes: 2 * 1024 ** 3,
+            oomKilled: false,
+            resourceJson: JSON.stringify({ source: 'cgroup-v2', samples: 2 }),
+        })
+        const partial = await seedRun(repositoryId, {
+            status: 'completed',
+            memoryMaxBytes: 8 * 1024 ** 3,
+            peakRssBytes: 3 * 1024 ** 3,
+            oomKilled: null,
+            resourceJson: JSON.stringify({
+                source: 'cgroup-v2',
+                degradedReason: 'memory.events oom_kill unavailable',
+            }),
+        })
+
+        const res = await call('GET', '/api/runs') as PaginatedRunsResponse
+        expect(res.items.find((r) => r.id === seeded.id)).toMatchObject({
+            memoryMaxBytes: 8 * 1024 ** 3,
+            peakRssBytes: 6 * 1024 ** 3,
+            oomKilled: true,
+            resource: {
+                source: 'cgroup-v2',
+                samples: 7,
+                degradedReason: 'memory.events oom_kill unavailable',
+            },
+        })
+        // false 必须原样返回（不得折叠为 null）；null + 原因 = 可采峰值 + OOM 不可采
+        expect(res.items.find((r) => r.id === falseRun.id)).toMatchObject({ oomKilled: false })
+        expect(res.items.find((r) => r.id === partial.id)).toMatchObject({
+            peakRssBytes: 3 * 1024 ** 3,
+            oomKilled: null,
+            resource: { degradedReason: 'memory.events oom_kill unavailable' },
         })
     })
 

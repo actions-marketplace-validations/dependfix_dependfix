@@ -40,6 +40,10 @@ describe('GET /api/runs/[id]', () => {
             summaryJson: JSON.stringify({ alertsTotal: 1, environmentalFailures: 1 }),
             exitCode: 1,
             environmentalFailureCount: 1,
+            memoryMaxBytes: 8 * 1024 ** 3,
+            peakRssBytes: 6 * 1024 ** 3,
+            oomKilled: true,
+            resourceJson: JSON.stringify({ source: 'cgroup-v2', samples: 4 }),
         }))
         runId = run.id
 
@@ -106,6 +110,10 @@ describe('GET /api/runs/[id]', () => {
             summary: { alertsTotal: 1, environmentalFailures: 1 },
             exitCode: 1,
             environmentalFailureCount: 1,
+            memoryMaxBytes: 8 * 1024 ** 3,
+            peakRssBytes: 6 * 1024 ** 3,
+            oomKilled: true,
+            resource: { source: 'cgroup-v2', samples: 4 },
         })
         expect((detail.results as Record<string, unknown>[])).toHaveLength(1)
         expect((detail.results as Record<string, unknown>[])[0]).toMatchObject({

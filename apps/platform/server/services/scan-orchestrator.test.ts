@@ -253,6 +253,13 @@ describe('scan-orchestrator.service', () => {
                 result: makeResult({ summary: { alertsFound: 3, alertsFixed: 1, environmentalFailures: 2 } }),
                 error: undefined,
                 exitCode: 1,
+                resource: {
+                    memoryMaxBytes: 8 * 1024 ** 3,
+                    peakRssBytes: 6 * 1024 ** 3,
+                    oomKilled: true,
+                    source: 'cgroup-v2',
+                    samples: 3,
+                },
             })
 
             const run = await runScanForRepository(repositoryId, { mode: 'fix', severityThreshold: 'high' })
@@ -264,6 +271,12 @@ describe('scan-orchestrator.service', () => {
             const persisted = await ds.getRepository(ScanRun).findOne({ where: { id: run.id } })
             expect(persisted?.exitCode).toBe(1)
             expect(persisted?.environmentalFailureCount).toBe(2)
+            expect(persisted).toMatchObject({
+                memoryMaxBytes: 8 * 1024 ** 3,
+                peakRssBytes: 6 * 1024 ** 3,
+                oomKilled: true,
+            })
+            expect(JSON.parse(persisted?.resourceJson ?? '{}')).toMatchObject({ source: 'cgroup-v2', samples: 3 })
         })
 
         it('keeps outcome columns null for a failed run without result', async () => {
@@ -278,6 +291,13 @@ describe('scan-orchestrator.service', () => {
             expect(run.status).toBe('failed')
             expect(run.exitCode).toBeNull()
             expect(run.environmentalFailureCount).toBeNull()
+            expect(run.memoryMaxBytes).toBeNull()
+            expect(run.peakRssBytes).toBeNull()
+            expect(run.oomKilled).toBeNull()
+            expect(JSON.parse(run.resourceJson ?? '{}')).toMatchObject({
+                source: 'none',
+                degradedReason: 'container executor did not return resource usage',
+            })
             // 超时分类保留（UI「结果缺失」不覆盖失败归因）
             expect(run.failureCode).toBe('execution_timeout')
             expect(run.failureStage).toBe('runtime')
@@ -475,6 +495,13 @@ describe('scan-orchestrator.service', () => {
             expect(run.failureCode).toBe('orchestration_failed')
             expect(run.failureStage).toBe('runtime')
             expect(run.failureKind).toBe('unknown')
+            expect(run.memoryMaxBytes).toBeNull()
+            expect(run.peakRssBytes).toBeNull()
+            expect(run.oomKilled).toBeNull()
+            expect(JSON.parse(run.resourceJson ?? '{}')).toMatchObject({
+                source: 'none',
+                degradedReason: 'orchestration failed before resource snapshot',
+            })
         })
 
         it('throws 404 when runId references missing run', async () => {
