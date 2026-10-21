@@ -17,6 +17,7 @@ import { runScanForRepository } from '../scan-orchestrator.service'
 import { SCHEDULED_JOB_NAME, triggerSchedule } from '../scheduler/scheduler.service'
 import { SCAN_QUEUE_NAME, type ScanJobData } from './scan-queue'
 import { sanitizeString } from '#server/utils/sanitize'
+import { DEFAULT_SCAN_CONCURRENCY } from '#server/utils/resource-budget'
 
 /** scheduled-scan job 数据（BullMQ job scheduler 模板，见 scheduler.service registerSchedule） */
 export interface ScheduledScanJobData {
@@ -170,7 +171,7 @@ export const createScanWorker = (
         return processor(job.data, job.name)
     }, {
         connection,
-        concurrency: options?.concurrency ?? 1,
+        concurrency: options?.concurrency ?? DEFAULT_SCAN_CONCURRENCY,
         ...SCAN_WORKER_LOCK_OPTIONS,
     })
 
