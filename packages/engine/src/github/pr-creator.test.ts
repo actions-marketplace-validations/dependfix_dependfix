@@ -1016,6 +1016,31 @@ describe('generatePRBody', () => {
         expect(body).not.toContain('Supersedes')
     })
 
+    it('renders skipped/truncated breakdown and unfixed count', () => {
+        const result = buildRunResult()
+        result.summary = {
+            ...result.summary,
+            alertsFound: 20,
+            alertsFixed: 0,
+            alertsUnfixed: 20,
+            alertsConverged: 0,
+            alertsSkipped: 4,
+            alertsSkippedByReason: { 'cross-major': 4 },
+            alertsTruncated: 6,
+            alertsTruncatedBySeverity: { critical: 2, high: 4 },
+        }
+
+        const body = generatePRBody(result)
+
+        expect(body).toContain('| Unfixed alerts | 20 |')
+        expect(body).toContain('### ⏭️ Not Fixed / Skipped')
+        expect(body).toContain('**20 / 20** evaluated alerts remain unfixed; **6** truncated before analysis (not evaluated).')
+        expect(body).toContain('| Truncated: Critical | 2 |')
+        expect(body).toContain('| Truncated: High | 4 |')
+        expect(body).toContain('| Skipped: Cross-major / manual review | 4 |')
+        expect(body).toContain('| Failed / other not fixed | 16 |')
+    })
+
     it('truncates body from the tail when exceeding GitHub 64KB limit', () => {
         const result = buildRunResult()
         // 构造大量修复告警（每行约 50-60 字节）：3000 行 → body ~150KB，远超 60KB 截断线

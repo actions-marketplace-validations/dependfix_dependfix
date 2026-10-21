@@ -251,6 +251,8 @@ describe('DependfixApp cross-major upgrade (--allow-major-upgrade)', () => {
 
         // 未开启：跨线告警不修复、不误标 fixed/converged → skipped
         expect(result.summary.alertsSkipped).toBe(1)
+        expect(result.summary.alertsSkippedByReason['cross-major']).toBe(1)
+        expect(Object.values(result.summary.alertsSkippedByReason).reduce((sum, value) => sum + value, 0)).toBe(1)
         expect(result.summary.alertsConverged).toBe(0)
         expect(result.summary.alertsFixed).toBe(0)
         const majorActions = result.actions.filter((a) => a.strategy === 'major-upgrade')

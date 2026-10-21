@@ -5,7 +5,12 @@ import {
     type FixAction,
     type RunResult,
     collectCodeScanningSuggestions,
+    countUnfixedAlerts,
+    formatSeverity,
+    formatSkipReason,
     isAlertFixedByActions,
+    skippedBreakdown,
+    truncatedBreakdown,
 } from '@dependfix/core'
 import { GIT_COMMIT_HOOKS_ISOLATION_ARGS, GIT_COMMIT_SIGNING_ISOLATION_ARGS, GIT_PUSH_HOOKS_ISOLATION_ARGS, GIT_PUSH_SIGNING_ISOLATION_ARGS } from './git-signing'
 
@@ -553,6 +558,9 @@ const MAX_PR_BODY_BYTES = 60 * 1024
  */
 export function generatePRBody(result: RunResult, supersededNumbers?: number[]): string {
     const { summary, actions, errors } = result
+    const unfixed = countUnfixedAlerts(summary)
+    const skippedRows = skippedBreakdown(summary)
+    const truncatedRows = truncatedBreakdown(summary)
 
     const lines: string[] = [
         '## 🔒 Dependfix Auto Fix',
@@ -570,12 +578,38 @@ export function generatePRBody(result: RunResult, supersededNumbers?: number[]):
         `| Alerts fixable | ${summary.alertsFixable} |`,
         `| Dependencies upgraded | ${summary.alertsFixed} |`,
         `| Upgrades failed | ${summary.alertsFailed} |`,
+        `| Skipped | ${summary.alertsSkipped} |`,
         `| Converged (already >= target) | ${summary.alertsConverged} |`,
+        `| Truncated (max alerts/repo) | ${summary.alertsTruncated} |`,
+        `| Unfixed alerts | ${unfixed} |`,
         `| Lockfile repairs | ${summary.lockfileRepairs} |`,
         `| Verifications passed | ${summary.verificationsPassed} |`,
         `| Verifications failed | ${summary.verificationsFailed} |`,
         '',
     ]
+
+    // Not Fixed / Skipped（分组披露：避免「部分修复」被读成「全部修复」）
+    if (unfixed > 0 || skippedRows.length > 0 || truncatedRows.length > 0) {
+        const skippedTotal = skippedRows.reduce((sum, row) => sum + row.count, 0)
+        const failedResidual = Math.max(0, unfixed - skippedTotal)
+        lines.push('### ⏭️ Not Fixed / Skipped', '')
+        lines.push(
+            `> **${unfixed} / ${summary.alertsFound}** evaluated alerts remain unfixed; **${summary.alertsTruncated}** truncated before analysis (not evaluated).`,
+            '',
+            '| Category | Count |',
+            '|----------|-------|',
+        )
+        for (const row of truncatedRows) {
+            lines.push(`| Truncated: ${formatSeverity(row.key)} | ${row.count} |`)
+        }
+        for (const row of skippedRows) {
+            lines.push(`| Skipped: ${formatSkipReason(row.key)} | ${row.count} |`)
+        }
+        if (failedResidual > 0) {
+            lines.push(`| Failed / other not fixed | ${failedResidual} |`)
+        }
+        lines.push('')
+    }
 
     // Supply Chain Warnings（路径 A 投毒合入前人工确认依据：升级包带脚本且被批准）
     const supplyChainWarnings = result.supplyChainWarnings ?? []
