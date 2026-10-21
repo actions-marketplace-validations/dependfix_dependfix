@@ -25,7 +25,7 @@
 
 **6 原子条目**（覆盖 🎨 2 + 🛠️ 2 + 🚀 1 + 🧪 1，满足 [规划规范 §1.1](../standards/planning.md#11-硬性约束) 类型平衡建议）：
 
-- **M46.1** [P1 🎨] 环境性失败与「有告警未修」的可见性
+- **M46.1** [P1 🎨] 环境性失败与「有告警未修」的可见性 —— **已闭环**
 - **M46.2** [P2 🎨] 跨 major / 截断 / 子目录跳过的披露
 - **M46.3** [P2 🛠️] 基线采样完整链与门禁回滚粒度
 - **M46.4** [P1 🛠️] 执行容器内存下限与 OOM 归因
@@ -44,7 +44,7 @@
 
 ---
 
-### M46.1 [P1 🎨] 环境性失败与「有告警未修」的可见性
+### M46.1 [P1 🎨] 环境性失败与「有告警未修」的可见性（**已闭环** `c3132555` + `900ab6f1` + `a70c5dc4` + `c040e05b` + `c7101de8` + `b36bcb36` + 本条登记）
 
 - **目标**：让「运行完成但存在环境性失败 / 有可修告警却 0 修复」在运行列表与详情可见，而不是显示为纯成功；引擎 exit code 与环境性失败计数落库，形成可查询的事实。
 - **优先级**：P1
@@ -52,16 +52,17 @@
   - `packages/core/src/report/types.ts`（`RunSummary` 新增环境性失败计数）；`packages/engine/src/app/result-assembly.ts:146-181`（环境性动作统计）；`packages/engine/src/app/repo-fix.ts` / `repo-fix-finalize.ts`（累加点）。
   - `apps/platform/server/entities/scan-run.ts`（新增 `exit_code` / `environmental_failure_count`）；新增幂等迁移并登记 `server/database/index.ts` 与迁移注册表测试。
   - `apps/platform/server/services/scan-orchestrator.service.ts:397-467`（终态落库）；`scan-run-state.ts:96-142`（复用同一判定，避免双源）；`apps/platform/server/api/scan-history/**`（序列化）。
-  - `apps/platform/app/pages/scans.vue` + `components/run-detail-dialog.vue`（行标记 / 详情区块）；`app/utils/run-view.ts`（派生函数）。
+  - `apps/platform/app/pages/scans.vue` + `components/run-detail-dialog.vue` + `components/repo-history-dialog.vue`（行标记 / 两处详情区块）；`app/utils/run-view.ts`（派生函数）；i18n 双侧；e2e / 视觉 fixtures。
 - **验收标准**：
-  - [ ] ① 新 run 落 `exit_code` 与 `environmental_failure_count`；旧数据为 `NULL` / `0` 时 API 与 UI 正常降级，不报错。
-  - [ ] ② 列表与详情在计数 > 0 时显示「环境性失败 N」与「未修复告警 N」，tooltip 说明「不归因本次运行但可见」；计数为 0 时不显示噪音标记。
-  - [ ] ③ 超时 / 无 `result` 的 run 显示「结果缺失」并保留 `execution_timeout` 分类，不误报成功；该 run 不参与告警明细 reconcile，UI 不显示误导性的「告警 0」。
-  - [ ] ④ 迁移二次执行幂等；单测覆盖 summary 累加、落库映射、派生函数；页面变化时更新视觉基线。
+  - [x] ① 新 run 落 `exit_code` 与 `environmental_failure_count`；旧数据为 `NULL` / `0` 时 API 与 UI 正常降级，不报错。
+  - [x] ② 列表与详情在计数 > 0 时显示「环境性失败 N」与「未修复告警 N」，tooltip 说明「不归因本次运行但可见」；计数为 0 时不显示噪音标记。
+  - [x] ③ 超时 / 无 `result` 的 run 显示「结果缺失」并保留 `execution_timeout` 分类，不误报成功；该 run 不参与告警明细 reconcile，UI 不显示误导性的「告警 0」。
+  - [x] ④ 迁移二次执行幂等；单测覆盖 summary 累加、落库映射、派生函数；页面变化时更新视觉基线。
 - **不做什么**：不改 exit code 0 / 1 / 2 语义；不做历史数据全量回填；不新增独立页面；不改 `run-failure-classify.ts` 的分类表（真实安装失败被并入环境性的分类语义收窄见 backlog「环境性失败分类语义收窄」）。
 - **依赖**：2026-10-17 / 18 生产复盘（13 仓库「有告警 / 0 修复」）；`run-failure-classify.ts` 既有 `failure_kind`；M43.3 环境性归因与 M45 交付守卫（交接来源）。
-- **交付物**：预计 3-4 commits / 10-14 文件 / 300-450 行——① `feat(core/engine)` summary 环境性计数（3-4 文件 / 80-120 行）；② `feat(platform)` 实体列 + 幂等迁移 + 终态落库（3-4 / 100-150）；③ `feat(platform)` 列表 / 详情标记 + 序列化（2-3 / 80-120）；④ `test(platform)` 派生函数与视觉基线（2-3 / 40-60）。
-- **风险与缓解**：**R1 双源判定漂移**（内存 exitCode 与落库计数不一致）→ 判定抽纯函数单一事实源 + 映射用例；**R2 UI 误读**（把「环境性失败」读成仓库代码问题）→ 文案与 tooltip 明确「不归因」；**R3 报告契约变更**（summary 新字段影响快照）→ core 类型契约测试 + 旧报告降级。
+- **交付物（实际）**：6 commits（不含本条登记）/ 39 文件 / 945 插入。拆分：`c3132555` core/engine 汇总契约（9 文件）；`900ab6f1` 实体列 + 迁移 + 终态落库（8）；`a70c5dc4` API 序列化 + fixtures（7）；`c040e05b` 列表 / 两处详情 / i18n（7）；`c7101de8` e2e + 视觉基线（5）；`b36bcb36` 标准与设计文档（3）。**超原估**（10-14 文件 / 300-450 行）的主因：`/scans?run=` 实际挂载 `repo-history-dialog`（与 alerts 侧栏 `run-detail-dialog` 为两套详情），两者都需展示结果可信度；另补列表 / 两详情 / 结果缺失的 e2e 与视觉前置断言。
+- **风险与缓解**：**R1 双源判定漂移**（内存 exitCode 与落库计数不一致）→ `resolveScanRunOutcome` 纯函数单一映射 + 映射用例；**R2 UI 误读**（把「环境性失败」读成仓库代码问题）→ 文案与 tooltip 明确「不归因」；**R3 报告契约变更**（summary 新字段影响快照）→ core 类型契约测试 + 旧报告降级；**R4 无 result 的执行器合成 exitCode=2 污染** → 仅在 result.summary 存在时落两列；**R5 视觉基线阈值内假绿**（单字符差异低于 100px）→ 删除基线重建 + 截图前断言语义 + 两次 no-update。
+- **闭环记录（2026-10-21）**：**审计** R1 `standard` 三分区并发（A core/engine/数据层 · B API/fixtures · C UI/视觉/文档）均 **Pass**（0 blocker；A 4 warning / B 3 warning / C 4 warning）→ 收口（无 result 两列 NULL、reuse 用例改为 catch-all 生效、主链路覆盖边界收窄 + backlog 候选、B 模式哨兵注释、0 值落库断言、repo-history 空态、已修复列归一、英文文案、结果缺失隐藏告警 0、converged 视觉覆盖等）→ R2 `quick` **Pass**（0 blocker / 1 warning：告警侧栏详情无断言）→ 补 `alerts-sidebar` e2e 的未修复 / 环境性失败 / 退出码 / 结果缺失断言 → 复跑通过。**门禁**：定向单测 141 passed（另 core/report 98 passed）；`test:visual` 16 passed（update 后连续两次 no-update；基线人工查看「未修复 1 / 环境性失败 1 / 退出码 1」，另以 `maxDiffPixels:0` 严格配置复验逐像素一致）；e2e 全量 198 passed + 2 flaky（repos-crud 删除 / scan-config 记住上次选择，单独重跑均通过），新增列表 / 两详情 / 结果缺失用例通过；`pnpm run lint` 0 error（3 warning：alerts.vue / scans.vue 存量 max-lines + scan-orchestrator.test max-lines-per-function）；`pnpm run typecheck` 7 包 Done；core / engine / platform build exit 0；`check:docs` / `check:doc-size`（warning 0）/ `lint:md:check` / `lint:i18n` / `check:orphan-ids`（0 命中）通过。**残余**：① 常规分组 / 逐包升级路径尚未消费 `environmental` 标记，计数可能低于真实环境性失败数（backlog「常规升级链路的环境性失败归因对齐」）；② `dispatched`（B 模式结果未就绪）仍显示「告警 0」，R1 接受为既有设计；③ `exit_code` 的 mysql / postgres 分支未实测（与既有同类迁移同风险）；④ 告警侧栏详情新增断言已覆盖，`run-detail-dialog` 的窄屏布局未单独验证。
 
 ### M46.2 [P2 🎨] 跨 major / 截断 / 子目录跳过的披露
 
