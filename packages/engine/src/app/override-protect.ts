@@ -4,13 +4,13 @@
 // 未命中返回 null（调用方继续正常写入路径）。
 // 设计见 docs/design/governance/override-protect-policy.md。
 
-import type { FixAction, FixError, Logger } from '@dependfix/core'
+import { addSkipped, type FixAction, type FixError, type Logger, type RunSummary } from '@dependfix/core'
 import { matchesOverrideProtect } from '../github/repo-policy'
 
 interface OverrideProtectCtx {
     logger: Logger
     allErrors: FixError[]
-    summary: { alertsSkipped: number }
+    summary: Pick<RunSummary, 'alertsSkipped' | 'alertsSkippedByReason'>
 }
 
 interface OverrideProtectParams {
@@ -52,7 +52,7 @@ export function handleOverrideProtection(
         category: 'OVERRIDE_PROTECTED',
         message: reason,
     })
-    ctx.summary.alertsSkipped++
+    addSkipped(ctx.summary, 'override-protected')
     return {
         type: 'dependency-upgrade',
         repository: params.repository,

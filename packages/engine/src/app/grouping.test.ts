@@ -366,8 +366,10 @@ describe('DependfixApp group upgrade', () => {
         expect(mockUpgradeDependency.mock.calls[0]?.[0].packageName).toBe('fast-uri')
         const upgrades = result.actions.filter((a) => a.type === 'dependency-upgrade')
         expect(upgrades.map((a) => a.target)).toEqual(['fast-uri'])
-        // 报告保留 vite 告警 + 计入 skipped
+        // 报告保留 vite 告警 + 计入 skipped（根 lockfile / 子目录 manifest 桶）
         expect(result.alerts.some((a) => a.packageName === 'vite' && a.manifestPath === 'pnpm-lock.yaml')).toBe(true)
         expect(result.summary.alertsSkipped).toBe(1)
+        expect(result.summary.alertsSkippedByReason['subdirectory-manifest']).toBe(1)
+        expect(Object.values(result.summary.alertsSkippedByReason).reduce((sum, value) => sum + value, 0)).toBe(1)
     })
 })

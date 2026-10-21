@@ -1,6 +1,8 @@
 import { join } from 'node:path'
 import type { Octokit } from '@octokit/rest'
 import {
+    addSkipped,
+    addTruncatedBySeverity,
     filterAlerts,
     limitAlerts,
     prioritizeAlerts,
@@ -189,7 +191,7 @@ async function fetchRepoFixInputs(
     const prioritized = prioritizeAlerts(filtered)
     const { limited, truncated } = limitAlerts(prioritized, ctx.config.maxAlertsPerRepository)
     if (truncated.length > 0) {
-        ctx.summary.alertsTruncated += truncated.length
+        addTruncatedBySeverity(ctx.summary, truncated.map((item) => item.alert))
         ctx.logger.warn(truncatedWarning(ctx.config, truncated.length))
     }
     progress.alertsCount = limited.length
@@ -220,15 +222,15 @@ async function prepareRepoFixSets(
     progress.failed += csCounts.failed
 
     // 2.1 子目录 / 根直接依赖 lockfile 告警（防护：docs vite 告警曾误降级根 vite@8→6）→ 剔除修复链路
-    // 收尾审查遗留修复：code-scanning 告警（manifestPath 为源码路径）不参与依赖清单分区，
-    // 避免全部落 sub 桶产生 skip 计数噪音（其可见性由 §Code Scanning Suggestions 承担）
-    const dependencyAlerts = limited.filter((a) => a.source !== 'code-scanning')
+    // 收尾审查遗留修复：code-scanning / code-quality 告警（manifestPath 为源码路径）不参与依赖清单分区，
+    // 避免全部落 sub 桶产生 skip 计数噪音（其可见性由 §Code Scanning Suggestions / §Code Quality Findings 承担）
+    const dependencyAlerts = limited.filter((a) => a.source !== 'code-scanning' && a.source !== 'code-quality')
     const { root: rootManifestAlerts, member: memberManifestAlerts, sub: submanifestAlerts } = partitionSubmanifestAlerts(dependencyAlerts, ctx.workDir)
     if (submanifestAlerts.length > 0) {
         ctx.logger.warn(
             `[alerts] ${submanifestAlerts.length} alert(s) from sub-directory / root-direct-dep manifest(s) skipped — manual review required: ${submanifestAlerts.map((a) => `${a.packageName} (${a.manifestPath})`).join(', ')}`,
         )
-        ctx.summary.alertsSkipped += submanifestAlerts.length
+        addSkipped(ctx.summary, 'subdirectory-manifest', submanifestAlerts.length)
     }
 
     return {
@@ -273,7 +275,7 @@ async function applyLockfileFixes(
         ctx.logger.warn(
             `[alerts] ${manualCrossMajorAlerts.length} alert(s) require a cross-major upgrade (no fix within the installed major line) — manual review required: ${manualCrossMajorAlerts.map((a) => `${a.packageName} → ${a.recommendedVersion}`).join(', ')}`,
         )
-        ctx.summary.alertsSkipped += manualCrossMajorAlerts.length
+        addSkipped(ctx.summary, 'cross-major', manualCrossMajorAlerts.length)
     }
     const autoMajorAlerts = lockfileManifestAlerts.filter((a) => autoMajorAlertIds.has(a.id))
     const fixableLockfileAlerts = lockfileManifestAlerts.filter(
@@ -343,9 +345,12 @@ async function applyLockfileFixes(
             progress.fixed++
             continue
         }
+        // 防御性分支：multiVersionAlerts 已按「overrides 非空」过滤，当前不可达；
+        // 保留以防上游过滤条件变化，并保持告警级收敛计数口径。
         if (Object.keys(versionedOverrides).length === 0) {
             ctx.logger.info(`Skipping ${alert.packageName}: no vulnerable instances below targets`)
-            ctx.summary.alertsConverged++
+            // 告警级计数：同包多告警共用一次包级判定，不能只 +1
+            ctx.summary.alertsConverged += multiVersionAlerts.filter((a) => a.packageName === alert.packageName).length
             continue
         }
         batchItems.push({ alert, versionedOverrides, targets })
@@ -663,14 +668,17 @@ async function applyGroupUpgrades(
                     ctx.logger.info(
                         `Skipping ${alert.packageName}: all locked versions ${lockedVersions.join(', ')} >= target ${alert.recommendedVersion} (no upgrade needed)`,
                     )
-                    ctx.summary.alertsConverged++
+                    // 告警级计数：dedupeFixableAlerts 后仍有代表告警，但同包全部告警都已收敛
+                    ctx.summary.alertsConverged += singleVersionAlerts.filter(
+                        (a) => a.packageName === alert.packageName && a.fixable && a.recommendedVersion,
+                    ).length
                     continue
                 }
                 ctx.logger.warn(
                     `Skipping ${alert.packageName}: locked instance(s) ${belowTarget.join(', ')} remain below target ${alert.recommendedVersion} `
                     + '(lower-major / different manifest instance; cross-major upgrade or manual review required)',
                 )
-                ctx.summary.alertsSkipped++
+                addSkipped(ctx.summary, 'cross-major')
                 continue
             }
             if (lockedVersions.length === 0) {
@@ -748,6 +756,8 @@ async function applyGroupUpgrades(
         }
     }
 
-    const skippedCount = singleVersionAlerts.length - fixableAlerts.length
-    ctx.summary.alertsSkipped += skippedCount
+    // 不可自动修复残差按告警逐条统计；忽略 dedupeFixableAlerts 的合并差额——被合并的告警
+    // 仍可能由代表 action 同时修复，不能标成 not-fixable（同包多 GHSA 常见）
+    const notFixableCount = singleVersionAlerts.filter((alert) => !alert.fixable || !alert.recommendedVersion).length
+    addSkipped(ctx.summary, 'not-fixable', notFixableCount)
 }

@@ -28,7 +28,7 @@ function makeCtx(overrideProtect?: Record<string, string[]>) {
         logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as never,
         workDir: '/tmp/m294',
         allErrors: [] as { category?: string, message: string }[],
-        summary: { alertsSkipped: 0 },
+        summary: { alertsSkipped: 0, alertsSkippedByReason: {} },
     }
 }
 
@@ -50,8 +50,9 @@ describe('upgradeAlert overrides 保护名单（间接依赖 override 路径）'
         expect(ctx.allErrors).toHaveLength(1)
         expect(ctx.allErrors[0].category).toBe('OVERRIDE_PROTECTED')
         expect(ctx.allErrors[0].message).toContain('foo/bar')
-        // skipped 恰好计 1 次（不得与调用侧重复计数）
+        // skipped 恰好计 1 次（不得与调用侧重复计数），且按原因归组
         expect(ctx.summary.alertsSkipped).toBe(1)
+        expect(ctx.summary.alertsSkippedByReason['override-protected']).toBe(1)
     })
 
     it('未命中保护名单：正常走 override 路径（回归，行为不变）', async () => {

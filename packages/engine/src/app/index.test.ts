@@ -596,6 +596,7 @@ describe('DependfixApp code-scanning parallel source', () => {
 
         expect(exitCode).toBe(0)
         expect(result.summary.alertsTruncated).toBe(1)
+        expect(result.summary.alertsTruncatedBySeverity).toEqual({ high: 1 })
         expect(result.alerts).toHaveLength(1)
         expect(nock.pendingMocks()).toEqual([])
     })

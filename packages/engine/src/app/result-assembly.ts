@@ -1,11 +1,12 @@
 // result-assembly.ts：从 app/helpers.ts 拆出的"结果汇总"段落。
 // 控制 app/helpers.ts 行数（max-lines 800），保持向后兼容：原 helpers.ts 通过
 // re-export 透出以下函数，内部消费者无需调整 import。
-import type {
-    RunReportConfig,
-    RunResult,
-    AiUsageAggregate,
-    SupplyChainWarning,
+import {
+    isAlertFixedByActions,
+    type RunReportConfig,
+    type RunResult,
+    type AiUsageAggregate,
+    type SupplyChainWarning,
 } from '@dependfix/core'
 import type { AiUsage } from '../ai/usage'
 import { isRepoVerificationBlocked } from '../runners/verification-gate'
@@ -72,6 +73,9 @@ export function computeSummary(
     summary.alertsFound = allAlerts.length
     summary.alertsFixable = fixable
     summary.alertsFixed = fixed
+    // 告警级未修复数：同包多告警可能共用一个成功 action，不能用 alertsFixed（action 数）做减法
+    const fixedAlertCount = allAlerts.filter((alert) => isAlertFixedByActions(alert, allActions)).length
+    summary.alertsUnfixed = Math.max(0, allAlerts.length - fixedAlertCount - summary.alertsConverged)
     summary.alertsFailed = failed
     // 环境性失败可见性（不归因）：按审计条目计数，与 exitCode / alertsFailed 保持独立口径。
     summary.environmentalFailures = allErrors.filter((error) => error.category === 'ENVIRONMENT_ERROR').length

@@ -57,6 +57,51 @@ describe('computeSummary', () => {
         expect(ctx.summary.alertsFailed).toBe(0)
     })
 
+    it('computes alert-level unfixed when one action fixes multiple same-package alerts', () => {
+        const alert = {
+            source: 'dependabot',
+            repository: 'foo/a',
+            packageName: 'lodash',
+            recommendedVersion: '4.17.21',
+        }
+        const ctx = makeCtx({
+            allAlerts: [{ ...alert, id: 1 }, { ...alert, id: 2 }] as never,
+            allActions: [{
+                type: 'dependency-upgrade',
+                repository: 'foo/a',
+                target: 'lodash',
+                success: true,
+                toVersion: '4.17.21',
+            }] as never,
+        })
+        computeSummary(ctx)
+        // action 级 fixed = 1，但两条告警都被该 action 满足 → 告警级 unfixed = 0
+        expect(ctx.summary.alertsFound).toBe(2)
+        expect(ctx.summary.alertsFixed).toBe(1)
+        expect(ctx.summary.alertsUnfixed).toBe(0)
+    })
+
+    it('keeps alert-level unfixed for same-package alerts whose target major is not satisfied', () => {
+        const ctx = makeCtx({
+            allAlerts: [
+                { id: 1, source: 'dependabot', repository: 'foo/a', packageName: 'vite', recommendedVersion: '6.4.3' },
+                { id: 2, source: 'dependabot', repository: 'foo/a', packageName: 'vite', recommendedVersion: '5.4.21' },
+            ] as never,
+            allActions: [{
+                type: 'dependency-upgrade',
+                repository: 'foo/a',
+                target: 'vite',
+                success: true,
+                toVersion: '6.4.3',
+            }] as never,
+        })
+        computeSummary(ctx)
+        expect(ctx.summary.alertsFound).toBe(2)
+        expect(ctx.summary.alertsFixed).toBe(1)
+        // 5.x 告警不能被 6.4.3 的目标满足 → 仍有一条未修复
+        expect(ctx.summary.alertsUnfixed).toBe(1)
+    })
+
     it('sets environmentalFailures to 0 when no environmental errors', () => {
         const ctx = makeCtx()
         computeSummary(ctx)

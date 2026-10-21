@@ -3,7 +3,7 @@
 // 拆出理由（2026-10-17）：`app/index.ts` 触及 `max-lines` 上限，按既有处置「先拆分再改」把
 // 与 fix 管线对称的 report 管线单独成模块（`app/repo-fix.ts` 为同族先例）。
 import type { Octokit } from '@octokit/rest'
-import { filterAlerts, limitAlerts, prioritizeAlerts, toErrorMessage } from '@dependfix/core'
+import { addTruncatedBySeverity, filterAlerts, limitAlerts, prioritizeAlerts, toErrorMessage } from '@dependfix/core'
 import type { AppContext } from './helpers'
 import { fetchRepoAlerts, fetchDefaultBranch, hasSourceScopedFetchFailure, truncatedWarning } from './repo-alerts'
 import { alertsFetchTokenHint } from './token-hints'
@@ -24,7 +24,7 @@ export async function processRepoForReport(ctx: AppContext, client: Octokit | nu
         const prioritized = prioritizeAlerts(filtered)
         const { limited, truncated } = limitAlerts(prioritized, ctx.config.maxAlertsPerRepository)
         if (truncated.length > 0) {
-            ctx.summary.alertsTruncated += truncated.length
+            addTruncatedBySeverity(ctx.summary, truncated.map((item) => item.alert))
             ctx.logger.warn(truncatedWarning(ctx.config, truncated.length))
         }
 
