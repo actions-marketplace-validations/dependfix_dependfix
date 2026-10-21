@@ -89,10 +89,29 @@ const scanRunSchema = z.object({
     summary: z.object({
         alertsFound: z.number().int().min(0),
         alertsFixed: z.number().int().min(0),
+        /** 告警级未修复数（旧数据可缺省，UI 回退近似公式） */
+        alertsUnfixed: z.number().int().min(0).optional(),
         /** 已收敛（未修复口径排除项） */
         alertsConverged: z.number().int().min(0).optional(),
         /** 环境性失败事件数（UI 在列缺失时回退该值） */
         environmentalFailures: z.number().int().min(0).optional(),
+        /** 跳过总数与按原因分组（结果披露） */
+        alertsSkipped: z.number().int().min(0).optional(),
+        alertsSkippedByReason: z.object({
+            'subdirectory-manifest': z.number().int().min(0).optional(),
+            'cross-major': z.number().int().min(0).optional(),
+            'not-fixable': z.number().int().min(0).optional(),
+            'override-protected': z.number().int().min(0).optional(),
+        }).optional(),
+        /** 截断总数与按严重级别分组（结果披露） */
+        alertsTruncated: z.number().int().min(0).optional(),
+        alertsTruncatedBySeverity: z.object({
+            critical: z.number().int().min(0).optional(),
+            high: z.number().int().min(0).optional(),
+            medium: z.number().int().min(0).optional(),
+            low: z.number().int().min(0).optional(),
+            unknown: z.number().int().min(0).optional(),
+        }).optional(),
     }).optional(),
     /** 进程级退出码（缺省 null；视觉基线可钉死非 null 值） */
     exitCode: z.number().int().min(0).max(255).nullable().optional(),

@@ -44,10 +44,21 @@ export interface ScanRunFixture {
     summary?: {
         alertsFound: number
         alertsFixed: number
+        /** 告警级未修复数（旧数据可缺省，UI 回退近似公式） */
+        alertsUnfixed?: number
         /** 已收敛（未修复口径排除项） */
         alertsConverged?: number
         /** 环境性失败事件数（UI 在列缺失时回退该值） */
         environmentalFailures?: number
+        /** 跳过总数与按原因分组（结果披露） */
+        alertsSkipped?: number
+        alertsSkippedByReason?: Partial<Record<
+            'subdirectory-manifest' | 'cross-major' | 'not-fixable' | 'override-protected',
+            number
+        >>
+        /** 截断总数与按严重级别分组（结果披露） */
+        alertsTruncated?: number
+        alertsTruncatedBySeverity?: Partial<Record<'critical' | 'high' | 'medium' | 'low' | 'unknown', number>>
     }
     /** 进程级退出码（缺省 null） */
     exitCode?: number | null

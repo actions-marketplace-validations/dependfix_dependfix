@@ -421,7 +421,15 @@ const runScanInternal = async (
             // `/api/scan-history/summary`（alertsFound / alertsFixed 两键）与运行列表（同两键），无暴露；
             // 未来若新增消费者，需复检 rollback / verification 场景下这些字段的可信度。
             if (result) {
-                savedRun.summaryJson = JSON.stringify({ ...result.summary, alertsFixed: 0 })
+                // 失败未交付：已修复数归零，未修复数同步按「发现 − 已收敛」重算；
+                // 不能保留引擎在内存中算出的 alertsUnfixed（否则出现「已修复 0 / 未修复 6 / 总数 10」自相矛盾）
+                const found = typeof result.summary.alertsFound === 'number' ? result.summary.alertsFound : 0
+                const converged = typeof result.summary.alertsConverged === 'number' ? result.summary.alertsConverged : 0
+                savedRun.summaryJson = JSON.stringify({
+                    ...result.summary,
+                    alertsFixed: 0,
+                    alertsUnfixed: Math.max(0, found - converged),
+                })
             }
         } else if (decision.status === 'degraded') {
             // degraded：业务结果完整 + 路径偏离（与 completed 等价写 summaryJson + runUrl）

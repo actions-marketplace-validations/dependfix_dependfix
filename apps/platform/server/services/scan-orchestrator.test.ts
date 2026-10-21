@@ -368,7 +368,7 @@ describe('scan-orchestrator.service', () => {
             // engine_delivery_failed（COMMIT_FAILED）：result 存在但交付失败 → failed
             containerExecute.mockResolvedValue({
                 result: makeResult({
-                    summary: { alertsFound: 5, alertsFixed: 3, environmentalFailures: 2 },
+                    summary: { alertsFound: 5, alertsFixed: 3, alertsConverged: 1, alertsUnfixed: 2, environmentalFailures: 2 },
                     errors: [{ repository: 'demo/app', stage: 'fix', category: 'COMMIT_FAILED', message: 'git commit failed' }],
                 }),
                 error: undefined,
@@ -381,6 +381,8 @@ describe('scan-orchestrator.service', () => {
             // 失败前已扫到的告警数如实落库；已修复归零（失败未交付，fixStatus 不可信）
             expect(summary.alertsFound).toBe(5)
             expect(summary.alertsFixed).toBe(0)
+            // 失败未交付：未修复数按 found − converged 重算，不能沿用引擎内存值
+            expect(summary.alertsUnfixed).toBe(4)
             // 环境性失败计数随 summary 快照保留（失败未交付也不丢可见性）
             expect(summary.environmentalFailures).toBe(2)
             // 仅快照：failed 分支不调用 reconcileAlerts，无告警明细写入
@@ -392,7 +394,7 @@ describe('scan-orchestrator.service', () => {
         it('persists summary snapshot when failed via exitCode=2 (no engine errors)', async () => {
             // 进程级兜底：exitCode=2 + result 存在且无 engine 交付失败 errors → failed
             containerExecute.mockResolvedValue({
-                result: makeResult({ summary: { alertsFound: 2, alertsFixed: 1 } }),
+                result: makeResult({ summary: { alertsFound: 2, alertsFixed: 1, alertsUnfixed: 1 } }),
                 error: undefined,
                 exitCode: 2,
             })
@@ -402,6 +404,7 @@ describe('scan-orchestrator.service', () => {
             const summary = JSON.parse(String(run.summaryJson ?? '{}')) as Record<string, number>
             expect(summary.alertsFound).toBe(2)
             expect(summary.alertsFixed).toBe(0)
+            expect(summary.alertsUnfixed).toBe(2)
         })
 
         it('captures runUrl from container executor (fix mode push succeed)', async () => {
