@@ -1,6 +1,27 @@
 import type { NormalizedSecurityAlert, AlertSeverity } from '../alerts'
 
 /**
+ * 跳过原因枚举（`alertsSkippedByReason` 的 key）。
+ *
+ * 新增累加点必须先在此登记，保证 `sum(alertsSkippedByReason) === alertsSkipped`
+ * （旧 summaryJson 缺分组字段时由展示层回退为「其他 / 未分类」）。
+ */
+export const SKIP_REASONS = [
+    'subdirectory-manifest',
+    'cross-major',
+    'not-fixable',
+    'override-protected',
+] as const
+
+export type SkipReason = (typeof SKIP_REASONS)[number]
+
+/** 按原因分组的跳过计数；缺失 key 等价于 0。 */
+export type AlertsSkippedByReason = Partial<Record<SkipReason, number>>
+
+/** 按严重级别分组的截断计数；缺失 key 等价于 0。 */
+export type AlertsTruncatedBySeverity = Partial<Record<AlertSeverity, number>>
+
+/**
  * 告警数据源。
  * - `github-dependabot`：GitHub Dependabot alerts API（默认）
  * - `pnpm-audit`：本地 `pnpm audit --json`（无 token 回退）
@@ -32,12 +53,26 @@ export interface RunSummary {
     alertsFound: number
     alertsFixable: number
     alertsFixed: number
+    /**
+     * 未修复告警数（告警级，非 action 级）。
+     *
+     * 由 `allAlerts` 逐条经 `isAlertFixedByActions` 判定后计算：
+     * `found − fixedAlerts − converged`。不能直接用 `alertsFixed`（成功 action 数）做减法——
+     * 同包多 GHSA / 多推荐版本可能只产生一个代表 action，却同时修复多条告警。
+     * 旧 summaryJson 缺失时消费方回退到 `found − alertsFixed − alertsConverged`（近似值）。
+     */
+    alertsUnfixed: number
     alertsFailed: number
     /**
      * 跳过（不可自动修复 / 需人工处理：非 fixable、子目录 manifest、降级风险等）。
      * 与 `alertsConverged`（已收敛，无需升级）语义分离。
      */
     alertsSkipped: number
+    /**
+     * 按原因分组的跳过计数（不含截断）。
+     * 新 run 满足 `sum(values) === alertsSkipped`；旧 summaryJson 缺失时展示层回退总数。
+     */
+    alertsSkippedByReason: AlertsSkippedByReason
     /**
      * 已收敛：当前锁定版本已 >= 推荐版本（或 lockfile 已无脆弱实例），
      * 无需升级。从 alertsSkipped 拆分，避免混合语义。
@@ -55,6 +90,11 @@ export interface RunSummary {
     environmentalFailures: number
     /** 因 maxAlertsPerRepository 截断的告警数（收尾审查遗留：截断明细进报告） */
     alertsTruncated: number
+    /**
+     * 按严重级别分组的截断计数。
+     * 新 run 满足 `sum(values) === alertsTruncated`；旧 summaryJson 缺失时展示层回退总数。
+     */
+    alertsTruncatedBySeverity: AlertsTruncatedBySeverity
     /**
      * 未启用 alerts 功能的仓库数（如 Dependabot alerts 未开启）。
      * 语义：预期状态而非失败，不计入 allErrors / 不影响 exitCode。
@@ -497,11 +537,14 @@ export function createEmptyRunSummary(): RunSummary {
         alertsFound: 0,
         alertsFixable: 0,
         alertsFixed: 0,
+        alertsUnfixed: 0,
         alertsFailed: 0,
         alertsSkipped: 0,
+        alertsSkippedByReason: {},
         alertsConverged: 0,
         environmentalFailures: 0,
         alertsTruncated: 0,
+        alertsTruncatedBySeverity: {},
         reposWithAlertsDisabled: 0,
         lockfileRepairs: 0,
         verificationsPassed: 0,

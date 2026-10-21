@@ -1,6 +1,8 @@
 export type AlertSource = 'dependabot' | 'code-scanning' | 'code-quality' | 'pnpm-audit'
 
-export type AlertSeverity = 'critical' | 'high' | 'medium' | 'low' | 'unknown'
+export const ALERT_SEVERITIES = ['critical', 'high', 'medium', 'low', 'unknown'] as const
+
+export type AlertSeverity = (typeof ALERT_SEVERITIES)[number]
 
 export type FixStrategy = 'upgrade' | 'lock' | 'wait-upstream' | 'manual' | 'override'
 

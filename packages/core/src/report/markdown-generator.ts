@@ -11,6 +11,7 @@ import {
 } from './types'
 import { collectCodeScanningSuggestions } from './suggestions'
 import { collectCodeQualityFindings } from './code-quality-suggestions'
+import { countUnfixedAlerts, formatSeverity, formatSkipReason, skippedBreakdown, truncatedBreakdown } from './summary-counters'
 
 /**
  * 生成 Markdown 格式报告字符串。
@@ -18,6 +19,7 @@ import { collectCodeQualityFindings } from './code-quality-suggestions'
  * 模板固定节（3/3.5 为条件渲染）：
  * 1. Header（runId / 时间 / 模式）
  * 2. Summary 表
+ * 2.5 Skipped & Truncated（有跳过 / 截断 / 失败残差时渲染）
  * 3. AI Usage（仅 AI 实际调用时渲染）
  * 3.5. Supply Chain Warnings（有警示时才渲染）
  * 4. Alerts by Severity 表
@@ -30,6 +32,7 @@ import { collectCodeQualityFindings } from './code-quality-suggestions'
  */
 export function generateMarkdownReport(result: RunResult): string {
     const { runId, startedAt, finishedAt, config, summary, repositories, alerts, actions, errors } = result
+    const unfixed = countUnfixedAlerts(summary)
 
     const sections: string[] = []
 
@@ -56,6 +59,7 @@ export function generateMarkdownReport(result: RunResult): string {
         `| Fixable | ${summary.alertsFixable} |`,
         `| Fixed | ${summary.alertsFixed} |`,
         `| Failed | ${summary.alertsFailed} |`,
+        `| Unfixed | ${unfixed} |`,
         `| Skipped | ${summary.alertsSkipped} |`,
         `| Converged (already >= target) | ${summary.alertsConverged} |`,
         `| Truncated (max alerts/repo) | ${summary.alertsTruncated} |`,
@@ -65,6 +69,32 @@ export function generateMarkdownReport(result: RunResult): string {
         `| Verifications failed | ${summary.verificationsFailed} |`,
         '',
     )
+
+    // ---- 2.5 Skipped & Truncated（有分组信息或失败残差时才渲染，避免空区块）----
+    const skippedRows = skippedBreakdown(summary)
+    const truncatedRows = truncatedBreakdown(summary)
+    const skippedTotal = skippedRows.reduce((sum, row) => sum + row.count, 0)
+    const failedResidual = Math.max(0, unfixed - skippedTotal)
+    if (skippedRows.length > 0 || truncatedRows.length > 0 || failedResidual > 0) {
+        sections.push(
+            '## Skipped & Truncated',
+            '',
+            `> **Unfixed**: ${unfixed} / ${summary.alertsFound} evaluated alerts; ${summary.alertsTruncated} truncated before analysis (not evaluated).`,
+            '',
+            '| Category | Count |',
+            '|----------|-------|',
+        )
+        for (const row of truncatedRows) {
+            sections.push(`| Truncated: ${formatSeverity(row.key)} | ${row.count} |`)
+        }
+        for (const row of skippedRows) {
+            sections.push(`| Skipped: ${formatSkipReason(row.key)} | ${row.count} |`)
+        }
+        if (failedResidual > 0) {
+            sections.push(`| Failed / other not fixed | ${failedResidual} |`)
+        }
+        sections.push('')
+    }
 
     // ---- 3. AI Usage（仅 --ai 实际调用时渲染；run 级聚合）----
     if (result.aiUsage && result.aiUsage.calls > 0) {

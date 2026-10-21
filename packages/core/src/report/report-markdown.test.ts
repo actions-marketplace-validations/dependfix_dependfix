@@ -50,6 +50,48 @@ describe('generateMarkdownReport', () => {
         expect(md).toContain('10')
     })
 
+    it('renders skipped/truncated breakdown and unfixed total', () => {
+        const result = {
+            ...EMPTY_RUN_RESULT,
+            summary: {
+                ...EMPTY_RUN_RESULT.summary,
+                alertsFound: 20,
+                alertsFixed: 0,
+                alertsUnfixed: 20,
+                alertsConverged: 0,
+                alertsSkipped: 4,
+                alertsSkippedByReason: { 'cross-major': 4 },
+                alertsTruncated: 6,
+                alertsTruncatedBySeverity: { critical: 2, high: 4 },
+            },
+        }
+        const md = generateMarkdownReport(result)
+
+        expect(md).toContain('## Skipped & Truncated')
+        expect(md).toContain('**Unfixed**: 20 / 20 evaluated alerts; 6 truncated before analysis (not evaluated).')
+        expect(md).toContain('| Truncated: Critical | 2 |')
+        expect(md).toContain('| Truncated: High | 4 |')
+        expect(md).toContain('| Skipped: Cross-major / manual review | 4 |')
+        expect(md).toContain('| Failed / other not fixed | 16 |')
+    })
+
+    it('falls back to other for old summary without grouped fields', () => {
+        const result = {
+            ...EMPTY_RUN_RESULT,
+            summary: {
+                ...EMPTY_RUN_RESULT.summary,
+                alertsFound: 3,
+                alertsSkipped: 2,
+                alertsTruncated: 1,
+                alertsSkippedByReason: {},
+                alertsTruncatedBySeverity: {},
+            },
+        }
+        const md = generateMarkdownReport(result)
+        expect(md).toContain('| Skipped: Other / unclassified | 2 |')
+        expect(md).toContain('| Truncated: Other / unclassified | 1 |')
+    })
+
     it('renders severity breakdown when alerts exist', () => {
         const result = {
             ...EMPTY_RUN_RESULT,
