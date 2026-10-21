@@ -29,7 +29,7 @@
 - **M46.2** [P2 🎨] 跨 major / 截断 / 子目录跳过的披露 —— **已闭环**
 - **M46.3** [P2 🛠️] 基线采样完整链与门禁回滚粒度
 - **M46.4** [P1 🛠️] 执行容器内存下限与 OOM 归因
-- **M46.5** [P2 🚀] 平台通知与邮件推送（issue #190）
+- **M46.5** [P2 🚀] 平台通知与邮件推送（issue #190）—— **B1-B4 已闭环；B5 延期**
 - **M46.6** [P3 🧪] 视觉套件测试库 fixtures 前置断言 —— **已闭环**
 
 **建议执行顺序**：M46.6（最小、先清本地噪声）→ M46.1（P1 可见性，先落数据层）→ M46.2（复用同一 summary 承载）→ M46.5（通知消费未修复高危口径）→ M46.3（引擎基线，独立）→ M46.4（部署口径，独立）。若阶段容量收紧，M46.6 与 M46.5 的 B5 周汇总可优先移出。
@@ -119,21 +119,25 @@
 - **交付物**：预计 3 commits / 10-14 文件 / 250-400 行——① `docs(guide)` 双语口径 + compose 默认（4-6 文件 / 80-120 行）；② `feat(platform)` 启动期探测 + 运行期采集 + 迁移（4-5 / 120-200）；③ `test` 阈值判定 / 跨平台降级（2-3 / 50-80）。
 - **风险与缓解**：**R1 跨平台采集差异**（Windows dev 无 cgroup）→ 仅 Linux 采集，其他平台降级并记录；**R2 指标开销** → 采样阈值与只读 cgroup 文件；**R3 文档口径再次漂移** → 以治理设计为权威源，配置指南与 compose 单点引用。
 
-### M46.5 [P2 🚀] 平台通知与邮件推送（issue #190）
+### M46.5 [P2 🚀] 平台通知与邮件推送（issue #190）（**B1-B4 已闭环；B5 延期** `eea2c581` + `104952f6` + `3aa8955f` + `4a65d9e5` + `253ea52b` + `61354f99` + `23cf9f79` + `b3c6cf49` + `19d69f1a` + `fd731c28` + `e0ac9a15` + `13c69da2` + `8210ec60` + 本条登记）
 
 - **目标**：落地 [platform-notification.md](../design/governance/platform-notification.md) 的四类事件（平台自身问题 / 高危告警 / 运行失败 / 完成摘要，外加可选周汇总）、三层配置（部署 / 组织 / 个人）、分流收件人与 24 小时去重；默认只在失败与未修复高危时打扰。
 - **优先级**：P2
-- **范围**：按设计稿 B1-B5 分批——① 迁移 + 实体字段（`notification_preference` / `notification_log` / `organization.notification_settings_json` / `scan_run` 与 `batch_run` 的 `triggered_by_user_id`）；② 策略层（事件分类、设置解析、个人偏好、收件人路由、高危查询、指纹 / 窗口纯函数）；③ 投递层（统一入口、幂等占位、模板、run / batch 触发点、平台事件接续）；④ 配置与展示（6 个 API + 个人卡片 + `/notifications` 管理员页 + i18n）；⑤ 可选周汇总（固定周期插件，默认关闭）。
+- **范围**：按设计稿 B1-B5 分批——① 迁移 + 实体字段（`notification_preference` / `notification_log` / `organization.notification_settings_json` / `scan_run` 与 `batch_run` 的 `triggered_by_user_id`）；② 策略层（事件分类、设置解析、个人偏好、收件人路由、高危查询、指纹 / 窗口纯函数）；③ 投递层（统一入口、幂等占位、模板、run / batch 触发点、平台事件接续）；④ 配置与展示（6 个 API + 个人卡片 + `/notifications` 管理员页 + i18n）；⑤ 可选周汇总（固定周期插件，默认关闭）——**本批未纳入，延期 backlog；UI 开关置灰并提示后续版本提供**。
 - **验收标准**：
-  - [ ] ① 默认策略符合设计稿 §13：完成类不发、失败类发送、高危仅未修复、平台事件必选；组织关闭后个人无法开启。
-  - [ ] ② 收件人：平台事件仅管理员；业务事件定向 `triggeredByUserId` + 已开启该类别的管理员；标题含 `[平台]` / `[告警]` / `[运行]` / `[摘要]` / `[周报]` 标签。
-  - [ ] ③ 降噪：一个批次只发一封高危；相同指纹不再重复发送；指纹变化且距上次超过 24 小时才再次发送；窗口内记 `skipped_cooldown`。
-  - [ ] ④ 失败语义：SMTP 未配置 noop；发送异常不阻断扫描；投递记录可查；迁移二次执行幂等。
-  - [ ] ⑤ 测试覆盖策略 / 路由 / 指纹 / 窗口 / 模板转义 / API 权限 / 迁移幂等；批次终态集成测试断言只发一封。
-  - [ ] ⑥ 截断高危以「另有 N 条截断未纳入明细」披露（读取 M46.2 的 `alertsTruncatedBySeverity`），不少报。
+  - [x] ① 默认策略符合设计稿 §13：完成类默认不发、失败类发送、高危仅未修复、平台事件必选；组织关闭后个人无法开启。
+  - [x] ② 收件人：平台事件仅管理员；业务事件定向 `triggeredByUserId` + 已开启该类别的管理员；标题含 `[平台]` / `[告警]` / `[运行]` / `[摘要]`（`[周报]` 随 B5）。
+  - [x] ③ 降噪：一个批次只发一封高危；相同指纹不再重复发送；指纹变化且距上次超过 24 小时才再次发送；窗口内记 `skipped_cooldown`。
+  - [x] ④ 失败语义：SMTP 未配置 noop；发送异常不阻断扫描；投递记录可查；迁移二次执行幂等。
+  - [x] ⑤ 测试覆盖策略 / 路由 / 指纹 / 窗口 / 模板转义 / API 权限 / 迁移幂等；批次终态服务测试断言只发一封。
+  - [x] ⑥ 截断高危以「另有 N 条截断未纳入明细」披露（读取 M46.2 的 `alertsTruncatedBySeverity`），不少报。
+  - [x] ⑦ 部署总开关可熔断全部通知；SMTP 不可用时管理员页 / 个人页提示。
+  - [x] ⑧ 组织设置写操作登记 `notification_settings_update` 审计事件；通知记录 / 测试发送仅 admin / org_admin。
+  - [x] ⑨（不纳入）周汇总按设计稿 §12 移出至 backlog；本批不宣称 AC⑨ 完成。
 - **不做什么**：不实现 Slack / Webhook 真实投递；不做仓库订阅关系；不做一键退订令牌；不做通用摘要调度器（周报为固定周期插件）；不在本期做通知历史独立页面（投递记录并入 `/notifications`）。
 - **依赖**：设计稿 [platform-notification.md](../design/governance/platform-notification.md)（2026-10-20 决策已定稿）；现有 `notification/` 渠道注册表与 `mailer/`；M46.1 / M46.2 的未修复高危与截断高危口径；[issue #190](https://github.com/dependfix/dependfix/issues/190)（用户 2026-10-20 明确授权纳入方案 A）。
-- **交付物**：预计 5 个批次 / 41-58 文件 / 1800-2850 行（B1-B5 求和，文件跨批复用；不含 B5 为 36-50 文件 / 1600-2500 行）——① B1 迁移 + 实体字段（6-8 / 200-300）；② B2 策略纯函数 + 单测（10-14 / 450-700）；③ B3 投递入口 / 幂等 / 模板 / 触发点（10-14 / 450-700）；④ B4 API + 个人卡片 + `/notifications` 管理员页 + i18n（10-14 / 500-800）；⑤ B5 周汇总（5-8 / 200-350，可选，可按容量移出）。
+- **交付物（实际）**：13 commits / 83 文件 / 4119 插入（含导航新增导致的 12 张存量视觉基线同步；B5 未纳入）。拆分：`eea2c581` 承载实体 + 迁移（8）；`104952f6` 设置 / 偏好 / 降噪纯函数（7）；`3aa8955f` 收件人 + 高危查询（5）；`4a65d9e5` 投递幂等 + 业务模板（4）；`253ea52b` 渠道注册 + 平台事件（8）；`61354f99` 单仓 / 批次终态服务（3）；`23cf9f79` 触发者写入 + 单仓终态（8）；`b3c6cf49` 批次写回触发（4）；`19d69f1a` 6 API + 错误码 + 审计类型（10）；`fd731c28` 管理员页 / 个人卡片 / i18n（6）；`e0ac9a15` 通知页视觉基线（8）；`13c69da2` 权限 e2e + 存量基线（8）；`8210ec60` 设计 / env / backlog 文档（2）。**超原估**的主因：B4 同时落 6 API + 两处 UI + 视觉基线；导航新增一项使 12 张存量页面截图整体位移；审计后补部署熔断、唯一冲突重放、sending 回收、失败路径通知、Postgres DDL、审计事件与 API 权限测试。
+- **闭环记录（2026-10-21）**：**审计** R1 `standard` 两分区（A 数据/策略/投递/触发 · B API/UI/视觉/文档）：B **Pass**（9 warning）；A **Reject**（1 blocker：`DEPENDFIX_NOTIFICATION_ENABLED` 未接入投递链；7 warning：平台唯一冲突被吞 / sending 无回收 / 失败路径漏通知 / weekly_digest 空开关 / extra 收件人绕过 / Postgres DDL / completed 默认关闭仍写日志）→ 收口（部署熔断入口、唯一冲突 rethrow + 平台键、10 分钟 sending 回收、catch-all / stale-cleanup 通知、周报 UI 置灰、recipients 部署防御、Postgres 类型、completed 开关；业务模板 locale；B 区 test.post 脱敏、组织设置审计、设计 §9、刷新 / 保存 / label / 权限测试）→ R2 `quick` **Pass**（0 blocker；W0 JSON 缩进 / W1 重复分支覆盖 notified / W2 多渠道键 / W4 extra 函数内防御 / W6 管理员页熔断状态 / W7 文档路径与 env 登记 / W8 刷新 loading / W9 实体默认值）→ 逐项收口（含 AuditEvent 事务 + 测试、平台重放 / 部署 / 回收测试）→ 终验。**门禁**：定向 vitest **280 passed**（25 文件：notification services/API/migration + scan/retry/batch/orchestrator/localized-error）；全量 e2e 干净库 **202 passed + 2 flaky**（alerts-rowgroup 排序 / scan-config 记忆，属既有 flake，exit 0）；`test:visual` **17 passed ×2**（含 `/notifications` 基线；导航新增入口导致存量基线整体位移）；`pnpm run lint` 0 error（3 条存量 max-lines warning）；`pnpm run typecheck` 7 包 Done；core / engine / platform build exit 0；`check:docs` / `check:doc-size`（warning 0）/ `lint:md:check` / `lint:i18n` / `check:orphan-ids`（0）通过。**残余**：① B5 周汇总延期 backlog，UI 开关置灰；② 视觉 / e2e 未注入 notification_log，投递记录区只覆盖空表；③ 收件人使用 `To:` 互见，未做 BCC；④ notification_log 无保留期 / 清理策略；⑤ 批次失败邮件缺 failureCode / failureStage / 失败仓库清单；⑥ 仅 SQLite 迁移测试，Postgres / MySQL DDL 分支未实机；⑦ `weeklyDigest` API 仍可写 true（UI 置灰），B5 上线时需清理存量 true / 迁移提示；⑧ catch-all / stale-cleanup 的通知调用无直接断言（仅代码审阅）。
 - **风险与缓解**：**R1 邮件风暴** → 批次合并 + 24 小时窗口 + 每小时上限；**R2 漏发关键告警** → 窗口可调至 0 + 周汇总兜底；**R3 收件人扩散** → 仅触发者 + 管理员，上限与去重；**R4 触发点重复** → 条件写回成功 + `deliveryKey` 唯一；**R5 迁移风险** → 幂等迁移 + 启动备份 + 二次执行测试。
 
 ### M46.6 [P3 🧪] 视觉套件测试库 fixtures 前置断言（**已闭环** `d2b64886` + `00eacfce` + 本条登记）
