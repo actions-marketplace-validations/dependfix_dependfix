@@ -43,7 +43,7 @@
 
 ### 2.4 已知错误码 / 类别清单
 
-- **`FixError.category`（进 `RunResult.errors[]`）**：`FETCH_FAILED`、`DISCOVERY_FAILED`、`EMPTY_REPO_LIST`、`PROCESS_FAILED`、`FATAL`、`COMMIT_FAILED`、`PR_CREATION_FAILED`、`VERIFICATION_FAILED`、`ROLLBACK_FAILED`、`OVERRIDE_PROTECTED`、`PRE_EXISTING_FAILURE`、`SCRIPT_NOT_FOUND`、`network_violation`、`BRANCH_DELETE_FAILED`、`PR_CLOSE_FAILED`、`CLEANUP_DETECT_FAILED`、`CLEANUP_FAILED`、`ENVIRONMENT_ERROR`、`ABORTED`（2026-10-17 运行级取消：平台执行超时 / 运维中止后引擎协作式收尾；`stage: 'report'` + `repository: '*'`）。
+- **`FixError.category`（进 `RunResult.errors[]`）**：`FETCH_FAILED`、`DISCOVERY_FAILED`、`EMPTY_REPO_LIST`、`PROCESS_FAILED`、`FATAL`、`COMMIT_FAILED`、`PR_CREATION_FAILED`、`VERIFICATION_FAILED`、`ROLLBACK_FAILED`、`OVERRIDE_PROTECTED`、`PRE_EXISTING_FAILURE`、`SCRIPT_NOT_FOUND`、`network_violation`、`BRANCH_DELETE_FAILED`、`PR_CLOSE_FAILED`、`CLEANUP_DETECT_FAILED`、`CLEANUP_FAILED`、`ENVIRONMENT_ERROR`、`ROLLBACK_GRANULARITY_DEGRADED`（审计性降级，跳过类）、`ABORTED`（2026-10-17 运行级取消：平台执行超时 / 运维中止后引擎协作式收尾；`stage: 'report'` + `repository: '*'`）。
 - **`LockfileFailureCategory`（进 `FixAction.error` / lockfile 修复结果，非 `RunResult.errors[].category`；例外见下）**：`LOCKFILE_NOT_FOUND`、`MANIFEST_MISMATCH`、`LOCKFILE_VERSION_MISMATCH`、`CORRUPTED_LOCKFILE`、`CREDENTIAL_ERROR`、`RESOLVE_ERROR`、`MINIMUM_RELEASE_AGE`、`ENVIRONMENT_ERROR`、`ABORTED`（运行级取消：命令未启动即收尾，与环境性失败语义分离）、`UNKNOWN`。**例外**：`ENVIRONMENT_ERROR`（环境性安装失败，2026-10-13 M43.3）**同时**作为 `FixError.category` 发射（`stage: 'repair'`，进 `RunResult.errors[]`；非归因，见 §4.3），供平台侧细分归因为 `install` + `transient`。
 - `ARCHIVE_FAILED` 仅出现在测试夹具（生产无发射点），不纳入分类映射。
 - `FixError.stage` 类型含 `fetch | filter | fix | repair | verify | report`，但当前生产发射点仅见 `fetch` / `fix` / `repair` / `verify` / `report`（`repair` 为 2026-10-13 M43.3 新增的 `ENVIRONMENT_ERROR` 发射点；`filter` 无发射点）。
@@ -197,6 +197,13 @@
 - **展示口径**：UI 详情显示 `未修复 X / 总数 Y · 截断 Z（未评估）· 跳过 W`，其中 `Y = alertsFound + alertsTruncated`、`X` 取 `alertsUnfixed`；分组 chips 固定顺序。列表只显示紧凑总数。PR 正文与 Markdown 报告输出 `Not Fixed / Skipped` 表，含跳过原因、截断严重级别与 `Failed / other not fixed` 残差；`Unfixed` 的分子分母按「已评估告警」表述，截断明确标注未评估。
 - **旧数据降级**：缺分组字段时按 `total - sum(known)` 补 `other` 行，不抛错且总数不丢；分组和大于总数时不再补 `other`（分组优先，异常数据原样展示）。
 - **不做什么**：不改跳过策略 / 跨 major 判定 / `allowMajorUpgrade`；不改 PR 指纹与去重；截断告警不伪造逐条明细，只披露分组计数。
+
+### 5.9 基线完整链与单元回滚粒度（M46.3）
+
+- **基线完整链**：修复前基线采样不再首失败即停，`install → lint → build → typecheck → test` 各段独立记录；`pnpm test` 的 `No tests found` 与工具链缺失按「同命令基线失败」豁免，不归因本次改动。修复后验证仍首失败即停（交付链语义不变）。
+- **单元回滚**：默认 `rollbackGranularity=unit`。依赖修复单元开始前记录工作树 checkpoint，成功时保留为可回退基线；最终验证存在本次引入失败时，回退最近单元并重跑一次完整验证，通过则保留更早 probe 并交付。重验仍失败时记 `ROLLBACK_GRANULARITY_DEGRADED`（跳过类审计，不影响 exit code），再由门禁执行整仓回滚。
+- **逃生开关**：`--rollback-granularity=repo` / `DEPENDFIX_ROLLBACK_GRANULARITY=repo` 恢复整仓回滚；`preExistingDirty` 保护面不变。
+- **映射**：`ROLLBACK_GRANULARITY_DEGRADED` → `verify` + `deterministic`（审计性降级，非失败动作；用于解释「为何回退粒度退回整仓」）。
 
 ## 6. 验收标准（草案 → 实现结果）
 
