@@ -248,6 +248,14 @@ const runScanInternal = async (
         }
     }
 
+    const rollbackGranularityRaw = process.env.DEPENDFIX_ROLLBACK_GRANULARITY?.trim().toLowerCase()
+    if (rollbackGranularityRaw && rollbackGranularityRaw !== 'unit' && rollbackGranularityRaw !== 'repo') {
+        console.warn(
+            `[engine] invalid DEPENDFIX_ROLLBACK_GRANULARITY="${process.env.DEPENDFIX_ROLLBACK_GRANULARITY}" — fallback to unit`,
+        )
+    }
+    const rollbackGranularity = rollbackGranularityRaw === 'repo' ? 'repo' : 'unit'
+
     const ctx: ScanExecutorContext = {
         runId: savedRun.id,
         repository: {
@@ -273,6 +281,8 @@ const runScanInternal = async (
             codeScanningEnabled: false,
             codeQualityEnabled: false,
             allowMajorUpgrade: false,
+            // 验证失败回滚粒度（默认 unit）：平台不经过 resolveRuntimeConfig，需在此贯通 env 逃生开关
+            rollbackGranularity,
             maxAlertsPerRepository: 20,
             maxConcurrency: 1,
             maxRetries: 3,
