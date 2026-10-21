@@ -29,7 +29,9 @@ import {
     RUN_FAILURE_STAGE_OPTIONS,
     runExecutorLabel,
     runModeLabel,
+    skippedTotal,
     summaryNumber,
+    truncatedTotal,
     unfixedAlerts,
 } from '~/utils/run-view'
 import { scanSeverityLabel } from '~/utils/scan-options'
@@ -52,6 +54,20 @@ const loading = ref(false)
 /** 批量日志导出进行中（工具栏按钮 loading 反馈） */
 const exporting = ref(false)
 const inflight = ref(false)
+/** 列表紧凑披露：截断 / 跳过总数（明细分组在运行详情）。 */
+const breakdownTag = (summary: Record<string, unknown> | null) => {
+    const parts: string[] = []
+    const truncated = truncatedTotal(summary)
+    const skipped = skippedTotal(summary)
+    if (truncated > 0) {
+        parts.push(t('runs.breakdown.truncatedShort', { count: truncated }))
+    }
+    if (skipped > 0) {
+        parts.push(t('runs.breakdown.skippedShort', { count: skipped }))
+    }
+    return parts.join(' / ')
+}
+
 const summaryLoading = ref(false)
 const summaryInflight = ref(false)
 const error = ref('')
@@ -811,6 +827,14 @@ onMounted(refresh)
                                 >
                                     <CaomeiTag tone="warning">
                                         {{ t('runs.unfixedAlerts', {count: unfixedAlerts(row.summary)}) }}
+                                    </CaomeiTag>
+                                </span>
+                                <span
+                                    v-if="truncatedTotal(row.summary) > 0 || skippedTotal(row.summary) > 0"
+                                    :title="t('runs.breakdown.listHint')"
+                                >
+                                    <CaomeiTag tone="neutral">
+                                        {{ breakdownTag(row.summary) }}
                                     </CaomeiTag>
                                 </span>
                             </span>

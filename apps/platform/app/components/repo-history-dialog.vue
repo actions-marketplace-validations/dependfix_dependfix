@@ -414,6 +414,7 @@ watch(() => route.query[props.queryKey], async (newVal) => {
                     {{ t('runs.exitCode') }}: {{ detail.exitCode }}
                 </CaomeiTag>
             </div>
+            <run-outcome-breakdown v-if="!isRunResultMissing(detail)" :summary="detail.summary ?? null" />
             <!-- 日志区域（原生滚动容器 + CSS） -->
             <div v-if="detail.logs && detail.logs.length > 0" class="repo-history__logs">
                 <div class="repo-history__logs-header">

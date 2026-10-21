@@ -1,9 +1,17 @@
+import { ALERT_SEVERITIES, SKIP_REASONS } from '@dependfix/core'
 import { describe, expect, it } from 'vitest'
 import {
     alertsFound,
     environmentalFailureCount,
     isRunResultMissing,
+    SEVERITY_DISPLAY_ORDER,
+    SKIP_REASON_ORDER,
+    skippedBreakdown,
+    skippedTotal,
     summaryNumber,
+    totalDiscoveredAlerts,
+    truncatedBreakdown,
+    truncatedTotal,
     unfixedAlerts,
 } from './run-view'
 
@@ -51,6 +59,11 @@ describe('unfixedAlerts', () => {
         expect(unfixedAlerts({ alertsFound: 3 })).toBe(3)
         expect(unfixedAlerts({ alertsFound: 1, alertsFixed: 3 })).toBe(0)
         expect(unfixedAlerts(null)).toBe(0)
+    })
+
+    it('优先读告警级 alertsUnfixed（同包多告警共用一个 action）', () => {
+        expect(unfixedAlerts({ alertsFound: 2, alertsFixed: 1, alertsConverged: 0, alertsUnfixed: 0 })).toBe(0)
+        expect(unfixedAlerts({ alertsFound: 2, alertsFixed: 1, alertsConverged: 0, alertsUnfixed: 1 })).toBe(1)
     })
 })
 
@@ -101,5 +114,51 @@ describe('isRunResultMissing', () => {
 
     it('completed 但 summary 缺失按数据异常展示结果缺失', () => {
         expect(isRunResultMissing({ status: 'completed', summary: undefined })).toBe(true)
+    })
+})
+
+
+describe('skippedBreakdown / truncatedBreakdown', () => {
+    it('按原因 / 严重级别稳定顺序展开，只返回 >0 项', () => {
+        const summary = {
+            alertsSkipped: 6,
+            alertsSkippedByReason: { 'not-fixable': 2, 'cross-major': 4 },
+            alertsTruncated: 3,
+            alertsTruncatedBySeverity: { medium: 1, critical: 2 },
+        }
+        expect(skippedBreakdown(summary)).toEqual([
+            { key: 'cross-major', count: 4 },
+            { key: 'not-fixable', count: 2 },
+        ])
+        expect(truncatedBreakdown(summary)).toEqual([
+            { key: 'critical', count: 2 },
+            { key: 'medium', count: 1 },
+        ])
+        expect(skippedTotal(summary)).toBe(6)
+        expect(truncatedTotal(summary)).toBe(3)
+    })
+
+    it('旧 summaryJson 缺分组字段时回退 other，总数不丢', () => {
+        expect(skippedBreakdown({ alertsSkipped: 5 })).toEqual([{ key: 'other', count: 5 }])
+        expect(truncatedBreakdown({ alertsTruncated: 4 })).toEqual([{ key: 'other', count: 4 }])
+        expect(skippedBreakdown({ alertsSkipped: 5, alertsSkippedByReason: { 'cross-major': 2 } }))
+            .toEqual([{ key: 'cross-major', count: 2 }, { key: 'other', count: 3 }])
+    })
+
+    it('无跳过 / 截断时返回空数组', () => {
+        expect(skippedBreakdown({})).toEqual([])
+        expect(truncatedBreakdown(null)).toEqual([])
+    })
+
+    it('totalDiscoveredAlerts 把截断计入总数', () => {
+        expect(totalDiscoveredAlerts({ alertsFound: 20, alertsTruncated: 6 })).toBe(26)
+    })
+})
+
+
+describe('展示顺序与 core 枚举同步', () => {
+    it('跳过原因 / 严重级别顺序与 core 单一事实源一致', () => {
+        expect(SKIP_REASON_ORDER).toEqual(SKIP_REASONS)
+        expect(SEVERITY_DISPLAY_ORDER).toEqual(ALERT_SEVERITIES)
     })
 })

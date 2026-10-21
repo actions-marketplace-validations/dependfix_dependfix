@@ -4,26 +4,92 @@ type Translator = (key: string, params?: Record<string, string | number>) => str
 
 export const shortRunId = (id: string) => id.slice(0, 8)
 
-/** 读取 summary 中的正数；0 / 负数 / 非数字 / 缺失一律降级为 0（旧 summaryJson 兼容）。 */
-export const summaryNumber = (summary: Record<string, unknown> | null, key: string) => {
-    const value = summary?.[key]
-    return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0
+/** 读取任意计数：正数原样返回；0 / 负数 / 非数字 / 缺失一律降级为 0（旧 summaryJson 兼容）。 */
+const countValue = (value: unknown) =>
+    typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0
+
+export const summaryNumber = (summary: Record<string, unknown> | null, key: string) =>
+    countValue(summary?.[key])
+
+const nestedCounts = (value: unknown): Record<string, unknown> =>
+    value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+
+/** 跳过原因展示顺序；与 `packages/core/src/report/types.ts#SKIP_REASONS` 同序。 */
+export const SKIP_REASON_ORDER = [
+    'subdirectory-manifest',
+    'cross-major',
+    'not-fixable',
+    'override-protected',
+] as const
+
+/** 严重级别展示顺序；与 `packages/core/src/alerts/index.ts#ALERT_SEVERITIES` 同序。 */
+export const SEVERITY_DISPLAY_ORDER = ['critical', 'high', 'medium', 'low', 'unknown'] as const
+
+export interface BreakdownRow {
+    key: string
+    count: number
 }
+
+/** 跳过总数（`summary.alertsSkipped`）。 */
+export const skippedTotal = (summary: Record<string, unknown> | null) => summaryNumber(summary, 'alertsSkipped')
+
+/** 截断总数（`summary.alertsTruncated`）。 */
+export const truncatedTotal = (summary: Record<string, unknown> | null) => summaryNumber(summary, 'alertsTruncated')
+
+/**
+ * 按原因展开跳过计数；旧 summaryJson 缺 `alertsSkippedByReason` 时回退为单行 `other`，
+ * 展示层用 `total - sum(known)` 补齐，保证总数不丢。
+ */
+export const skippedBreakdown = (summary: Record<string, unknown> | null): BreakdownRow[] => {
+    const grouped = nestedCounts(summary?.alertsSkippedByReason)
+    const rows: BreakdownRow[] = SKIP_REASON_ORDER
+        .map((key) => ({ key, count: countValue(grouped[key]) }))
+        .filter((row) => row.count > 0)
+    const other = Math.max(0, skippedTotal(summary) - rows.reduce((sum, row) => sum + row.count, 0))
+    if (other > 0) {
+        rows.push({ key: 'other', count: other })
+    }
+    return rows
+}
+
+/** 按严重级别展开截断计数；旧 summaryJson 缺分组字段时回退为单行 `other`。 */
+export const truncatedBreakdown = (summary: Record<string, unknown> | null): BreakdownRow[] => {
+    const grouped = nestedCounts(summary?.alertsTruncatedBySeverity)
+    const rows: BreakdownRow[] = SEVERITY_DISPLAY_ORDER
+        .map((key) => ({ key, count: countValue(grouped[key]) }))
+        .filter((row) => row.count > 0)
+    const other = Math.max(0, truncatedTotal(summary) - rows.reduce((sum, row) => sum + row.count, 0))
+    if (other > 0) {
+        rows.push({ key: 'other', count: other })
+    }
+    return rows
+}
+
+/** 发现总数 = 已评估 + 截断，用于「未修复 / 总数」披露。 */
+export const totalDiscoveredAlerts = (summary: Record<string, unknown> | null) =>
+    alertsFound(summary) + truncatedTotal(summary)
 
 export const alertsFound = (summary: Record<string, unknown> | null) => summaryNumber(summary, 'alertsFound')
 
 /**
- * 未修复告警数 = found − fixed − converged（下限 0）。
+ * 未修复告警数：优先读 `summary.alertsUnfixed`（告警级 canonical）；
+ * 旧 summary 缺 `alertsUnfixed` 字段时回退 `found − alertsFixed − alertsConverged`（action 级近似，下限 0）。
  *
  * 归因原则与 [platform-notification.md §7.1](../../../docs/design/governance/platform-notification.md#71-高危与未修复口径)
  * 一致（本函数读运行期 summary 快照，后续 supersede 不回溯）：`converged`（本地已满足、无需升级）不计入未修复；`failed` / `skipped` / 不可自动修复
  * 都属于「本次未修复」，在 UI 中可见但不改变 exit code / 运行状态。
  *
- * 截断告警不在此口径内（引擎只把 `limited` 写入 `alertsFound`），由后续条目的
- * `alertsTruncatedBySeverity`（规划中）单独披露，避免把截断算成「已修复」或「未修复」。
+ * 截断告警不在此口径内（引擎只把 `limited` 写入 `alertsFound`），由 `truncatedBreakdown`
+ * 单独披露；`totalDiscoveredAlerts` 把截断计入总数用于「未修复 / 总数」展示。
  */
-export const unfixedAlerts = (summary: Record<string, unknown> | null) =>
-    Math.max(0, alertsFound(summary) - summaryNumber(summary, 'alertsFixed') - summaryNumber(summary, 'alertsConverged'))
+export const unfixedAlerts = (summary: Record<string, unknown> | null) => {
+    // 优先读告警级 canonical 字段；旧 summaryJson 缺失时回退 action 级近似公式
+    const canonical = summary?.alertsUnfixed
+    if (typeof canonical === 'number' && Number.isFinite(canonical)) {
+        return Math.max(0, canonical)
+    }
+    return Math.max(0, alertsFound(summary) - summaryNumber(summary, 'alertsFixed') - summaryNumber(summary, 'alertsConverged'))
+}
 
 interface RunOutcomeView {
     status: string

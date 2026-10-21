@@ -749,6 +749,23 @@
         "unfixedAlertsHint": "有告警本次未修复（含失败 / 跳过 / 不可自动修复）；不计入本次运行的代码回归归因",
         "resultMissing": "结果缺失",
         "resultMissingHint": "本次运行未产出结果（如执行超时）；不展示告警 0，避免被误读为「扫描无告警」",
+        "breakdown": {
+            "headline": "未修复 {unfixed} / {total}",
+            "headlineHint": "总数含截断；未修复不含截断；跳过告警包含在未修复内",
+            "listHint": "截断 / 跳过明细见运行详情",
+            "truncatedShort": "截断 {count}",
+            "truncatedNotEvaluated": "截断 {count}（未评估）",
+            "skippedShort": "跳过 {count}",
+            "truncatedBySeverity": "截断（按严重级别）",
+            "skippedByReason": "跳过（按原因）",
+            "other": "其他 / 未分类",
+            "reason": {
+                "subdirectoryManifest": "子目录 / 根直接清单",
+                "crossMajor": "跨大版本 / 人工复核",
+                "notFixable": "不可自动修复",
+                "overrideProtected": "保护名单"
+            }
+        },
         "failureStage": {
             "source": "告警获取",
             "clone": "仓库克隆",

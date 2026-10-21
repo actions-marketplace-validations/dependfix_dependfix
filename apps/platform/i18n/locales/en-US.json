@@ -749,6 +749,23 @@
         "unfixedAlertsHint": "Alerts not fixed in this run (failed / skipped / not auto-fixable); not attributed as a regression from this run",
         "resultMissing": "Result missing",
         "resultMissingHint": "This run produced no result (e.g. execution timeout); no alert count is shown to avoid misreading it as zero alerts",
+        "breakdown": {
+            "headline": "Unfixed {unfixed} / {total}",
+            "headlineHint": "Total includes truncated alerts; unfixed excludes truncated; skipped alerts are included in unfixed",
+            "listHint": "See run details for the truncated / skipped breakdown",
+            "truncatedShort": "{count} truncated",
+            "truncatedNotEvaluated": "{count} truncated (not evaluated)",
+            "skippedShort": "{count} skipped",
+            "truncatedBySeverity": "Truncated by severity",
+            "skippedByReason": "Skipped by reason",
+            "other": "Other / unclassified",
+            "reason": {
+                "subdirectoryManifest": "Sub-directory / root direct manifest",
+                "crossMajor": "Cross-major / manual review",
+                "notFixable": "Not auto-fixable",
+                "overrideProtected": "Protected by policy"
+            }
+        },
         "failureStage": {
             "source": "Alert fetch",
             "clone": "Clone",

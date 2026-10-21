@@ -325,6 +325,7 @@ watch(() => props.runId, (runId) => {
                     </CaomeiTag>
                 </div>
             </div>
+            <run-outcome-breakdown v-if="!isRunResultMissing(detail)" :summary="detail.summary" />
             <div
                 v-if="detail.aiUsage"
                 class="run-detail__ai-usage"
