@@ -29,6 +29,10 @@ export class BatchRun extends BaseEntity {
     @Column({ type: 'varchar', length: 36, nullable: true })
     scheduleId!: string | null
 
+    /** 触发者用户 id（手动批量触发写入；定时 / 系统为 null）。 */
+    @Column({ type: 'varchar', length: 36, nullable: true, name: 'triggered_by_user_id' })
+    triggeredByUserId!: string | null
+
     /** 扫描模式 */
     @Column({ type: 'varchar', length: 32 })
     mode!: string

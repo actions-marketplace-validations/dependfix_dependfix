@@ -23,6 +23,7 @@ import { AddPrCheckBuildSignals2300000000000 } from './migrations/2300000000000-
 import { AddScanRunRetriedFromRunId2400000000000 } from './migrations/2400000000000-AddScanRunRetriedFromRunId'
 import { AddRepositoryPrCheckFocus2500000000000 } from './migrations/2500000000000-AddRepositoryPrCheckFocus'
 import { AddScanRunOutcomeColumns2600000000000 } from './migrations/2600000000000-AddScanRunOutcomeColumns'
+import { AddPlatformNotification2700000000000 } from './migrations/2700000000000-AddPlatformNotification'
 import { runStartupBackup } from './backup'
 import { Account } from '#server/entities/account'
 import { Session } from '#server/entities/session'
@@ -37,6 +38,8 @@ import { Schedule } from '#server/entities/schedule'
 import { BatchRun } from '#server/entities/batch-run'
 import { AuditEvent } from '#server/entities/audit-event'
 import { PRCheck } from '#server/entities/pr-check'
+import { NotificationPreference } from '#server/entities/notification-preference'
+import { NotificationLog } from '#server/entities/notification-log'
 
 /**
  * TypeORM DataSource 单例（多后端：SQLite 默认 / MySQL / PostgreSQL）。
@@ -82,6 +85,8 @@ export const createDataSourceOptions = (): DataSourceOptions => {
             BatchRun,
             AuditEvent,
             PRCheck,
+            NotificationPreference,
+            NotificationLog,
         ],
         migrations: [
             CreateInitialSchema1600000000000,
@@ -98,6 +103,7 @@ export const createDataSourceOptions = (): DataSourceOptions => {
             AddScanRunRetriedFromRunId2400000000000,
             AddRepositoryPrCheckFocus2500000000000,
             AddScanRunOutcomeColumns2600000000000,
+            AddPlatformNotification2700000000000,
         ],
         migrationsRun,
         synchronize,

@@ -111,6 +111,13 @@ export class ScanRun extends BaseEntity {
     @Column({ type: 'varchar', length: 64, nullable: true })
     retriedFromRunId!: string | null
 
+    /**
+     * 触发者用户 id（手动触发 / 重试写入；定时与系统触发为 null）。
+     * 业务通知定向投递依据；用户删除后保留字符串，不做外键级联。
+     */
+    @Column({ type: 'varchar', length: 36, nullable: true, name: 'triggered_by_user_id' })
+    triggeredByUserId!: string | null
+
     /** 执行日志（JSON 数组：[{timestamp, level, message, context}]） */
     @Column({ type: 'text', nullable: true })
     logsJson!: string | null
