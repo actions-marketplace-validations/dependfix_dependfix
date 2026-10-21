@@ -181,6 +181,15 @@
 - 新增列迁移（TypeORM）；回填脚本按历史 `errorJson.code` / `summaryJson` / `RunResult.errors` 尽力推断 `failure_stage` / `failure_kind`，无法判定写 `unknown`。
 - 回填为**幂等**且可 dry-run（对齐 `db:backfill` 既有脚本模式）。
 
+### 5.7 运行结果可信度与未修复口径
+
+- **落库**：`scan_run.exit_code`（integer NULL）保存引擎进程级退出码（0 / 1 / 2）；**仅在执行器产出 result 时落库**——无 result 的执行器合成码 2（超时 / 容器不可用 / 交付失败）不是引擎进程码，不落库；B 模式（github-action）的 0 / 2 是触发受理哨兵，编排层不传递；旧数据为 NULL。`scan_run.environmental_failure_count`（integer NULL）保存 `RunSummary.environmentalFailures` 快照；**无 result 或 result 缺 summary 时为 NULL**，与「0 次环境性失败」区分。映射单一事实源 `scan-run-state.ts#resolveScanRunOutcome`；`reuse=true` 时两列随 `summaryJson` 一并清空。
+- **不归因**：环境性失败由 `computeSummary` 按 `FixError.category === 'ENVIRONMENT_ERROR'` 的审计条目计数（不按 action 的 `environmentalFailure` 标记重复计数），不计入 `alertsFailed`、不驱动 `status=failed`、不参与 exit code；运行即使 `completed` 也可显示「环境性失败 N」，tooltip 必须说明「不归因本次运行但可见」。
+- **未修复告警**：UI 派生 `unfixed = alertsFound − alertsFixed − alertsConverged`（下限 0）；`converged`（本地已满足）不计入，`failed` / `skipped` / 不可自动修复计入。截断告警不在 `alertsFound` 内，由后续 `alertsTruncatedBySeverity`（规划中）单独披露。
+- **结果缺失**：`failed` / `completed` / `degraded` 且 `summaryJson` 为空，或 `error.code === 'execution_timeout'` → UI 显示「结果缺失」，不展示「告警 0」；该 run 不参与告警明细 reconcile（`failed` 分支既有契约）。
+- **覆盖边界**：当前计数只覆盖已落 `ENVIRONMENT_ERROR` 的路径（lockfile 诊断 / 多版本 / 合批）；常规分组 / 逐包升级与 major 路径尚未消费 `environmental` 标记（见 backlog「常规升级链路的环境性失败归因对齐」）。本字段已进入 `RunResult` JSON，CLI Markdown / PR 正文摘要表暂未新增行（平台可见性为本条目范围）。
+- **迁移与降级**：迁移 `2600000000000-AddScanRunOutcomeColumns` 幂等（前缀感知 + 列缺失才 ALTER）；旧数据两列为 NULL，API 原样返回 NULL，UI 按 0 / 结果缺失降级，不抛错。
+
 ## 6. 验收标准（草案 → 实现结果）
 
 - [x] `classifyRunFailure` 纯函数 + 单测覆盖全部已知 code / category（含 `unknown` 兜底）——`server/services/run-failure-classify.ts` + 全映射表逐码用例。

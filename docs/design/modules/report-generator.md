@@ -75,6 +75,10 @@ interface RunSummary {
     alertsFailed: number
     /** 跳过的告警数（不可修复 + 超过阈值 + major 限制） */
     alertsSkipped: number
+    /** 已收敛（当前锁定版本已满足推荐版本，无需升级；不计入未修复） */
+    alertsConverged: number
+    /** 环境性失败事件数（不归因目标仓库：安装信号 / 超时 / 静默非零退出） */
+    environmentalFailures: number
     /** lockfile 修复执行次数 */
     lockfileRepairs: number
     /** 验证通过次数 */
@@ -83,6 +87,8 @@ interface RunSummary {
     verificationsFailed: number
 }
 ```
+
+完整字段（含 `alertsTruncated` / `reposWithAlertsDisabled`）以 `packages/core/src/report/types.ts` 为准；本节仅列关键字段。
 
 ### 2.4 RepositoryResult（仓库维度汇总）
 

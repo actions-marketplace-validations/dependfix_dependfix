@@ -73,7 +73,7 @@ Nuxt 4（全栈 SSR + API Routes，`app/` + `server/`）/ TypeScript strict / UI
 
 - `ScanRun.status='failed'` 语义过载，故落库三列支持筛选与汇总：`failure_code`（归一化原始码；`engine_delivery_failed` 从 message 回读细分，无法解析保留兜底码）/ `failure_stage`（source · clone · install · fix · verify · deliver · runtime · cleanup · unknown）/ `failure_kind`（transient / deterministic / unknown）。
 - **单一事实源**：`server/services/run-failure-classify.ts` 集中映射表 + `unknown` 兜底；前端 `app/utils/run-view.ts` 仅复制枚举词汇供筛选控件，标签经 i18n 渲染。
-- 参与分类的终态 = `failed` + 有错误码的 `dispatched`；成功态与 `degraded` 三列为 null；覆盖全部失败写路径（orchestrator · batch-executor · stale-cleanup · scan.post · force-fail）；`reuse=true` 复用既有 run 时三列随 `errorJson` / `summaryJson` 一并清空。存量行回填 `pnpm db:backfill:run-failure`（默认 dry-run，`--apply` + y/N，幂等）。**不建索引**：单组织 run 量级小（summary 窗口上限 500）。完整模型见 [run-failure-taxonomy.md](../design/governance/run-failure-taxonomy.md)。
+- 参与分类的终态 = `failed` + 有错误码的 `dispatched`；成功态与 `degraded` 三列为 null；覆盖全部失败写路径（orchestrator · batch-executor · stale-cleanup · scan.post · force-fail）；`reuse=true` 复用既有 run 时三列随 `errorJson` / `summaryJson` 一并清空。存量行回填 `pnpm db:backfill:run-failure`（默认 dry-run，`--apply` + y/N，幂等）。**不建索引**：单组织 run 量级小（summary 窗口上限 500）。完整模型见 [run-failure-taxonomy.md](../design/governance/run-failure-taxonomy.md)；运行结果可信度（`exit_code` / `environmental_failure_count`、未修复 / 结果缺失口径）见该文 §5.7。
 
 ## 7. 前端规范（app/）
 
