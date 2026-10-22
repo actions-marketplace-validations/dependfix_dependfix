@@ -13,14 +13,17 @@
 # 环境变量：
 #   SMOKE_IMAGE   被测镜像（默认 dependfix-smoke:local）
 #   SMOKE_BUILD   非空且为 1 时先 docker build（默认 0）
+#   SMOKE_APK_MIRROR  仅构建时生效，向 Dockerfile 透传 --build-arg APK_MIRROR（受限网络下用镜像源，如 https://mirrors.aliyun.com）
+#   SMOKE_NPM_REGISTRY  仅构建时生效，向 Dockerfile 透传 --build-arg NPM_REGISTRY（受限网络下用镜像源，如 https://registry.npmmirror.com）
 #   SMOKE_PORT    宿主探测端口（默认 3999）
 #   SMOKE_EXPECT_VERSION / SMOKE_EXPECT_COMMIT  期望的版本戳（非空时校验 /api/health 端到端注入值；默认空，仅校验字段存在）
 #
 # 断言：
+#   0. Node 运行时 ≥ 安全基线（check-node-version.mjs）
 #   1. 正常启动（不注入 DATABASE_MIGRATIONS_RUN）→ 日志 migrationsRun=true、无 no such table
 #   2. GET / = 200 且 GET /api/auth/get-session = 200 且 GET /api/health = 200（JSON 含 version/commit/startedAt）
 #   3. 启动日志含版本戳行 `[build] version=...`
-#   4. 业务表 = 13（经容器内 better-sqlite3 读取）
+#   4. 业务表 ≥ 13（经容器内 better-sqlite3 读取；当前迁移实测 15）
 #   5. 迁移专用模式（DEPENDFIX_MIGRATIONS_ONLY=true）一次性容器退出码 0 且建表成功
 set -eu
 
@@ -58,12 +61,25 @@ if [ "$BUILD" = "1" ]; then
     SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
     REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../../.." && pwd)
     log "构建镜像 $IMAGE（context=$REPO_ROOT）"
-    docker build -f "$REPO_ROOT/apps/platform/Dockerfile" -t "$IMAGE" "$REPO_ROOT"
+    # 用位置参数拼接可选 build-arg，避免字符串词分割（空值不传参）
+    set --
+    if [ -n "${SMOKE_APK_MIRROR:-}" ]; then
+        set -- "$@" --build-arg "APK_MIRROR=$SMOKE_APK_MIRROR"
+    fi
+    if [ -n "${SMOKE_NPM_REGISTRY:-}" ]; then
+        set -- "$@" --build-arg "NPM_REGISTRY=$SMOKE_NPM_REGISTRY"
+    fi
+    docker build "$@" -f "$REPO_ROOT/apps/platform/Dockerfile" -t "$IMAGE" "$REPO_ROOT"
 fi
 
 docker image inspect "$IMAGE" >/dev/null 2>&1 || fail "镜像不存在：$IMAGE（可设 SMOKE_BUILD=1 本地构建）"
 
-# ── 场景 0：目标仓库原生模块回退编译所需的最小工具链 ─────────────────────────────
+# ── 场景 0：Node 运行时安全基线（CVE-2026-111497 / 105483 / 106069 等）────────────
+# 基础镜像回退或误用旧 digest 时，冒烟必须先于推送拦下；版本口径见 check-node-version.mjs。
+docker run --rm --entrypoint node "$IMAGE" /usr/local/bin/dependfix-check-node-version.mjs \
+    || fail "镜像 Node 运行时低于安全基线（修复版本见 Node.js 2026-10-21 安全公告）"
+
+# ── 场景 0b：目标仓库原生模块回退编译所需的最小工具链 ─────────────────────────────
 # 单个 `command -v a b c` 在 busybox ash 下部分缺失仍可能 exit 0，必须逐个断言。
 for tool in python3 make g++; do
     docker run --rm --entrypoint sh "$IMAGE" -c "command -v $tool >/dev/null" || fail "镜像缺少工具链：$tool"
