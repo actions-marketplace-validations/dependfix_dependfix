@@ -23,7 +23,7 @@ import type { AppContext } from './helpers'
  * （lockfile-repair 与合批 / 多版本安装路径均落此类别），避免同时按 action 标记计数造成同一事件
  * 双计（lockfile-repair 失败会同时产生 action.environmentalFailure 与一条 ENVIRONMENT_ERROR）。
  * 覆盖边界：常规分组 / 逐包升级与 major 路径尚未消费安装结果的 `environmental` 标记，
- * 因此计数可能低于真实环境性失败数（见 backlog「常规升级链路的环境性失败归因对齐」）。
+ * 因此计数可能低于真实环境性失败数（归因接线已上收 M47.3，见 docs/plan/todo.md）。
  */
 export function computeSummary(
     ctx: Pick<AppContext, 'allActions' | 'allAlerts' | 'allErrors' | 'alertsDisabled' | 'repoResults' | 'summary'>,

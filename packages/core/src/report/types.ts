@@ -85,7 +85,7 @@ export interface RunSummary {
      * 运行即使 `completed`，也可据此提示「环境性失败 N」而不把仓库判为失败。
      * 计数口径为 `FixError.category === 'ENVIRONMENT_ERROR'` 的审计条目数；当前只覆盖已分类路径
      * （lockfile 诊断 / 多版本 / 合批），常规分组 / 逐包升级路径尚未消费 `environmental` 标记
-     * （见 backlog「常规升级链路的环境性失败归因对齐」），计数可能低于真实环境性失败数。
+     * （归因接线已上收 M47.3，见 docs/plan/todo.md），计数可能低于真实环境性失败数。
      */
     environmentalFailures: number
     /** 因 maxAlertsPerRepository 截断的告警数（收尾审查遗留：截断明细进报告） */

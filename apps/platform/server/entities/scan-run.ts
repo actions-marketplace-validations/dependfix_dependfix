@@ -91,7 +91,7 @@ export class ScanRun extends BaseEntity {
      * 语义为「不归因本次运行的安装环境失败」（信号杀死 / 超时 / 静默非零退出），
      * 与 `status=failed` / `alertsFailed` 独立：completed run 也可能 > 0。
      * 计数只覆盖已落 `ENVIRONMENT_ERROR` 审计条目的路径（lockfile 诊断 / 多版本 / 合批）；
-     * 常规分组 / 逐包升级路径尚未分类（见 backlog 候选），计数可能低于真实环境性失败数。
+     * 常规分组 / 逐包升级路径尚未分类（归因接线已上收 M47.3，见 docs/plan/todo.md），计数可能低于真实环境性失败数。
      * 无 result 的失败（如执行超时）为 null；旧数据同为 null，UI 按 0 降级。
      */
     @Column({ type: 'integer', nullable: true })
