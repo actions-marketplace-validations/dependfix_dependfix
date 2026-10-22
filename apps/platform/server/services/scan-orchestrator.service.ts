@@ -293,7 +293,7 @@ const runScanInternal = async (
             maxRetries: 3,
             maxBackoffMs: 30_000,
             maxRepos: 100,
-            // AI 研判配置（M25.2a）：runtime 注入，已合并优先级 + 解密 apiKey
+            // AI 研判配置：runtime 注入，已合并优先级 + 解密 apiKey
             // 见 [resolveAiConfig] 函数注释（AI 合并优先级 + 错误规则）
             ai: resolvedAi,
         },

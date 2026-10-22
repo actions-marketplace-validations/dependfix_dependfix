@@ -95,6 +95,10 @@ describe('analyzeContent', () => {
         expect(hits).toHaveLength(0)
     })
 
+    it('决策编号不被常量白名单掩盖', () => {
+        expect(analyzeContent('// 关键决策 D3：ack 不修改 conclusion\n', '.ts').hits).toHaveLength(1)
+    })
+
     it('测试名中的编号同样检测', () => {
         const { hits } = analyzeContent('it(\'默认响应包含 M20.3 新增字段\', () => {})\n', '.ts')
         expect(hits).toHaveLength(1)
@@ -130,6 +134,27 @@ describe('analyzeContent', () => {
         expect(analyzeContent('// RG-W04 修复：aria-label\n', '.ts').hits).toHaveLength(1)
         expect(analyzeContent('// RG-W04 修复：aria-label\n', '.ts').hits[0].ids).toEqual(['RG-W04'])
         expect(analyzeContent('// 遵循 W3C 规范\n', '.ts').hits).toHaveLength(0)
+    })
+
+    it('检测子任务字母后缀编号', () => {
+        expect(analyzeContent('// M43.2a 承接项\n', '.ts').hits[0].ids).toEqual(['M43.2a'])
+    })
+
+    it('字母后缀编号带文档指针合规', () => {
+        const { hits, compliantIds } = analyzeContent('// M43.2a 承接项（见 docs/plan/archive/）\n', '.ts')
+        expect(hits).toHaveLength(0)
+        expect(compliantIds).toContain('M43.2a')
+    })
+
+    it('不误伤更长后缀与无点形态', () => {
+        // 规范只允许单字母后缀；`M43.2ab` 与 `M1a` 均不应被识别为规划编号
+        expect(analyzeContent('// M43.2ab 非规范形态\n', '.ts').hits).toHaveLength(0)
+        expect(analyzeContent('// M1a 产品代号\n', '.ts').hits).toHaveLength(0)
+    })
+
+    it('测试名中的字母后缀编号同样检测', () => {
+        const id = ['M43', '2a'].join('.')
+        expect(analyzeContent(`it('${id} 承接', () => {})`, '.ts').hits).toHaveLength(1)
     })
 
     it('已知边界：裸 PR 编号不在检测面', () => {

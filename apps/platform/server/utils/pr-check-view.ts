@@ -12,7 +12,7 @@ import { matchesPRCheckFocus, parsePRCheckFocus } from '#server/utils/pr-check-f
  * 字段口径：
  * - `repository`：服务端解析的 `owner/name`（与 alerts / env-events / dashboard 同源口径；
  *   调用方须加载 `repository` 关系，否则回退 `null`）
- * - `overallStatus` / `signals` / `failureSources`：三源聚合字段（M43.2b）；JSON 列解析，
+ * - `overallStatus` / `signals` / `failureSources`：三源聚合字段；JSON 列解析，
  *   列值缺失或损坏时回退 `null`（不抛错）
  * - `focusConfigured`：该仓库是否配置了 PR Check 告警关注集（`false` = 全量只报警不阻断）
  * - `signals[].focused`：该信号是否命中关注集（未配置时恒为 `true`）。未命中的信号仍返回

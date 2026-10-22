@@ -150,7 +150,7 @@ export const FAILURE_CONCLUSIONS: readonly PRCheckConclusion[] = [
 
 /**
  * 判定快照结论是否应触发 alerts firing。
- * 状态机（关键决策 D3）：失败时 firing=true → 用户 ack 或回归 success 自动 ack → firing=false。
+ * 状态机（关键决策）：失败时 firing=true → 用户 ack 或回归 success 自动 ack → firing=false。
  * 注意：用户 ack 操作仅设置 firing=false + acknowledgedAt=NOW，**不修改** `conclusion`，
  * alert 状态机严格基于 polling 结果。
  */

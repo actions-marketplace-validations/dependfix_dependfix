@@ -156,9 +156,9 @@ export class ActionStatusMonitor {
      * `signalsJson` 仍写入**全量信号**（审计面，未命中的信号不丢弃）。命中集合为空时按空集聚合口径
      * 视为 `success`（关注面没有任何需要告警的信号），但整行照常落库。
      *
-     * 状态机推断（关键决策 D3 + M43.2b 承接）：
+     * 状态机推断（关键决策与后续承接）：
      * - INSERT / UPDATE 路径：alertFiring = isFailureConclusion(关注面 conclusion)
-     * - **自动 ack 清空判定按 `overallStatus === 'success'`**（M43.2b 承接项）：聚合成功（含
+     * - **自动 ack 清空判定按 `overallStatus === 'success'`**（后续承接项）：聚合成功（含
      *   `neutral` / `skipped` 信号但无失败 / 无 pending）即视为回归成功并清 ack；
      *   若沿用 `conclusion === 'success'`，含 `neutral` 信号的 PR 将永不清 ack。
      *

@@ -65,15 +65,14 @@ export const DOC_POINTER_RE = /docs\/|\.md\b|§|todo\.md|todo-archive|backlog|ro
  * 规划 / 任务 / 审计 / backlog 编号。
  * 覆盖 D 阶段自检 canonical 集合（T / P / C / G / R / M / B）+ §3 语义内的审计与决策编号
  * （`UX-R` 变体 / `RG-Bxx` 审计项 / `D\d` 决策 / `W\d` 警告项 / `S\d` 建议项，其中 S 兼容
- * 带连字符与裸编号两种写法）。位数范围限定（M0–M99 / T100–T9999 / W、S 1–99），
- * 不试图与任意宽度的编号完全等价。
+ * 带连字符与裸编号两种写法）。M 编号兼容子任务字母后缀（`M43.2a`）；位数范围限定
+ * （M0–M99 / T100–T9999 / W、S 1–99），不试图与任意宽度的编号完全等价。
  */
-export const PLANNING_ID_RE = /(?<![\w.-])(UX-R\d+|RG-[BWS]?\d+|T\d{3,4}|P[0-3](?:-\d+)?|C\d{1,3}|G[1-7]|R[1-9]|M\d{1,2}(?:\.(?:\d{1,2}|x))?|B[1-9]|D\d{1,2}|W\d{1,2}|S-?\d{1,2})(?![\w.-])/g
+export const PLANNING_ID_RE = /(?<![\w.-])(UX-R\d+|RG-[BWS]?\d+|T\d{3,4}|P[0-3](?:-\d+)?|C\d{1,3}|G[1-7]|R[1-9]|M\d{1,2}(?:\.(?:\d{1,2}|x)[a-z]?)?|B[1-9]|D\d{1,2}|W\d{1,2}|S-?\d{1,2})(?![\w.-])/g
 
 /** 真常量白名单：命中该 token 即忽略（大小写敏感）。按实测命中的真实常量维护。 */
 export const WHITELIST = new Set([
     'R2', // Cloudflare R2 对象存储
-    'D3', // 数据可视化库 d3（如以 `D3` 形式出现）
 ])
 
 /**

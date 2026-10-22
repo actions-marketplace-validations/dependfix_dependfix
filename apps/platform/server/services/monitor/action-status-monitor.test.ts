@@ -130,7 +130,7 @@ describe('ActionStatusMonitor', () => {
             expect(JSON.parse(saved.failureSourcesJson)).toEqual([])
         })
 
-        it('1 个 failure 快照 → INSERT 路径 + alertFiring=true（状态机 D3）+ 失败源清单', async () => {
+        it('1 个 failure 快照 → INSERT 路径 + alertFiring=true（状态机）+ 失败源清单', async () => {
             vi.mocked(mockSource.fetchSnapshots).mockResolvedValue([
                 makeSnapshot({
                     conclusion: 'failure',
@@ -168,7 +168,7 @@ describe('ActionStatusMonitor', () => {
         })
     })
 
-    describe('状态机（关键决策 D3 + M43.2b 承接）', () => {
+    describe('状态机（关键决策与后续承接）', () => {
         it('UPDATE 路径：failure 覆盖原 ack 状态为 firing=true', async () => {
             prCheckFindOne.mockResolvedValue({
                 id: 'existing-1',
@@ -213,7 +213,7 @@ describe('ActionStatusMonitor', () => {
         })
 
         it('UPDATE 路径：聚合 success 但结论为 neutral（存在 neutral 信号）→ 仍清空 ack', async () => {
-            // M43.2b 承接项：自动 ack 判定按 overallStatus（此前按 conclusion 时 neutral 永不清 ack）
+            // 自动 ack 判定按 overallStatus（此前按 conclusion 时 neutral 永不清 ack）
             prCheckFindOne.mockResolvedValue({
                 id: 'existing-1',
                 repositoryId: 'repo-1',
@@ -423,7 +423,7 @@ describe('ActionStatusMonitor', () => {
         })
     })
 
-    describe('终态节流（M43.2b 承接项）', () => {
+    describe('终态节流（后续承接项）', () => {
         it('终态 + 静默窗口内 → 传入 knownTerminalHeads（采集层据此跳过）', async () => {
             prCheckFind.mockResolvedValue([
                 {
