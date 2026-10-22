@@ -38,7 +38,7 @@
     "dependfix": "./dist/bin.mjs"
   },
   "engines": {
-    "node": ">=20"
+    "node": "^22.23.4 || ^24.22.1"
   },
   "scripts": {
     "build": "tsdown",
