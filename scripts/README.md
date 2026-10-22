@@ -27,12 +27,13 @@
 |---|---|---|
 | `pnpm check:docs` | `check-docs.mjs` | 校验仓库内 .md 文件规范（七类规则：links：路径存在、锚点 slug、拒绝绝对路径/目录越界；vue-interp：docs/ 行内代码不触发 VitePress 编译失败；link-text：链接文本 §N ↔ 目标锚点编号；link-syntax：畸形链接；emphasis：`**` 未配对；site-links：站点静态绝对链接；archive-anchors：归档文档锚点子集）；`--only=<links\|vue-interp\|link-text\|link-syntax\|emphasis\|site-links\|archive-anchors>` 单跑（覆盖面与边界见 [文档规范 §2](../docs/standards/documentation.md#2-markdown-约定)） |
 | `pnpm docs:check:i18n` | `docs/check-i18n-duplicates.mjs` | 检查 docs 翻译页是否同时存在于旧目录（`docs/<locale>/`）与 `docs/i18n/<locale>/`（回流即报错；详见 [i18n 规范](../docs/standards/i18n.md)） |
+| `pnpm check:experience-landing` | `check-experience-landing.mjs` | 校验归档条目落点非空（编号子条目逐条校验；无编号子条目的 `##` 整体校验；占位符与自指落点判空）；**已接入 CI Test job（命中即阻断）** |
 
 ### 代码注释治理
 
 | pnpm 命令 | 脚本 | 用途 |
 |---|---|---|
-| `pnpm check:orphan-ids` | `check-orphan-ids.mjs` | 检测非 `docs/` 源码 / 配置 / 脚本注释中的孤立规划编号（无文档指针即违规；判定口径与已知边界见脚本头注释 + [开发规范 §3](../docs/standards/development.md#3-注释规范)）；`--json` 机读；**已接入 CI Test job（命中即阻断）** |
+| `pnpm check:orphan-ids` | `check-orphan-ids.mjs` | 检测非 `docs/` 源码 / 配置 / 脚本注释中的孤立规划编号（无文档指针即违规；覆盖子任务字母后缀 `M43.2a`；判定口径与已知边界见脚本头注释 + [开发规范 §3](../docs/standards/development.md#3-注释规范)）；`--json` 机读；**已接入 CI Test job（命中即阻断）** |
 
 ### 仓库自洽门禁
 

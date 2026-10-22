@@ -330,6 +330,7 @@ if (value) { ... }  // 对 0, "", false 失效
 | [development.md §5.1.41](../../../../docs/standards/development.md) | 「收窄 / 跳过」类改动（省成本、消除假失败、提前返回、降级） | 被跳过步骤的产物是否有**别的消费者**（字段级穷举）？跳过后面临的判据空洞是否显式补上（新增信号 / 跨用例不变量）？ |
 | [development.md §5.1.42](../../../../docs/standards/development.md) | 给 composable 引入依赖注入（`useXxx(deps)`） | 缺省实现是否在 **setup 期**求值（`deps.x ?? resolveXxx()`）而非事件期延迟调用 setup-only composable（`useI18n` / `useRoute` / `useState`）？事件期是否只用 event-safe 全局？ |
 | [testing.md §6.11](../../../../docs/standards/testing.md) | 门禁 / 脚本类单测（`scripts/**`） | CLI 早返回分支是否 `process.exit` **兼** `return`（mock 下不终止会 fall-through，使 mutation 存活）？夹具字面量是否会被被测门禁脚本自身扫到（改运行时拼接）？ |
+| [documentation.md §6](../../../../docs/standards/documentation.md) | 归档条目落点校验粒度 | 同一 `##` 下存在编号 `###` 子条目时是否**逐条**校验（不得由兄弟条目的落点代偿）？无编号子条目的 `##` 是否整体校验？自指落点（`本条` / `同上` / `详见本条`）是否判空？门禁：`pnpm check:experience-landing`。 |
 | [platform.md §10.6](../../../../docs/standards/platform.md#106-队列执行进程隔离独立-worker-进程) | `apps/platform/docker/entrypoint.sh` 双进程编排 / 信号处置改动 | 容器停止（TERM / INT）的转发 trap 是否**先于**「启动子进程」与「输出就绪行」安装（就绪行是外部观测方唯一同步点，晚装则落在窗口的信号按默认处置终止 PID 1 → 观测方读到 signal 终止而非 143、看护循环与 worker 失去父进程）？子进程尚未启动时是否直接退出而非吞掉停止信号后照旧启动？源码顺序断言（`entrypoint.test.mjs`）是否同步更新？退避等待是否用 `sleep N & wait $!`（前台 `sleep` 阻塞 trap）并有真实 `sleep` + `TERM` 计时用例 |
 
 > **维护纪律**：本矩阵为严格约束检查点的**单点落点**，其他文档 / skill / agent 只做一行链接引用（见上方「规范单点声明」）。矩阵行与条款对应（**同一条款可对应多行**，见上方说明）；条款废弃 / 合并时同步删行。

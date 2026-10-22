@@ -38,7 +38,7 @@
 
 **范围边界（不做什么）**：不按目标仓库 workflow 动态替换 `verifyCommands`、不解析 matrix / secrets / services 的完整语义（M47.1）；不做部署回执（Jenkins / webhook）与历史 run 回填（M47.2）；不改 `failure_kind` 枚举本身、不回填历史数据（M47.3）；不实现 store 自动 GC 调度、不做多仓共享 store 并发控制（M47.4）；不做通用摘要调度器、不做周报历史归档页、不做时区逐用户配置（M47.5）；不做全仓编号重命名、不改 husky 其他钩子（M47.6）。
 
-**§3.4 交叉核验**：6 项经 ① todo-archive 表格扫描（关键词 `环境性失败` / `构建版本` / `CI 口径` / `workflow 对齐` / `pnpm store` / `weekly_digest` / `check-orphan-ids` / `check-experience-landing` / `lint-staged` 仅命中来源批次与残余观察项，无「已闭环」范围）；② `git log --oneline -- <候选路径>`（`verify-project.ts` 最近 `d76dcea8` / `pr-creator.ts` 最近 `37c93068` / `repo-fix.ts` 最近 `dd195219` / `Dockerfile` 最近 `957bc58f` / `package.json` 最近 `89fdb6ce` 均未覆盖本阶段范围）；③ 代码 anchor（`verify-project.ts:40` 只消费默认链 / 仓库 `verifyCommands`，engine / platform 无读取目标仓库 workflow 的代码（`scripts/check-verify-chain.mjs` 仅解析 dependfix 自身 workflow）；`build-info` 插件仅向平台 stdout 打版本戳、engine 运行日志无版本，`ScanRun` 无构建版本列；`result-assembly.ts:22-25` 自述升级路径未消费 `environmental`；engine / platform 产品代码无 `store-dir` 配置；`package.json:90/94/98` 裸 `git add` 仍在），**0 项重复评估**。
+**§3.4 交叉核验**：6 项经 ① todo-archive 表格扫描（关键词 `环境性失败` / `构建版本` / `CI 口径` / `workflow 对齐` / `pnpm store` / `weekly_digest` / `check-orphan-ids` / `check-experience-landing` / `lint-staged` 仅命中来源批次与残余观察项，无「已闭环」范围）；② `git log --oneline -- <候选路径>`（`verify-project.ts` 最近 `d76dcea8` / `pr-creator.ts` 最近 `37c93068` / `repo-fix.ts` 最近 `dd195219` / `Dockerfile` 最近 `957bc58f` / `package.json` 最近 `89fdb6ce` 均未覆盖本阶段范围）；③ 代码 anchor（`verify-project.ts:40` 只消费默认链 / 仓库 `verifyCommands`，engine / platform 无读取目标仓库 workflow 的代码（`scripts/check-verify-chain.mjs` 仅解析 dependfix 自身 workflow）；`build-info` 插件仅向平台 stdout 打版本戳、engine 运行日志无版本，`ScanRun` 无构建版本列；`result-assembly.ts:22-25` 自述升级路径未消费 `environmental`；engine / platform 产品代码无 `store-dir` 配置；`package.json:90/94/98` 裸 `git add` 仍在（规划时点）），**0 项重复评估**。
 
 **审计 depth 预告**：M47.1 / M47.2 / M47.3 / M47.4 / M47.5 → `standard`（M47.1 若跨 engine + platform + PR 契约，建议 2 分区并发；M47.2 含迁移建议 2 分区）；M47.6 → `quick`。
 
@@ -157,18 +157,18 @@
 - **优先级**：P3
 - **范围**：
   - `scripts/check-orphan-ids.mjs`：`PLANNING_ID_RE` 支持子任务字母后缀（如 `M43.2a`），评估既有真常量白名单误报面；fixtures 用运行时拼接 token（避免被门禁自扫）。
-  - `scripts/check-experience-landing.mjs`：落点校验粒度由 `##` 改为 `###` 逐条；自指落点（「本条环境注记」）单独告警；存量条目按实测补真实落点或登记白名单。
-  - `package.json:87-102` lint-staged：移除三条裸 `git add`（保留 `packages/skills/**` 带路径的正确形态）。
+  - `scripts/check-experience-landing.mjs`：落点校验粒度由 `##` 改为编号 `###` 子条目逐条；纯结构小节归所属条目；自指落点（「本条环境注记」等）判空并给出专用原因；存量条目按实测补真实落点或登记白名单。
+  - `package.json:87-102` lint-staged：移除三条裸 `git add` 并改为文件级任务（`eslint --fix` / `lint-md --fix`），避免仓库级 formatter 连带暂存；保留 `packages/skills/**` 带路径的正确形态。
   - 文档：`docs/standards/documentation.md` / `testing.md` 对应条款（若需）+ review 检查点矩阵（若新增规则）。
 - **验收标准**：
-  - [ ] ① `check-orphan-ids` 对 `M43.2a` 形态在源码注释 / 测试名中命中（fixture 单测），合法文档指针仍通过；全仓 `pnpm check:orphan-ids` 0 error。
-  - [ ] ② `check-experience-landing` 对同 `##` 下某 `###` 无落点报错（fixture），存量全仓 0 error；自指落点被标记。
-  - [ ] ③ 移除裸 `git add` 后，多文件工作区下单个 commit 仅含指定文件（实测）；husky 不再打印 `tasks use git add` 告警。
-  - [ ] ④ 三条改动均有单测 / 实测证据；mutation 至少 3 项。
-  - [ ] ⑤ 不改变门禁退出码语义（新增规则自身除外）。
+  - [x] ① `check-orphan-ids` 对 `M43.2a` 形态在源码注释 / 测试名中命中（fixture 不得进入门禁自扫面，必要时运行时拼接），合法文档指针仍通过；全仓 `pnpm check:orphan-ids` 0 error。
+  - [x] ② `check-experience-landing` 对同 `##` 下某 `###` 无落点报错（fixture），存量全仓 0 error；自指落点被标记。
+  - [x] ③ 移除三条业务 glob 的裸 `git add` 并改为文件级任务后，lint-staged 跑后暂存区仍仅含目标文件（实测）；`packages/skills/**` 的带 pathspec `git add` 作为生成物同步例外保留（husky 仍会由该条触发 `tasks use git add` 告警）。
+  - [x] ④ 三条改动均有单测 / 实测证据；mutation 至少 3 项。
+  - [x] ⑤ 不改变门禁退出码语义（新增规则自身除外）。
 - **不做什么**：不做全仓编号重命名；不做 lint-staged 性能优化；不改 husky 其他钩子。
 - **依赖**：原 backlog 三条候选（本阶段已上收）；`check-orphan-ids` 的产物排除改动；`check-experience-landing` 既有分片结构；`package.json` lint-staged 段。
-- **交付物**：预估 3 commits（编号门禁 / 落点门禁 / lint-staged + 文档），**6-8 文件 / 200-380 行**。
+- **交付物**：**19 文件**（含审计收口新增的治理 / 计划文件）；计划 3 commits（编号门禁 8 / 落点门禁 2 / lint-staged 与文档 9，F 阶段执行，提交后以 `git show --stat` 回填实际分组）。
 - **风险与缓解**：**R1 字母后缀正则误报**（文档 ID / 版本号）→ 先跑一次性探针量化分布 + 白名单；**R2 `###` 粒度导致大量存量报错** → 先量化，必要时分批补落点并登记；**R3 移除裸 add 后重暂存行为变化** → 多文件提交实测。
 
 ---
