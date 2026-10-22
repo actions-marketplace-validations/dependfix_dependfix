@@ -16,8 +16,8 @@
 # 安全基线（2026-10-21 Node.js 安全公告）：运行时必须 >= 24.22.1（24.x 线）。
 # 暂用官方 node:24.22.1-alpine：自建 caomeiyouren/alpine-nodejs 走 `apk add nodejs`，而 Alpine
 # v3.24 与 edge 此刻仍停在 24.18.1（-r0 / -r5），重建自建镜像拿不到补丁。等 docker-builder
-# 改为官方 tarball 并发布 alpine3.24-node24.22 后，收敛回自建基础镜像（见 docs/plan/todo.md
-# 「追加临时待办（不占阶段条目编号）：Node 运行时安全基线升级」）。
+# 改为官方 tarball 并发布 alpine3.24-node24.22 后再评估收敛（用户 2026-10-22 决定暂不迁移）；
+# 记录见 docs/plan/todo.md「追加临时待办（不占阶段条目编号）：Node 运行时安全基线升级」。
 FROM public.ecr.aws/docker/library/node:24.22.1-alpine@sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53 AS nodejs
 
 # pnpm 工具链：钉住当前运行时镜像实际携带的版本（11.18.0），切基底不改变目标仓库的安装语义。

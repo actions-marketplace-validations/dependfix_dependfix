@@ -68,7 +68,7 @@ Versions are **not** duplicated here — [`apps/platform/package.json`](../../..
 dependfix uses **tsdown** (built on Rolldown) as the build tool:
 
 - **Library packages** (`packages/core` / `packages/engine` / `packages/cli` / `packages/mcp`): tsdown builds dual ESM + CJS output (ESM only since 0.2.0) and `.d.ts` type declarations
-- **App packages** (`apps/platform` / `apps/action`): tsdown bundles entry points (single ESM output, no `.d.ts`)
+- **App package** (`apps/platform`): tsdown bundles entry points (single ESM output, no `.d.ts`); the GitHub Action is a root `action.yml` composite, not a package
 - **Smoke test**: after `tsdown` build completes, run `node dist/index.js --help` to verify runtime entry is callable
 
 Release process: see [Release Guide](https://github.com/dependfix/dependfix/blob/master/docs/guide/release.md).
@@ -81,7 +81,7 @@ Release process: see [Release Guide](https://github.com/dependfix/dependfix/blob
 | `apps/platform` server | Vitest + Better-SQLite in-memory | Same as above |
 | `apps/platform` web | Vitest + Vue Test Utils | Same as above |
 | `apps/platform` e2e | Playwright | Critical user flows (5 critical baseline) |
-| `apps/action` smoke | tsx entry + mock outputs | N/A |
+| root `action.yml` (composite) | dogfooded via `uses: ./` in `.github/workflows/security-auto-fix.yml` | N/A |
 
 Coverage report command:
 

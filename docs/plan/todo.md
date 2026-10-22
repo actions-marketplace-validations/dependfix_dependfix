@@ -175,12 +175,12 @@
 
 ### 追加临时待办（不占阶段条目编号）：Node 运行时安全基线升级（2026-10-21 安全公告）
 
-> **授权依据**：用户 2026-10-22 明确授权；依据 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 插队例外清单第 1/2 类（已确认的安全漏洞 / 高危漏洞）与用户裁定的技术路线（先官方镜像止血、上游就绪后收敛）。**不分配阶段编号**，不计入 M47 条目容量与类型平衡。
+> **授权依据**：用户 2026-10-22 明确授权；依据 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 插队例外清单第 1/2 类（已确认的安全漏洞 / 高危漏洞）与用户裁定的技术路线（先官方镜像止血；收敛回自建基底暂不迁移，待上游就绪后再评估）。**不分配阶段编号**，不计入 M47 条目容量与类型平衡。
 
 - **目标**：把平台镜像运行时从 Node 24.18.1 升到已修复版本，并让该基线可机检，避免基础镜像 digest 静默回退到受影响版本。
 - **评估结论**：
   - [Node.js 2026-10-21 安全公告](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases) 修复版本为 22.23.4 / 24.22.1 / 26.12.1；本仓镜像 digest 实测 Node 24.18.1（OpenSSL 3.5.8 / undici 7.29.0），`node:24.22.1-alpine` 为 OpenSSL 3.5.9 / undici 7.30.1。
-  - 自建基础镜像（docker-builder 的 `alpine-nodejs`）走 `apk add nodejs`，而 Alpine v3.24 与 edge 仍停留在 24.18.1（`-r0` / `-r5`），重建自建镜像拿不到补丁 → 本轮改用官方 `node:24.22.1-alpine` 止血；待 docker-builder 改为官方 tarball 并发布 `alpine3.24-node24.22` 后回归自建基底。
+  - 自建基础镜像（docker-builder 的 `alpine-nodejs`）走 `apk add nodejs`，而 Alpine v3.24 与 edge 仍停留在 24.18.1（`-r0` / `-r5`），重建自建镜像拿不到补丁 → 本轮改用官方 `node:24.22.1-alpine` 止血；待 docker-builder 改为官方 tarball 并发布 `alpine3.24-node24.22` 后再评估收敛（用户 2026-10-22 决定暂不迁移）。
   - 实测补充：pnpm 11.x（实测 11.28）与 undici `fetch` 均忽略请求头、按响应头自动解 br（`accept-encoding: gzip, deflate` 仍解 `content-encoding: br`）；本仓 `registry-discovery.ts` 信任目标仓库配置的 registry，且 pnpm 直连不走审计代理 → Brotli 解压面不止「GitHub API / AI 端点」，评级由 P2 上修为 P1。全仓 `dns.resolve` / startup snapshot / `--permission` / `ZipFile` 0 处，对应 CVE 不适用于本仓。
 - **范围**：
   - `apps/platform/Dockerfile`：基础镜像改官方 `node:24.22.1-alpine`（manifest list digest，覆盖 amd64 / arm64）+ pnpm 11.18.0 全局安装（与切换前一致、移除 corepack shim）+ `npm_config_nodedir` 指向镜像自带 headers + runtime 去 npm / corepack / yarn + 构建期基线断言 + 可选 `APK_MIRROR` / `NPM_REGISTRY` 构建参数（受限网络，值经字符集校验且不写入运行期 ENV）。
@@ -197,7 +197,7 @@
 - **验证证据**：构建期 `[node-baseline] Node 24.22.1 >= 24.22.1`；运行期 `node -v` = v24.22.1、`process.versions.openssl` = 3.5.9、`undici` = 7.30.1、`pnpm -v` = 11.18.0（与切换前一致）、`npm/corepack/yarn` 均无；`SMOKE_BUILD=1` 与 `SMOKE_IMAGE=…` 两种入口均 PASS（15 业务表）；负例 `--version=24.18.1` → exit 1；定向 vitest 8 passed；`pnpm run lint` 0 error / `typecheck` 7 包 Done。
 - **§3.1.1 容量评估**：1 批 / 19 文件 / +336 −39 行，约占阶段基线文件数 32-46%、行数 13-21%；未达「累计 ≥ 3 批」与「≥ 50%」阈值，剩余窗口可容纳审计与验证 → **不移出原子条目**。
 - **不做什么**：不改 docker-builder（另一仓，收敛路线 A 另行跟进）；不引入 `--permission` / SEA 等缓解（本仓未使用）；不改目标仓库 install 语义与 pnpm 版本；不新增 audit 豁免。
-- **依赖与风险**：**R1** 官方镜像经 public ECR 拉取，CI 需可达（不可达时回退 Docker Hub 同名 tag，digest 需重新核对）；**R2** 本地开发容器原 Node 24.19.0 低于新 engines 下限，已在本批验证期间升级到 24.22.1（环境动作，不入库）；**R3** 受限网络下构建需 `--build-arg APK_MIRROR` + `--build-arg NPM_REGISTRY`（冒烟脚本已支持 `SMOKE_APK_MIRROR` / `SMOKE_NPM_REGISTRY` 透传；构建参数值会记入镜像 history，仅可用于非敏感 URL）；**R4** 收敛回自建基底时须重跑冒烟与 amd64 / arm64 构建，并复核 better-sqlite3 musl prebuild。**已知残余**：① runtime 镜像体积由 ~661MB 增至 ~787MB（官方 node 基底 + 保留原生编译工具链；工具链瘦身归 backlog 既有候选）；② 官方 node 基底不含 corepack，`verify-project` 的 `corepack pnpm@<ver>` 回退路径在容器内不可用（切换前同样不可用，非本批回归，登记为已知限制）；③ 安全断言含 26 线而发布包 engines 只声明 22 / 24，二者口径不同为有意设计（engines 只声明支持面：22 / 24，CI 当前覆盖 24 线）。
+- **依赖与风险**：**R1** 官方镜像经 public ECR 拉取，CI 需可达（不可达时回退 Docker Hub 同名 tag，digest 需重新核对）；**R2** 本地开发容器原 Node 24.19.0 低于新 engines 下限，已在本批验证期间升级到 24.22.1（环境动作，不入库）；**R3** 受限网络下构建需 `--build-arg APK_MIRROR` + `--build-arg NPM_REGISTRY`（冒烟脚本已支持 `SMOKE_APK_MIRROR` / `SMOKE_NPM_REGISTRY` 透传；构建参数值会记入镜像 history，仅可用于非敏感 URL）；**R4**（暂不迁移，条件性）收敛回自建基底时须重跑冒烟与 amd64 / arm64 构建，并复核 better-sqlite3 musl prebuild。**已知残余**：① 路线 A（收敛回自建基底）**用户 2026-10-22 决定暂不迁移**——docker-builder 仍走 `apk add nodejs`（Alpine v3.24/edge 为 24.18.1），待上游发布 `alpine3.24-node24.22` 后再评估；② runtime 镜像体积由 ~661MB 增至 ~787MB（官方 node 基底 + 保留原生编译工具链；工具链瘦身归 backlog 既有候选）；③ 官方 node 基底不含 corepack，`verify-project` 的 `corepack pnpm@<ver>` 回退路径在容器内不可用（切换前同样不可用，非本批回归，登记为已知限制）；④ 安全断言含 26 线而发布包 engines 只声明 22 / 24，二者口径不同为有意设计（engines 只声明支持面：22 / 24，CI 当前覆盖 24 线）。
 
 ---
 

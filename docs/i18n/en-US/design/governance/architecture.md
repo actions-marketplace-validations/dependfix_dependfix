@@ -11,7 +11,7 @@ dependfix consists of the following parts:
 | CLI | `packages/cli` | ✅ Shipped |
 | MCP Server | `packages/mcp` | ✅ Shipped (M6) |
 | Skill | `packages/skills` | ✅ Shipped (M5.5) |
-| GitHub Action | `apps/action` | ✅ Shipped |
+| GitHub Action | `action.yml` (composite) | ✅ Shipped |
 | Management Platform | `apps/platform` | ✅ Shipped (M6-M11) |
 
 ## 2. Overall plan
@@ -23,7 +23,7 @@ dependfix follows a layered architecture:
 │ User entry                                                │
 ├─────────────────────────────────────────────────────────┤
 │ CLI / GitHub Action / MCP Server / Skill                  │
-│  (packages/cli / apps/action / packages/mcp / skills)    │
+│  (packages/cli / action.yml / packages/mcp / skills)    │
 ├─────────────────────────────────────────────────────────┤
 │ Engine layer (packages/engine)                            │
 │  - fetcher: Dependabot / pnpm-audit / Code Scanning       │
@@ -49,7 +49,7 @@ The dependency direction is top-down (UI / entry → engine → core), and lower
 ### Entry layer
 
 - **CLI** (`packages/cli`): commander-based CLI, four modes (`report-only` / `fix` / `fix-and-pr` / `cleanup-branches`), flags via Commander
-- **GitHub Action** (`apps/action`): wraps CLI, exposes `uses: dependfix/dependfix@v1` to GitHub Actions
+- **GitHub Action** (root `action.yml`, composite): wraps CLI, exposes `uses: dependfix/dependfix@v1` to GitHub Actions
 - **MCP Server** (`packages/mcp`): exposes scan / fix tools to AI agents (Claude Code / Copilot / Cursor) via Model Context Protocol
 - **Skill** (`packages/skills`): Markdown + YAML frontmatter, lets AI agents converse and drive fixes
 
