@@ -187,7 +187,7 @@
 - **不归因**：环境性失败由 `computeSummary` 按 `FixError.category === 'ENVIRONMENT_ERROR'` 的审计条目计数（不按 action 的 `environmentalFailure` 标记重复计数），不计入 `alertsFailed`、不驱动 `status=failed`、不参与 exit code；运行即使 `completed` 也可显示「环境性失败 N」，tooltip 必须说明「不归因本次运行但可见」。
 - **未修复告警**：UI 优先读 `alertsUnfixed`（告警级 canonical，逐条 `isAlertFixedByActions` 判定）；旧 summary 缺 `alertsUnfixed` 字段时回退 `alertsFound − alertsFixed − alertsConverged`（action 级近似，下限 0）。`converged`（本地已满足）不计入，`failed` / `skipped` / 不可自动修复计入。截断告警不在 `alertsFound` 内，由 §5.8 的 `alertsTruncatedBySeverity` 单独披露。
 - **结果缺失**：`failed` / `completed` / `degraded` 且 `summaryJson` 为空，或 `error.code === 'execution_timeout'` → UI 显示「结果缺失」，不展示「告警 0」；该 run 不参与告警明细 reconcile（`failed` 分支既有契约）。
-- **覆盖边界**：当前计数只覆盖已落 `ENVIRONMENT_ERROR` 的路径（lockfile 诊断 / 多版本 / 合批）；常规分组 / 逐包升级与 major 路径尚未消费 `environmental` 标记（见 backlog「常规升级链路的环境性失败归因对齐」）。本字段已进入 `RunResult` JSON，CLI Markdown / PR 正文摘要表暂未新增行（平台可见性为本条目范围）。
+- **覆盖边界**：当前计数只覆盖已落 `ENVIRONMENT_ERROR` 的路径（lockfile 诊断 / 多版本 / 合批）；常规分组 / 逐包升级与 major 路径尚未消费 `environmental` 标记（归因接线已上收 M47.3，见 [todo.md §M47](../../plan/todo.md)）。本字段已进入 `RunResult` JSON，CLI Markdown / PR 正文摘要表暂未新增行（平台可见性为本条目范围）。
 - **迁移与降级**：迁移 `2600000000000-AddScanRunOutcomeColumns` 幂等（前缀感知 + 列缺失才 ALTER）；旧数据两列为 NULL，API 原样返回 NULL，UI 按 0 / 结果缺失降级，不抛错。
 
 ### 5.8 跳过与截断披露

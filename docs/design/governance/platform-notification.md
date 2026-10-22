@@ -1,6 +1,6 @@
 # 平台通知与邮件推送设计
 
-> 状态：✅ 已落地（2026-10-21，B1-B4；B5 周汇总延期至 backlog；来源 [issue #190](https://github.com/dependfix/dependfix/issues/190)）
+> 状态：✅ B1-B4 已落地（2026-10-21）；B5 周汇总已随 M47.5 进入规划（2026-10-22，见 [todo.md §M47](../../plan/todo.md)）；来源 [issue #190](https://github.com/dependfix/dependfix/issues/190)）
 > 关联：[系统架构](./architecture-platform.md) · [定时扫描与批量处理设计](./platform-scheduled-batch.md) · [运行失败分类与筛选设计](./run-failure-taxonomy.md) · [平台规范](../../standards/platform.md) · [安全规范](../../standards/security.md)
 
 ## 1. 背景与现状
