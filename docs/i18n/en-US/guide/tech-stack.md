@@ -33,13 +33,13 @@ dependfix is built on the Node.js runtime + TypeScript stack, with the following
 
 | Layer | Language | Runtime | Build tool |
 |:------|:---------|:--------|:-----------|
-| `packages/core` | TypeScript (strict) | Node.js >= 20 (LTS) | tsdown |
-| `packages/engine` | TypeScript (strict) | Node.js >= 20 (LTS) | tsdown |
-| `packages/cli` | TypeScript (strict) | Node.js >= 20 (LTS) | tsdown (ESM only since 0.2.0) |
-| `packages/mcp` | TypeScript (strict) | Node.js >= 20 (LTS) | tsdown |
+| `packages/core` | TypeScript (strict) | Node.js ^22.23.4 \|\| ^24.22.1 | tsdown |
+| `packages/engine` | TypeScript (strict) | Node.js ^22.23.4 \|\| ^24.22.1 | tsdown |
+| `packages/cli` | TypeScript (strict) | Node.js ^22.23.4 \|\| ^24.22.1 | tsdown (ESM only since 0.2.0) |
+| `packages/mcp` | TypeScript (strict) | Node.js ^22.23.4 \|\| ^24.22.1 | tsdown |
 | `packages/skills` | Markdown + YAML frontmatter | N/A (Claude / Copilot / Cursor consumption) | N/A |
-| `apps/platform` | Vue 3 + TypeScript | Node.js >= 22 (LTS) | Nuxt 4 + Vite |
-| `apps/action` | TypeScript | Node.js 20 (GitHub Actions runner) | tsdown |
+| `apps/platform` | Vue 3 + TypeScript | Node.js ^22.23.4 \|\| ^24.22.1 | Nuxt 4 + Vite |
+| `action.yml` (composite, not a package) | YAML | per consumer `actions/setup-node` | N/A |
 
 > **Breaking change (since 0.2.0)**: `dependfix` / `@dependfix/core` are now **pure ESM** (CJS dual-format outputs removed). CLI commands and GitHub Action consumption are unaffected; programmatic consumers should use `import`; `require()` needs Node 22.12+ (native `require(ESM)`). Node 20.x CJS programmatic consumers need dynamic `import()`.
 

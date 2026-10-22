@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Node.js >= 20
+- Node.js ^22.23.4 || ^24.22.1 (security baseline from the 2026-10-21 Node.js advisory; Node 20 is EOL)
 - pnpm (latest stable recommended)
 - GitHub Token (for alert fetching and PR creation; **local without a token still works via `--alerts-source pnpm-audit` fallback**, see [Local without a token](#local-without-a-tokenpnpm-audit-fallback))
   - `report-only` / `fix` modes: require `security-events: read` permission

@@ -93,13 +93,13 @@ Four execution modes form a progressive chain (each mode is a refinement of the 
 
 | Layer | Language | Runtime | Build tool |
 |:------|:---------|:--------|:-----------|
-| `packages/core` | TypeScript (strict) | Node.js >= 20 (LTS) | tsdown |
-| `packages/engine` | TypeScript (strict) | Node.js >= 20 (LTS) | tsdown |
-| `packages/cli` | TypeScript (strict) | Node.js >= 20 (LTS) | tsdown (ESM only since 0.2.0) |
-| `packages/mcp` | TypeScript (strict) | Node.js >= 20 (LTS) | tsdown |
+| `packages/core` | TypeScript (strict) | Node.js ^22.23.4 \|\| ^24.22.1 | tsdown |
+| `packages/engine` | TypeScript (strict) | Node.js ^22.23.4 \|\| ^24.22.1 | tsdown |
+| `packages/cli` | TypeScript (strict) | Node.js ^22.23.4 \|\| ^24.22.1 | tsdown (ESM only since 0.2.0) |
+| `packages/mcp` | TypeScript (strict) | Node.js ^22.23.4 \|\| ^24.22.1 | tsdown |
 | `packages/skills` | Markdown + YAML | N/A | N/A |
-| `apps/platform` | Vue 3 + TypeScript | Node.js >= 20 (LTS) | Nuxt 4 + Vite |
-| `apps/action` | TypeScript | Node.js 20 (GitHub Actions runner) | tsdown |
+| `apps/platform` | Vue 3 + TypeScript | Node.js ^22.23.4 \|\| ^24.22.1 | Nuxt 4 + Vite |
+| `action.yml` (composite, not a package) | YAML | per consumer `actions/setup-node` | N/A |
 
 ## 6. Platform architecture (apps/platform)
 

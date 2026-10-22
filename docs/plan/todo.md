@@ -42,6 +42,8 @@
 
 **审计 depth 预告**：M47.1 / M47.2 / M47.3 / M47.4 / M47.5 → `standard`（M47.1 若跨 engine + platform + PR 契约，建议 2 分区并发；M47.2 含迁移建议 2 分区）；M47.6 → `quick`。
 
+**容量再平衡（2026-10-22）**：移出 0 → backlog；插队 1 批（Node 运行时安全基线升级，19 文件 / +336 −39 行 ≈ 阶段基线的 32-46% 文件、13-21% 行）——未达「累计 ≥ 3 批」与「≥ 50%」阈值，且不占用剩余交付窗口，故不作条目移出。
+
 **插队容量治理**：累计 ≥ 3 批或插队工作量 ≥ 本阶段基线 50% 时，按 [规划规范 §3.1.1](../standards/planning.md#_3-1-1-插队后的阶段容量再平衡-hard-requirement-2026-10-19) 评估移出低优先级原子，不得压缩验收 / 跳过 Review Gate / 缩短审计。
 
 ---
@@ -170,6 +172,32 @@
 - **依赖**：原 backlog 三条候选（本阶段已上收）；`check-orphan-ids` 的产物排除改动；`check-experience-landing` 既有分片结构；`package.json` lint-staged 段。
 - **交付物**：**19 文件**（含审计收口新增的治理 / 计划文件）；计划 3 commits（编号门禁 8 / 落点门禁 2 / lint-staged 与文档 9，F 阶段执行，提交后以 `git show --stat` 回填实际分组）。
 - **风险与缓解**：**R1 字母后缀正则误报**（文档 ID / 版本号）→ 先跑一次性探针量化分布 + 白名单；**R2 `###` 粒度导致大量存量报错** → 先量化，必要时分批补落点并登记；**R3 移除裸 add 后重暂存行为变化** → 多文件提交实测。
+
+### 追加临时待办（不占阶段条目编号）：Node 运行时安全基线升级（2026-10-21 安全公告）
+
+> **授权依据**：用户 2026-10-22 明确授权；依据 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 插队例外清单第 1/2 类（已确认的安全漏洞 / 高危漏洞）与用户裁定的技术路线（先官方镜像止血、上游就绪后收敛）。**不分配阶段编号**，不计入 M47 条目容量与类型平衡。
+
+- **目标**：把平台镜像运行时从 Node 24.18.1 升到已修复版本，并让该基线可机检，避免基础镜像 digest 静默回退到受影响版本。
+- **评估结论**：
+  - [Node.js 2026-10-21 安全公告](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases) 修复版本为 22.23.4 / 24.22.1 / 26.12.1；本仓镜像 digest 实测 Node 24.18.1（OpenSSL 3.5.8 / undici 7.29.0），`node:24.22.1-alpine` 为 OpenSSL 3.5.9 / undici 7.30.1。
+  - 自建基础镜像（docker-builder 的 `alpine-nodejs`）走 `apk add nodejs`，而 Alpine v3.24 与 edge 仍停留在 24.18.1（`-r0` / `-r5`），重建自建镜像拿不到补丁 → 本轮改用官方 `node:24.22.1-alpine` 止血；待 docker-builder 改为官方 tarball 并发布 `alpine3.24-node24.22` 后回归自建基底。
+  - 实测补充：pnpm 11.x（实测 11.28）与 undici `fetch` 均忽略请求头、按响应头自动解 br（`accept-encoding: gzip, deflate` 仍解 `content-encoding: br`）；本仓 `registry-discovery.ts` 信任目标仓库配置的 registry，且 pnpm 直连不走审计代理 → Brotli 解压面不止「GitHub API / AI 端点」，评级由 P2 上修为 P1。全仓 `dns.resolve` / startup snapshot / `--permission` / `ZipFile` 0 处，对应 CVE 不适用于本仓。
+- **范围**：
+  - `apps/platform/Dockerfile`：基础镜像改官方 `node:24.22.1-alpine`（manifest list digest，覆盖 amd64 / arm64）+ pnpm 11.18.0 全局安装（与切换前一致、移除 corepack shim）+ `npm_config_nodedir` 指向镜像自带 headers + runtime 去 npm / corepack / yarn + 构建期基线断言 + 可选 `APK_MIRROR` / `NPM_REGISTRY` 构建参数（受限网络，值经字符集校验且不写入运行期 ENV）。
+  - `apps/platform/docker/check-node-version.mjs`（新增）：按 22 / 24 / 26 发布线取最低已修复版本，EOL 线一律拒绝；构建期与镜像冒烟共用。
+  - `apps/platform/docker/smoke-test.sh`：新增场景 0 运行期基线断言。
+  - 六个 `package.json` 的 `engines.node`：`^22.23.4 || ^24.22.1`。
+  - 文档：`docs/guide/tech-stack.md` / `docs/guide/quick-start.md` / `README.md` 徽章 + en-US 镜像（`guide/quick-start` / `guide/tech-stack` / `design/governance/architecture`）+ `packages/skills/dependfix-remediator/SKILL.md`（经 `sync:skills` 同步到 `skills/`）。
+- **验收标准**：
+  - [x] ① 镜像内 `node -v` = 24.22.1，`check-node-version.mjs` 通过（构建期 + 冒烟期各一次）。
+  - [x] ② 镜像不含 npm / corepack / yarn，pnpm 可用且版本与切换前一致（11.18.0）。
+  - [x] ③ `SMOKE_BUILD=1 sh apps/platform/docker/smoke-test.sh` 全绿（better-sqlite3 原生模块、15 业务表、entrypoint 降权、HTTP 200）。
+  - [x] ④ 基线断言负例可复现：`node apps/platform/docker/check-node-version.mjs --version=24.18.1` exit 1（不读环境变量，防镜像 ENV 旁路）；单测 8 例覆盖 22 / 24 / 26 达标、低于基线、EOL 线、参数解析。
+  - [x] ⑤ `engines` 六处一致；`pnpm run lint`（0 error）/ `typecheck`（7 包 Done）/ 定向 vitest（8 passed）通过。
+- **验证证据**：构建期 `[node-baseline] Node 24.22.1 >= 24.22.1`；运行期 `node -v` = v24.22.1、`process.versions.openssl` = 3.5.9、`undici` = 7.30.1、`pnpm -v` = 11.18.0（与切换前一致）、`npm/corepack/yarn` 均无；`SMOKE_BUILD=1` 与 `SMOKE_IMAGE=…` 两种入口均 PASS（15 业务表）；负例 `--version=24.18.1` → exit 1；定向 vitest 8 passed；`pnpm run lint` 0 error / `typecheck` 7 包 Done。
+- **§3.1.1 容量评估**：1 批 / 19 文件 / +336 −39 行，约占阶段基线文件数 32-46%、行数 13-21%；未达「累计 ≥ 3 批」与「≥ 50%」阈值，剩余窗口可容纳审计与验证 → **不移出原子条目**。
+- **不做什么**：不改 docker-builder（另一仓，收敛路线 A 另行跟进）；不引入 `--permission` / SEA 等缓解（本仓未使用）；不改目标仓库 install 语义与 pnpm 版本；不新增 audit 豁免。
+- **依赖与风险**：**R1** 官方镜像经 public ECR 拉取，CI 需可达（不可达时回退 Docker Hub 同名 tag，digest 需重新核对）；**R2** 本地开发容器原 Node 24.19.0 低于新 engines 下限，已在本批验证期间升级到 24.22.1（环境动作，不入库）；**R3** 受限网络下构建需 `--build-arg APK_MIRROR` + `--build-arg NPM_REGISTRY`（冒烟脚本已支持 `SMOKE_APK_MIRROR` / `SMOKE_NPM_REGISTRY` 透传；构建参数值会记入镜像 history，仅可用于非敏感 URL）；**R4** 收敛回自建基底时须重跑冒烟与 amd64 / arm64 构建，并复核 better-sqlite3 musl prebuild。**已知残余**：① runtime 镜像体积由 ~661MB 增至 ~787MB（官方 node 基底 + 保留原生编译工具链；工具链瘦身归 backlog 既有候选）；② 官方 node 基底不含 corepack，`verify-project` 的 `corepack pnpm@<ver>` 回退路径在容器内不可用（切换前同样不可用，非本批回归，登记为已知限制）；③ 安全断言含 26 线而发布包 engines 只声明 22 / 24，二者口径不同为有意设计（engines 只声明支持面：22 / 24，CI 当前覆盖 24 线）。
 
 ---
 

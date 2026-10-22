@@ -6,7 +6,7 @@
 
 | 组件 | 版本要求 | 说明 |
 |------|---------|------|
-| Node.js | >= 20 LTS | 运行环境 |
+| Node.js | ^22.23.4 \|\| ^24.22.1 | 运行环境（2026-10-21 [Node.js 安全公告](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases)基线；20.x 已 EOL，不再接收补丁） |
 | pnpm | 最新稳定版 | 包管理器 + workspace monorepo |
 
 ## Monorepo 结构
