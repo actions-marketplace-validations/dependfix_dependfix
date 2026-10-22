@@ -54,6 +54,7 @@
 | M44: 验证链治本 + 文档门禁可信度收口 | 验证命令链纳入 `typecheck`（治本）+ 文档门禁机检缺口收敛（四类静默缺陷）+ 文档口径与命名一致性收口 + 设计文档存量超健康窗口分批拆分 + 站点语言切换器未翻译页 404 兜底 + `tech-stack` 平台依赖表行级一致性 | P2-P3 | 已完成（2026-10-14 用户决策方案 A / 2026-10-15 已闭环归档，见 [todo-archive.md §M44](archive/todo-archive-phases-m44.md#m44-验证链治本--文档门禁可信度收口m441m446-全部已闭环--2026-10-15-归档)） |
 | M45: 运行可靠性与交付链收口 | 自用验证链面差收口 + 零告警仓库修复前基线采样成本 + 队列 worker 按 role 跳过周期插件 + 运行失败受约束重试入口 + 浮层类组件视觉覆盖扩面 + PR Check 告警关注集 | P2-P3 | 已完成（2026-10-15 用户决策方案 A / 2026-10-19 已闭环归档，见 [todo-archive.md §M45](todo-archive.md#m45-运行可靠性与交付链收口-2026-10-15-用户决策方案-a-2026-10-19-归档)） |
 | M46: 运行结果可信度与可观测性 | 环境性失败与「有告警未修」可见性 + 跨 major / 截断 / 子目录跳过披露 + 基线完整链与门禁回滚粒度 + 执行容器内存下限与 OOM 归因 + 平台通知与邮件推送（issue #190）+ 视觉库 fixtures 前置断言 | P1-P3 | 已完成（2026-10-20 用户决策方案 A / 2026-10-22 已闭环归档，见 [todo-archive.md §M46](todo-archive.md#m46-运行结果可信度与可观测性-2026-10-20-用户决策方案-a-2026-10-22-归档)） |
+| M47: 交付判定可信与运行自证 | 验证链与目标仓库 CI 口径对齐 + 构建版本回执与安装日志语义 + 环境性失败归因收口 + pnpm store 持久化与提交卫生 + 通知周汇总（`weekly_digest`）+ 工程门禁与提交卫生收口 | P1-P3 | 进行中（2026-10-22 用户决策方案 A′） |
 
 > **本路线图定位**：按 [规划规范 §2.1](../standards/planning.md) 仅维护阶段概览（目标 / 优先级 / 状态）。详细实施记录 / commit 引用 / 关键决策 / 经验教训见对应归档段（详见下方"## 详细任务"索引）。
 
@@ -291,7 +292,7 @@
 - **M46.2** [P2 🎨] 跨 major / 截断 / 子目录跳过的披露 —— **已闭环**
 - **M46.3** [P2 🛠️] 基线采样完整链与门禁回滚粒度 —— **已闭环**
 - **M46.4** [P1 🛠️] 执行容器内存下限与 OOM 归因 —— **已闭环**
-- **M46.5** [P2 🚀] 平台通知与邮件推送（issue #190，设计稿 [platform-notification.md](../design/governance/platform-notification.md)）—— **B1-B4 已闭环；B5 周汇总延期**
+- **M46.5** [P2 🚀] 平台通知与邮件推送（issue #190，设计稿 [platform-notification.md](../design/governance/platform-notification.md)）—— **B1-B4 已闭环；B5 周汇总已随 M47.5 上收**
 - **M46.6** [P3 🧪] 视觉套件测试库 fixtures 前置断言 —— **已闭环**
 
 **建议顺序**：M46.6 → M46.1 → M46.2 → M46.5 → M46.3 → M46.4。M46.6 最小且先清本地视觉噪声；M46.1 / M46.2 共用 `summaryJson` 承载面，连续落地可只付一次契约成本；M46.5 消费未修复高危口径；M46.3 / M46.4 相互独立，放在后段避免与数据层迁移交织。
@@ -304,17 +305,46 @@
 
 **审计 depth 预告**：M46.1 / M46.2 / M46.4 / M46.5 → `standard`（M46.5 建议 2 分区并发）；M46.3 → `standard`（回滚语义变更；计划曾按 deep，实际按 standard 执行）；M46.6 → `quick`。
 
-> **闭环记录（2026-10-22）**：M46 六原子条目均已完成既定范围（M46.5 B1-B4 闭环、B5 周汇总延期 backlog）。实现 / 测试 / 文档 commits 见 [todo-archive.md §M46](todo-archive.md#m46-运行结果可信度与可观测性-2026-10-20-用户决策方案-a-2026-10-22-归档)；审计逐条目 R1/R2 均以 Pass 放行（M46.2 / M46.3 曾 Reject，收口后 Pass；M46.5 B1-B4 R1 A Reject → R2 quick Pass）。**门禁**：M46.1 定向 141 + core/report 98；M46.2 定向 257 + e2e 干净库 200 + visual 16×2；M46.3 engine 1437 / platform 2039 / root 复跑 exit 0；M46.4 platform 2063 + visual 17 + platform build + 启动冒烟；M46.5 定向 280 + e2e 202 + visual 17×2；M46.6 定向 26 + visual 16。全阶段 `lint` 0 error、`typecheck` 7 包、文档 / i18n / orphan / verify-chain 门禁通过。**残余**：M46.1 常规升级链路环境性归因、M46.2 batch-aggregate、M46.3 基线成本 / 非最近单元降级、M46.4 宿主 OOM / sandbox / action 采集、M46.5 B5 周汇总、M46.6 视觉库 schedule 引用；均已登记 backlog 或各条目归档块。
+> **闭环记录（2026-10-22）**：M46 六原子条目均已完成既定范围（M46.5 B1-B4 闭环、B5 周汇总延期 backlog）。实现 / 测试 / 文档 commits 见 [todo-archive.md §M46](todo-archive.md#m46-运行结果可信度与可观测性-2026-10-20-用户决策方案-a-2026-10-22-归档)；审计逐条目 R1/R2 均以 Pass 放行（M46.2 / M46.3 曾 Reject，收口后 Pass；M46.5 B1-B4 R1 A Reject → R2 quick Pass）。**门禁**：M46.1 定向 141 + core/report 98；M46.2 定向 257 + e2e 干净库 200 + visual 16×2；M46.3 engine 1437 / platform 2039 / root 复跑 exit 0；M46.4 platform 2063 + visual 17 + platform build + 启动冒烟；M46.5 定向 280 + e2e 202 + visual 17×2；M46.6 定向 26 + visual 16。全阶段 `lint` 0 error、`typecheck` 7 包、文档 / i18n / orphan / verify-chain 门禁通过。**残余**：M46.1 常规升级链路环境性归因、M46.2 batch-aggregate、M46.3 基线成本 / 非最近单元降级、M46.4 宿主 OOM / sandbox / action 采集、M46.5 B5 周汇总（已随 M47.5 上收）、M46.6 视觉库 schedule 引用；均已登记 backlog 或各条目归档块。
 
 > 详细任务与 8 要素见 [todo-archive.md §M46](todo-archive.md#m46-运行结果可信度与可观测性-2026-10-20-用户决策方案-a-2026-10-22-归档)；上一阶段（M45）见 [todo-archive.md §M45](todo-archive.md#m45-运行可靠性与交付链收口-2026-10-15-用户决策方案-a-2026-10-19-归档)。
 
 ---
 
+## M47: 交付判定可信与运行自证（2026-10-22 用户决策方案 A′）
+
+承接 M46 归档后的「**判定可信、运行可自证**」阶段。M46 已把「有告警未修 / 环境性失败 / 跳过与截断」变成可见；本阶段转向**交付判定的自证能力**——① PR 正文的验证红字与目标仓库 CI 的绿 / 红不是同一口径，用户无法判断「PR 是否真的过 CI」（**M47.1**，2026-10-18 生产复盘）；② 日志缺行时无法区分「线上构建旧」与「代码路径未覆盖」，且 `Lockfile repaired` 文案把「本就合规」读成「修好未提交」（**M47.2**，2026-10-17 生产复盘）；③ 环境性失败计数只覆盖部分路径、分类语义未收窄，真实安装失败仍可能被误归因仓库（**M47.3**，M46.1 明文残余）；④ pnpm store 随 run 清理导致冷安装，且 `git add .` 可能误收 store（**M47.4**，2026-10-18 安装失败复盘）；⑤ M46.5 B5 周汇总按阶段容量延期（**M47.5**）；⑥ 三条门禁 / 提交卫生缺口（**M47.6**）。
+
+**6 原子条目**（🎨 1 + 🛠️ 2 + 🚀 2 + 🧪 1）：
+
+- **M47.1** [P1 🎨] 验证链与目标仓库 CI 口径对齐（差异披露 + 默认分支 workflow 健康预检）
+- **M47.2** [P1 🛠️] 构建版本回执与安装日志语义订正
+- **M47.3** [P2 🛠️] 环境性失败归因收口（分类收窄 + 常规升级链路）
+- **M47.4** [P2 🚀] pnpm store 持久化与提交卫生
+- **M47.5** [P2 🚀] 通知周汇总（`weekly_digest`，M46.5 B5）
+- **M47.6** [P3 🧪] 工程门禁与提交卫生收口
+
+**类型平衡复核**：🎨 1（M47.1）+ 🛠️ 2（M47.2 / M47.3）+ 🚀 2（M47.4 / M47.5）+ 🧪 1（M47.6）；🎨 独立条目 1 项低于建议值 2（M47.2 含用户可见面），缺口显式标注。
+
+**建议顺序**：M47.6 → M47.2 → M47.1 → M47.3 → M47.4 → M47.5。M47.6 最小且先清门禁噪声；M47.2 建立「本次运行由哪个构建执行」的诊断基线；M47.1 最大且需设计结论，依赖 M47.2 的诊断面；M47.3 语义变更待前两项稳定；M47.4 部署形态变更；M47.5 独立周期插件。
+
+**条目容量**：6 原子符合 [规划规范 §1.1](../standards/planning.md#11-硬性约束) 的 5-6 项上限。**阶段基线工作量（§3.1.1 再平衡分母）**：6 条目「交付物」区间和为 **41-59 文件 / 1600-2650 行**（取整 40-60 / 1600-2700；执行角色按候选锚点计数的量级预估，D 阶段按实际 diff 复测）。M47.1 单体最大（10-14 文件 / 450-700 行）；若实际 diff 触发 [设计文档硬阈值](../design/governance/spec-and-doc-governance.md#24-设计文档硬阈值hard-requirement)，须补 governance 设计稿后再进入 D 阶段。
+
+**范围边界（不做什么）**：不按 workflow 动态替换 `verifyCommands`、不解析 matrix / secrets / services 完整语义（M47.1）；不做部署回执与历史 run 回填（M47.2）；不改 `failure_kind` 枚举、不回填历史数据（M47.3）；不做 store 自动 GC 与多仓共享并发控制（M47.4）；不做通用摘要调度器 / 周报历史页 / 逐用户时区（M47.5）；不做全仓编号重命名、不改 husky 其他钩子（M47.6）。
+
+**§3.4 交叉核验**：6 项经 todo-archive 表格扫描（关键词 `环境性失败` / `构建版本` / `CI 口径` / `workflow 对齐` / `pnpm store` / `weekly_digest` / `check-orphan-ids` / `check-experience-landing` / `lint-staged` 仅命中来源批次与残余观察项）+ `git log --oneline -- <路径>`（`verify-project.ts` 最近 `d76dcea8` / `pr-creator.ts` 最近 `37c93068` / `repo-fix.ts` 最近 `dd195219` / `Dockerfile` 最近 `957bc58f` / `package.json` 最近 `89fdb6ce` 均未覆盖本阶段范围）+ 代码 anchor（`verify-project.ts:40` 只消费默认链 / 仓库 `verifyCommands` / engine / platform 无读取目标仓库 workflow 的代码（`scripts/check-verify-chain.mjs` 仅解析 dependfix 自身 workflow）；`build-info` 插件仅向平台 stdout 打版本戳、engine 运行日志无版本，`ScanRun` 无构建版本列；`result-assembly.ts:22-25` 自述升级路径未消费 `environmental`；engine / platform 产品代码无 `store-dir` 配置；`package.json:90/94/98` 裸 `git add` 仍在），**0 项重复评估**。
+
+**审计 depth 预告**：M47.1 / M47.2 / M47.3 / M47.4 / M47.5 → `standard`（M47.1 跨 engine + platform + PR 契约建议 2 分区并发；M47.2 含迁移建议 2 分区）；M47.6 → `quick`。
+
+> 详细任务与 8 要素见 [todo.md §M47](todo.md#m47-交付判定可信与运行自证-2026-10-22-用户决策方案-a′)。
+
+---
+
 ## 详细任务
 
-- 当前阶段任务：**无**——M46 已于 2026-10-22 闭环归档（6 原子条目；M46.5 B1-B4 闭环、B5 延期）
+- 当前阶段任务：M47「交付判定可信与运行自证」（6 原子条目，2026-10-22 用户决策方案 A′；见 [todo.md §M47](todo.md#m47-交付判定可信与运行自证-2026-10-22-用户决策方案-a′)）
 - 已归档阶段：[todo-archive.md](todo-archive.md)（主窗口保留最近阶段完整段 + 指针段；M0-M46 全部已归档；早期阶段见 [archive/index.md](archive/index.md) 分片索引）
-- 下一阶段（未授权）：无——按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 评估 backlog 候选池后由用户决策
+- 下一阶段（未授权）：无——M47 闭环归档后按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 重新评估候选池
 - 后续阶段任务（延期项 + 未排期增强候选）：[backlog.md](backlog.md)
 
 ## 交付原则
