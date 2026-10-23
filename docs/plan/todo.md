@@ -135,20 +135,30 @@
 - **目标**：把 pnpm content-addressable store 固定到持久卷，并在交付提交前排除 store / `node_modules`，避免每 run 冷安装与误提交。
 - **优先级**：P2
 - **范围**：
-  - `apps/platform/docker/entrypoint.sh`：在启动前设置 store 目录（`PNPM_CONFIG_STORE_DIR` 或 `pnpm config --global set store-dir`，D 阶段按 pnpm 官方口径实测二选一），默认 `/app/data/pnpm-store`；不可写时 warn 并回退既有行为。
-  - `apps/platform/server/services/executor/container-executor.ts`（clone 后准备阶段）：幂等追加 `.pnpm-store/` / `node_modules/` 到目标仓库 `.git/info/exclude`；不修改目标仓库 `.gitignore`。
-  - `apps/platform/Dockerfile` / `docs/guide/deployment.md`：数据卷挂载示例、容量建议、手工清理命令；env 权威登记与 `configuration.md` 同步。
-  - 测试：entrypoint 源码顺序静态断言；`git/info/exclude` 幂等单测；`git add .` 后暂存区不含 store 的用例。
+  - `apps/platform/docker/entrypoint.sh`：启动前设置 store 目录（实测选 `PNPM_CONFIG_STORE_DIR`，pnpm 11 下 `npm_config_store_dir` 无效、项目 `.npmrc` 的 `store-dir` 亦不生效），默认 `$DATA_DIR/pnpm-store`；不可用时 warn 并回退既有行为。
+  - 目标仓库 `.git/info/exclude`：幂等追加 `.pnpm-store/` / `node_modules/`，不改目标仓库 `.gitignore`。
+  - `apps/platform/Dockerfile` / `docs/guide/deployment.md`：数据卷挂载示例、容量建议、手工清理命令；env 权威登记与 `configuration.md` 同步（zh/en）。
+  - 测试：entrypoint root / 非 root 两条路径与顺序断言；`git/info/exclude` 幂等 / 取反 / 子目录 / 工作树单测；真实 `git add .` 场景。
 - **验收标准**：
-  - [ ] ① 容器内 `pnpm store path` 落在持久目录（默认 `/app/data/pnpm-store`），跨 run 复用；未挂载持久卷时回退既有行为且日志 warn（不阻断）。
-  - [ ] ② 目标仓库 `git add .` 后暂存区不含 `.pnpm-store/**` / `node_modules/**`（单测 + 真实场景）。
-  - [ ] ③ `.git/info/exclude` 重复执行不重复追加；不修改目标仓库 `.gitignore`。
-  - [ ] ④ 部署文档给出卷挂载、容量建议与清理方式；env 与 `configuration.md` 双语同步。
-  - [ ] ⑤ 不改 clone / 安装 / 提交语义；mutation 至少 2 项。
+  - [x] ① 容器内 `pnpm store path` 落在持久目录（默认 `/app/data/pnpm-store/v11`），跨容器复用；不可用（只读挂载 / 权限不足 / 非绝对路径）时回退既有行为且日志 warn（不阻断）。
+  - [x] ② 目标仓库 `git add .` 后暂存区不含 `.pnpm-store/**` / `node_modules/**`（单测 + 真实 `git add .` 场景）。
+  - [x] ③ `.git/info/exclude` 重复执行不重复追加；不修改目标仓库 `.gitignore`。
+  - [x] ④ 部署文档给出卷挂载、容量建议与清理方式；env 与 `configuration.md` 双语同步。
+  - [x] ⑤ 不改 clone / 安装 / 提交机制；mutation 8/8 击杀（原计划至少 2 项）。
 - **不做什么**：不实现自动 GC 调度；不做多仓共享 store 并发控制（队列并发 1）；不改 pnpm 版本。
-- **依赖**：原 backlog 候选「pnpm store 持久化与项目内 store 的提交卫生」（本阶段已上收）；`entrypoint.sh` 的信号 / 角色约束（`platform.md §10.6`）；pnpm 官方 `store-dir` 配置口径（已查证 `pnpm_config_store_dir` / `pnpm config set store-dir`）。
-- **交付物**：预估 3 commits（entrypoint + 部署文档 / git exclude + 测试 / 文档与 env），**6-9 文件 / 200-350 行**。
-- **风险与缓解**：**R1 持久卷未挂载导致磁盘占满** → 容量建议 + 启动 warn + 文档；**R2 store 与工作目录跨文件系统**（只能 copy 不能 hardlink，收益有限）→ 文档写明同卷要求；**R3 exclude 误伤** → 只写 `.git/info/exclude` 且幂等。
+- **依赖**：原 backlog 候选「pnpm store 持久化与项目内 store 的提交卫生」（本阶段已上收）；`entrypoint.sh` 的信号 / 角色约束（`platform.md §10.6`）；pnpm 官方 `store-dir` 配置口径。
+- **D 阶段裁定**：
+  - **store 配置通道**：选环境变量 `PNPM_CONFIG_STORE_DIR`（实测 11.17.0：`PNPM_CONFIG_STORE_DIR` / `pnpm_config_store_dir` 生效，`npm_config_store_dir` 无效；项目 `.npmrc` 的 `store-dir` 在 pnpm 11 不生效，全局配置生效但优先级低于 env）。pnpm 11+ 的 `storeDir` 只从 CLI / env / `pnpm-workspace.yaml` / 全局配置读取，env 最高 → 平台固定缓存位置，目标仓库 workspace 的 `storeDir` 不再生效（缓存位置属执行环境基础设施）。`Dockerfile` **不**固化 ENV：入口按 `DATA_DIR` 派生，避免 `-e DATA_DIR=…` 时固化值与数据目录脱节；compose 仍同名转发（供 `docker compose exec` 与覆盖）。
+  - **落点上移（计划偏差）**：`git/info/exclude` 的写入从计划的 `container-executor.ts`（clone 后准备阶段）上移到**引擎 `DependfixApp.run()` 起始**（`executeMode()` 之前）。理由：全仓 commit 唯一入口是引擎 `stageAndCommit` 的 `git add .`，平台 / CLI / Action / MCP 共用；且必须在安装前落盘，否则安装产物污染「无变更」判定与 `git add .`。实现在 `packages/engine/src/app/git-exclude.ts#prepareDeliveryHygiene`，仅 `fix` / `fix-and-pr` 且非 `dry-run` 预置（`report-only` / `cleanup-branches` / `dry-run` 零副作用）。
+  - **判定用写探针而非 `test -w`**：`test -w` 只看 DAC 位、不看挂载只读属性——只读卷上「上次运行留下的 store 目录」会被误判可写，随后安装期 EROFS 硬失败。探针以真实运行身份执行（root 启动经 `su-exec`），并覆盖 ENOSPC / ACL；失败时 **unset 变量回退**（只 warn 不 unset 会让 pnpm 继续用坏路径）。
+  - **store 目录以运行身份创建**：不对用户指定路径做 `chown`（`PNPM_CONFIG_STORE_DIR=/` 之类会波及根目录）；root 路径先 `chown -R` 数据卷 / HOME，再经 `su-exec mkdir` 建 store，最后探针判定。父目录已授权（777 / 预 chown）时自定义路径可用；未授权时创建失败即回退且不留 root 属主目录。
+  - **exclude 语义**：复用 `.gitignore` 归一化 + 按「同一文件内最后一条匹配胜出」处理取反行；不解析 `.git` 文件内容（改 `git rev-parse --git-common-dir`，覆盖子目录 / 工作树 / 子模块）；写入失败返回 `error` 并 warn（不阻断）；跨文件优先级（`.gitignore` > `info/exclude`）登记为边界。
+  - **审计收口**：R1 `standard` 两分区均 Reject（A：dry-run / cleanup-branches 仍写、子目录不解析、失败不可见、取反漏排除、用例依赖宿主 gpgsign；B：`test -w` 盲区、自定义路径 root 属主、root 路径无行为用例、§10.8 未挂检查点、Dockerfile ENV 冗余、相对路径、文档量化口径）→ 全量收口 → R2（A Pass / B Reject：smoke 0c 捕获两行、任意路径 chown、marker 不可证、§11 双标点）→ 收口 → R3 Reject（检查点矩阵仍写「先建后 chown」+ no-chown 无守卫）→ 收口 → R4 quick Pass（2 suggest 已一并收口）。
+  - **实际 diff**：18 文件 / `+908 −23`（16 个改动 + 2 个新增；原估 6-9 文件 / 200-350 行）。新增行中测试占 358 行（entrypoint 24 例 + exclude 33 例，四轮审计收口所致），文档占约 180 行（双语镜像 + 检查点矩阵）。已触发 [设计文档硬阈值](../design/governance/spec-and-doc-governance.md#24-设计文档硬阈值hard-requirement)（> 10 文件 / > 800 行），设计结论落 [gitignore-management.md §7](../design/governance/gitignore-management.md) + [platform.md §10.8](../standards/platform.md)，不另立专项稿（与 M47.2 / M47.3 同族）。
+  - **mutation 标定（8/8 击杀）**：移除 run 起始预置 → 3 例；删 4 处回退 unset → 3 例；跳过幂等 / 取反过滤 → 8 例；删 root `prepare` → 3 例；去 `dryRun` 闸门 → 2 例；探针退回 `[ -w ]` → 1 例；store 目录退回 root `mkdir` → 1 例；加回 `chown store` → 1 例。工件 `artifacts/review-gate/2026-10-23-m47-4-evidence.md`（还原后 md5 逐项一致）。
+- **交付物**：计划 3 commits（entrypoint + 部署文档 / git exclude + 测试 / 文档与 env），**18 文件 / 约 908 行新增**（含测试 358 行）。
+- **验证证据**：lint 0 error（3 条存量 warning）；`pnpm -r build` + `pnpm run typecheck` 7 包 Done；engine 84 文件 / 1533 passed / 1 skipped（终轮全仓 308 文件 / 4725 passed / 10 skipped）；平台 docker 目录 32 passed；真机容器四场景（默认可写 / 只读卷 + 已存在 store / 自定义已授权父目录 / 跨容器复用）+ smoke 0c 管道实证；文档九项 + `lint:md` + `docs:build`（fallback 116）全绿、`check:doc-size` 0 warning；编号标记 0 命中。
+- **风险与缓解**：**R1 持久卷未挂载导致磁盘占满** → 容量经验值 + 启动 warn + `pnpm store prune` 文档；**R2 store 与工作目录跨文件系统**（只能 copy 不能 hardlink）→ 文档写明同卷要求；**R3 exclude 误伤** → 只写 `.git/info/exclude`、幂等、取反感知、不改 `.gitignore`；**R4 只读挂载误判** → 写探针 + 真机回归；**R5 自定义路径越权写** → 不做任意路径 chown、根路径拒绝、行为用例守卫。
 
 ### M47.5 [P2 🚀] 通知周汇总（`weekly_digest`，M46.5 B5）
 
