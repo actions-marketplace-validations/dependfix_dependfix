@@ -1,4 +1,5 @@
 import type { NormalizedSecurityAlert, AlertSeverity } from '../alerts'
+import type { CiAlignmentRecord } from './ci-alignment'
 
 /**
  * 跳过原因枚举（`alertsSkippedByReason` 的 key）。
@@ -239,6 +240,14 @@ export interface RunResult {
      * 仅在有仓库未启用 alerts 时存在；空/undefined = 不渲染。
      */
     alertsDisabled?: AlertsDisabledRecord[]
+    /**
+     * 验证链与目标仓库 CI 口径对齐记录（按仓库；仅在实际执行验证链后存在）。
+     *
+     * 只描述**命令口径**（本次执行集 vs 默认分支 workflow 可识别命令集），
+     * 不预测 / 不承诺目标仓库 CI 结果；解析与降级口径见
+     * [verification-ci-alignment.md](../../../../docs/design/governance/verification-ci-alignment.md)。
+     */
+    ciAlignment?: CiAlignmentRecord[]
 }
 
 /**

@@ -20,6 +20,7 @@ export function createEmptyExecutionSummary(): ExecutionSummary {
 }
 
 export * from './types'
+export * from './ci-alignment'
 export * from './summary-counters'
 export { generateMarkdownReport } from './markdown-generator'
 export { generateJsonReport } from './json-generator'

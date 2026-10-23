@@ -11,6 +11,7 @@ import {
 } from './types'
 import { collectCodeScanningSuggestions } from './suggestions'
 import { collectCodeQualityFindings } from './code-quality-suggestions'
+import { describeCiAlignment } from './ci-alignment'
 import { countUnfixedAlerts, formatSeverity, formatSkipReason, skippedBreakdown, truncatedBreakdown } from './summary-counters'
 
 /**
@@ -26,6 +27,7 @@ import { countUnfixedAlerts, formatSeverity, formatSkipReason, skippedBreakdown,
  * 5. Repositories 明细
  * 5.5. Code Scanning Suggestions（有建议时才渲染）
  * 5.6. Code Quality Findings（有 findings 时才渲染）
+ * 5.7. Verification Alignment（有验证链口径记录时才渲染）
  * 3.6. Alerts Disabled（有未启用记录时才渲染）
  * 6. Fix Actions 表
  * 7. Errors 节（有错误时才渲染）
@@ -275,6 +277,29 @@ export function generateMarkdownReport(result: RunResult): string {
         for (const f of cqFindings) {
             sections.push(
                 `| ${escapeMd(f.repository)} | \`${escapeMd(f.ruleId)}\` | \`${escapeMd(f.location)}\` | ${f.severity.toUpperCase()} | ${escapeMd(f.summary)} | ${escapeMd(f.suggestion)} |`,
+            )
+        }
+        sections.push('')
+    }
+
+    // ---- 5.7 Verification Alignment（验证链与目标仓库 CI 口径；仅执行过验证链时渲染）----
+    if (result.ciAlignment && result.ciAlignment.length > 0) {
+        sections.push(
+            '## Verification Alignment',
+            '',
+            '> 本次验证链与目标仓库默认分支 CI 的**可识别命令类别**比对（只比对命令口径，不预测 CI 结果）。',
+            '',
+            '| Repository | Status | Commands | Notes |',
+            '|------------|--------|----------|-------|',
+        )
+        for (const record of result.ciAlignment) {
+            const description = describeCiAlignment(record)
+            const commands = record.commands.length > 0
+                ? record.commands.map((c) => `\`${escapeMd(c)}\``).join('<br>')
+                : '—'
+            const notes = [description.headline, ...description.notes].join('<br>')
+            sections.push(
+                `| ${escapeMd(record.repository)} | ${description.statusLabel} | ${commands} | ${escapeMd(notes)} |`,
             )
         }
         sections.push('')
