@@ -133,6 +133,16 @@ export interface RuntimeConfig {
      */
     rollbackGranularity?: RollbackGranularity
     /**
+     * 执行宿主的构建版本回执（平台容器注入；与 `/api/health`、平台启动 `[build]` 行同源）。
+     * 未提供时引擎回退自身 `package.json` 版本（CLI / MCP 本地执行场景），最终回退 `unknown`。
+     */
+    buildVersion?: string
+    /**
+     * 执行宿主的构建 commit（平台容器注入）。只有宿主构建期能提供；
+     * 本地执行场景固定回退 `unknown`，不参与任何判定。
+     */
+    buildCommit?: string
+    /**
      * Dependabot alerts 专用 token（可选）。
      * 提供时仅用于拉取 Dependabot alerts（GITHUB_TOKEN 无法读取该 API，
      * 建议使用最小权限 fine-grained PAT，仅 `Dependabot alerts: read`）；

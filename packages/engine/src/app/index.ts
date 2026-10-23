@@ -45,6 +45,7 @@ import { loadRulesConfigFromEnv, resetActiveRulesConfig, setActiveRulesConfig } 
 import type { CommandResult } from '../runners/verification-runner'
 import type { VerificationCheckpoint } from './verification-checkpoint'
 import { createConfiguredGitHubClient, createConfiguredGitHubClientOrNull } from './github-client'
+import { formatEngineBuildLine, resolveRunBuildInfo, type RunBuildInfo } from './build-info'
 import { fetchDefaultBranch } from './repo-alerts'
 import { abortAwareRepoTask, abortBlocksDelivery, logSkippedRepos, recordRunAbort } from './abort'
 import { processRepoForReport } from './repo-report'
@@ -181,6 +182,8 @@ export class DependfixApp {
     private readonly runId: string
     /** GitHub App 认证提供者（用于 commit author 真实 bot 身份；仅 fix/fix-and-pr 模式生效） */
     private readonly githubAppAuth?: AuthProvider
+    /** 运行构建版本回执（`[build]` 启动行；平台注入优先，CLI 回退包版本） */
+    private readonly buildInfo: RunBuildInfo
 
     private readonly allAlerts: NormalizedSecurityAlert[] = []
     private readonly allActions: FixAction[] = []
@@ -221,6 +224,8 @@ export class DependfixApp {
         // 需在 logger 之后（降级 / 生效告警走 logger），且合并结果作为**唯一 config 来源**
         // 单次赋值（保持 readonly 不可变语义）；非法配置一律降级不中断运行。
         this.config = applyRepoConfig(options.config, this.workDir, this.logger)
+        // 构建版本回执：平台注入值（容器镜像构建期）优先，本地执行回退引擎包版本
+        this.buildInfo = resolveRunBuildInfo(this.config)
 
         // GitHub App 认证提供者（用于 commit author 真实 bot 身份）
         if (this.config.githubApp) {
@@ -297,6 +302,8 @@ export class DependfixApp {
         // 显式前置 `isGitRepository`（纵深防御，不依赖 `hasGitChanges` 的内部守卫）：非仓库目录
         // ⇒ 视为「无既有改动」；门禁在非仓库下另跳过回滚（无可回滚工作树），故两处语义自洽。
         this.preExistingDirty = isGitRepository(this.workDir) && hasGitChanges(this.workDir)
+        // 构建版本回执：先于业务日志输出，让「线上构建旧 / 代码路径未覆盖」可判读（口径见 app/build-info.ts）
+        this.logger.info(formatEngineBuildLine(this.buildInfo))
         this.logger.info(`Starting dependfix run ${this.runId}`, {
             mode: this.config.mode,
             repositories: this.config.repositories,
