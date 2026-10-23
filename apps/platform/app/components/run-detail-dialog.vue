@@ -6,6 +6,7 @@ import {
     environmentalFailureCount,
     failureKindLabel,
     failureStageLabel,
+    formatBuildLabel,
     formatBytes,
     formatRunDuration,
     isRunResultMissing,
@@ -43,6 +44,12 @@ interface RunDetailView {
     /** 运行结果可信度：旧数据 / B 模式为 null */
     exitCode: number | null
     environmentalFailureCount: number | null
+    /**
+     * 构建版本回执（本次 run 由哪个部署产物执行）：构建期未注入为 `unknown`，
+     * 存量行（列上线前）为 null——两者都按「未知」降级展示，不是错误态。
+     */
+    buildVersion: string | null
+    buildCommit: string | null
     /** 执行资源 / OOM 归因：null = 不可采集（原因在 resource.degradedReason） */
     memoryMaxBytes: number | null
     peakRssBytes: number | null
@@ -124,6 +131,15 @@ const { retryingRunId, retryError, retryMerged, retrySuccess, retryRun, resetMes
 
 /** 仅「可重试」类失败呈现入口（与后端守卫同一判据；前端不可见 ≠ 后端可绕过） */
 const canRetry = computed(() => detail.value?.failureKind === 'transient')
+
+/**
+ * 构建版本回执（`scan_run.build_version/build_commit`）。
+ * 构建期未注入（`unknown`）与存量行（null）统一按「未知」降级展示——这是诊断信息缺失的正常形态，
+ * 不进入错误态、不改变任何判定。口径见 docs/standards/platform.md §10.7。
+ */
+const buildInfo = computed(() =>
+    formatBuildLabel(detail.value?.buildVersion, detail.value?.buildCommit, t('runs.buildUnknown')),
+)
 
 /** 二次确认后触发重试：参数与来源均由服务端按来源运行派生，前端只传 runId */
 const requestRetry = async () => {
@@ -320,6 +336,15 @@ watch(() => props.runId, (runId) => {
                 <div v-if="!isRunResultMissing(detail) && detail.exitCode !== null && detail.exitCode !== undefined" class="run-detail__meta-item">
                     <span class="run-detail__meta-label">{{ t('runs.exitCode') }}</span>
                     <strong>{{ detail.exitCode }}</strong>
+                </div>
+                <div class="run-detail__meta-item">
+                    <span class="run-detail__meta-label">{{ t('runs.buildVersion') }}</span>
+                    <strong
+                        :class="{'text-muted': buildInfo.unknown}"
+                        :title="t('runs.buildVersionHint')"
+                    >
+                        {{ buildInfo.label }}
+                    </strong>
                 </div>
                 <div v-if="detail.memoryMaxBytes !== null" class="run-detail__meta-item">
                     <span class="run-detail__meta-label">{{ t('runs.memoryLimit') }}</span>

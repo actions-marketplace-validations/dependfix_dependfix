@@ -4,6 +4,39 @@ type Translator = (key: string, params?: Record<string, string | number>) => str
 
 export const shortRunId = (id: string) => id.slice(0, 8)
 
+/**
+ * 构建期未注入 / 存量行的统一哨兵。
+ * 权威值在 `server/utils/build-info.ts#UNKNOWN_BUILD_VALUE`（同一字符串，跨 client/server 边界复制），
+ * 等值由 `server/api/runs/[id].get.test.ts` 断言（同 `EXPORT_RUNS_LIMIT` 镜像模式）。
+ */
+export const BUILD_UNKNOWN_VALUE = 'unknown'
+
+export interface BuildLabelView {
+    label: string
+    /** 两侧都不可读（未注入 / 存量行）时为 true，UI 据此走 muted 降级而不是错误态 */
+    unknown: boolean
+}
+
+/**
+ * 构建版本回执展示：`<version> · <短 commit>`。
+ *
+ * - 新 run 未注入构建期版本时两列写 `unknown`，存量行为 `null` → 统一显示「未知」（降级，不是错误态）
+ * - 只有一侧可读时只显示该侧，不拼 `unknown`
+ */
+export const formatBuildLabel = (
+    version: string | null | undefined,
+    commit: string | null | undefined,
+    unknownLabel: string,
+): BuildLabelView => {
+    const knownVersion = version && version !== BUILD_UNKNOWN_VALUE ? version : ''
+    const knownCommit = commit && commit !== BUILD_UNKNOWN_VALUE ? commit.slice(0, 8) : ''
+    const unknown = knownVersion === '' && knownCommit === ''
+    return {
+        label: unknown ? unknownLabel : [knownVersion, knownCommit].filter(Boolean).join(' · '),
+        unknown,
+    }
+}
+
 /** 读取任意计数：正数原样返回；0 / 负数 / 非数字 / 缺失一律降级为 0（旧 summaryJson 兼容）。 */
 const countValue = (value: unknown) =>
     typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0

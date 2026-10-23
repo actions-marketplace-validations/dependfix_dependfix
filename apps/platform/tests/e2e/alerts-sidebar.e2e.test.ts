@@ -110,6 +110,8 @@ test.describe('alerts 去重视图受影响运行 Sidebar', () => {
             },
             exitCode: 1,
             environmentalFailureCount: 1,
+            buildVersion: '2026.10.23',
+            buildCommit: 'deadbeefcafe',
         })
         await installRoutes(page, [run])
 
@@ -138,6 +140,9 @@ test.describe('alerts 去重视图受影响运行 Sidebar', () => {
         await expect(detail).toContainText('未修复告警')
         await expect(detail).toContainText('环境性失败')
         await expect(detail).toContainText('退出码')
+        // 构建版本回执：本次 run 由哪个部署产物执行（版本 · 短 commit）
+        const buildMeta = detail.locator('.run-detail__meta-item').filter({ hasText: '构建版本' })
+        await expect(buildMeta).toContainText('2026.10.23 · deadbeef')
         const breakdown = detail.locator('.run-outcome-breakdown')
         await expect(breakdown).toContainText('未修复 20 / 26')
         await expect(breakdown).toContainText('跨大版本 / 人工复核 4')
@@ -170,6 +175,8 @@ test.describe('alerts 去重视图受影响运行 Sidebar', () => {
         const alertsMeta = detail.locator('.run-detail__meta-item').filter({ hasText: '告警数' })
         await expect(alertsMeta).toContainText('结果缺失')
         await expect(alertsMeta).not.toContainText('0')
+        // 构建版本缺失（旧数据 / 未注入）显示「未知」，不进入错误态
+        await expect(detail.locator('.run-detail__meta-item').filter({ hasText: '构建版本' })).toContainText('未知')
     })
 
     test('容器执行不显示内部 Run URL', async ({ page }) => {

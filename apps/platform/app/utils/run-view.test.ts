@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
     alertsFound,
     environmentalFailureCount,
+    formatBuildLabel,
     formatBytes,
     isRunResultMissing,
     SEVERITY_DISPLAY_ORDER,
@@ -172,5 +173,28 @@ describe('formatBytes', () => {
         expect(formatBytes(null)).toBe('—')
         expect(formatBytes(Number.NaN)).toBe('—')
         expect(formatBytes(-1)).toBe('—')
+    })
+})
+
+describe('formatBuildLabel', () => {
+    it('拼出版本与短 commit', () => {
+        expect(formatBuildLabel('2026.10.23', 'deadbeefcafe', '未知'))
+            .toEqual({ label: '2026.10.23 · deadbeef', unknown: false })
+    })
+
+    it('未注入 / 存量行统一显示「未知」（unknown 与 null 同口径）', () => {
+        expect(formatBuildLabel('unknown', 'unknown', '未知')).toEqual({ label: '未知', unknown: true })
+        expect(formatBuildLabel(null, null, '未知')).toEqual({ label: '未知', unknown: true })
+        expect(formatBuildLabel(undefined, undefined, '未知')).toEqual({ label: '未知', unknown: true })
+        expect(formatBuildLabel('', '', '未知')).toEqual({ label: '未知', unknown: true })
+    })
+
+    it('只有一侧可读时不拼 unknown', () => {
+        expect(formatBuildLabel('unknown', 'deadbeefcafe', '未知'))
+            .toEqual({ label: 'deadbeef', unknown: false })
+        expect(formatBuildLabel('2026.10.23', 'unknown', '未知'))
+            .toEqual({ label: '2026.10.23', unknown: false })
+        expect(formatBuildLabel('2026.10.23', null, '未知'))
+            .toEqual({ label: '2026.10.23', unknown: false })
     })
 })

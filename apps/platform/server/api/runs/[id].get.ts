@@ -52,6 +52,9 @@ export default defineEventHandler(async (event) => {
         // 运行结果可信度：与列表同一口径；旧数据 exitCode 为 null，B 模式不传递 exitCode
         exitCode: run.exitCode,
         environmentalFailureCount: run.environmentalFailureCount,
+        // 构建版本回执：本次 run 由哪个部署产物执行（未注入为 unknown，存量行为 null）
+        buildVersion: run.buildVersion ?? null,
+        buildCommit: run.buildCommit ?? null,
         memoryMaxBytes: run.memoryMaxBytes,
         peakRssBytes: run.peakRssBytes,
         oomKilled: run.oomKilled,
