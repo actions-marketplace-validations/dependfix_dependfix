@@ -213,6 +213,18 @@
 - 归因边界：cgroup `oom_kill` 只覆盖容器限额触发的 OOM；宿主级 OOM（未设容器 memory limit）不保证被捕获。`resource_json.sigkillDetected` 仅表示引擎错误文本出现 SIGKILL，**不单独断言 OOM**；引擎自身安装 / 验证超时也会产生 `signal SIGKILL, timed out`，需结合宿主 `journalctl -k` 与峰值 / 上限判断。
 - API `GET /api/runs` / `GET /api/runs/[id]` 返回三列与解析后的 `resource`；运行详情展示内存上限 / 峰值 / OOM 标记，不可采集时显示「不可采集」+ 原因 tooltip。
 
+### 5.11 构建版本回执（M47.2）
+
+- **问题**：日志缺行时无法区分「线上构建旧（代码路径不存在）」与「代码路径未覆盖（数据为空）」——两者表现都是「没有这一行」，靠猜。故每次运行落一份「由哪个部署产物受理 / 执行」的回执。
+- **落库**：`scan_run.build_version` / `build_commit`（varchar(64) NULL，迁移 `2900000000000-AddScanRunBuildColumns`，前缀感知 + 幂等）。**业务写入路径创建的新 run 两列不会是 null**：构建期未注入时写 `unknown`（e2e fixtures 端点直接建行、属测试专用写入，不在此承诺内）；**存量行为 NULL**（不回填），UI 按「未知」降级。
+- **取值单一事实源**：`runtimeConfig.buildVersion` / `buildCommit`（与 `/api/health`、平台启动 `[build]` 行同源，来自镜像构建期 `--build-arg BUILD_VERSION/BUILD_COMMIT`；口径见 [platform.md](../../standards/platform.md) §10.7）。服务端经 `server/utils/run-build-info.ts#resolveRunBuildStamp` 读取，取不到 `useRuntimeConfig`（非 Nitro 运行时的脚本 / 单测）时回退 `unknown`，**不阻断 run 创建**。
+- **写入点与刷新语义**：`createPendingScanRun`（入队即落库，pending 阶段即可看受理产物）与 `runScanInternal` 的同步新建路径；队列续跑 / `reuse=true` 复用路径**随本次执行进程刷新**——跨部署续跑时记录当前构建，而不是最初入队者。
+- **执行者口径（重要边界）**：`container` / `sandbox` 模式下两列即**实际执行者**的构建；`github-action`（B 模式）模式下引擎跑在目标仓库的 Actions runner，本列记录的是**受理 / 派发本次 run 的平台构建**——真实执行镜像需结合 `executor_kind` 与 Actions 侧版本核对，UI 文案与 tooltip 不得读成「Actions 镜像版本」。
+- **引擎侧**：同一个值经 `RuntimeConfig.buildVersion/buildCommit` 透传，`DependfixApp.run()` 在 `Starting dependfix run` 之前输出 `[build] dependfix version=… commit=… source=…`（`app/build-info.ts`）。`source=host` 表示「值来自宿主运行时配置」（平台缺省值即字符串 `unknown`，也归此类——它代表宿主没注入真值，而不是引擎包版本）；`source=engine-package` 表示宿主未提供任何值、回退引擎自身 `package.json` 版本（CLI / MCP；该版本号与 CLI 产品版本可能不同号，故必须带来源标记）。commit 无宿主注入时固定 `unknown`。
+- **消费面**：`GET /api/runs/[id]` 返回 `buildVersion` / `buildCommit`；运行详情弹窗（`run-detail-dialog.vue`）以「构建版本：`<version> · <短 commit>`」展示，`unknown` / null 统一显示「未知」+ tooltip 说明（诊断信息缺失不是错误态）。`/scans` 的详情（`repo-history-dialog.vue`）本批不渲染该字段（UI 面收敛，与 §5.5「重试入口只在运行详情弹窗」同族边界）；该视图的 `container` 执行 run 仍可从日志区 `[build]` 行读到同一事实——`github-action` 与存量 run 无该日志行，不承诺兜底。
+- **有意不动**：`GET /api/runs` 列表与 `scan-trigger.serializeScanRun` 的响应白名单不改（避免第二个事实源）；后续若在列表 / 触发响应展示，需同批扩展白名单并补等值断言。`sandbox` 执行器当前只回显最小 `RunResult`、不启动引擎，故无 `[build]` 行；其落库值仍是平台构建，启用真实引擎执行时需补 `buildVersion/buildCommit` 透传。
+- **不做什么**：不做部署回执（Jenkins webhook / 镜像推送对齐）；不回填历史 run；不把版本塞进 `summaryJson`（独立列，契约不变）；不改 exit code / 交付判定。
+
 ## 6. 验收标准（草案 → 实现结果）
 
 - [x] `classifyRunFailure` 纯函数 + 单测覆盖全部已知 code / category（含 `unknown` 兜底）——`server/services/run-failure-classify.ts` + 全映射表逐码用例。

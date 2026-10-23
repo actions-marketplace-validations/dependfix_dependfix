@@ -76,20 +76,28 @@
 - **目标**：让每次运行的日志与落库记录能回答「本次运行由哪个构建版本 / commit 执行」，并把 `Lockfile repaired` 的中性语义写清楚。
 - **优先级**：P1
 - **范围**：
-  - 数据层：`apps/platform/server/entities/scan-run.ts` 新增 `buildVersion` / `buildCommit`（可空）；新增迁移 `apps/platform/server/database/migrations/<新时间戳>-AddScanRunBuildInfo.ts` 并登记进 `createDataSourceOptions().migrations`。
+  - 数据层：`apps/platform/server/entities/scan-run.ts` 新增 `buildVersion` / `buildCommit`（可空）；新增迁移 `apps/platform/server/database/migrations/2900000000000-AddScanRunBuildColumns.ts` 并登记进 `createDataSourceOptions().migrations`。
   - 写入：`scan-orchestrator` / `scan-trigger` 的 run 创建点写两列（取值复用 `apps/platform/server/utils/build-info.ts` 的 `resolveBuildInfo()`，未注入为 `unknown`）。
   - 读取：run 详情 API / `run-detail-dialog`（或列表 tooltip）展示版本与 commit；`unknown` 不作错误态。
-  - 引擎：`DependfixApp` 启动日志（`app/index.ts:296` 附近）输出版本 + commit；CLI 场景回退 `package.json` 版本；平台→引擎的传值形态在 D 阶段裁定（优先 `RuntimeConfig` 可选字段，避免新增隐式 env 依赖）。
-  - 文案：`packages/engine/src/app/helpers.ts:564-568` 的无改动路径改为中性表述（如「lockfile 已合规，无需修复」），有改动路径保留原语义；核对报告 / PR 正文契约串消费者。
+  - 引擎：`DependfixApp` 启动日志（`app/index.ts` 的 `run()` 首部）输出版本 + commit；CLI 场景回退 `package.json` 版本；平台→引擎的传值形态在 D 阶段裁定（优先 `RuntimeConfig` 可选字段，避免新增隐式 env 依赖）。
+  - 文案：`packages/engine/src/app/helpers.ts` 的 `tryLockfileRepair` 日志段把无改动路径改为中性表述（如「lockfile 已合规，无需修复」），有改动路径保留原语义；核对报告 / PR 正文契约串消费者。
   - 文档：`docs/guide/configuration.md`（中英）+ 平台差异说明登记 env；`platform.md` 数据模型段同步列。
 - **验收标准**：
-  - [ ] ① 构建期注入时新建 run 两列写入真实值；未注入时为 `unknown`（非 null 崩溃）；API 返回且 UI 可见。
-  - [ ] ② 引擎启动日志含版本 + commit；CLI 场景回退 package 版本，有单测。
-  - [ ] ③ 「无改动」路径不再输出 `Lockfile repaired`（改中性文案）；「有改动」路径语义不变；`rg -n "Lockfile repaired"` 全仓无残留旧串（报告 / PR 正文消费者已核对）。
-  - [ ] ④ 迁移在全新库与存量库真实迁移链均通过（复用 `migrations-registry.test.ts` 形态），两列可空。
-  - [ ] ⑤ 不改 exit code / 交付判定；不改 `summaryJson` 契约（版本走独立列）。
+  - [x] ① 构建期注入时新建 run 两列写入真实值；未注入时为 `unknown`（非 null 崩溃）；API 返回且 UI 可见。
+  - [x] ② 引擎启动日志含版本 + commit；CLI 场景回退 package 版本，有单测。
+  - [x] ③ 「无改动」路径不再输出 `Lockfile repaired`（改中性文案）；「有改动」路径语义不变；旧串在**生产源码**零残留（`rg -n "Lockfile repaired" packages apps --glob '!**/*.test.ts'` = 0；测试保留负例断言、规范 / 规划文档保留问题陈述，不计入判据），报告 / PR 正文消费者已核对。
+  - [x] ④ 迁移在全新库与存量库真实迁移链均通过（复用 `migrations-registry.test.ts` 形态），两列可空。
+  - [x] ⑤ 不改 exit code / 交付判定；不改 `summaryJson` 契约（版本走独立列）。
 - **不做什么**：不做部署回执（Jenkins webhook / 镜像推送对齐）；不回填历史 run（存量两列为 null）；不把构建版本塞进 `summaryJson`。
 - **依赖**：`build-info.ts` 既有 `resolveBuildInfo()`；`ScanRun` 迁移链与 registry 测试；`helpers.ts` 日志行；原 backlog 候选「运行日志的语义订正与构建版本回执」（本阶段已上收）。
+- **D 阶段裁定**：
+  - **平台→引擎传值形态**：`RuntimeConfig` 新增**可选** `buildVersion` / `buildCommit`（无新增 env；平台由 `server/utils/run-build-info.ts#resolveRunBuildStamp` 从 `runtimeConfig` 读取，与 `/api/health` 同源）。引擎 `app/build-info.ts` 按「宿主注入 → 引擎包 `package.json` 版本 → `unknown`」解析，启动日志固定输出 `[build] dependfix version=… commit=… source=host|engine-package`（先于 `Starting dependfix run`；`source` 区分宿主注入值与本地包版本回退，避免把引擎包版本读成产品版本）。
+  - **落库写点**：`createPendingScanRun`（入队即写）+ `runScanInternal` 同步新建；`existing` 分支（队列续跑 / `reuse=true`）**随本次执行进程刷新**——跨部署续跑记录当前构建。迁移 `2900000000000-AddScanRunBuildColumns`（前缀感知 + 幂等 + 两列可空）。`github-action` 模式两列记录受理 / 派发的平台构建，实际执行镜像在目标仓库 runner（文档与 tooltip 已限定）。
+  - **UI 面收敛**：只改运行详情弹窗 `run-detail-dialog.vue`（`构建版本` 元信息项，`unknown` / null 统一「未知」+ tooltip，`unknown` 判定由 `formatBuildLabel` 单点派生）；`/scans` 的 `repo-history-dialog.vue` 不重复渲染，**未重建视觉基线**。列表 / 触发响应白名单有意不动。
+  - **文案口径**：旧串在**生产源码**零残留（`rg -n "Lockfile repaired" packages apps --glob '!**/*.test.ts'` = 0）；测试保留负例断言、规划 / 设计文档保留问题陈述。「有改动」改为 `Lockfile repair applied for …`（语义不变），`changed` 缺省走中性 `repair completed (change status unknown)`，`noOp` 判据与日志共用同一 `noChange`。
+  - **实际 diff**：28 文件 / 约 880 行新增（`git diff --cached --numstat` 实测 `+877 −23`；含本段文档自身的个位数漂移），其中测试 + 迁移用例约 2/3（592 + 30 / 877 行），超出原估 8-11 文件 / 300-450 行；按审计 depth 映射（> 10 文件 + 跨 engine/platform 两模块）**升级为 `deep` 两分区**（预告为 standard）。设计结论落在 `run-failure-taxonomy.md §5.11`（governance 面，`scan_run` 列族单一事实源）+ `dependency-fixer-records.md §12.15`，不另立 slug 专项稿——与 M46.1（39 文件 / 945 插入，落点该文 §5.7/§5.8）同族。
+  - **mutation 标定（4/4 击杀）**：去 `createPendingScanRun` 的版本落库 → 2 例失败；`noChange` 分支失效 → 文案用例失败；去引擎 `[build]` 启动行 → 2 例失败；续跑不刷新执行者版本 → 刷新用例失败。
+  - **Review Gate R1（deep 两分区）**：分区 A **Reject**（2 blocker：「零残留」口径不可复现 / D 阶段数字失真；4 warning：B 模式执行者语义、引擎包版本与产品版本混读、透传无断言、回退分支缺测）＋分区 B **Pass**（4 warning：同步新建 / `reuse` 刷新无断言、`unknown` 哨兵裸字面量、B 模式语义、量化口径；3 suggest）→ 已收口：验收 ③ 限定域 + 允许命中清单、diff 数字与迁移名订正（提交前实测 `28 文件 / +877 −23`）、日志加 `source=host|engine-package`、B 模式口径写入 §5.11 / tooltip、补 4 例（同步新建 / `reuse` 刷新 / `ctx.config` 透传 / 解析失败回退）+ 前端哨兵等值断言、`changed` 缺省走中性文案、registry 用例改为「已记录前序迁移的存量库增量迁移」。
 - **交付物**：预估 3-4 commits（迁移 + 数据层 / 引擎日志 / API + UI / 文档与文案），**8-11 文件 / 300-450 行**。
 - **风险与缓解**：**R1 迁移漏登记**（生产 `synchronize=false` 时永不执行）→ 复用 registry 双向核对 + 存量库集成用例；**R2 构建期 env 未注入** → UI 显示 `unknown` + 文档写明注入方式，不影响运行；**R3 文案消费者漏改** → 结构化复扫 + 报告契约测试。
 

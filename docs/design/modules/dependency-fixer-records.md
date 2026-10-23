@@ -266,3 +266,10 @@ T108 (报告生成器)
 - **落点**：`packages/engine/src/github/ci-alignment.ts` 只读默认分支检出的 `.github/workflows/*.yml|yaml`（只解析 `jobs.*.steps[].run`），把 lint / build / typecheck / test 四类语义项与本次**实际执行**的命令集比对；`verifyProject` 完成处写入 `RunResult.ciAlignment`（同仓库多次验证取命令并集，并复用首轮健康预检）。PR 正文新增「CI 口径」区块（固定行预算，`formatCiAlignmentSection`），Markdown 报告新增 `Verification Alignment` 段（`describeCiAlignment`），文案事实源在 `@dependfix/core`。解析边界（文件数 / 字节 / 非普通文件上限）、健康预检与完整降级矩阵见 governance 稿。
 - **降级口径**：无 workflow / 非法 YAML / 非 GitHub Actions / 超解析上限 / 软链等非普通文件 → `unreadable`（「未能读取 CI 配置」）；CI 无可识别语义项 / 本次为自定义链 → `inconclusive`；默认分支健康预检失败 / 限流 / 超时只 warn，不标注失败结论。**任一降级均不阻断运行、不改 exit code 与交付判定**。平台侧本批零代码改动（`RunResult` 经进程内结果直接回到 `platform-delivery.generatePRBody`）。
 - **不承诺**：只描述命令口径，不预测 CI 结果；不按 workflow 替换验证命令；不覆盖 GitHub Actions 之外的 CI。完整设计与已知边界见 [verification-ci-alignment.md](../governance/verification-ci-alignment.md)。
+
+### 12.15 lockfile 修复日志的「已合规」与「修复生效」语义（M47.2，2026-10-23）
+
+- **问题**：`tryLockfileRepair` 对「lockfile 本就合规、`repairLockfile` 未改动文件」与「真的改写了 lockfile」输出同一句 `Lockfile repaired for …`，读者把前者读成「修好了但没提交」（2026-10-17 生产复盘）。
+- **落点**：`packages/engine/src/app/helpers.ts#tryLockfileRepair` 按 `repairLockfile` 的 `changed` 分流——`changed === false` → `Lockfile already compliant for <repo> — no repair needed`；`changed === true` → `Lockfile repair applied for <repo> (strategy: …)`（语义不变，措辞与前者区分）；`changed` 缺省（类型可选，当前无生产路径）→ `Lockfile repair completed for <repo> (change status unknown)`，不把「可能改动」说成「已修复」；失败路径文案不变。`FixAction.noOp` 判据与日志同源（同一个 `noChange`），不出现「日志说已合规、动作却算交付」的错位。
+- **契约核对**：旧串 `Lockfile repaired` 在**生产源码**零残留（`rg -n "Lockfile repaired" packages apps --glob '!**/*.test.ts'` = 0）；测试保留负例断言、规范 / 规划文档保留问题陈述，故「全仓」口径不成立、不作为验收判据；报告 / PR 正文 / 通知均不解析该日志文案，消费的是 action 的 `success / noOp / strategy / diff` 结构化字段。
+- **不做什么**：不改 `changed` 判定（`fixers/pnpm` 的内容比较）；不改 `noOp` 对交付判定的既有语义（noOp 不计可交付修复）。
