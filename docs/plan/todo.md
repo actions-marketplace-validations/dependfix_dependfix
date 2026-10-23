@@ -60,13 +60,14 @@
   - 平台侧 `apps/platform/server/services/executor/*` 只透传仓库上下文（不改执行链）；run 详情是否同步展示由 D 阶段按成本裁定，PR 正文为必交付面。
   - 文档：`docs/design/modules/dependency-fixer-records.md` 新增小节（解析边界 / 降级口径 / 不承诺 CI 结果）。
 - **验收标准**：
-  - [ ] ① 目标仓库为单 job `run: pnpm lint` / `pnpm build` / `pnpm test` 时，PR 正文出现「CI 口径：一致」说明；缺 `typecheck` 时明确列出「本仓库 CI 未跑 typecheck，本次已验证」。
-  - [ ] ② 无法解析（无 `.github/workflows`、非法 YAML、非 GitHub Actions）时不阻断运行，PR 正文标注「未能读取 CI 配置」，并有对应单测。
-  - [ ] ③ 口径比对所依据的 workflow 在默认分支最近一次结论为 failure 时，PR 正文标注「默认分支同 workflow 最近一次失败（非本 PR 引入）」；API 失败 / 限流 / 超时时不标注且日志 warn。
-  - [ ] ④ 不改 `DEFAULT_VERIFY_COMMANDS`（`runners/verification-runner.ts`）、不改执行顺序、不改 exit code 与交付判定；mutation 至少 3 项（去比对 / 去降级 / 去健康预检）。
-  - [ ] ⑤ 设计小节落地；新增用户可见文案走 i18n 双语（若落 UI）。
+  - [x] ① 目标仓库为单 job `run: pnpm lint` / `pnpm build` / `pnpm test` 时，PR 正文出现「CI 口径：一致」说明；缺 `typecheck` 时明确列出「本仓库 CI 未跑 typecheck，本次已验证」。
+  - [x] ② 无法解析（无 `.github/workflows`、非法 YAML、非 GitHub Actions）时不阻断运行，PR 正文标注「未能读取 CI 配置」，并有对应单测。
+  - [x] ③ 口径比对所依据的 workflow 在默认分支最近一次结论为 failure 时，PR 正文标注「默认分支同 workflow 最近一次失败（非本 PR 引入）」；API 失败 / 限流 / 超时时不标注且日志 warn。
+  - [x] ④ 不改 `DEFAULT_VERIFY_COMMANDS`（`runners/verification-runner.ts`）、不改执行顺序、不改 exit code 与交付判定；mutation 至少 3 项（去比对 / 去降级 / 去健康预检）。
+  - [x] ⑤ 设计小节落地；新增用户可见文案走 i18n 双语（若落 UI——本批无 UI，N/A）。
 - **不做什么**：不按 workflow 动态替换 `verifyCommands`；不解析 matrix / secrets / services 的完整执行语义；不改 PR 创建条件；不覆盖 GitHub Actions 之外的 CI。
 - **依赖**：`yaml`（engine 既有依赖）；`verification-runner.ts` 的 `DEFAULT_VERIFY_COMMANDS` 单一事实源；`pr-creator.ts` Verification 区块；GitHub Octokit 既有封装；原 backlog 候选「验证链与目标仓库 CI 命令对齐 / 默认分支 workflow 健康预检」（本阶段已上收）。
+- **D 阶段裁定**：**平台零代码改动**——引擎在 `container-executor` 内进程化执行，仓库与默认分支上下文已由 `fetchDefaultBranch` 提供，`RunResult.ciAlignment` 随结果直接回到 `platform-delivery.generatePRBody`；**run 详情 UI 不做**（报告 Markdown / JSON 与 PR 正文已覆盖诊断面，UI 待明确需求）。实际 diff **22 文件 / 约 2100 行新增**（含测试与设计稿），已按设计文档硬阈值补 [verification-ci-alignment.md](../design/governance/verification-ci-alignment.md) 并拆 4 个原子 commit。
 - **交付物**：预估 3-4 commits（解析与比对模块 + 单测 / 报告与 PR 正文 / 平台接线（若有）/ 设计小节与文案），**10-14 文件 / 450-700 行**（执行角色锚点计数，D 阶段复测）。
 - **风险与缓解**：**R1 解析过度承诺**（workflow 形态千变万化）→ 只做可识别命令子集并显式标注「未识别」；**R2 API 配额 / 弱网** → 单次调用 + 超时 + 降级不阻断；**R3 PR 正文膨胀** → 固定行数预算，仅差异展开；**R4 被读成「CI 必绿」承诺** → 文案限定「命令口径」并声明不预测结果。
 

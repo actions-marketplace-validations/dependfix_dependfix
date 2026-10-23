@@ -34,6 +34,7 @@
 | [PR 构建与部署信号采集设计](./pr-build-deploy-signals.md) | 专项设计（PR 构建 / 部署多源聚合：GitHub Checks + Commit Statuses + Deployments，可选 provider 日志富化） | 🔶 设计先行稿（backlog 候选，2026-10-10） |
 | [队列僵尸任务终结与去重键释放设计](./queue-stale-recovery.md) | 专项设计（宿主机重启后 pending/running 收敛 + BullMQ 去重键释放 + 触发自愈 + worker 慢重试） | ✅ 已落地（2026-10-18，Review Gate R2 Pass） |
 | [平台通知与邮件推送设计](./platform-notification.md) | 专项设计（事件分层 + 组织 / 个人配置 + 收件人分流 + 合并降噪；issue #190） | ✅ 已落地（2026-10-22 M46 归档；B1-B4 闭环，B5 已随 M47.5 进入规划） |
+| [验证链与目标仓库 CI 口径对齐设计](./verification-ci-alignment.md) | 专项设计（M47.1：workflow 命令口径解析 / 差异披露 / 默认分支健康预检） | ✅ 已落地（2026-10-23，M47.1；Review Gate R2 Pass） |
 
 ## 使用约定
 

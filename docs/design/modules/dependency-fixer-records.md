@@ -246,7 +246,7 @@ T108 (报告生成器)
 - **修复后安装仍既有失败不交付**：`PRE_EXISTING_FAILURE` 只表示「不归因本次改动」，不等于「PR 的 CI 会绿」。若修复后验证中安装命令仍以 `preExisting: true` 失败（如目标仓库 lockfile 本身损坏），普通 PR 的 CI 必然同因失败。现由 `hasPreExistingInstallFailure` 在提交 / PR 前拦截；若 lockfile repair 让安装转绿（修复后无该失败 action），仍允许交付。新增 `app/skipped-delivery.ts` 承载跳过交付时的回滚（复用 `rollbackChanges`，保留 `preExistingDirty` 保护面）。
 - **override 生效校验（所有写入路径）**：`pnpm install` 成功 ≠ override 真正生效。通用 override 已存在、但被更具体的路径级规则压过时，pnpm 可能认为 lockfile 已最新而不重解析——日志报「升级成功」、实际无 diff、commit 被跳过（`cmyr-skills-agents` 的 `undici` 7.28.0 实证）。现 `overrideTransitiveDependency` 与 `applyVersionedOverridesBatch` 在 install 后回读 **全部** 锁定实例（`override-verification.ts`）：单包 override 要求所有实例 >= 目标；版本化 override 只校验对应 major 的实例；仍有低于目标者 → 回滚 + 失败（不再有「假成功」）。原先仅覆盖「无 `pnpm-workspace.yaml` + pnpm v10+」的风险分支，现覆盖 workspace 写入路径。
 - **收敛判定按全部实例**：`applyGroupUpgrades` 原先用 `readLockfileVersion`（最高版本）判断「已收敛」；`cookie-cloudflare` 的 `undici` 7.30.0 让 5.28.4 / 5.29.0 被误判为已修复，报告 `Converged: 1` 但 10 条 `< 6.28.0` 告警仍在。现按 `readLockfileVersions` 全量判定：**最高实例 < 目标**时仍走常规升级（no-downgrade 保护只在最高实例已达标时生效）；**最高实例 >= 目标且全部实例 >= 目标**才算 `alertsConverged`；**最高实例 >= 目标但仍有低实例**（低 major / 其它 manifest）时计入 `alertsSkipped` 并 warn「cross-major upgrade or manual review required」。
-- **不做什么**：不改 `PRE_EXISTING_FAILURE` 的归因 / 出口码口径（仍不归因、不改出口码；但修复后安装仍红时阻断普通 PR 交付，二者不矛盾）；不改验证链 / 安装链顺序；不做 draft PR / issue 降级通道（P2 backlog）；不做「目标仓库 CI 命令对齐 / 默认分支 workflow 健康预检」（该事项已上收 M47.1）；不把路径级 override 的生效校验细化为 `parent>child` 映射（当前跳过，由完整验证兜底）。
+- **不做什么**：不改 `PRE_EXISTING_FAILURE` 的归因 / 出口码口径（仍不归因、不改出口码；但修复后安装仍红时阻断普通 PR 交付，二者不矛盾）；不改验证链 / 安装链顺序；不做 draft PR / issue 降级通道（P2 backlog）；不做「目标仓库 CI 命令对齐 / 默认分支 workflow 健康预检」（该事项已上收 M47.1，已于 §12.14 落地）；不把路径级 override 的生效校验细化为 `parent>child` 映射（当前跳过，由完整验证兜底）。
 
 ### 12.13 基线完整链与单元回滚粒度（M46.3，2026-10-21）
 
@@ -259,3 +259,10 @@ T108 (报告生成器)
 - **逃生开关**：`--rollback-granularity=repo` / `DEPENDFIX_ROLLBACK_GRANULARITY=repo` 关闭单元回滚，保持既有整仓回滚；默认 `unit`。`preExistingDirty` 保护面不变（运行前有用户改动时禁用选择性回滚，门禁也不自动整仓回滚），整仓回滚仍保留为最终逃生路径。
 - **边界与风险**：① 只尝试一次「回退最近单元 + 重验」，不在失败路径做多单元递归搜索（最多一次完整验证链额外开销；仅当首次 lockfile repair 真正改文件时才重做 repair）；② 无 checkpoint / checkpoint 恢复失败 / checkpoint 之后存在失败单元动作或错误 → 记 `ROLLBACK_GRANULARITY_DEGRADED` 并整仓回滚（不抹掉失败审计）；③ 多仓共享 `workDir` 时 checkpoint 带仓库归属，但文件级改动无法按仓拆分，仍按当前仓库最近 checkpoint 处理并在降级审计中说明；④ `git read-tree` 恢复把改动放回暂存区，最终 commit / PR 内容不变；`preExistingDirty=true` 时禁用选择性回滚（沿用门禁保护面）；⑤ checkpoint 对象不写 ref，退出前无须清理，由 git GC 回收。
 - **影响面**：`RuntimeConfig` 新增**可选** `rollbackGranularity`（缺省按 `unit` 处理，避免破坏既有程序化调用；平台 `scan-orchestrator` / CLI / env 可显式覆盖）；`ROLLBACK_GRANULARITY_DEGRADED` 为跳过类审计，不改变 exit code / 平台 `failed` 判定。
+
+### 12.14 验证链与目标仓库 CI 口径对齐（M47.1，2026-10-23）
+
+- **问题**：PR 正文 `Verification` 区块来自 engine 本地验证链，与目标仓库 CI 不是同一口径（典型：CI 只跑 `lint / build / test`，默认链还跑 `typecheck`），红绿平铺导致「PR 是否真的过 CI」不可判读。
+- **落点**：`packages/engine/src/github/ci-alignment.ts` 只读默认分支检出的 `.github/workflows/*.yml|yaml`（只解析 `jobs.*.steps[].run`），把 lint / build / typecheck / test 四类语义项与本次**实际执行**的命令集比对；`verifyProject` 完成处写入 `RunResult.ciAlignment`（同仓库多次验证取命令并集，并复用首轮健康预检）。PR 正文新增「CI 口径」区块（固定行预算，`formatCiAlignmentSection`），Markdown 报告新增 `Verification Alignment` 段（`describeCiAlignment`），文案事实源在 `@dependfix/core`。解析边界（文件数 / 字节 / 非普通文件上限）、健康预检与完整降级矩阵见 governance 稿。
+- **降级口径**：无 workflow / 非法 YAML / 非 GitHub Actions / 超解析上限 / 软链等非普通文件 → `unreadable`（「未能读取 CI 配置」）；CI 无可识别语义项 / 本次为自定义链 → `inconclusive`；默认分支健康预检失败 / 限流 / 超时只 warn，不标注失败结论。**任一降级均不阻断运行、不改 exit code 与交付判定**。平台侧本批零代码改动（`RunResult` 经进程内结果直接回到 `platform-delivery.generatePRBody`）。
+- **不承诺**：只描述命令口径，不预测 CI 结果；不按 workflow 替换验证命令；不覆盖 GitHub Actions 之外的 CI。完整设计与已知边界见 [verification-ci-alignment.md](../governance/verification-ci-alignment.md)。
