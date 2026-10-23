@@ -18,7 +18,8 @@ vi.mock('../fixers/pnpm', async (importOriginal) => {
 })
 
 describe('tryLockfileRepair', () => {
-    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() } as never
+    const loggerMocks = { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+    const logger = loggerMocks as never
 
     beforeEach(() => {
         vi.clearAllMocks()
@@ -45,6 +46,8 @@ describe('tryLockfileRepair', () => {
         expect(action.success).toBe(true)
         expect(action.diff).toBe('lockfile updated: +10 lines')
         expect(action.environmentalFailure).toBeUndefined()
+        // changed 缺省（类型可选）时不夸大语义：既不说「已修复」也不说「已合规」
+        expect(loggerMocks.info).toHaveBeenCalledWith('Lockfile repair completed for foo/bar (change status unknown)')
     })
 
     it('annotates diff when lockfileVersion changed (format drift guard)', async () => {
@@ -83,6 +86,9 @@ describe('tryLockfileRepair', () => {
 
         expect(action.success).toBe(true)
         expect(action.noOp).toBe(true)
+        // 中性文案：已合规 ≠ 修复生效（旧串 `Lockfile repaired` 会让用户误读为「修好未提交」）
+        expect(loggerMocks.info).toHaveBeenCalledWith('Lockfile already compliant for foo/bar — no repair needed')
+        expect(JSON.stringify(loggerMocks.info.mock.calls)).not.toContain('Lockfile repaired')
     })
 
     it('does not mark noOp when the repair changed the lockfile', async () => {
@@ -102,6 +108,8 @@ describe('tryLockfileRepair', () => {
 
         expect(action.success).toBe(true)
         expect(action.noOp).toBeUndefined()
+        // 「有改动」路径语义不变，但文案与「已合规」区分（旧串不再出现在任何路径）
+        expect(loggerMocks.info).toHaveBeenCalledWith('Lockfile repair applied for foo/bar (strategy: N/A)')
     })
 
     it('returns early success record in dry-run mode', async () => {

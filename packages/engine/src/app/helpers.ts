@@ -570,11 +570,21 @@ export async function tryLockfileRepair(
             ...(config.toolchainPnpmVersion ? { toolchain: { pnpmVersion: config.toolchainPnpmVersion } } : {}),
         })
 
-        logger.info(
-            result.success
-                ? `Lockfile repaired for ${repo} (strategy: ${result.strategy ?? 'N/A'})`
-                : `Lockfile repair failed for ${repo}: ${result.failureDetail ?? 'unknown'}`,
-        )
+        // 「已合规」与「修复生效」必须区分：旧文案对两者都输出 repaired，
+        // 用户读成「修好了但没提交」（口径见 docs/design/modules/dependency-fixer-records.md §12.15）。
+        const noChange = result.success && result.changed === false
+        let logMessage: string
+        if (!result.success) {
+            logMessage = `Lockfile repair failed for ${repo}: ${result.failureDetail ?? 'unknown'}`
+        } else if (noChange) {
+            logMessage = `Lockfile already compliant for ${repo} — no repair needed`
+        } else if (result.changed === true) {
+            logMessage = `Lockfile repair applied for ${repo} (strategy: ${result.strategy ?? 'N/A'})`
+        } else {
+            // changed 缺省（类型可选）：不把「可能改动」说成「已修复」
+            logMessage = `Lockfile repair completed for ${repo} (change status unknown)`
+        }
+        logger.info(logMessage)
 
         // 格式漂移检测：lockfileVersion 变化时 diff 摘要附加标注（wisdom: pnpm v11 迁移教训）
         let diffSummary = result.diff?.summary
@@ -605,7 +615,7 @@ export async function tryLockfileRepair(
             strategy: result.strategy,
             durationMs: Date.now() - startMs,
             diff: diffSummary,
-            ...(result.success && result.changed === false ? { noOp: true } : {}),
+            ...(noChange ? { noOp: true } : {}),
             ...(environmentalFailure ? { environmentalFailure: true } : {}),
         }
     } catch (error: unknown) {
