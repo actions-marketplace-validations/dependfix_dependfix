@@ -106,20 +106,29 @@
 - **目标**：收窄「环境性失败」判定，并让常规分组 / 逐包升级 / major 路径消费安装结果的 `environmental` 标记，使环境性失败计数与真实环境故障一致。
 - **优先级**：P2
 - **范围**：
-  - 归因接线：`packages/engine/src/app/result-assembly.ts:22-25` 自述的覆盖边界（常规分组 / 逐包升级 / major）→ 三条路径接入；调用点见 `app/repo-fix.ts:701,746` 与 major 路径。
+  - 归因接线：`result-assembly.ts#computeSummary` 原自述的覆盖边界（常规分组 / 拆组逐包 / major）→ 三条路径接入；调用点为 `app/repo-fix.ts#applyGroupUpgrades` 内经 `upgradeAlert` 的两处与 `major-upgrade` 分支（本批按同族一并收口 workspace 成员链路）。
   - 分类收窄：`ENVIRONMENT_ERROR` 判据从「stderr 空 / 信号 / 超时」扩展为「有明确 stderr 且非信号 / 非超时 → 非环境性」，抽单一判据函数（落 `runners/` 或 `fixers/` 既有分层）。
   - 语义交互：与 `failure_kind=transient`、`alertsFailed`、exit code、交付守卫的交互先在设计文档落结论（`docs/design/modules/dependency-fixer-records.md` 新增小节）再改代码。
   - 测试：三路径环境性用例、分类反例（明确 `ERR_PNPM_*` 不再环境性）、零修复且全部环境性 / 有真实失败两场景的 exit code 与交付回归。
 - **验收标准**：
-  - [ ] ① 常规 / 逐包 / major 路径在安装被信号杀死或超时时产出 `environmental` 标记并推 `ENVIRONMENT_ERROR`；`alertsFailed` 不计该告警；mutation 至少 3 项。
-  - [ ] ② 有明确 stderr 的安装失败不再被判环境性（判据单测 + 端到端用例）。
-  - [ ] ③ 「零修复且全部环境性」与「有真实失败」两场景的 exit code / status / 交付守卫与既有口径一致（回归用例）。
-  - [ ] ④ 历史 run 计数不回填；文档声明仅新 run 生效。
-  - [ ] ⑤ 设计结论小节先于实现提交（或同批 docs commit 在前）。
+  - [x] ① 常规 / 逐包 / major 路径在安装被信号杀死或超时时产出 `environmental` 标记并推 `ENVIRONMENT_ERROR`；`alertsFailed` 不计该告警；mutation 至少 3 项。
+  - [x] ② 有明确 stderr 的安装失败不再被判环境性（判据单测 + 端到端用例）。
+  - [x] ③ 「零修复且全部环境性」与「有真实失败」两场景的 exit code / `alertsFailed` / 审计条目与既有口径一致（回归用例；`status` 由既有 `resolveScanRunState` 映射，本批不改映射，未新增平台断言）。
+  - [x] ④ 历史 run 计数不回填；文档声明仅新 run 生效。
+  - [x] ⑤ 设计结论小节先于实现落地（提交顺序按 docs → 代码 → 测试 → 计划登记执行）。
 - **不做什么**：不改 `failure_kind` 枚举本身（需新增值另立条目）；不回填历史数据；不改 exit code 语义。
 - **依赖**：M46.1 的 `RunSummary.environmentalFailures` 与 `ENVIRONMENT_ERROR` 计数；M47.2 的版本日志（诊断辅助）；原 backlog 候选「环境性失败分类语义收窄」+「常规升级链路的环境性失败归因对齐」（本阶段已上收）。
-- **交付物**：预估 3 commits（设计结论 / 归因接线 + 测试 / 分类收窄 + 回归），**6-9 文件 / 250-420 行**。
-- **风险与缓解**：**R1 分类收窄把真实环境故障归因仓库** → 保守判据（只有明确 stderr 才非环境性）+ 反例用例；**R2 计数与 exit code 双源漂移** → 单一映射函数 + 映射用例；**R3 行为变更面广** → 先设计后实现，D 阶段定向回归 + `standard` 审计。
+- **D 阶段裁定**：
+  - **判据单点化**：`fixers/process-signals.ts#isEnvironmentalInstallError` 成为唯一判据（lockfile 诊断链把受管执行结果适配成同形错误后调用），规则 = 运行级取消 → 非环境性；信号 / 超时 → 环境性；有 stderr → 非环境性；stderr 空 → 环境性。**stdout 不参与归因**（pnpm 11 的 `gyp` / `prebuild-install` 输出仍按环境性处理，保留 §12.11 的既有决定），故本条不做「有输出即非环境性」的语义反转；升级链因此与诊断链同口径（静默非零退出不再误报为仓库失败，`ERR_PNPM_*` 仍归因）。
+  - **消费点扩到四条路径 / 三个代码点**：`upgradeAlert`（常规分组 + 拆组逐包共用一个代码点）、跨线 `major-upgrade`、workspace 成员 `member-upgrade`（原范围写三条路径，成员链路属同一判据消费点，一并收口避免同族遗留）；统一经 `app/environmental-failure.ts#markEnvironmentalInstallFailure` 记 `ENVIRONMENT_ERROR`（`stage: 'fix'`）+ 动作标记 `environmentalFailure`。多版本逐包 / 合批沿用 §12.11 的「记审计、不产出失败动作」口径（测试已锁定）。
+  - **计数 / 出口码交互**：`computeSummary` 跳过 `environmentalFailure` 动作（不进 `alertsFailed` / `alertsFixed`）；`environmentalFailures` 仍只按审计条目计数；`computeExitCode` 谓词零改动（跳过类 + `hasFailures` 排除）——零修复且全部环境性 → exit 0、平台 `completed` + 计数可见；真实失败并存时照常非零；`alertsUnfixed` 仍计未修复。
+  - **停止语义**：环境性失败即停止本仓库剩余**升级类**安装尝试（成员停止剩余成员并让调用方跳过分组链；分组停止组内后续包并对已应用改动跑一次组级验证，通过计 fixed、失败整组回滚并计验证失败后退回；跨线置 `stopReason='environmental'` 跳过成员 / 分组链）。lockfile repair 仍按既有流程执行（独立动作，不计入「升级类」）；计数单位是安装尝试而非故障事件。
+  - **审计 R1 收口（standard 2 分区均 Pass）**：A 分区 3 warning（成员停机不传导 / noOp 动作在停机回滚分支被改判失败 / 取消未启动被新判据误判环境性）+ 4 suggest（两分支与成员停机缺用例、`addSkipped` 被提前 return 跳过、日志丢证据、计数语义）；B 分区 7 warning + 4 suggest（成员停机口径、取消口径、`stage` 枚举、升级链注释陈旧、commit 声明、单一写入点措辞、风险方向 + 链接文字 / 行号 / 验收限定）。全部已收口：`applyMemberUpgrades` 返回停止标志并由 `processRepoFix` 跳过分组链、停机回滚分支排除 `noOp`、`execPnpmInstall` 未启动取消抛带 `aborted` 标记的错误、`notFixableCount` 记账前移到告警分区处、warn 带失败 detail、文档与注释口径改净、补 2 条分支用例与 2 成员停机用例。**R2 quick 复审 Pass**（8 项修复点全 closed；新增 2 warning：取消时组 / 成员循环仍会产出 K 条同因失败动作、整段跳过分组链时 `not-fixable` 仍未记账 → 已补取消守卫（成功动作保留、失败动作不入列）与记账上移，并补 2 条用例 / 2 项 mutation；3 suggest：diff 数字偏高、`report-generator` 两种错误文本形态混写、noOp 不入列属既有行为 → 前两项已订正、第三项按既有行为保留）。
+  - **实际 diff**：24 文件 / `+675 −61`（含新增模块 46 行、测试 7 文件与文档 5 文件；审计收口新增的成员停机传导、noOp 排除、取消守卫、`not-fixable` 记账与 5 条用例；数字含本段自身微调），超出原估 6-9 文件 / 250-420 行，主因是四条路径各需一条端到端回归 + 判据反例；设计与计数口径落 [dependency-fixer-records.md §12.16](../design/modules/dependency-fixer-records.md) + [pnpm-lockfile-fixer.md §2.4](../design/modules/pnpm-lockfile-fixer.md) + [run-failure-taxonomy.md §4.3/§5.x](../design/governance/run-failure-taxonomy.md)，不另立专项稿（与 M47.2 同族）。
+  - **mutation 标定（8/8 击杀）**：去 stderr 判据 → 27 例失败；去 `upgradeAlert` 的环境性标记 → 4 例；去 `computeSummary` 跳过 → 5 例；分组路径不停止 → 3 例；跨线不置 `stopReason` / 成员停机不传导 / 分组取消守卫 / `not-fixable` 记账 → 各 1 例。工件 `artifacts/review-gate/2026-10-23-m47-3-mutation.md`（还原后 md5 逐项一致）。
+- **交付物**：计划 4 commits（设计结论 / 判据与接线 / 测试 / 计划登记），**24 文件 / 约 675 行**（原估 6-9 文件 / 250-420 行；审计两轮收口后测试与文档行数增加约 250 行）。
+- **验证证据**：lint 0 error（3 条存量 warning）；`pnpm -r build` + `pnpm run typecheck` 7 包 Done；engine 83 文件 / 1508 passed / 1 skipped；全仓 307 文件 / 4683 passed / 10 skipped；mutation 8/8（工件 `artifacts/review-gate/2026-10-23-m47-3-mutation.md`，还原后 md5 逐项一致）；文档九项 + `docs:build` 全绿；新增行编号标记扫描 0 命中。
+- **风险与缓解**：**R1 分类收窄把真实环境故障归因仓库** → 保守判据（只有明确 stderr 才非环境性）+ 反例用例；**R2 计数与 exit code 双源漂移** → 单一映射函数 + 映射用例；**R3 行为变更面广** → 先设计后实现，D 阶段定向回归 + `standard` 审计；**R4 判据在升级链上比改前更宽**（静默非零退出也算环境性）→ 仓库自身失败若只写 stdout 会被记为环境性（不增 `alertsFailed`、exit 0）：缓解为 stdout 证据仍进 `FixAction.error`、失败日志带 detail、`environmentalFailures` 单列可见，保留 §2.4 的既有决定并在 §12.16 登记。
 
 ### M47.4 [P2 🚀] pnpm store 持久化与提交卫生
 
