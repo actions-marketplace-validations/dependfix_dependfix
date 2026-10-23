@@ -58,6 +58,10 @@ services:
       NUXT_IN_PROCESS_WORKER: ${IN_PROCESS_WORKER:-true}
       # worker 连续快速失败后的慢重试间隔（秒，空值回退 300；范围 1-3600）。
       DEPENDFIX_QUEUE_WORKER_SLOW_RETRY_SECONDS: ${DEPENDFIX_QUEUE_WORKER_SLOW_RETRY_SECONDS:-}
+      # pnpm store 持久化（目标仓库依赖安装共用）：落在数据卷内，跨 run / 容器重建复用；
+      # 与 run 工作目录同卷时走硬链接（不额外占一份磁盘）。入口对不可写路径会 warn 并回退
+      # $HOME 下的 pnpm 默认位置（每次冷安装）。见 docs/guide/deployment.md「pnpm store 与依赖缓存」。
+      PNPM_CONFIG_STORE_DIR: ${PNPM_CONFIG_STORE_DIR:-/app/data/pnpm-store}
       # 孤儿清理宽限（毫秒，空值回退 300000；不要设 0）。
       STALE_CLEANUP_RUNNING_GRACE_MS: ${STALE_CLEANUP_RUNNING_GRACE_MS:-}
       STALE_CLEANUP_PENDING_GRACE_MS: ${STALE_CLEANUP_PENDING_GRACE_MS:-}

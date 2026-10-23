@@ -20,6 +20,7 @@
 #
 # 断言：
 #   0. Node 运行时 ≥ 安全基线（check-node-version.mjs）
+#   0c. pnpm store 落在数据卷（入口派生默认值；供跨 run 复用）
 #   1. 正常启动（不注入 DATABASE_MIGRATIONS_RUN）→ 日志 migrationsRun=true、无 no such table
 #   2. GET / = 200 且 GET /api/auth/get-session = 200 且 GET /api/health = 200（JSON 含 version/commit/startedAt）
 #   3. 启动日志含版本戳行 `[build] version=...`
@@ -85,6 +86,19 @@ for tool in python3 make g++; do
     docker run --rm --entrypoint sh "$IMAGE" -c "command -v $tool >/dev/null" || fail "镜像缺少工具链：$tool"
 done
 log "工具链 python3/make/g++ 可用"
+
+# ── 场景 0c：pnpm store 落数据卷（入口派生的默认值）────────────────────────────
+# 走完整入口（root → chown → 探针判定 → 降权）而非 --entrypoint：验证默认值不依赖 compose 注入。
+# 入口先输出 `[entrypoint] pnpm store: …`，pnpm 的实际输出在其后：分别断言日志行与最后一行
+store_out=$(docker run --rm -v "$DATA_DIR":/app/data "$IMAGE" pnpm store path) \
+    || fail "容器内 pnpm store path 执行失败"
+printf '%s\n' "$store_out" | grep -q '^\[entrypoint\] pnpm store: ' || { printf '%s\n' "$store_out"; fail "入口未输出 pnpm store 日志行"; }
+store_path=$(printf '%s\n' "$store_out" | grep -E '^/app/data/pnpm-store/' | tail -n 1)
+case "$store_path" in
+    /app/data/pnpm-store/*) log "pnpm store 落在数据卷：$store_path" ;;
+    *) fail "pnpm store 未落在持久目录：$store_path（期望 /app/data/pnpm-store/v*）" ;;
+esac
+[ -d "$DATA_DIR/pnpm-store" ] || fail "数据卷内未创建 pnpm store 目录"
 
 # ── 场景 1：正常启动，不注入 DATABASE_MIGRATIONS_RUN（验证镜像级默认）──────────────
 log "场景 1：正常启动（不注入 DATABASE_MIGRATIONS_RUN）"

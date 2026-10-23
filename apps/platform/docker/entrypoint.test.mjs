@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -33,16 +33,41 @@ const makeStub = (root, body) => {
     return path
 }
 
-const makeShims = (root, { dateShim = false, sleepStub = 'exit 0' } = {}) => {
+const makeShims = (root, { dateShim = false, sleepStub = 'exit 0', rootUid = false, denyStore = false } = {}) => {
     const bin = join(root, 'bin')
     mkdirSync(bin)
+    // rootUid：模拟入口以 root 启动（`id -u` 无参 → 0），此时入口走 chown + su-exec 降权路径；
+    // 带参查询（`id -u dependfix`）仍返回镜像内非 root uid，供 PUID/PGID 缺省解析。
     writeExecutable(join(bin, 'id'), `#!/bin/sh
 case "$*" in
+    "-u") echo ${rootUid ? '0' : '100'} ;;
+    "-g") echo ${rootUid ? '0' : '101'} ;;
     *-u*) echo 100 ;;
     *-g*) echo 101 ;;
     *) echo "uid=100(test) gid=101(test)" ;;
 esac
 `)
+    if (rootUid) {
+        // chown 桩：真实 chown 会改动测试目录属主，这里只记录实参（用于断言不对 store 路径 chown）
+        writeExecutable(join(bin, 'chown'), `#!/bin/sh
+if [ -n "$STUB_CHOWN_LOG" ]; then
+    echo "$*" >> "$STUB_CHOWN_LOG"
+fi
+exit 0
+`)
+        // su-exec 桩：按运行身份执行（本机无法真正 setuid 到 100），并支持模拟「运行身份不可写」。
+        // 记录调用参数：用于断言 store 目录是**以运行身份**创建的（非 root 建目录后 chown）。
+        writeExecutable(join(bin, 'su-exec'), `#!/bin/sh
+if [ "${denyStore ? '1' : '0'}" = "1" ] && [ "$2" = "sh" ]; then
+    exit 1
+fi
+if [ -n "$STUB_SUEXEC_LOG" ]; then
+    echo "$*" >> "$STUB_SUEXEC_LOG"
+fi
+shift
+exec "$@"
+`)
+    }
     // 退避 sleep 默认置零：崩溃重启即时发生，避免测试等待。
     // 需要验证「TERM 可打断长 sleep」的用例通过 sleepStub 注入真实 sleep。
     writeExecutable(join(bin, 'sleep'), `#!/bin/sh
@@ -68,9 +93,9 @@ esac
     return bin
 }
 
-const start = ({ stub, env = {}, dateShim = false, sleepStub = 'exit 0' }) => {
+const start = ({ stub, env = {}, dateShim = false, sleepStub = 'exit 0', rootUid = false, denyStore = false }) => {
     const root = mkdtempSync(join(tmpdir(), 'entrypoint-test-'))
-    const bin = makeShims(root, { dateShim, sleepStub })
+    const bin = makeShims(root, { dateShim, sleepStub, rootUid, denyStore })
     const dataDir = join(root, 'data')
     const homeDir = join(root, 'home')
     mkdirSync(dataDir)
@@ -82,6 +107,8 @@ const start = ({ stub, env = {}, dateShim = false, sleepStub = 'exit 0' }) => {
     delete baseEnv.NUXT_QUEUE_ENABLED
     // 角色由入口注入（单进程形态不注入）：清理宿主环境残留，保证三态断言确定性
     delete baseEnv.DEPENDFIX_ROLE
+    // store 路径由入口默认注入：清理宿主残留，保证「默认值」断言确定性
+    delete baseEnv.PNPM_CONFIG_STORE_DIR
 
     const child = spawn('sh', [entrypointPath, stubPath], {
         env: {
@@ -91,8 +118,11 @@ const start = ({ stub, env = {}, dateShim = false, sleepStub = 'exit 0' }) => {
             HOME: homeDir,
             DEPENDFIX_ALLOW_ANY_DIR: '1',
             DEPENDFIX_QUEUE_WORKER_SOCKET: join(root, 'worker.sock'),
+            STUB_SUEXEC_LOG: join(root, 'suexec.log'),
+            STUB_CHOWN_LOG: join(root, 'chown.log'),
             ...env,
         },
+        cwd: root,
         stdio: ['ignore', 'pipe', 'pipe'],
     })
 
@@ -370,5 +400,155 @@ describe.skipIf(skipOnWindows)('entrypoint.sh 队列 worker 看护', () => {
         expect(announceIndex).toBeGreaterThan(-1)
         expect(trapIndex).toBeLessThan(spawnIndex)
         expect(spawnIndex).toBeLessThan(announceIndex)
+    })
+})
+
+describe.skipIf(skipOnWindows)('entrypoint.sh pnpm store 持久化', () => {
+    it('默认把 store 放到数据卷内并注入 PNPM_CONFIG_STORE_DIR', async () => {
+        const handle = start({
+            stub: 'echo "store=[$PNPM_CONFIG_STORE_DIR]"\nexit 0',
+            env: { DEPENDFIX_QUEUE_WORKER: '0' },
+        })
+        const { code } = await waitExit(handle)
+        const expected = join(handle.root, 'data', 'pnpm-store')
+
+        expect(code).toBe(0)
+        expect(handle.output()).toContain(`store=[${expected}]`)
+        expect(handle.output()).toContain(`[entrypoint] pnpm store: ${expected}`)
+        expect(existsSync(expected)).toBe(true)
+    })
+
+    it('显式 PNPM_CONFIG_STORE_DIR 优先于默认路径', async () => {
+        const storeDir = mkdtempSync(join(tmpdir(), 'entrypoint-store-'))
+        try {
+            const handle = start({
+                stub: 'echo "store=[$PNPM_CONFIG_STORE_DIR]"\nexit 0',
+                env: { DEPENDFIX_QUEUE_WORKER: '0', PNPM_CONFIG_STORE_DIR: storeDir },
+            })
+            const { code } = await waitExit(handle)
+
+            expect(code).toBe(0)
+            expect(handle.output()).toContain(`store=[${storeDir}]`)
+        } finally {
+            rmSync(storeDir, { recursive: true, force: true })
+        }
+    })
+
+    it('store 目录不可创建时 warn 并回退 pnpm 默认位置（不阻断启动）', async () => {
+        // 父路径是普通文件 → mkdir -p 必然失败（root / 非 root 两种 uid 下都成立）
+        const dataDir = mkdtempSync(join(tmpdir(), 'entrypoint-data-'))
+        writeFileSync(join(dataDir, 'blocked'), 'not a directory')
+        try {
+            const handle = start({
+                stub: 'echo "store=[$PNPM_CONFIG_STORE_DIR]"\nexit 0',
+                env: {
+                    DEPENDFIX_QUEUE_WORKER: '0',
+                    DATA_DIR: dataDir,
+                    PNPM_CONFIG_STORE_DIR: join(dataDir, 'blocked', 'store'),
+                },
+            })
+            const { code } = await waitExit(handle)
+
+            expect(code).toBe(0)
+            expect(handle.output()).toContain('回退 pnpm 默认位置')
+            expect(handle.output()).toContain('store=[]')
+        } finally {
+            rmSync(dataDir, { recursive: true, force: true })
+        }
+    })
+
+    it('同一数据卷跨两次启动复用同一 store（内容保留）', async () => {
+        const dataDir = mkdtempSync(join(tmpdir(), 'entrypoint-data-'))
+        try {
+            const first = start({
+                stub: 'echo marker > "$PNPM_CONFIG_STORE_DIR/probe"\nexit 0',
+                env: { DEPENDFIX_QUEUE_WORKER: '0', DATA_DIR: dataDir },
+            })
+            expect((await waitExit(first)).code).toBe(0)
+
+            const second = start({
+                stub: 'echo "probe=[$(cat "$PNPM_CONFIG_STORE_DIR/probe" 2>/dev/null)]"\nexit 0',
+                env: { DEPENDFIX_QUEUE_WORKER: '0', DATA_DIR: dataDir },
+            })
+            expect((await waitExit(second)).code).toBe(0)
+
+            expect(second.output()).toContain('probe=[marker]')
+        } finally {
+            rmSync(dataDir, { recursive: true, force: true })
+        }
+    })
+
+    it('拒绝相对路径（相对路径会按目标仓库 cwd 解析到仓库内）', async () => {
+        const handle = start({
+            stub: 'echo "store=[$PNPM_CONFIG_STORE_DIR]"',
+            env: { DEPENDFIX_QUEUE_WORKER: '0', PNPM_CONFIG_STORE_DIR: 'relative-store' },
+        })
+        const { code } = await waitExit(handle)
+
+        expect(code).toBe(0)
+        expect(handle.output()).toContain('pnpm store 目录必须是绝对路径')
+        expect(handle.output()).toContain('store=[]')
+        // 校验先于 mkdir：相对路径不得在 cwd（此处为测试根）留下目录
+        expect(existsSync(join(handle.root, 'relative-store'))).toBe(false)
+    })
+
+    it('root 启动（compose 默认形态）：以运行身份建目录 → 探针判定后注入', async () => {
+        const handle = start({
+            rootUid: true,
+            stub: 'echo "store=[$PNPM_CONFIG_STORE_DIR]"',
+            env: { DEPENDFIX_QUEUE_WORKER: '0' },
+        })
+        const { code } = await waitExit(handle)
+        const expected = join(handle.root, 'data', 'pnpm-store')
+
+        expect(code).toBe(0)
+        expect(handle.output()).toContain(`store=[${expected}]`)
+        // 目录必须经 su-exec 以运行身份创建：root 先建再 chown 的形态会让自定义路径永久不可写
+        expect(readFileSync(join(handle.root, 'suexec.log'), 'utf-8')).toContain(`mkdir -p ${expected}`)
+        // 且不得对用户指定路径做 chown（`PNPM_CONFIG_STORE_DIR=/` 这类值会波及根目录）
+        expect(readFileSync(join(handle.root, 'chown.log'), 'utf-8')).not.toContain(expected)
+    })
+
+    it('root 启动：根路径被拒绝（不对任意路径 mkdir / chown）', async () => {
+        const handle = start({
+            rootUid: true,
+            stub: 'echo "store=[$PNPM_CONFIG_STORE_DIR]"',
+            env: { DEPENDFIX_QUEUE_WORKER: '0', PNPM_CONFIG_STORE_DIR: '/' },
+        })
+        const { code } = await waitExit(handle)
+
+        expect(code).toBe(0)
+        expect(handle.output()).toContain('pnpm store 目录不能是根路径')
+        expect(handle.output()).toContain('store=[]')
+        expect(readFileSync(join(handle.root, 'suexec.log'), 'utf-8')).not.toContain('mkdir -p /')
+        // 也不得对根路径 chown（chown 桩记录实参，避免「不对任意路径 chown」只停留在标题里）
+        expect(readFileSync(join(handle.root, 'chown.log'), 'utf-8')).not.toContain('-R 100:101 /\n')
+    })
+
+    it('root 启动：运行身份写探针失败时 warn 并回退（只读挂载 / 权限不足）', async () => {
+        const handle = start({
+            rootUid: true,
+            denyStore: true,
+            stub: 'echo "store=[$PNPM_CONFIG_STORE_DIR]"',
+            env: { DEPENDFIX_QUEUE_WORKER: '0' },
+        })
+        const { code } = await waitExit(handle)
+
+        expect(code).toBe(0)
+        expect(handle.output()).toContain('对运行身份不可写')
+        expect(handle.output()).toContain('store=[]')
+    })
+
+    it('root 路径顺序：chown → 以运行身份建目录 → 探针判定', () => {
+        const source = readFileSync(entrypointPath, 'utf8')
+        // 只看「最终降权段」（非 root 分支之后）：锚定稳定 token，不依赖空行 / 缩进
+        const rootBlock = source.slice(source.lastIndexOf('if [ "$(id -u)" != "0" ]'))
+        const chownAt = rootBlock.indexOf('chown -R "$RUN_IDENTITY"')
+        const prepareAt = rootBlock.indexOf('\nprepare_pnpm_store\n')
+        const activateAt = rootBlock.indexOf('\nactivate_pnpm_store\n')
+
+        expect(chownAt).toBeGreaterThan(-1)
+        expect(prepareAt).toBeGreaterThan(chownAt)
+        expect(activateAt).toBeGreaterThan(prepareAt)
     })
 })

@@ -71,6 +71,76 @@ check_dir_path() {
 DATA_DIR_CANON="$(check_dir_path DATA_DIR "$DATA_DIR")"
 HOME_DIR_CANON="$(check_dir_path HOME "$HOME_DIR")"
 
+# ---- pnpm store 持久化（跨 run 复用 content-addressable store）----
+# 目标仓库依赖安装由 pnpm 执行，store 默认落在 $HOME/.local/share/pnpm/store——容器重建 / HOME 未持久化
+# 时每次运行都是冷安装（弱网 / 大仓下单次安装容易撞上安装超时）。默认把 store 放进数据卷
+# （$DATA_DIR/pnpm-store）：与 run 工作目录同卷，可硬链接复用、不额外占一份磁盘（跨文件系统只退化
+# 为复制，仍能免去重复下载）。
+# 显式设置 PNPM_CONFIG_STORE_DIR 时尊重用户值（必须为绝对路径）；目录不可用（只读挂载 / 宿主未授权）
+# 时 warn 并回退 pnpm 默认位置（同时清空变量，避免 pnpm 仍读到不可用路径），不阻断启动。
+STORE_DIR="${PNPM_CONFIG_STORE_DIR:-${DATA_DIR_CANON}/pnpm-store}"
+
+# 创建 store 目录：一律以**运行身份**创建（root 启动时经 su-exec 降权），避免 root 建目录后运行身份
+# 永久写不进去；也不对用户指定的任意路径做 chown（`PNPM_CONFIG_STORE_DIR=/` 这类值会波及根目录）。
+# 非绝对路径直接跳过（相对路径会按目标仓库 cwd 解析，把 store 落进仓库工作区）；由 activate 统一告警回退。
+prepare_pnpm_store() {
+    case "$STORE_DIR" in
+        ""|"/") return 0 ;;
+        /*) : ;;
+        *) return 0 ;;
+    esac
+    if [ "$(id -u)" = "0" ] && command -v su-exec > /dev/null 2>&1; then
+        su-exec "$RUN_IDENTITY" mkdir -p "$STORE_DIR" 2>/dev/null || true
+    else
+        mkdir -p "$STORE_DIR" 2>/dev/null || true
+    fi
+}
+
+# 以真实运行身份写探针判定可用性。不用 `test -w`：它只看 DAC 位，不看挂载只读属性——只读卷上
+# 「上一次运行留下的 store 目录」会被误判可写，随后安装期 EROFS 硬失败（而本意是回退冷安装）。
+# 探针同时覆盖 ENOSPC / ACL 拒绝；root 启动时必须经 su-exec 降权后再判（root 写探针恒真）。
+# su-exec 缺失时退回当前身份判定——该形态随后由入口 fail-closed 拒绝启动（构建损坏）。
+store_writable() {
+    # 探针名带时间戳：容器内 PID 恒为 1，固定名可能与上次运行残留（不同 uid 属主）冲突
+    probe="$STORE_DIR/.dependfix-store-probe.$$-$(date -u +%s)"
+    if [ "$(id -u)" = "0" ] && command -v su-exec > /dev/null 2>&1; then
+        su-exec "$RUN_IDENTITY" sh -c ': > "$1" && rm -f "$1"' dependfix-probe "$probe" 2>/dev/null
+    else
+        (: > "$probe" && rm -f "$probe") 2>/dev/null
+    fi
+}
+
+# 启用 store 或回退既有行为（pnpm 默认位置）。回退必须 unset：用户显式注入的 PNPM_CONFIG_STORE_DIR
+# 仍在环境中，否则 pnpm 会继续使用不可用路径。
+activate_pnpm_store() {
+    case "$STORE_DIR" in
+        ""|"/")
+            echo "warn: pnpm store 目录不能是根路径（当前 '$STORE_DIR'），回退 pnpm 默认位置" >&2
+            unset PNPM_CONFIG_STORE_DIR
+            return 0
+            ;;
+        /*) : ;;
+        *)
+            echo "warn: pnpm store 目录必须是绝对路径（当前 '$STORE_DIR'），回退 pnpm 默认位置" >&2
+            unset PNPM_CONFIG_STORE_DIR
+            return 0
+            ;;
+    esac
+    if [ ! -d "$STORE_DIR" ]; then
+        echo "warn: pnpm store 目录 $STORE_DIR 不存在（创建失败），回退 pnpm 默认位置（每次运行冷安装）" >&2
+        unset PNPM_CONFIG_STORE_DIR
+        return 0
+    fi
+    if store_writable; then
+        export PNPM_CONFIG_STORE_DIR="$STORE_DIR"
+        echo "[entrypoint] pnpm store: $STORE_DIR"
+        return 0
+    fi
+    echo "warn: pnpm store 目录 $STORE_DIR 对运行身份不可写（只读挂载或权限不足），回退 pnpm 默认位置（每次运行冷安装）" >&2
+    unset PNPM_CONFIG_STORE_DIR
+    return 0
+}
+
 # ---- 队列执行进程隔离（独立 worker 进程形态）----
 # DEPENDFIX_QUEUE_WORKER=1 时启动双进程形态：
 #   worker 进程：NUXT_IN_PROCESS_WORKER=true 消费扫描队列（扫描与引擎同步调用均在此进程）；
@@ -253,15 +323,22 @@ run_platform() {
 # 非 root 启动（compose user: 已指定身份）：无法 chown / setuid，直接执行
 if [ "$(id -u)" != "0" ]; then
     [ -w "$HOME_DIR_CANON" ] || echo "warn: $HOME_DIR_CANON not writable by uid $(id -u); pnpm/npm cache may fail (pre-authorize the volume + HOME)" >&2
+    prepare_pnpm_store
+    activate_pnpm_store
     run_platform "" "$@"
 fi
 
+# 顺序：先修复数据卷 / HOME 归属（默认 store 的父目录由此可写）→ 再以运行身份建 store 目录 →
+# 最后按运行身份写探针判定可用性。自定义路径只要求父目录对运行身份可进入，入口不对其做 chown。
 for canon in "$DATA_DIR_CANON" "$HOME_DIR_CANON"; do
     if [ -d "$canon" ]; then
         chown -R "$RUN_IDENTITY" "$canon" 2>/dev/null \
             || echo "warn: chown $canon to $RUN_IDENTITY failed (read-only volume?)" >&2
     fi
 done
+
+prepare_pnpm_store
+activate_pnpm_store
 
 # 降权执行；su-exec 缺失属构建损坏（构建期 apk add 固定安装），fail-closed 拒绝以 root 运行
 if command -v su-exec > /dev/null 2>&1; then

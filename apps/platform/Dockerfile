@@ -127,6 +127,9 @@ ENV NUXT_BUILD_COMMIT=${BUILD_COMMIT} \
 # 基线迁移 CreateInitialSchema 建全部业务表，迁移幂等；直接 docker run 或用旧版 compose 也能自建 schema。
 # 需完全手动控制时用 -e DATABASE_MIGRATIONS_RUN=false 覆盖（再用 docker/init-db.sh 初始化）。
 ENV DATABASE_MIGRATIONS_RUN=true
+# pnpm store 持久化由入口脚本派生（默认 $DATA_DIR/pnpm-store，可经 PNPM_CONFIG_STORE_DIR 覆盖），
+# 不在此固化 ENV：DATA_DIR 被覆盖时入口能跟着走，而固化值会与自定义数据目录脱节。
+# 口径见 docs/standards/platform.md §10.8 与 docs/guide/deployment.md「pnpm store 与依赖缓存」。
 # 容器工具链（ContainerExecutor 依赖）：git（clone）+ pnpm（install/audit）——
 # unzip：B mode result fetch（ActionResultFetcher unzip artifact）需要
 # git 随 alpine 滚动 index（与 unzip/su-exec 同惯例，实证版本 2.54.0）；可复现性以基础镜像 digest 为基线
