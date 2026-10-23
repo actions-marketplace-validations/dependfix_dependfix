@@ -5,9 +5,10 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import betterSqlite3 from 'better-sqlite3'
-import { DataSource, type MigrationInterface, type QueryRunner } from 'typeorm'
+import { DataSource, type DataSourceOptions, type MigrationInterface, type QueryRunner } from 'typeorm'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createDataSourceOptions } from '..'
+import { SnakeCaseNamingStrategy } from '../naming-strategy'
 import { CreatePrCheckTable1800000000000 } from './1800000000000-CreatePrCheckTable'
 
 /**
@@ -71,19 +72,24 @@ describe('迁移登记一致性', () => {
     })
 })
 
-describe('存量库真实迁移链（pr_check 新列）', () => {
+describe('存量库真实迁移链（新列补齐）', () => {
     let dir: string | undefined
     const dataSources: DataSource[] = []
 
-    const makeDataSource = async (file: string, migrations: MigrationClass[]): Promise<DataSource> => {
+    const makeDataSource = async (
+        file: string,
+        migrations: MigrationClass[],
+        entities: NonNullable<DataSourceOptions['entities']> = [],
+    ): Promise<DataSource> => {
         const ds = new DataSource({
             type: 'better-sqlite3',
             database: file,
             driver: betterSqlite3,
-            entities: [],
+            entities,
             migrations,
             synchronize: false,
             entityPrefix: 'dependfix_',
+            namingStrategy: new SnakeCaseNamingStrategy(),
         })
         dataSources.push(ds)
         await ds.initialize()
@@ -132,6 +138,35 @@ describe('存量库真实迁移链（pr_check 新列）', () => {
 
         const names = await columnNames(upgraded, 'dependfix_pr_check')
         expect(names).toEqual(expect.arrayContaining(['signals_json', 'overall_status', 'failure_sources_json']))
+    })
+
+    it('旧库（已记录前序迁移、scan_run 缺构建版本列）经注册数组跑增量迁移后补上两列', async () => {
+        dir = await mkdtemp(join(tmpdir(), 'dependfix-migration-chain-'))
+        const file = join(dir, 'legacy-scan-run.sqlite')
+
+        // 1. 先用注册数组建到「本批之前」的状态（含前序迁移记录）
+        const options = createDataSourceOptions()
+        const before = await makeDataSource(
+            file,
+            options.migrations as MigrationClass[],
+            options.entities as NonNullable<DataSourceOptions['entities']>,
+        )
+        await before.runMigrations()
+        // 2. 回退成本批上线前的存量库：删掉两列与 2900 的迁移记录
+        await before.query('ALTER TABLE dependfix_scan_run DROP COLUMN build_commit')
+        await before.query('ALTER TABLE dependfix_scan_run DROP COLUMN build_version')
+        await before.query('DELETE FROM migrations WHERE name = \'AddScanRunBuildColumns2900000000000\'')
+        expect(await columnNames(before, 'dependfix_scan_run')).not.toContain('build_version')
+        await before.destroy()
+
+        // 3. 用**注册数组**（生产同一事实源）跑真实迁移链：只执行未记录的增量迁移
+        const upgraded = await makeDataSource(file, createDataSourceOptions().migrations as MigrationClass[])
+        const executed = await upgraded.runMigrations()
+        // 存量库由「最新 schema 删列」近似（等价于重放到 28 号），据此锁定「只跑增量」这一关键路径
+        expect(executed.map((migration) => migration.name)).toEqual(['AddScanRunBuildColumns2900000000000'])
+
+        const names = await columnNames(upgraded, 'dependfix_scan_run')
+        expect(names).toEqual(expect.arrayContaining(['build_version', 'build_commit']))
     })
 
     it('已应用迁移的库重复跑链为 no-op（幂等，不抛错）', async () => {

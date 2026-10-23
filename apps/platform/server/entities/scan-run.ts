@@ -61,6 +61,20 @@ export class ScanRun extends BaseEntity {
     @Column({ type: 'varchar', length: 32, default: 'container' })
     executorKind!: string
 
+    /**
+     * 本次运行所在构建产物的版本（`scan_run.build_version`）。
+     *
+     * 写入来源 `runtimeConfig.buildVersion`（与 `/api/health`、平台启动 `[build]` 行同源，
+     * 由镜像构建期 `--build-arg BUILD_VERSION` 注入）；未注入时为 `unknown`（新数据不会是 null）。
+     * 存量行为 null，UI 按「未知」降级。用途：消除「代码已修复但线上仍复现」的陈旧产物误判。
+     */
+    @Column({ type: 'varchar', length: 64, nullable: true })
+    buildVersion!: string | null
+
+    /** 本次运行所在构建产物的 commit（`scan_run.build_commit`）；口径同 {@link buildVersion}。 */
+    @Column({ type: 'varchar', length: 64, nullable: true })
+    buildCommit!: string | null
+
     @Index()
     @Column({ type: 'varchar', length: 32 })
     status!: ScanRunStatus

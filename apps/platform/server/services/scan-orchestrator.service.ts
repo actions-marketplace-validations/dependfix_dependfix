@@ -21,6 +21,7 @@ import { Organization } from '#server/entities/organization'
 import { AuditEvent, type AuditEventType } from '#server/entities/audit-event'
 import { ensureDatabaseInitialized } from '#server/database'
 import { detectSigkill, unavailableResourceUsage } from '#server/utils/resource-usage'
+import { resolveRunBuildStamp } from '#server/utils/run-build-info'
 
 /**
  * 扫描编排：触发 → 执行 → 落库（同步执行模型 Q2，请求内完成）。
@@ -119,6 +120,8 @@ export const createPendingScanRun = async (
         batchRunId: options?.batchRunId ?? null,
         retriedFromRunId: options?.retriedFromRunId ?? null,
         triggeredByUserId: options?.triggeredByUserId ?? null,
+        // 构建版本回执：入队即落库，pending 阶段也能看出「这条 run 由哪个部署产物受理」
+        ...resolveRunBuildStamp(),
     })
     return runRepo.save(run)
 }
@@ -140,6 +143,8 @@ const runScanInternal = async (
     const ds = await ensureDatabaseInitialized()
     const repoRepo = ds.getRepository(Repository)
     const runRepo = ds.getRepository(ScanRun)
+    // 构建版本回执（本次执行者所属部署产物）；见 #server/utils/run-build-info
+    const buildStamp = resolveRunBuildStamp()
     // per-alert 模型下不再需要 resultRepo 直接 INSERT；
     // reconcileAlerts 内部管理 ScanResult 写入（INSERT / UPDATE 活跃 / supersede）
 
@@ -188,6 +193,10 @@ const runScanInternal = async (
         }
         existing.status = 'running'
         existing.startedAt = existing.startedAt ?? new Date()
+        // 构建版本回执随执行者刷新：队列续跑 / 用户复用都可能跨部署发生，
+        // 记录「本次实际执行者」而不是「最初入队者」
+        existing.buildVersion = buildStamp.buildVersion
+        existing.buildCommit = buildStamp.buildCommit
         // reuse=true 时重置终态字段：让既有 record 复用为新执行的载体（finishedAt / errorJson /
         // summaryJson 来自上一次执行，重置以避免新执行的 summaryJson 与旧 finishedAt 时间戳错位）
         if (options.reuse) {
@@ -236,6 +245,8 @@ const runScanInternal = async (
             batchRunId: options?.batchRunId ?? null,
             retriedFromRunId: options?.retriedFromRunId ?? null,
             triggeredByUserId: options?.triggeredByUserId ?? null,
+            // 构建版本回执（同步新建路径：本次执行者）
+            ...buildStamp,
             // AI 配置快照（apiKey 不写入；hasApiKey 标记替代）；见 resolveAiConfig
             aiConfigSnapshot: aiConfigResolution.snapshot
                 ? JSON.stringify(aiConfigResolution.snapshot)
@@ -288,6 +299,8 @@ const runScanInternal = async (
             allowMajorUpgrade: false,
             // 验证失败回滚粒度（默认 unit）：平台不经过 resolveRuntimeConfig，需在此贯通 env 逃生开关
             rollbackGranularity,
+            // 构建版本回执透传给引擎启动日志（`[build]` 行）：与落库两列同源
+            ...buildStamp,
             maxAlertsPerRepository: 20,
             maxConcurrency: 1,
             maxRetries: 3,
