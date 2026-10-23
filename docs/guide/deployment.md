@@ -117,6 +117,36 @@ PGID=1000
 - `PUID=0` / `PGID=0`（或非数字、超范围值）会被入口 **fail-closed 拒绝启动**（保持非 root 基线）。
 - 若改用 compose `user:` 字段以非 root 启动，入口无法再 `chown`，需宿主预先授权数据卷与 `$HOME` 写权限。
 
+## pnpm store 与依赖缓存
+
+目标仓库的依赖安装由容器内 pnpm 执行，其 store（content-addressable 缓存）默认落在 `$HOME/.local/share/pnpm/store`——容器重建即丢失，每次运行都要从零下载。入口脚本默认把 store 固定到数据卷：
+
+| 项 | 默认 | 说明 |
+|:---|:---|:---|
+| store 目录 | `/app/data/pnpm-store` | 入口注入 `PNPM_CONFIG_STORE_DIR`，启动日志输出 `[entrypoint] pnpm store: …` |
+| 复用范围 | 跨 run / 容器重建 | 目录位于 `dependfix-data` 卷内；删除卷即清空 |
+| 硬链接 | 同卷生效 | `RUN_WORK_ROOT` 默认 `/app/data/runs`，与 store 同卷 → 安装走硬链接（不占双份磁盘）；自定义到其他文件系统会退化为复制 |
+
+核对与清理：
+
+```bash
+# 确认 store 落在持久目录（输出形如 /app/data/pnpm-store/v11）
+docker compose exec -u 100:101 platform pnpm store path
+# 仅删除无引用条目（保留仍在使用的包）
+docker compose exec -u 100:101 platform pnpm store prune
+# 彻底清空（下一次运行冷安装）
+docker compose exec -u 100:101 platform rm -rf /app/data/pnpm-store
+```
+
+> `100:101` 为镜像内 `dependfix` 默认身份；自定义 `PUID`/`PGID` 时换成对应值（否则会以 root 身份写入 store）。
+
+- **不可用即回退**：store 目录无法创建、非绝对路径，或运行身份写入探针失败（只读挂载 / 权限不足）时，入口打印 `warn: pnpm store 目录 … 回退 pnpm 默认位置` 并继续启动（每次运行冷安装，不阻断服务）。判定用真实写入探针而非 `test -w`，因此只读卷上已存在的 store 目录也能被识别。
+- **自定义路径**：父目录必须对运行身份可进入（挂载点预先 `chown` 到 `PUID:PGID`）；入口**以运行身份**创建 store 目录，不对用户指定的路径做 `chown`（根路径直接拒绝并回退），父目录未授权时目录创建失败即回退。
+- **优先级**：pnpm 11+ 的 `storeDir` 只从命令行 / 环境变量 / `pnpm-workspace.yaml` / 全局配置读取（项目 `.npmrc` 只作用于认证与 registry），环境变量优先级最高——平台因此固定缓存位置，目标仓库在 `pnpm-workspace.yaml` 声明的 `storeDir` 不再生效（缓存位置属执行环境基础设施）。`pnpm store path` 的返回值带版本后缀（如 `/app/data/pnpm-store/v11`）。
+- **容量建议（经验值）**：store 随目标仓库依赖数量增长，中等规模仓库通常约 0.5-1.5 GB / 个；与数据库 / 备份共用 `dependfix-data` 卷，建议先预留 10 GB 并观察 `docker system df -v`，再按仓库数量调整。定期 `pnpm store prune` 清理无引用条目。
+- **备份注意**：卷级备份（下方「备份与恢复」的 tar 示例）会连同 store 一起打包；只需数据库时给 tar 加 `--exclude=./pnpm-store`。
+- **提交卫生**：安装产物不会进入交付提交——`fix` / `fix-and-pr`（且非 dry-run）运行开始时，引擎把 `.pnpm-store/` 与 `node_modules/` 写入目标仓库的 `.git/info/exclude`（幂等，不修改目标仓库的 `.gitignore`），`git add .` 因此不会带上依赖目录；写入失败会 warn 但继续运行。
+
 ## 数据库初始化
 
 ### 自动（默认，推荐）
