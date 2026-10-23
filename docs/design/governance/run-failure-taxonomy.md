@@ -44,9 +44,9 @@
 ### 2.4 已知错误码 / 类别清单
 
 - **`FixError.category`（进 `RunResult.errors[]`）**：`FETCH_FAILED`、`DISCOVERY_FAILED`、`EMPTY_REPO_LIST`、`PROCESS_FAILED`、`FATAL`、`COMMIT_FAILED`、`PR_CREATION_FAILED`、`VERIFICATION_FAILED`、`ROLLBACK_FAILED`、`OVERRIDE_PROTECTED`、`PRE_EXISTING_FAILURE`、`SCRIPT_NOT_FOUND`、`network_violation`、`BRANCH_DELETE_FAILED`、`PR_CLOSE_FAILED`、`CLEANUP_DETECT_FAILED`、`CLEANUP_FAILED`、`ENVIRONMENT_ERROR`、`ROLLBACK_GRANULARITY_DEGRADED`（审计性降级，跳过类）、`ABORTED`（2026-10-17 运行级取消：平台执行超时 / 运维中止后引擎协作式收尾；`stage: 'report'` + `repository: '*'`）。
-- **`LockfileFailureCategory`（进 `FixAction.error` / lockfile 修复结果，非 `RunResult.errors[].category`；例外见下）**：`LOCKFILE_NOT_FOUND`、`MANIFEST_MISMATCH`、`LOCKFILE_VERSION_MISMATCH`、`CORRUPTED_LOCKFILE`、`CREDENTIAL_ERROR`、`RESOLVE_ERROR`、`MINIMUM_RELEASE_AGE`、`ENVIRONMENT_ERROR`、`ABORTED`（运行级取消：命令未启动即收尾，与环境性失败语义分离）、`UNKNOWN`。**例外**：`ENVIRONMENT_ERROR`（环境性安装失败，2026-10-13 M43.3）**同时**作为 `FixError.category` 发射（`stage: 'repair'`，进 `RunResult.errors[]`；非归因，见 §4.3），供平台侧细分归因为 `install` + `transient`。
+- **`LockfileFailureCategory`（进 `FixAction.error` / lockfile 修复结果，非 `RunResult.errors[].category`；例外见下）**：`LOCKFILE_NOT_FOUND`、`MANIFEST_MISMATCH`、`LOCKFILE_VERSION_MISMATCH`、`CORRUPTED_LOCKFILE`、`CREDENTIAL_ERROR`、`RESOLVE_ERROR`、`MINIMUM_RELEASE_AGE`、`ENVIRONMENT_ERROR`、`ABORTED`（运行级取消：命令未启动即收尾，与环境性失败语义分离）、`UNKNOWN`。**例外**：`ENVIRONMENT_ERROR`（环境性安装失败，2026-10-13 M43.3）**同时**作为 `FixError.category` 发射（`stage: 'repair'` 于 lockfile 链 / `stage: 'fix'` 于升级链——成员 / 分组 / 拆组逐包 / 跨线 / 多版本 / 合批，进 `RunResult.errors[]`；非归因，见 §4.3），供平台侧细分归因为 `install` + `transient`。
 - `ARCHIVE_FAILED` 仅出现在测试夹具（生产无发射点），不纳入分类映射。
-- `FixError.stage` 类型含 `fetch | filter | fix | repair | verify | report`，但当前生产发射点仅见 `fetch` / `fix` / `repair` / `verify` / `report`（`repair` 为 2026-10-13 M43.3 新增的 `ENVIRONMENT_ERROR` 发射点；`filter` 无发射点）。
+- `FixError.stage` 类型含 `fetch | filter | fix | repair | verify | report`，但当前生产发射点仅见 `fetch` / `fix` / `repair` / `verify` / `report`（`repair` 为 2026-10-13 M43.3 新增的 `ENVIRONMENT_ERROR` 发射点，升级链同类别走 `fix`；`filter` 无发射点）。
 - GitHub 错误码（`packages/core/src/errors/error-codes.ts`）：`AUTHENTICATION_FAILED`、`PERMISSION_DENIED`、`ALERTS_DISABLED`、`RATE_LIMITED`、`REPO_NOT_FOUND`、`GITHUB_API_ERROR`、`NETWORK_ERROR`。
 
 ### 2.5 API / UI 现状
@@ -187,7 +187,7 @@
 - **不归因**：环境性失败由 `computeSummary` 按 `FixError.category === 'ENVIRONMENT_ERROR'` 的审计条目计数（不按 action 的 `environmentalFailure` 标记重复计数），不计入 `alertsFailed`、不驱动 `status=failed`、不参与 exit code；运行即使 `completed` 也可显示「环境性失败 N」，tooltip 必须说明「不归因本次运行但可见」。
 - **未修复告警**：UI 优先读 `alertsUnfixed`（告警级 canonical，逐条 `isAlertFixedByActions` 判定）；旧 summary 缺 `alertsUnfixed` 字段时回退 `alertsFound − alertsFixed − alertsConverged`（action 级近似，下限 0）。`converged`（本地已满足）不计入，`failed` / `skipped` / 不可自动修复计入。截断告警不在 `alertsFound` 内，由 §5.8 的 `alertsTruncatedBySeverity` 单独披露。
 - **结果缺失**：`failed` / `completed` / `degraded` 且 `summaryJson` 为空，或 `error.code === 'execution_timeout'` → UI 显示「结果缺失」，不展示「告警 0」；该 run 不参与告警明细 reconcile（`failed` 分支既有契约）。
-- **覆盖边界**：当前计数只覆盖已落 `ENVIRONMENT_ERROR` 的路径（lockfile 诊断 / 多版本 / 合批）；常规分组 / 逐包升级与 major 路径尚未消费 `environmental` 标记（归因接线已上收 M47.3，见 [todo.md §M47](../../plan/todo.md)）。本字段已进入 `RunResult` JSON，CLI Markdown / PR 正文摘要表暂未新增行（平台可见性为本条目范围）。
+- **覆盖边界**：计数只覆盖已落 `ENVIRONMENT_ERROR` 的路径（lockfile 诊断 / 多版本 / 合批 / 成员 / 常规分组与拆组逐包 / 跨线——2026-10-23 M47.3 已把升级链四条消费点接入，见 [dependency-fixer-records.md §12.16](../modules/dependency-fixer-records.md)）。本字段已进入 `RunResult` JSON，CLI Markdown / PR 正文摘要表暂未新增行（平台可见性为本条目范围）。
 - **迁移与降级**：迁移 `2600000000000-AddScanRunOutcomeColumns` 幂等（前缀感知 + 列缺失才 ALTER）；旧数据两列为 NULL，API 原样返回 NULL，UI 按 0 / 结果缺失降级，不抛错。
 
 ### 5.8 跳过与截断披露

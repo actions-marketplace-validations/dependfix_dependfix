@@ -48,7 +48,7 @@ pnpm i --frozen-lockfile
 
 ### 2.4 环境性失败与非归因口径
 
-`ENVIRONMENT_ERROR` 表示**执行环境**问题（OOM 杀死、超时、静默非零退出；stderr 为空但 stdout 有安装脚本错误时仍按环境性处理，stdout 作为证据保留），此时锁文件内容是否合规无从判断：
+`ENVIRONMENT_ERROR` 表示**执行环境**问题（OOM 杀死、超时、静默非零退出；stderr 为空但 stdout 有安装脚本错误时仍按环境性处理，stdout 作为证据保留），此时锁文件内容是否合规无从判断。判定单一事实源为 `fixers/process-signals.ts#isEnvironmentalInstallError`（本链与依赖升级链共用的判据）：运行级取消 → 非环境性；信号终止 / 超时 → 环境性；有 stderr 诊断 → 非环境性；stderr 为空 → 环境性；stdout 只作证据、不参与归因判定（见 [dependency-fixer-records.md §12.16](./dependency-fixer-records.md)）：
 
 - 分类结果携带 `environmental: true`，并在 `RepairLockfileResult.environmental` 上透出；
 - 调用方 `tryLockfileRepair` 据此把该 action 标记为 `environmentalFailure`、并记 `ENVIRONMENT_ERROR` 审计条目（`stage: 'repair'`）；
