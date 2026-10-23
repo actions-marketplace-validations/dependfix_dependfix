@@ -271,6 +271,90 @@ describe('DependfixApp member upgrade (2.0.3)', () => {
         expect(result.summary.alertsFailed).toBe(1)
     })
 
+    it('marks environmental install failures on the member path without attributing them', async () => {
+        setupMemberWorkspace(workDir)
+        writeSingleVersionLockfile(workDir)
+        nockAlerts([makeViteMemberAlert(1, '5.4.20')])
+        mockUpgradeDependency.mockResolvedValue({
+            packageName: 'vite',
+            fromVersion: '^5.4.0',
+            toVersion: '^5.4.20',
+            isMajor: false,
+            success: false,
+            error: 'pnpm install failed: timed out',
+            environmental: true,
+        })
+
+        const { exitCode, result } = await runApp()
+
+        expect(exitCode).toBe(0)
+        expect(result.summary.environmentalFailures).toBe(1)
+        expect(result.summary.alertsFailed).toBe(0)
+        expect(result.repositories[0].failed).toBe(0)
+        const memberActions = result.actions.filter((a) => a.strategy === 'member-upgrade')
+        expect(memberActions).toHaveLength(1)
+        expect(memberActions[0]).toMatchObject({ success: false, environmentalFailure: true })
+        expect(result.errors.some((error) => error.category === 'ENVIRONMENT_ERROR')).toBe(true)
+    })
+
+    it('stops remaining member and group installs when a member install fails environmentally', async () => {
+        setupMemberWorkspace(workDir)
+        writeSingleVersionLockfile(workDir)
+        // 成员告警 + 根 manifest 告警：环境性停机后分组链也不得再试装
+        nockAlerts([
+            makeViteMemberAlert(1, '5.4.20'),
+            {
+                number: 2,
+                state: 'open',
+                html_url: 'https://github.com/foo/bar/security/dependabot/2',
+                security_advisory: { ghsa_id: 'GHSA-2', severity: 'high', summary: 'lodash vuln' },
+                security_vulnerability: {
+                    package: { ecosystem: 'npm', name: 'lodash' },
+                    severity: 'high',
+                    vulnerable_version_range: '< 4.17.21',
+                    first_patched_version: { identifier: '4.17.21' },
+                },
+                dependency: { package: { ecosystem: 'npm', name: 'lodash' }, manifest_path: 'package.json' },
+            },
+            // 无修复版本的根告警：跳过分组链后仍须计入 not-fixable（报告 failedResidual 不虚高）
+            {
+                number: 3,
+                state: 'open',
+                html_url: 'https://github.com/foo/bar/security/dependabot/3',
+                security_advisory: { ghsa_id: 'GHSA-3', severity: 'high', summary: 'no patch' },
+                security_vulnerability: {
+                    package: { ecosystem: 'npm', name: 'minimist' },
+                    severity: 'high',
+                    vulnerable_version_range: '< 1.2.6',
+                },
+                dependency: { package: { ecosystem: 'npm', name: 'minimist' }, manifest_path: 'package.json' },
+            },
+        ])
+        mockUpgradeDependency.mockResolvedValue({
+            packageName: 'vite',
+            fromVersion: '^5.4.0',
+            toVersion: '^5.4.20',
+            isMajor: false,
+            success: false,
+            error: 'pnpm install failed: timed out',
+            environmental: true,
+        })
+
+        const logger = makeLogger()
+        const { exitCode, result } = await runApp({ logger })
+
+        expect(exitCode).toBe(0)
+        expect(result.summary.environmentalFailures).toBe(1)
+        expect(result.summary.alertsFailed).toBe(0)
+        // 只有成员链路的那一次安装尝试；分组链被跳过
+        expect(mockUpgradeDependency).toHaveBeenCalledTimes(1)
+        expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('stopped (environmental) — skipping group upgrades'))
+        expect(result.actions.filter((action) => action.strategy !== 'member-upgrade' && action.type === 'dependency-upgrade')).toHaveLength(0)
+        // 整段跳过分组链时 not-fixable 仍记账（记账点在告警分区处，不依赖分组链执行）
+        expect(result.summary.alertsSkippedByReason['not-fixable']).toBe(1)
+        expect(result.summary.alertsSkipped).toBe(1)
+    })
+
     it('upgrades a member manifest direct dependency with lint verification (fixed)', async () => {
         const memberPkgPath = setupMemberWorkspace(workDir)
         writeSingleVersionLockfile(workDir)

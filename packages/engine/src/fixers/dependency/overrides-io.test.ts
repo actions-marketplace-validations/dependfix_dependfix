@@ -3,7 +3,7 @@
 // 日志与报告里只剩 `pnpm install failed: `，无法区分「超时 / 被杀 / 装不动」。
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import { DEFAULT_INSTALL_TIMEOUT_MS, INSTALL_TIMEOUT_ENV } from '../install-timeouts'
-import { classifyInstallFailure, describeInstallError, execPnpmInstall, formatInstallFailure } from './overrides-io'
+import { classifyInstallFailure, describeInstallError, execPnpmInstall, formatInstallFailure, isInstallEnvironmentalFailure } from './overrides-io'
 
 // 安装类调用已迁到受管异步执行（`runners/process-control.ts`）：本文件以替身接管该单一入口。
 const { mockRunTrackedCommand } = vi.hoisted(() => ({
@@ -233,6 +233,8 @@ describe('execPnpmInstall', () => {
 
         // 未启动（取消守卫命中）与"启动后被信号杀死"必须可区分（后者见下一例）
         expect((err as Error).message).toContain('run aborted — install not started')
+        // 运行级取消不得被新判据（stderr 为空 → 环境性）误吞
+        expect(isInstallEnvironmentalFailure(err)).toBe(false)
     })
 
     it('marks aborted terminations in the evidence text (distinct from OOM kill)', async () => {
@@ -256,5 +258,45 @@ describe('execPnpmInstall', () => {
         const err = await execPnpmInstall('/tmp/work').catch((error: unknown) => error)
 
         expect(describeInstallError(err)).toBe('spawn error ENOENT: spawn pnpm install --no-frozen-lockfile ENOENT')
+    })
+})
+
+// ---------------------------------------------------------------------------
+// isInstallEnvironmentalFailure（升级链与 lockfile 诊断链共用的单一判据）
+// ---------------------------------------------------------------------------
+
+describe('isInstallEnvironmentalFailure', () => {
+    beforeEach(() => {
+        mockRunTrackedCommand.mockReset()
+    })
+
+    async function installError(overrides: Partial<import('../../runners/process-control').TrackedCommandResult>) {
+        mockRunTrackedCommand.mockResolvedValue(outcome(overrides))
+        return execPnpmInstall('/tmp/work').catch((error: unknown) => error)
+    }
+
+    it('有明确 stderr 的安装失败不判环境性（归因目标仓库）', async () => {
+        const err = await installError({ exitCode: 1, stderr: 'ERR_PNPM_IGNORED_BUILDS: approve builds' })
+        expect(isInstallEnvironmentalFailure(err)).toBe(false)
+    })
+
+    it('信号终止 / 超时判环境性', async () => {
+        expect(isInstallEnvironmentalFailure(await installError({ exitCode: null, signal: 'SIGKILL' }))).toBe(true)
+        expect(isInstallEnvironmentalFailure(await installError({ exitCode: null, timedOut: true }))).toBe(true)
+    })
+
+    it('静默非零退出判环境性（与 lockfile 诊断链同口径）', async () => {
+        const err = await installError({ exitCode: 1 })
+        expect(isInstallEnvironmentalFailure(err)).toBe(true)
+    })
+
+    it('只有 stdout 诊断时仍判环境性（stdout 不参与归因判定）', async () => {
+        const err = await installError({ exitCode: 1, stdout: 'gyp ERR! find Python' })
+        expect(isInstallEnvironmentalFailure(err)).toBe(true)
+    })
+
+    it('运行级取消不判环境性（中止是独立类别）', async () => {
+        const err = await installError({ exitCode: null, signal: 'SIGKILL', aborted: true })
+        expect(isInstallEnvironmentalFailure(err)).toBe(false)
     })
 })

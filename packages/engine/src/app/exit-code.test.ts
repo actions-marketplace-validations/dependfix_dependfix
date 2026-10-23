@@ -399,6 +399,30 @@ describe('computeExitCode', () => {
         expect(exitCode).toBe(0)
     })
 
+    // 升级链的环境性失败动作（常规分组 / 拆组逐包 / 跨线 / 成员）与 lockfile-repair 同族：
+    // 不归因本次运行 → 零修复且全部环境性时 exit 0
+    it('returns 0 when the only upgrade failures are environmental', () => {
+        const exitCode = computeExitCode(makeCtx({
+            config: { mode: 'fix' } as AppContext['config'],
+            allErrors: [{
+                repository: 'foo/bar',
+                target: 'lodash',
+                stage: 'fix',
+                category: 'ENVIRONMENT_ERROR',
+                message: 'install failed (environmental): pnpm install failed: timed out',
+            } as never],
+            allActions: [{
+                type: 'dependency-upgrade',
+                repository: 'foo/bar',
+                target: 'lodash',
+                success: false,
+                environmentalFailure: true,
+            } as never],
+            repoResults: [{ alertsCount: 1, fixed: 0 } as never],
+        }))
+        expect(exitCode).toBe(0)
+    })
+
     // 反例防护：环境性失败标记不掩盖真实失败——与真实失败动作并存时仍非零
     it('still counts real failures alongside an environmental failure', () => {
         const exitCode = computeExitCode(makeCtx({

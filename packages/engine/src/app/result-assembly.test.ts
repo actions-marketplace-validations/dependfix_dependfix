@@ -57,6 +57,40 @@ describe('computeSummary', () => {
         expect(ctx.summary.alertsFailed).toBe(0)
     })
 
+    it('excludes environmental upgrade actions from alertsFailed (non-attribution)', () => {
+        const ctx = makeCtx({
+            allErrors: [{
+                repository: 'foo/a',
+                target: 'lodash',
+                stage: 'fix',
+                category: 'ENVIRONMENT_ERROR',
+                message: 'install failed (environmental): pnpm install failed: timed out',
+            }],
+            allActions: [
+                // 常规分组 / 跨线 / 成员路径的环境性失败：动作保留可审计，但不计入失败
+                {
+                    type: 'dependency-upgrade',
+                    repository: 'foo/a',
+                    target: 'lodash',
+                    success: false,
+                    environmentalFailure: true,
+                    error: 'pnpm install failed: timed out',
+                } as never,
+                // 真实失败仍照常归因
+                {
+                    type: 'dependency-upgrade',
+                    repository: 'foo/a',
+                    target: 'minimist',
+                    success: false,
+                    error: 'ERR_PNPM_PEER_DEP_ISSUES',
+                } as never,
+            ],
+        })
+        computeSummary(ctx)
+        expect(ctx.summary.alertsFailed).toBe(1)
+        expect(ctx.summary.environmentalFailures).toBe(1)
+    })
+
     it('computes alert-level unfixed when one action fixes multiple same-package alerts', () => {
         const alert = {
             source: 'dependabot',

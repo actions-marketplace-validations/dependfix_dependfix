@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import nock from 'nock'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { resolveRuntimeConfig } from '../config'
+import { requestAbort, resetProcessControlState } from '../runners/process-control'
 import { DependfixApp } from './index'
 
 // ---------------------------------------------------------------------------
@@ -220,6 +221,160 @@ describe('DependfixApp group upgrade', () => {
         expect(aPkg?.success).toBe(true)
         expect(bPkg?.success).toBe(false)
         expect(bPkg?.error).toContain('per-package verification failed')
+    })
+
+    it('marks environmental install failures without attributing them to the repo (group path)', async () => {
+        nockAlerts([alertJson('a-pkg', 1), alertJson('b-pkg', 2)])
+        // 安装被信号杀死 / 超时：environmental 标记由依赖升级链透出
+        mockUpgradeDependency.mockImplementation(({ packageName }: { packageName: string }) => ({
+            packageName,
+            fromVersion: '1.0.0',
+            toVersion: '2.0.0',
+            isMajor: false,
+            success: false,
+            error: 'pnpm install failed: timed out',
+            environmental: true,
+        }))
+        mockRunVerification.mockResolvedValue(verificationResult(true))
+
+        const { exitCode, result } = await runFix([alertJson('a-pkg', 1), alertJson('b-pkg', 2)], { g: ['a-pkg', 'b-pkg'] })
+
+        // 不归因：出口码 0、失败计数 0，环境性失败单列可见
+        expect(exitCode).toBe(0)
+        expect(result.summary.environmentalFailures).toBe(1)
+        expect(result.summary.alertsFailed).toBe(0)
+        expect(result.repositories[0].failed).toBe(0)
+        const failed = result.actions.find((action) => action.target === 'a-pkg')
+        expect(failed).toMatchObject({ success: false, environmentalFailure: true })
+        expect(result.errors.some((error) => error.category === 'ENVIRONMENT_ERROR')).toBe(true)
+        // 环境性失败后不再尝试组内后续包
+        expect(mockUpgradeDependency).toHaveBeenCalledTimes(1)
+    })
+
+    it('keeps already-applied upgrades when the group verifies green after an environmental stop', async () => {
+        nockAlerts([alertJson('a-pkg', 1), alertJson('b-pkg', 2)])
+        mockUpgradeDependency
+            .mockImplementationOnce(({ packageName }: { packageName: string }) => ({
+                packageName, fromVersion: '1.0.0', toVersion: '2.0.0', isMajor: false, success: true,
+            }))
+            .mockImplementationOnce(({ packageName }: { packageName: string }) => ({
+                packageName,
+                fromVersion: '1.0.0',
+                toVersion: '2.0.0',
+                isMajor: false,
+                success: false,
+                error: 'pnpm install failed: timed out',
+                environmental: true,
+            }))
+        mockRunVerification
+            .mockResolvedValueOnce(verificationResult(true)) // 修复前基线采样
+            .mockResolvedValueOnce(verificationResult(true)) // 环境性停机前的组级验证（通过 → 保留已应用改动）
+            .mockResolvedValueOnce(verificationResult(true)) // 最终验证
+
+        const { exitCode, result } = await runFix([alertJson('a-pkg', 1), alertJson('b-pkg', 2)], { g: ['a-pkg', 'b-pkg'] })
+
+        expect(exitCode).toBe(0)
+        expect(result.summary.environmentalFailures).toBe(1)
+        expect(result.summary.alertsFailed).toBe(0)
+        expect(result.repositories[0].fixed).toBe(1)
+        expect(result.repositories[0].failed).toBe(0)
+        // 基线 + 组级验证 + 最终验证：停机前仍跑一次组级验证，不把已应用改动留成未验证状态
+        expect(mockRunVerification).toHaveBeenCalledTimes(3)
+    })
+
+    it('rolls back the group and counts verification failure when an environmental stop fails verification', async () => {
+        nockAlerts([alertJson('a-pkg', 1), alertJson('b-pkg', 2)])
+        mockUpgradeDependency
+            .mockImplementationOnce(({ packageName }: { packageName: string }) => ({
+                packageName, fromVersion: '1.0.0', toVersion: '2.0.0', isMajor: false, success: true,
+            }))
+            .mockImplementationOnce(({ packageName }: { packageName: string }) => ({
+                packageName,
+                fromVersion: '1.0.0',
+                toVersion: '2.0.0',
+                isMajor: false,
+                success: false,
+                error: 'pnpm install failed: signal SIGKILL',
+                environmental: true,
+            }))
+        mockRunVerification
+            .mockResolvedValueOnce(verificationResult(true)) // 修复前基线采样
+            .mockResolvedValueOnce(verificationResult(false)) // 停机前的组级验证失败
+            .mockResolvedValueOnce(verificationResult(true)) // 最终验证（整组已回滚）
+
+        const { exitCode, result } = await runFix([alertJson('a-pkg', 1), alertJson('b-pkg', 2)], { g: ['a-pkg', 'b-pkg'] })
+
+        // 已应用动作随整组回滚改判失败（真实验证失败）→ 归因；环境性动作仍不归因
+        expect(result.summary.alertsFailed).toBe(1)
+        expect(result.summary.environmentalFailures).toBe(1)
+        expect(result.repositories[0].failed).toBe(1)
+        expect(exitCode).toBe(1)
+        // 环境已不可用：不再逐包重试（仅组内两次安装尝试）
+        expect(mockUpgradeDependency).toHaveBeenCalledTimes(2)
+        const rolledBack = result.actions.find((action) => action.target === 'a-pkg')
+        expect(rolledBack).toMatchObject({ success: false })
+        expect(rolledBack?.error).toContain('environmental stop; changes rolled back')
+    })
+
+    it('does not attribute aborted installs or spam failed actions when the run is cancelled', async () => {
+        nockAlerts([alertJson('a-pkg', 1), alertJson('b-pkg', 2)])
+        mockRunVerification.mockResolvedValue(verificationResult(true))
+        mockUpgradeDependency.mockImplementationOnce(({ packageName }: { packageName: string }) => {
+            // 取消与安装失败竞争：取消态下的失败不得被当成仓库失败（也不得逐包产出失败动作）
+            requestAbort('execution timeout')
+            return {
+                packageName,
+                fromVersion: '1.0.0',
+                toVersion: '2.0.0',
+                isMajor: false,
+                success: false,
+                error: 'run aborted — install not started',
+            }
+        })
+
+        try {
+            const { result } = await runFix([alertJson('a-pkg', 1), alertJson('b-pkg', 2)], { g: ['a-pkg', 'b-pkg'] })
+
+            expect(mockUpgradeDependency).toHaveBeenCalledTimes(1)
+            expect(result.actions.filter((action) => action.type === 'dependency-upgrade')).toHaveLength(0)
+            expect(result.summary.environmentalFailures).toBe(0)
+            expect(result.summary.alertsFailed).toBe(0)
+        } finally {
+            resetProcessControlState()
+        }
+    })
+
+    it('stops per-package retries when the retry install fails environmentally', async () => {
+        nockAlerts([alertJson('a-pkg', 1), alertJson('b-pkg', 2)])
+        mockUpgradeDependency
+            .mockImplementationOnce(({ packageName }: { packageName: string }) => ({
+                packageName, fromVersion: '1.0.0', toVersion: '2.0.0', isMajor: false, success: true,
+            }))
+            .mockImplementationOnce(({ packageName }: { packageName: string }) => ({
+                packageName, fromVersion: '1.0.0', toVersion: '2.0.0', isMajor: false, success: true,
+            }))
+            .mockImplementationOnce(({ packageName }: { packageName: string }) => ({
+                packageName,
+                fromVersion: '1.0.0',
+                toVersion: '2.0.0',
+                isMajor: false,
+                success: false,
+                error: 'pnpm install failed: signal SIGKILL',
+                environmental: true,
+            }))
+        mockRunVerification
+            .mockResolvedValueOnce(verificationResult(true)) // 修复前基线采样
+            .mockResolvedValueOnce(verificationResult(false)) // 组级验证失败 → 拆组重试
+            .mockResolvedValueOnce(verificationResult(true)) // 最终验证
+
+        const { exitCode, result } = await runFix([alertJson('a-pkg', 1), alertJson('b-pkg', 2)], { g: ['a-pkg', 'b-pkg'] })
+
+        expect(exitCode).toBe(0)
+        expect(result.summary.environmentalFailures).toBe(1)
+        expect(result.summary.alertsFailed).toBe(0)
+        expect(result.repositories[0].failed).toBe(0)
+        // 拆组第一个包即环境性失败 → 第二个包不再重试
+        expect(mockUpgradeDependency).toHaveBeenCalledTimes(3)
     })
 
     it('keeps per-package verification behavior without grouping config (backward compatible)', async () => {

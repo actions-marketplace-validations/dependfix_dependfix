@@ -115,3 +115,61 @@ describe('toExecLikeError', () => {
         expect(described).not.toContain('ghp_abcdef')
     })
 })
+
+// ---------------------------------------------------------------------------
+// 环境性判据（单一判据：lockfile 诊断链与依赖升级链共用）
+// ---------------------------------------------------------------------------
+
+describe('isEnvironmentalInstallError 判据', () => {
+    it('信号终止 → 环境性（即便已吐出部分 stderr，证据也不足以归因仓库）', () => {
+        const err = toExecLikeError('pnpm install --no-frozen-lockfile', outcome({
+            exitCode: null,
+            signal: 'SIGKILL',
+            stderr: 'ERR_PNPM_BROKEN_LOCKFILE: partial output',
+        }))
+
+        expect(isEnvironmentalInstallError(err)).toBe(true)
+    })
+
+    it('超时 → 环境性', () => {
+        const err = toExecLikeError('pnpm install --no-frozen-lockfile', outcome({
+            exitCode: null,
+            signal: 'SIGTERM',
+            timedOut: true,
+        }))
+
+        expect(isEnvironmentalInstallError(err)).toBe(true)
+    })
+
+    it('有明确 stderr 且无信号 / 超时 → 非环境性（归因目标仓库）', () => {
+        const err = toExecLikeError('pnpm install --no-frozen-lockfile', outcome({
+            exitCode: 1,
+            stderr: 'ERR_PNPM_OUTDATED_LOCKFILE: out of sync',
+        }))
+
+        expect(isEnvironmentalInstallError(err)).toBe(false)
+    })
+
+    it('无 stderr 且无信号 / 超时（静默非零退出）→ 环境性', () => {
+        const err = toExecLikeError('pnpm install --no-frozen-lockfile', outcome({ exitCode: 1 }))
+
+        expect(err.stderr).toBeUndefined()
+        expect(isEnvironmentalInstallError(err)).toBe(true)
+    })
+
+    it('只有 stdout 诊断（pnpm 11 安装脚本错误）→ 仍按环境性处理', () => {
+        const err = toExecLikeError('pnpm install --no-frozen-lockfile', outcome({
+            exitCode: 1,
+            stdout: 'gyp ERR! find Python',
+        }))
+
+        expect(isEnvironmentalInstallError(err)).toBe(true)
+    })
+
+    it('只有 err.message 而无 stderr → 环境性（message 不算诊断）', () => {
+        const err = toExecLikeError('pnpm install --no-frozen-lockfile', outcome({ exitCode: 2 }))
+
+        expect(err.message).toContain('Command failed')
+        expect(isEnvironmentalInstallError(err)).toBe(true)
+    })
+})

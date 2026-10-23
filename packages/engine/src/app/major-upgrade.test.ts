@@ -259,6 +259,41 @@ describe('DependfixApp cross-major upgrade (--allow-major-upgrade)', () => {
         expect(majorActions).toHaveLength(0)
     })
 
+    it('marks environmental install failures on the cross-major path and stops remaining chains', async () => {
+        writeFileSync(join(workDir, 'package.json'), JSON.stringify({
+            name: 'fixture',
+            version: '1.0.0',
+            scripts: { lint: 'exit 0', build: 'exit 0', typecheck: 'exit 0', test: 'exit 0' },
+            devDependencies: { vite: '^5.4.0' },
+        }, null, 2))
+        writeSingleVersionLockfile(workDir)
+        nockAlerts([makeViteAlert(1, '6.4.3')])
+        mockUpgradeDependency.mockResolvedValue({
+            packageName: 'vite',
+            fromVersion: '^5.4.0',
+            toVersion: '^6.4.3',
+            isMajor: true,
+            success: false,
+            error: 'pnpm install failed: signal SIGKILL',
+            environmental: true,
+        })
+
+        const logger = makeLogger()
+        const { exitCode, result } = await runApp({ cliOverrides: { allowMajorUpgrade: true }, logger })
+
+        // 不归因：出口码 0，环境性单列可见，失败计数为 0
+        expect(exitCode).toBe(0)
+        expect(result.summary.environmentalFailures).toBe(1)
+        expect(result.summary.alertsFailed).toBe(0)
+        expect(result.errors.some((error) => error.category === 'ENVIRONMENT_ERROR')).toBe(true)
+        const majorActions = result.actions.filter((a) => a.strategy === 'major-upgrade')
+        expect(majorActions).toHaveLength(1)
+        expect(majorActions[0]).toMatchObject({ success: false, environmentalFailure: true })
+        // 环境性失败后跳过成员 / 分组安装链（仅一次升级尝试）
+        expect(mockUpgradeDependency).toHaveBeenCalledTimes(1)
+        expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('dependency install chain stopped (environmental)'))
+    })
+
     it('upgrades direct-dep single-version cross-major alerts with full verification when enabled', async () => {
         writeFileSync(join(workDir, 'package.json'), JSON.stringify({
             name: 'fixture',
