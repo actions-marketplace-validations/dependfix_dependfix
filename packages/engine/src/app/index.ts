@@ -69,6 +69,7 @@ import {
     type AppContext,
 } from './helpers'
 import { findInstallBlockedReposWithFixes, hasDeliverableFixes } from './delivery'
+import { prepareDeliveryHygiene } from './git-exclude'
 import { rollbackForSkippedDelivery, skipDeliveryForInstallFailure } from './skipped-delivery'
 import { pullRequestCreationHint } from './token-hints'
 
@@ -302,6 +303,8 @@ export class DependfixApp {
         // 显式前置 `isGitRepository`（纵深防御，不依赖 `hasGitChanges` 的内部守卫）：非仓库目录
         // ⇒ 视为「无既有改动」；门禁在非仓库下另跳过回滚（无可回滚工作树），故两处语义自洽。
         this.preExistingDirty = isGitRepository(this.workDir) && hasGitChanges(this.workDir)
+        // 提交卫生：安装产物不得进入交付提交。必须在安装 / 验证前落盘（只写 .git/info/exclude，幂等）
+        prepareDeliveryHygiene(this.workDir, this.config, this.logger)
         // 构建版本回执：先于业务日志输出，让「线上构建旧 / 代码路径未覆盖」可判读（口径见 app/build-info.ts）
         this.logger.info(formatEngineBuildLine(this.buildInfo))
         this.logger.info(`Starting dependfix run ${this.runId}`, {
