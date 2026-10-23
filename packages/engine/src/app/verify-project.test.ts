@@ -1,10 +1,11 @@
 // verify-project.test.ts — verifyProject（默认命令链 install 与工具链同版本 + typecheck / test 纳入默认链）。
 // 拆分自 app/helpers.test.ts（原 1031 行超 max-lines 1000）。
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { execSync } from 'node:child_process'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { CiAlignmentRecord } from '@dependfix/core'
 import { enforceVerificationGate } from '../runners/verification-gate'
 import type { CommandResult } from '../runners/verification-runner'
 import { type AppContext } from './helpers'
@@ -77,6 +78,128 @@ describe('verifyProject', () => {
 
         const commands = verificationRunnerMock.runVerification.mock.calls[0][0].commands
         expect(commands[0]).toBe('pnpm install --frozen-lockfile')
+    })
+
+    it('记录本次实际执行的命令集与 CI 口径（重复验证同一命令集只保留一条记录）', async () => {
+        mkdirSync(join(workDir, '.github', 'workflows'), { recursive: true })
+        writeFileSync(join(workDir, '.github', 'workflows', 'ci.yml'), [
+            'jobs:',
+            '  ci:',
+            '    steps:',
+            '      - run: pnpm lint',
+            '      - run: pnpm build',
+            '      - run: pnpm test',
+        ].join('\n'))
+        const commands = [
+            'pnpm install --frozen-lockfile',
+            'pnpm lint',
+            'pnpm build',
+            'pnpm typecheck',
+            'pnpm test',
+        ]
+        verificationRunnerMock.runVerification.mockResolvedValue({
+            success: true,
+            commandResults: commands.map((command) => ({
+                command, exitCode: 0, durationMs: 1, stdout: '', stderr: '',
+            })),
+        })
+        const ctx = { ...makeVerifyCtx(undefined), ciAlignment: [] as CiAlignmentRecord[] }
+
+        await verifyProject(ctx, 'foo/bar', { ciAlignment: { client: null } })
+        await verifyProject(ctx, 'foo/bar', { ciAlignment: { client: null } })
+
+        expect(ctx.ciAlignment).toHaveLength(1)
+        const record = ctx.ciAlignment[0]
+        expect(record.repository).toBe('foo/bar')
+        expect(record.commands).toEqual(commands)
+        expect(record.status).toBe('aligned')
+        expect(record.extraInExecution).toEqual(['typecheck'])
+        expect(record.healthUnavailableReason).toContain('无 GitHub 客户端')
+    })
+
+    it('同仓库多次验证取命令并集（中间态前缀不覆盖后续全链，也不重复发起健康预检）', async () => {
+        mkdirSync(join(workDir, '.github', 'workflows'), { recursive: true })
+        writeFileSync(join(workDir, '.github', 'workflows', 'ci.yml'), [
+            'jobs:',
+            '  ci:',
+            '    steps:',
+            '      - run: pnpm lint',
+            '      - run: pnpm build',
+            '      - run: pnpm test',
+        ].join('\n'))
+        const ctx = { ...makeVerifyCtx(undefined), ciAlignment: [] as CiAlignmentRecord[] }
+
+        // 第一次：首失败短路，只执行 install + lint
+        verificationRunnerMock.runVerification.mockResolvedValue({
+            success: false,
+            commandResults: [
+                { command: 'pnpm install --frozen-lockfile', exitCode: 0, durationMs: 1, stdout: '', stderr: '' },
+                { command: 'pnpm lint', exitCode: 1, durationMs: 1, stdout: '', stderr: 'lint failed' },
+            ],
+        })
+        await verifyProject(ctx, 'foo/bar', { ciAlignment: { client: null } })
+        expect(ctx.ciAlignment[0].commands).toEqual(['pnpm install --frozen-lockfile', 'pnpm lint'])
+        const firstReason = ctx.ciAlignment[0].healthUnavailableReason
+
+        // 第二次：全链通过（跨 major 回退 / 单元回滚后的终验形态）
+        verificationRunnerMock.runVerification.mockResolvedValue({
+            success: true,
+            commandResults: [
+                'pnpm install --frozen-lockfile', 'pnpm lint', 'pnpm build', 'pnpm typecheck', 'pnpm test',
+            ].map((command) => ({ command, exitCode: 0, durationMs: 1, stdout: '', stderr: '' })),
+        })
+        await verifyProject(ctx, 'foo/bar', { ciAlignment: { client: null } })
+
+        expect(ctx.ciAlignment).toHaveLength(1)
+        expect(ctx.ciAlignment[0].commands).toEqual([
+            'pnpm install --frozen-lockfile', 'pnpm lint', 'pnpm build', 'pnpm typecheck', 'pnpm test',
+        ])
+        expect(ctx.ciAlignment[0].status).toBe('aligned')
+        expect(ctx.ciAlignment[0].healthUnavailableReason).toBe(firstReason)
+    })
+
+    it('首失败短路时只记录实际执行的命令前缀（不得断言未跑到的命令已验证）', async () => {
+        mkdirSync(join(workDir, '.github', 'workflows'), { recursive: true })
+        writeFileSync(join(workDir, '.github', 'workflows', 'ci.yml'), [
+            'jobs:',
+            '  ci:',
+            '    steps:',
+            '      - run: pnpm lint',
+            '      - run: pnpm build',
+            '      - run: pnpm test',
+        ].join('\n'))
+        verificationRunnerMock.runVerification.mockResolvedValue({
+            success: false,
+            commandResults: [
+                { command: 'pnpm install --frozen-lockfile', exitCode: 0, durationMs: 1, stdout: '', stderr: '' },
+                { command: 'pnpm lint', exitCode: 1, durationMs: 1, stdout: '', stderr: 'lint failed' },
+            ],
+        })
+        const ctx = { ...makeVerifyCtx(undefined), ciAlignment: [] as CiAlignmentRecord[] }
+
+        await verifyProject(ctx, 'foo/bar', { ciAlignment: { client: null } })
+
+        const record = ctx.ciAlignment[0]
+        expect(record.commands).toEqual(['pnpm install --frozen-lockfile', 'pnpm lint'])
+        expect(record.status).toBe('differs')
+        expect(record.missingInExecution).toEqual(['build', 'test'])
+        expect(record.extraInExecution).toEqual([])
+    })
+
+    it('实际执行的命令集为空（取消 / 未执行）→ 不产生口径记录', async () => {
+        const ctx = { ...makeVerifyCtx(undefined), ciAlignment: [] as CiAlignmentRecord[] }
+
+        await verifyProject(ctx, 'foo/bar', { ciAlignment: { client: null } })
+
+        expect(ctx.ciAlignment).toEqual([])
+    })
+
+    it('未提供 CI 口径上下文时不做比对（报告不产生空记录）', async () => {
+        const ctx = { ...makeVerifyCtx(undefined), ciAlignment: [] as CiAlignmentRecord[] }
+
+        await verifyProject(ctx, 'foo/bar')
+
+        expect(ctx.ciAlignment).toEqual([])
     })
 
     it('does not touch custom commands', async () => {

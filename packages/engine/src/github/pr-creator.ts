@@ -11,6 +11,7 @@ import {
     isAlertFixedByActions,
     skippedBreakdown,
     truncatedBreakdown,
+    formatCiAlignmentSection,
 } from '@dependfix/core'
 import { GIT_COMMIT_HOOKS_ISOLATION_ARGS, GIT_COMMIT_SIGNING_ISOLATION_ARGS, GIT_PUSH_HOOKS_ISOLATION_ARGS, GIT_PUSH_SIGNING_ISOLATION_ARGS } from './git-signing'
 
@@ -713,6 +714,15 @@ export function generatePRBody(result: RunResult, supersededNumbers?: number[]):
             lines.push(`- ${icon} \`${v.target}\` ${v.error ? `(${v.error})` : ''}`)
         }
         lines.push('')
+    }
+
+    // CI 口径（验证链 vs 目标仓库 CI 的可识别命令类别；固定 ≤5 行，只披露口径不承诺结果）
+    const ciAlignment = result.ciAlignment ?? []
+    if (ciAlignment.length > 0) {
+        const ciLines = formatCiAlignmentSection(ciAlignment, 5)
+        if (ciLines.length > 0) {
+            lines.push('### 🔎 CI 口径', '', ...ciLines, '')
+        }
     }
 
     // Code Scanning 建议（无法自动修复的问题不静默丢失）

@@ -7,6 +7,7 @@ import {
     createEmptyRunSummary,
     toErrorMessage,
     type AlertsDisabledRecord,
+    type CiAlignmentRecord,
     type Logger,
     type NormalizedSecurityAlert,
     type RunResult,
@@ -15,7 +16,7 @@ import {
     type FixAction,
     type FixError,
 } from '@dependfix/core'
-import { fromPat, fromApp, type AuthProvider } from '../auth'
+import { fromApp, type AuthProvider } from '../auth'
 import {
     createFixBranch,
     stageAndCommit,
@@ -28,7 +29,6 @@ import {
     commentOnPullRequest,
     addLabelToPullRequest,
     type DependfixOpenPR,
-    createGitHubClient,
     discoverRepositories,
     mergeRepositories,
     filterExplicitRepositories,
@@ -44,6 +44,7 @@ import { collectSupplyChainWarnings } from '../supply-chain'
 import { loadRulesConfigFromEnv, resetActiveRulesConfig, setActiveRulesConfig } from '../code-scanning/rule-config'
 import type { CommandResult } from '../runners/verification-runner'
 import type { VerificationCheckpoint } from './verification-checkpoint'
+import { createConfiguredGitHubClient, createConfiguredGitHubClientOrNull } from './github-client'
 import { fetchDefaultBranch } from './repo-alerts'
 import { abortAwareRepoTask, abortBlocksDelivery, logSkippedRepos, recordRunAbort } from './abort'
 import { processRepoForReport } from './repo-report'
@@ -198,6 +199,8 @@ export class DependfixApp {
     private verificationBaseline: { value?: CommandResult[] } = {}
     /** 单元回滚 checkpoint（单元 probe 开始前记录，跨仓库传递）。 */
     private readonly verificationCheckpoints: VerificationCheckpoint[] = []
+    /** 验证链口径记录（run 级；`verifyProject` 写入，报告与 PR 正文消费） */
+    private readonly ciAlignment: CiAlignmentRecord[] = []
 
     constructor(options: DependfixAppOptions) {
         this.workDir = options.workDir ?? process.cwd()
@@ -277,6 +280,7 @@ export class DependfixApp {
             startedAt: this.startedAt,
             finishedAt: this.finishedAt,
             authProvider: this.githubAppAuth,
+            ciAlignment: this.ciAlignment,
         }
     }
 
@@ -385,7 +389,7 @@ export class DependfixApp {
         }
 
         if (this.config.alertSource === 'github-dependabot' && this.config.githubToken) {
-            const result = await checkTokenPermissions(this.createClient(), {
+            const result = await checkTokenPermissions(createConfiguredGitHubClient(this.config), {
                 codeScanningEnabled: this.config.codeScanningEnabled,
             })
             if (result.ok && result.warnings.length > 0) {
@@ -422,7 +426,7 @@ export class DependfixApp {
     // -----------------------------------------------------------------------
 
     private async executeReportMode(): Promise<void> {
-        const client = this.githubClientOrNull()
+        const client = createConfiguredGitHubClientOrNull(this.config)
         const repositories = await this.resolveRepositories(client)
         await this.runRepoPipeline(repositories, (repo) => processRepoForReport(this.ctx, client, repo))
     }
@@ -432,7 +436,7 @@ export class DependfixApp {
     // -----------------------------------------------------------------------
 
     private async executeFixMode(): Promise<void> {
-        const client = this.githubClientOrNull()
+        const client = createConfiguredGitHubClientOrNull(this.config)
         const repositories = await this.resolveRepositories(client)
         await this.runRepoPipeline(repositories, (repo) => this.processRepoForFix(client, repo))
 
@@ -489,7 +493,7 @@ export class DependfixApp {
      *   新 PR 创建失败时保留旧 PR，避免出现"无 PR 窗口"
      */
     private async executeFixAndPrMode(): Promise<void> {
-        const client = this.createClient()
+        const client = createConfiguredGitHubClient(this.config)
         const repositories = await this.resolveRepositories(client)
 
         // 1. Run fix pipeline for all repos (same as fix mode)
@@ -676,7 +680,7 @@ export class DependfixApp {
      * - dry-run 模式仅列清单并打印 "would delete"，不执行删除
      */
     private async executeCleanupBranchesMode(): Promise<void> {
-        const client = this.createClient()
+        const client = createConfiguredGitHubClient(this.config)
         for (const repo of this.config.repositories) {
             await runBranchCleanupForRepo(this.ctx, client, repo)
         }
@@ -857,29 +861,5 @@ export class DependfixApp {
             // 发现失败不阻塞显式列表（显式优先语义；显式列表仍受 exclude 约束）
             return filterExplicitRepositories(policy, this.config.repositories)
         }
-    }
-
-    // -----------------------------------------------------------------------
-    // GitHub helpers
-    // -----------------------------------------------------------------------
-
-    /** pnpm-audit 模式不创建 GitHub client（无 token）；github-dependabot 模式返回主 token client。 */
-    private githubClientOrNull(): Octokit | null {
-        if (this.config.alertSource === 'pnpm-audit') {
-            return null
-        }
-        return this.createClient()
-    }
-
-    private createClient(token: string = this.config.githubToken): Octokit {
-        return createGitHubClient({
-            auth: fromPat(token, {
-                // 429 / rate limit 指数退避重试（0 可关闭；退避上限可配）
-                retry: {
-                    maxRetries: this.config.maxRetries,
-                    maxBackoffMs: this.config.maxBackoffMs,
-                },
-            }),
-        })
     }
 }

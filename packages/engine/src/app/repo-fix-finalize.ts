@@ -4,6 +4,7 @@
 // 「再次改动需要新增语句时（先拆分再改）」处置；该候选已随之移出候选池，处置记录见 docs/plan/todo.md 的「零告警仓库修复前基线采样成本」闭环登记。
 // 两段职责的耦合点只有运行级基线持有器：采样时机决定是否需要付基线成本，收尾消费采样结果做归因豁免。
 // 验证链口径见 docs/design/modules/dependency-fixer-records.md §12.9。
+import type { Octokit } from '@octokit/rest'
 import { formatVerificationError, type CommandResult } from '../runners/verification-runner'
 import { tryLockfileRepair } from './helpers'
 import type { RepoFixCtx, RepoFixProgress } from './repo-fix'
@@ -98,7 +99,7 @@ export async function finalizeRepoFix(
     ctx: RepoFixCtx,
     repo: string,
     progress: RepoFixProgress,
-    options: { exemptAttribution?: boolean } = {},
+    options: { exemptAttribution?: boolean, client?: Octokit | null } = {},
 ): Promise<void> {
     let lockfileRepairFailed = false
     if (progress.alertsCount > 0) {
@@ -120,6 +121,8 @@ export async function finalizeRepoFix(
             // 「无改动即豁免」：零告警仓库未采样基线（无任何写操作）——其失败一律视为既有失败，
             // 与「基线中同命令也失败」等价（同命令 + 同一 pristine 工作区），故归因口径零退化
             noChanges: options.exemptAttribution === true,
+            // CI 口径比对上下文（只读 + 不阻断；无 GitHub client 时只做本地解析）
+            ciAlignment: { client: options.client ?? null, defaultBranch: progress.defaultBranch },
         }
         let verifyActions = await verifyProject(ctx, repo, verifyOptions)
         let blocking = verifyActions.some((a) => !a.success && !a.preExisting)

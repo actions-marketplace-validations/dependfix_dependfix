@@ -7,7 +7,9 @@
 // 零告警仓库不采样，改由 `noChanges` 选项做等价豁免）；修复后仍失败、且**同一命令**在基线下也失败
 // → 标记 `preExisting`（既有失败，不归因本次改动）；基线中缺失的命令保守归因本次（未知不算既有）。
 // 详见 docs/design/modules/dependency-fixer-records.md §12.9。
-import { toErrorMessage, type FixAction } from '@dependfix/core'
+import { toErrorMessage, type CiAlignmentRecord, type FixAction } from '@dependfix/core'
+import type { Octokit } from '@octokit/rest'
+import { buildCiAlignmentRecord } from '../github/ci-alignment'
 import { logNetworkAudit, redactUrlForReport } from '../runners/network-audit'
 import {
     DEFAULT_VERIFY_COMMANDS,
@@ -152,6 +154,77 @@ export interface VerifyProjectOptions {
      * 与 `baseline` 同时提供时以「任一命中即豁免」处理（`noChanges` 语义不依赖基线）。
      */
     noChanges?: boolean
+    /**
+     * CI 口径比对上下文（提供时把本次实际执行的命令集与目标仓库默认分支 workflow
+     * 做可识别命令类别比对，写入 `ctx.ciAlignment`）。
+     *
+     * 比对与默认分支健康预检均为**只读 + 不阻断**：解析失败 / API 限流 / 超时只降级留痕，
+     * 不影响验证结论、exit code 与交付判定。
+     */
+    ciAlignment?: CiAlignmentContext
+}
+
+/** CI 口径比对所需的最小上下文（GitHub 源之外的运行 client 为 null）。 */
+export interface CiAlignmentContext {
+    client: Pick<Octokit, 'rest'> | null
+    /** 目标仓库默认分支（未知时只做本地解析，不做健康预检） */
+    defaultBranch?: string
+}
+
+/**
+ * 记录本次实际执行的验证命令与目标仓库 CI 的口径（同仓库**取命令并集**）。
+ *
+ * 同一次运行内 `verifyProject` 可能被调用多次（跨 major 回退 / 单元回滚后重验），每次只跑到
+ * 首失败位置：单次命令集可能是中间态前缀，若「首写胜出」会把已执行的全链误报成未执行。
+ * 因此取**并集**（按首次出现顺序）——即「本次运行实际执行过的命令」；workflow 配置在运行期间
+ * 不变，并集未增长时直接复用已有记录，避免重复发起默认分支健康预检（配额与耗时）。
+ * 任何异常只 warn，不影响本次验证结果与交付。
+ */
+async function recordCiAlignment(
+    ctx: Pick<AppContext, 'workDir' | 'logger' | 'ciAlignment'>,
+    repo: string,
+    commands: string[],
+    ci: CiAlignmentContext | undefined,
+): Promise<void> {
+    // 空命令集（取消 / 未执行）不产生记录：没有口径需要比对
+    if (!ci || !ctx.ciAlignment || commands.length === 0) {
+        return
+    }
+    const existingIndex = ctx.ciAlignment.findIndex((record: CiAlignmentRecord) => record.repository === repo)
+    const previous = existingIndex >= 0 ? ctx.ciAlignment[existingIndex] : undefined
+    const merged = previous ? [...new Set([...previous.commands, ...commands])] : commands
+    if (previous && merged.length === previous.commands.length) {
+        return
+    }
+    try {
+        const record = await buildCiAlignmentRecord({
+            repository: repo,
+            workDir: ctx.workDir,
+            commands: merged,
+            client: previous ? null : ci.client,
+            ...(ci.defaultBranch ? { defaultBranch: ci.defaultBranch } : {}),
+            logger: ctx.logger,
+            skipHealth: previous !== undefined,
+        })
+        if (previous) {
+            // 复用首轮健康预检结果（workflow 配置与默认分支在运行期间不变）
+            if (previous.defaultBranchHealth) {
+                record.defaultBranchHealth = previous.defaultBranchHealth
+            }
+            if (previous.healthUnavailableReason) {
+                record.healthUnavailableReason = previous.healthUnavailableReason
+            }
+            ctx.ciAlignment[existingIndex] = record
+        } else {
+            ctx.ciAlignment.push(record)
+        }
+        ctx.logger.info(
+            `[ci-alignment] ${repo}: ${record.status}${
+                record.unreadableReason ? `（${record.unreadableReason}）` : ''}`,
+        )
+    } catch (error: unknown) {
+        ctx.logger.warn(`[ci-alignment] ${repo}: 口径比对失败（不阻断运行）：${toErrorMessage(error)}`)
+    }
 }
 
 /**
@@ -173,7 +246,7 @@ function resolvePreExistingReason(
 }
 
 export async function verifyProject(
-    ctx: Pick<AppContext, 'config' | 'customCommands' | 'logger' | 'workDir' | 'allErrors'>,
+    ctx: Pick<AppContext, 'config' | 'customCommands' | 'logger' | 'workDir' | 'allErrors' | 'ciAlignment'>,
     repo: string,
     options: VerifyProjectOptions = {},
 ): Promise<FixAction[]> {
@@ -215,7 +288,7 @@ export async function verifyProject(
             logger.error(`[network-audit] ${repo}: outbound blocked (network_violation): ${violation.method} ${redacted}`)
         }
 
-        return result.commandResults.map((cr) => {
+        const actions = result.commandResults.map((cr) => {
             // 失败时附 stdout/stderr 摘要（已脱敏截断）供日志/报告定位失败原因（run 31552922137 教训：仅 "exit code 1" 无法定位）
             const failed = cr.exitCode !== 0
             const error = failed ? formatVerificationError(cr) : undefined
@@ -258,6 +331,12 @@ export async function verifyProject(
                 durationMs: cr.durationMs,
             }
         })
+
+        // CI 口径比对（只读 + 不阻断）：只记**实际执行**的命令（首失败短路时尾部命令未 spawn，
+        // 不得让正文断言「本次已验证」某条未跑到的命令）
+        await recordCiAlignment(ctx, repo, result.commandResults.map((cr) => cr.command), options.ciAlignment)
+
+        return actions
     } catch (error: unknown) {
         const message = toErrorMessage(error)
         logger.error(`Verification error for ${repo}: ${message}`)

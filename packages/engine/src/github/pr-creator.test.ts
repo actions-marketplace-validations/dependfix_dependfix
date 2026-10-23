@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Octokit } from '@octokit/rest'
-import { createEmptyRunSummary, type FixAction, type NormalizedSecurityAlert, type RunResult } from '@dependfix/core'
+import { createEmptyRunSummary, type CiAlignmentRecord, type FixAction, type NormalizedSecurityAlert, type RunResult } from '@dependfix/core'
 import {
     computeFixFingerprint,
     extractFingerprintFromBranch,
@@ -1446,5 +1446,117 @@ describe('generatePRBody supply chain warnings', () => {
         const body = generatePRBody(buildRunResult())
 
         expect(body).not.toContain('Supply Chain Warnings')
+    })
+})
+
+// ---------------------------------------------------------------------------
+// generatePRBody CI 口径（验证链 vs 目标仓库 CI）
+// ---------------------------------------------------------------------------
+
+function makeCiAlignment(overrides: Partial<CiAlignmentRecord> = {}): CiAlignmentRecord {
+    return {
+        repository: 'owner/repo',
+        commands: ['pnpm install --frozen-lockfile', 'pnpm lint', 'pnpm build', 'pnpm typecheck', 'pnpm test'],
+        status: 'aligned',
+        ciCategories: ['lint', 'build', 'test'],
+        extraInExecution: ['typecheck'],
+        missingInExecution: [],
+        workflows: [{ path: '.github/workflows/ci.yml', categories: ['lint', 'build', 'test'], unrecognized: [] }],
+        ...overrides,
+    }
+}
+
+function ciBulletLines(body: string): string[] {
+    const section = body.split('### 🔎 CI 口径')[1]?.split('\n\n')[0] ?? ''
+    return section.split('\n').map((line) => line.trim()).filter((line) => line.startsWith('- '))
+}
+
+describe('generatePRBody CI 口径', () => {
+    it('aligned 时披露一致与「CI 未跑 typecheck，本次已验证」', () => {
+        const result = { ...buildRunResult(), ciAlignment: [makeCiAlignment()] }
+
+        const body = generatePRBody(result)
+
+        expect(body).toContain('### 🔎 CI 口径')
+        expect(body).toContain('CI 口径：一致')
+        expect(body).toContain('本仓库 CI 未跑 typecheck，本次已验证')
+        expect(body).toContain('本次验证链：')
+    })
+
+    it('区块固定 ≤ 5 行', () => {
+        const result = {
+            ...buildRunResult(),
+            ciAlignment: [makeCiAlignment({
+                workflows: [{
+                    path: '.github/workflows/ci.yml',
+                    categories: ['lint', 'build', 'test'],
+                    unrecognized: ['pnpm test:e2e', 'pnpm format', 'pnpm release'],
+                }],
+                defaultBranchHealth: [{ path: '.github/workflows/ci.yml', conclusion: 'failure' }],
+            })],
+        }
+
+        expect(ciBulletLines(generatePRBody(result)).length).toBeLessThanOrEqual(5)
+    })
+
+    it('differs 时列出 CI 运行而本次未执行的类别', () => {
+        const result = {
+            ...buildRunResult(),
+            ciAlignment: [makeCiAlignment({
+                status: 'differs',
+                extraInExecution: [],
+                missingInExecution: ['test'],
+            })],
+        }
+
+        const body = generatePRBody(result)
+
+        expect(body).toContain('CI 口径：不一致（CI 运行、本次未执行：test）')
+    })
+
+    it('unreadable 时标注未能读取 CI 配置（不阻断正文生成）', () => {
+        const result = {
+            ...buildRunResult(),
+            ciAlignment: [makeCiAlignment({
+                status: 'unreadable',
+                workflows: [],
+                ciCategories: [],
+                extraInExecution: [],
+                unreadableReason: '未找到 .github/workflows',
+            })],
+        }
+
+        const body = generatePRBody(result)
+
+        expect(body).toContain('CI 口径：未能读取 CI 配置（未找到 .github/workflows）')
+    })
+
+    it('默认分支同 workflow 最近一次失败 → 标注「非本 PR 引入」', () => {
+        const result = {
+            ...buildRunResult(),
+            ciAlignment: [makeCiAlignment({
+                defaultBranchHealth: [{ path: '.github/workflows/ci.yml', conclusion: 'failure' }],
+            })],
+        }
+
+        expect(generatePRBody(result)).toContain('默认分支同 workflow 最近一次失败（非本 PR 引入）')
+    })
+
+    it('健康预检未获取（API 失败 / 限流 / 超时）不标注失败结论', () => {
+        const result = {
+            ...buildRunResult(),
+            ciAlignment: [makeCiAlignment({
+                healthUnavailableReason: 'API rate limit exceeded',
+            })],
+        }
+
+        const body = generatePRBody(result)
+
+        expect(body).not.toContain('最近一次失败')
+        expect(body).not.toContain('rate limit')
+    })
+
+    it('无口径记录时不渲染区块（旧结果 / 未执行验证链）', () => {
+        expect(generatePRBody(buildRunResult())).not.toContain('CI 口径')
     })
 })

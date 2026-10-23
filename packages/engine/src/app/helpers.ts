@@ -7,6 +7,7 @@ import { execFileSync, execSync } from 'node:child_process'
 import {
     toErrorMessage,
     type AlertsDisabledRecord,
+    type CiAlignmentRecord,
     type FixAction,
     type FixError,
     type Logger,
@@ -140,6 +141,13 @@ export interface AppContext {
     finishedAt: string
     /** GitHub App 认证提供者（用于 commit author 真实 bot 身份） */
     authProvider?: AuthProvider
+    /**
+     * 验证链口径记录（run 级累积；`verifyProject` 写入，报告与 PR 正文消费）。
+     *
+     * 缺省（测试直接构造 ctx）⇒ 不记录；同一仓库多次验证取命令并集（按首次出现顺序），
+     * 并集未增长时复用既有记录与首轮健康预检结果，避免重复发起 API 调用。
+     */
+    ciAlignment?: CiAlignmentRecord[]
 }
 
 // ---------------------------------------------------------------------------

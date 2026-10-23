@@ -88,7 +88,7 @@ export function computeSummary(
 }
 
 export function buildRunResult(
-    ctx: Pick<AppContext, 'config' | 'runId' | 'startedAt' | 'finishedAt' | 'summary' | 'repoResults' | 'allAlerts' | 'allActions' | 'allErrors' | 'alertsDisabled'>,
+    ctx: Pick<AppContext, 'config' | 'runId' | 'startedAt' | 'finishedAt' | 'summary' | 'repoResults' | 'allAlerts' | 'allActions' | 'allErrors' | 'alertsDisabled' | 'ciAlignment'>,
     aiUsage?: AiUsageAggregate, supplyChainWarnings?: SupplyChainWarning[],
 ): RunResult {
     const reportConfig: RunReportConfig = {
@@ -116,6 +116,7 @@ export function buildRunResult(
         aiUsage: aiUsage && aiUsage.calls > 0 ? aiUsage : undefined,
         supplyChainWarnings: supplyChainWarnings && supplyChainWarnings.length > 0 ? supplyChainWarnings : undefined,
         alertsDisabled: ctx.alertsDisabled.length > 0 ? ctx.alertsDisabled : undefined,
+        ciAlignment: ctx.ciAlignment && ctx.ciAlignment.length > 0 ? ctx.ciAlignment : undefined,
     }
 }
 

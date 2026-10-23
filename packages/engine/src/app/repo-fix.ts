@@ -151,7 +151,7 @@ export async function processRepoFix(
                 await applyGroupUpgrades(ctx, repo, sets, singleVersionAlerts, progress)
             }
         }
-        await finalizeRepoFix(ctx, repo, progress, { exemptAttribution })
+        await finalizeRepoFix(ctx, repo, progress, { exemptAttribution, client })
     } catch (error: unknown) {
         const message = toErrorMessage(error)
         const hint = alertsFetchTokenHint(error)
@@ -535,7 +535,9 @@ async function applyLockfileFixes(
         // 跨线升级保留**严格**口径（不套用基线归因）：命令级基线只能区分「同一命令红 / 绿」，
         // 无法区分失败身份（红的还是原来那条失败），不足以支撑「跨 major 升级可保留」的判断。
         // 基线归因仅用于最终交付门禁（finalizeRepoFix）。
-        const majorVerifyActions = await verifyProject(ctx, repo)
+        const majorVerifyActions = await verifyProject(ctx, repo, {
+            ciAlignment: { client, defaultBranch: progress.defaultBranch },
+        })
         ctx.allActions.push(...majorVerifyActions)
         let majorOk = majorVerifyActions.every((a) => a.success)
 
