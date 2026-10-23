@@ -45,6 +45,7 @@ import { applyMemberUpgrades } from './repo-fix-member'
 import { tryBatchVersionedOverrides, type VersionedOverrideBatchItem } from './repo-fix-batch'
 import { fetchDefaultBranch, fetchRepoAlerts, truncatedWarning } from './repo-alerts'
 import { alertsFetchTokenHint } from './token-hints'
+import { markEnvironmentalInstallFailure } from './environmental-failure'
 import { recordUpgradeFailure } from './upgrade-failure'
 import { ensureVerificationBaseline, finalizeRepoFix, recordInstallBaselineFailure } from './repo-fix-finalize'
 import { recordVerificationCheckpoint, type VerificationCheckpoint } from './verification-checkpoint'
@@ -147,8 +148,12 @@ export async function processRepoFix(
                     + '— skipping member/group upgrades',
                 )
             } else {
-                await applyMemberUpgrades(ctx, repo, sets, progress)
-                await applyGroupUpgrades(ctx, repo, sets, singleVersionAlerts, progress)
+                const memberEnvironmentalStop = await applyMemberUpgrades(ctx, repo, sets, progress)
+                if (memberEnvironmentalStop) {
+                    ctx.logger.warn(`[member-upgrade] ${repo}: dependency install chain stopped (environmental) — skipping group upgrades`)
+                } else {
+                    await applyGroupUpgrades(ctx, repo, sets, singleVersionAlerts, progress)
+                }
             }
         }
         await finalizeRepoFix(ctx, repo, progress, { exemptAttribution, client })
@@ -240,6 +245,11 @@ async function prepareRepoFixSets(
         )
         addSkipped(ctx.summary, 'subdirectory-manifest', submanifestAlerts.length)
     }
+
+    // 不可自动修复残差按告警逐条统计（忽略 dedupeFixableAlerts 合并差额：被合并告警仍可能由代表
+    // action 修复）；放在分区处一次算净，使「整段跳过升级链」的路径也覆盖
+    const notFixableCount = rootManifestAlerts.filter((alert) => !alert.fixable || !alert.recommendedVersion).length
+    addSkipped(ctx.summary, 'not-fixable', notFixableCount)
 
     return {
         rootManifestAlerts,
@@ -365,7 +375,7 @@ async function applyLockfileFixes(
     }
 
     // 合批快路径（≥2 个包）：把 K 次完整安装压到 1 次；失败则回滚并由下方逐包路径重试。
-    // 环境性失败（信号 / 超时）例外：逐包重试只会重复同一失败并耗尽单仓预算，直接跳过。
+    // 环境性失败（信号 / 超时 / 无 stderr 诊断）例外：逐包重试只会重复同一失败并耗尽单仓预算，直接跳过。
     const batchOutcome = batchItems.length > 1
         ? await tryBatchVersionedOverrides(ctx, repo, progress, batchItems)
         : { applied: false }
@@ -414,14 +424,12 @@ async function applyLockfileFixes(
             if (result.environmental) {
                 // 环境级失败（OOM / 超时）：不产出失败动作 / 不计入 alertsFailed（与合批路径同口径），
                 // 记非归因审计条目后停止本仓库剩余安装尝试（含成员 / 分组升级）。
-                ctx.allErrors.push({
+                markEnvironmentalInstallFailure(ctx, {
+                    scope: 'multi-version',
                     repository: alert.repository,
                     target: alert.packageName,
-                    stage: 'fix',
-                    category: 'ENVIRONMENT_ERROR',
-                    message: `install failed (environmental): ${result.error ?? 'no error detail'}`,
+                    error: result.error,
                 })
-                ctx.logger.warn(`[multi-version] ${alert.packageName}: environmental install failure — stopping further dependency install attempts`)
                 stopReason = 'environmental'
                 break
             }
@@ -493,6 +501,16 @@ async function applyLockfileFixes(
             workDir: ctx.workDir,
         })
         if (!majorResult.success) {
+            // 环境性安装失败（信号 / 超时 / 无 stderr 诊断）：不归因目标仓库，也不值得继续
+            // 尝试其余跨线 / 成员 / 分组安装（同一次环境故障会重复出现）
+            const environmentalMark = majorResult.environmental === true
+                ? markEnvironmentalInstallFailure(ctx, {
+                    scope: 'major-upgrade',
+                    repository: alert.repository,
+                    target: alert.packageName,
+                    error: majorResult.error,
+                })
+                : {}
             ctx.allActions.push({
                 type: 'dependency-upgrade',
                 repository: alert.repository,
@@ -504,7 +522,12 @@ async function applyLockfileFixes(
                 success: false,
                 error: majorResult.error,
                 durationMs: 0,
+                ...environmentalMark,
             })
+            if (majorResult.environmental === true) {
+                stopReason = 'environmental'
+                break
+            }
             recordUpgradeFailure(ctx, progress, 'major-upgrade', alert.packageName, majorResult.error)
             continue
         }
@@ -613,7 +636,7 @@ async function applyLockfileFixes(
         }
     }
 
-    return { singleVersionAlerts }
+    return stopReason ? { singleVersionAlerts, stopReason } : { singleVersionAlerts }
 }
 
 
@@ -659,6 +682,7 @@ async function applyGroupUpgrades(
 
         const pendingActions: FixAction[] = []
         const upgradedInGroup: NormalizedSecurityAlert[] = []
+        let environmentalStop = false
 
         for (const packageName of group.packages) {
             const alert = alertByPackage.get(packageName)
@@ -703,6 +727,16 @@ async function applyGroupUpgrades(
             const action = await upgradeAlert(ctx, alert)
             pendingActions.push(action)
             if (!action.success) {
+                // 运行级取消：剩余包装不下去，也不该产出 K 条同因失败动作（口径同多版本路径）
+                if (isAbortRequested()) {
+                    ctx.allActions.push(...pendingActions.filter((pending) => pending.success))
+                    return
+                }
+                // 环境性安装失败不归因仓库，且继续试装只会重复同因失败 / 耗尽单仓预算
+                if (action.environmentalFailure) {
+                    environmentalStop = true
+                    break
+                }
                 progress.failed++
                 continue
             }
@@ -718,6 +752,10 @@ async function applyGroupUpgrades(
 
         if (ctx.config.dryRun || upgradedInGroup.length === 0) {
             ctx.allActions.push(...pendingActions)
+            if (environmentalStop) {
+                ctx.logger.warn(`[group] ${group.name}: environmental install failure — stopping further upgrade attempts for ${repo}`)
+                return
+            }
             continue
         }
 
@@ -729,6 +767,10 @@ async function applyGroupUpgrades(
                 `[group] ${group.name}: ${upgradedInGroup.length} upgrade(s) passed group verification`,
             )
             snapshot = snapshotTrackedFiles(ctx.workDir)
+            if (environmentalStop) {
+                ctx.logger.warn(`[group] ${group.name}: environmental install failure — stopping further upgrade attempts for ${repo}`)
+                return
+            }
             continue
         }
 
@@ -743,11 +785,37 @@ async function applyGroupUpgrades(
             }
         }
 
+        if (environmentalStop) {
+            // 组级验证失败且环境已不可用：整组回滚并停机。环境性动作已随 !success 入列，此处只补记
+            // 「已应用但随整组回滚作废」的动作（noOp 从未写盘，不改判也不入列，与常规路径同口径）。
+            for (const action of pendingActions) {
+                if (action.success && !action.noOp) {
+                    action.success = false
+                    action.error = 'group verification failed after environmental stop; changes rolled back'
+                    progress.failed++
+                    ctx.allActions.push(action)
+                }
+            }
+            ctx.logger.warn(
+                `[group] ${group.name}: environmental install failure — rolled back group, stopping further upgrade attempts for ${repo}`,
+            )
+            return
+        }
+
         for (const alert of upgradedInGroup) {
             recordVerificationCheckpoint(ctx, repo, progress, `group:${group.name}:${alert.packageName}`)
             const action = await upgradeAlert(ctx, alert)
             ctx.allActions.push(action)
             if (!action.success) {
+                if (isAbortRequested()) {
+                    return
+                }
+                if (action.environmentalFailure) {
+                    ctx.logger.warn(
+                        `[group] ${group.name}: environmental install failure during per-package retry — stopping further upgrade attempts for ${repo}`,
+                    )
+                    return
+                }
                 progress.failed++
                 continue
             }
@@ -769,9 +837,4 @@ async function applyGroupUpgrades(
             snapshot = snapshotTrackedFiles(ctx.workDir)
         }
     }
-
-    // 不可自动修复残差按告警逐条统计；忽略 dedupeFixableAlerts 的合并差额——被合并的告警
-    // 仍可能由代表 action 同时修复，不能标成 not-fixable（同包多 GHSA 常见）
-    const notFixableCount = singleVersionAlerts.filter((alert) => !alert.fixable || !alert.recommendedVersion).length
-    addSkipped(ctx.summary, 'not-fixable', notFixableCount)
 }

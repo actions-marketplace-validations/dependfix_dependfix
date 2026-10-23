@@ -84,9 +84,9 @@ export interface RunSummary {
      *
      * 与 `alertsFailed` 语义分离——后者归因本次修复，本字段只用于「结果可见性」：
      * 运行即使 `completed`，也可据此提示「环境性失败 N」而不把仓库判为失败。
-     * 计数口径为 `FixError.category === 'ENVIRONMENT_ERROR'` 的审计条目数；当前只覆盖已分类路径
-     * （lockfile 诊断 / 多版本 / 合批），常规分组 / 逐包升级路径尚未消费 `environmental` 标记
-     * （归因接线已上收 M47.3，见 docs/plan/todo.md），计数可能低于真实环境性失败数。
+     * 计数口径为 `FixError.category === 'ENVIRONMENT_ERROR'` 的审计条目数；`lockfile-repair` 与升级链
+     * （成员 / 常规分组 / 拆组逐包 / 跨线 / 多版本 / 合批）的安装失败均已接入该归类
+     * （判据与消费点见 docs/design/modules/dependency-fixer-records.md §12.16）。
      */
     environmentalFailures: number
     /** 因 maxAlertsPerRepository 截断的告警数（收尾审查遗留：截断明细进报告） */
@@ -151,9 +151,10 @@ export interface FixAction {
      */
     preExisting?: boolean
     /**
-     * 仅 `type === 'lockfile-repair'` 时有意义：该失败为**环境性安装失败**
-     * （诊断步无 stderr 诊断：被信号杀死 / 超时 / 静默非零退出）→ 无法归因目标仓库，
-     * 不计入「本次改动引入的失败」（与 `preExisting` 验证失败同族的非归因口径）。
+     * 仅失败动作有意义：该失败为**环境性安装失败**
+     * （信号终止 / 超时 / 无 stderr 诊断：无法归因目标仓库）→ 不计入「本次改动引入的失败」
+     * （与 `preExisting` 验证失败同族的非归因口径）。`type === 'lockfile-repair'` 与
+     * `type === 'dependency-upgrade'`（常规分组 / 拆组逐包 / 跨线 / 成员）都可能携带。
      */
     environmentalFailure?: boolean
     strategy?: string

@@ -5,6 +5,7 @@ import {
     describeProcessSignals,
     extractProcessSignals,
     getInstallDiagnostics,
+    isEnvironmentalInstallError,
     toExecLikeError,
     type ExecError,
 } from '../process-signals'
@@ -186,10 +187,11 @@ export async function classifyLockfileFailure(workDir: string): Promise<Classifi
     // `signal` / `timedOut` / `errno` 与旧 `extractProcessSignals(err)` 的语义一一对应
     const rawStderr = outcome.stderr
     const rawStdout = outcome.stdout
-    // 合并诊断：pnpm 11 的安装脚本错误写到 stdout，只读 stderr 会丢失根因
-    const diagnostics = getInstallDiagnostics(toExecLikeError('pnpm install --frozen-lockfile', outcome))
-    // 环境性判定保持既有口径（信号 / 超时 / 无 stderr 诊断）；诊断文本另取 stderr+stdout
-    const environmental = outcome.signal !== null || outcome.timedOut || rawStderr.trim().length === 0
+    // 合并诊断：pnpm 11 的安装脚本错误写到 stdout，只读 stderr 会丢失根因；
+    // 环境性判定与依赖升级链共用单一判据（fixers/process-signals），不在此处另持一份规则
+    const execLikeError = toExecLikeError('pnpm install --frozen-lockfile', outcome)
+    const diagnostics = getInstallDiagnostics(execLikeError)
+    const environmental = isEnvironmentalInstallError(execLikeError)
     return {
         ok: false,
         category: environmental ? 'ENVIRONMENT_ERROR' : parseFailureCategory(diagnostics),

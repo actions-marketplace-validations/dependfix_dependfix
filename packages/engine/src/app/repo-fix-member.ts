@@ -6,6 +6,7 @@ import { compareSemver, readLockfileVersions, upgradeDependency } from '../fixer
 import { quickVerifyProject, restoreTrackedFiles, snapshotTrackedFiles, type MemberManifestAlert } from '../helpers'
 import { isAbortRequested } from '../runners/process-control'
 import type { LockfileAlertSets, RepoFixCtx, RepoFixProgress } from './repo-fix'
+import { markEnvironmentalInstallFailure } from './environmental-failure'
 import { recordVerificationCheckpoint } from './verification-checkpoint'
 import { recordUpgradeFailure } from './upgrade-failure'
 
@@ -14,15 +15,18 @@ import { recordUpgradeFailure } from './upgrade-failure'
  * 成员白名单 + 直接声明 + fixable + 单版本 + 非跨线）。按「包名 + manifestDir」
  * 聚合取最高推荐为代表；逐项快照 → upgradeDependency({ manifestDir }) → 实例
  * 复核（残留脆弱实例回滚）→ quickVerify（根 lint）→ 失败回滚。不误标 fixed/converged。
+ *
+ * @returns `true` = 环境性安装失败已终止本仓库后续安装（调用方应跳过分组升级链）；
+ *          `false` = 正常走完（或运行级取消，取消由调用方自己的守卫处理）
  */
 export async function applyMemberUpgrades(
     ctx: RepoFixCtx,
     repo: string,
     sets: LockfileAlertSets,
     progress: RepoFixProgress,
-): Promise<void> {
+): Promise<boolean> {
     if (isAbortRequested()) {
-        return
+        return false
     }
     const { memberManifestAlerts, lockfilePath } = sets
     const memberByPackageAndDir = new Map<string, MemberManifestAlert>()
@@ -72,6 +76,15 @@ export async function applyMemberUpgrades(
             manifestDir,
         })
         if (!memberResult.success) {
+            // 环境性安装失败：不归因仓库，并停止剩余成员尝试（多版本 / 合批 / 分组同口径）
+            const environmentalMark = memberResult.environmental === true
+                ? markEnvironmentalInstallFailure(ctx, {
+                    scope: 'member-upgrade',
+                    repository: alert.repository,
+                    target: `${alert.packageName} (${memberManifestPath})`,
+                    error: memberResult.error,
+                })
+                : {}
             ctx.allActions.push({
                 type: 'dependency-upgrade',
                 repository: alert.repository,
@@ -84,7 +97,16 @@ export async function applyMemberUpgrades(
                 error: memberResult.error,
                 durationMs: 0,
                 filePath: memberManifestPath,
+                ...environmentalMark,
             })
+            if (memberResult.environmental === true) {
+                // 环境已不可用：剩余成员与后续分组链都不再试装（同一次故障重复尝试只会重复失败）
+                return true
+            }
+            // 运行级取消：剩余成员不必逐条试装（每条都会以同一原因失败）
+            if (isAbortRequested()) {
+                return false
+            }
             recordUpgradeFailure(ctx, progress, 'member-upgrade', `${alert.packageName} (${memberManifestPath})`, memberResult.error)
             continue
         }
@@ -150,4 +172,5 @@ export async function applyMemberUpgrades(
         progress.fixed++
         ctx.logger.info(`[member-upgrade] ${alert.packageName}: member upgrade passed verification (${memberManifestPath})`)
     }
+    return false
 }

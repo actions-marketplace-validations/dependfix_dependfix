@@ -63,7 +63,7 @@ export interface DependencyFixResult {
     /** 成功但存在需要用户注意的附加信息（如 overrides 写入位置可能被 pnpm 忽略） */
     warning?: string
     /**
-     * 失败是否由进程级环境问题导致（信号终止 / 超时）。
+     * 失败是否由安装环境问题导致（信号终止 / 超时 / 无 stderr 诊断）。
      * 调用方据此停止后续安装尝试——同一环境下逐包重试只会重复失败并耗尽运行预算。
      */
     environmental?: boolean

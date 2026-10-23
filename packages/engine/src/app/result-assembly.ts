@@ -20,10 +20,11 @@ import type { AppContext } from './helpers'
  * 汇总所有动作到 summary（alertsSkipped / alertsConverged 已在 repo-fix 修复管线中累加）。
  *
  * `environmentalFailures` 取 `ENVIRONMENT_ERROR` 审计条目数：该类别是环境性失败的单一审计事实
- * （lockfile-repair 与合批 / 多版本安装路径均落此类别），避免同时按 action 标记计数造成同一事件
- * 双计（lockfile-repair 失败会同时产生 action.environmentalFailure 与一条 ENVIRONMENT_ERROR）。
- * 覆盖边界：常规分组 / 逐包升级与 major 路径尚未消费安装结果的 `environmental` 标记，
- * 因此计数可能低于真实环境性失败数（归因接线已上收 M47.3，见 docs/plan/todo.md）。
+ * （lockfile-repair 与合批 / 多版本 / 成员 / 常规分组 / 跨线安装路径均落此类别），避免同时按 action
+ * 标记计数造成同一事件双计（lockfile-repair 失败会同时产生 action.environmentalFailure 与一条
+ * ENVIRONMENT_ERROR）。
+ * 带 `environmentalFailure` 标记的动作不归因本次运行：不计入 `alertsFixed` / `alertsFailed`
+ * （升级链路四条消费点见 docs/design/modules/dependency-fixer-records.md §12.16）。
  */
 export function computeSummary(
     ctx: Pick<AppContext, 'allActions' | 'allAlerts' | 'allErrors' | 'alertsDisabled' | 'repoResults' | 'summary'>,
@@ -44,6 +45,11 @@ export function computeSummary(
         // AI 辅助动作（ai-patch 修复 / ai-suggestion 建议）是过程证据，不计入 fixed/failed——
         // 告警结果由主动作（major-upgrade 等）代表，避免同告警重复计数
         if (action.strategy === 'ai-patch' || action.strategy === 'ai-suggestion') {
+            continue
+        }
+        // 环境性安装失败（不归因）：既不计 failed（alertsFailed），也不计 fixed——
+        // 与出口码 `hasFailures` 的非归因谓词同源，计数单列在 `environmentalFailures`
+        if (action.environmentalFailure) {
             continue
         }
         if (action.type === 'dependency-upgrade' || action.type === 'code-scanning-fix') {
@@ -161,7 +167,7 @@ export function mergeAiUsage(
  * - `PRE_EXISTING_FAILURE`：修复前即红的既有基线失败（`verificationBlocking === false`），
  *   目标仓库本就如此，不归因本次改动（口径见 [isRepoVerificationBlocked] 与
  *   [docs/design/modules/dependency-fixer-records.md 既有失败基线]）
- * - `ENVIRONMENT_ERROR`：环境性安装失败（诊断步无 stderr 诊断：被信号杀死 / 超时 / 静默非零退出），
+ * - `ENVIRONMENT_ERROR`：环境性安装失败（信号终止 / 超时 / 无 stderr 诊断），
  *   无法归因目标仓库（与既有失败基线同族口径；对应 action 的 `environmentalFailure` 标记）
  * - `ROLLBACK_GRANULARITY_DEGRADED`：单元级回滚不可用，显式降级整仓回滚（审计性，不归因失败）
  */
@@ -169,7 +175,7 @@ const SKIPPED_AUDIT_CATEGORIES = new Set<string>([
     'OVERRIDE_PROTECTED', // 保护名单命中，主动跳过 override 写入
     'SCRIPT_NOT_FOUND', // 无 test 脚本，跳过 pnpm test 验证
     'PRE_EXISTING_FAILURE', // 既有基线失败（本次改动前即为红），不归因本次运行
-    'ENVIRONMENT_ERROR', // 环境性安装失败（无 lockfile 诊断），不归因本次运行
+    'ENVIRONMENT_ERROR', // 环境性安装失败（无法归因目标仓库），不归因本次运行
     'ROLLBACK_GRANULARITY_DEGRADED', // 单元回滚不可用，显式降级为整仓回滚（审计性，不归因失败）
 ])
 
@@ -192,9 +198,9 @@ export function computeExitCode(
     const { config, allErrors, allActions, repoResults } = ctx
     const nonSkippedErrors = allErrors.filter((e) => !SKIPPED_AUDIT_CATEGORIES.has(e.category ?? ''))
     const hasErrors = nonSkippedErrors.length > 0
-    // 既有失败（`preExisting`，仅验证 action 携带）与环境性安装失败（`environmentalFailure`，仅
-    // lockfile-repair action 携带）均不归因本次运行，不计入失败动作——否则「仅既有失败 / 环境性失败
-    // 且无告警/修复产出」的运行仍会被判 exit 2（平台 `engine_exit_2` 误标 failed）
+    // 既有失败（`preExisting`，仅验证 action 携带）与环境性安装失败（`environmentalFailure`，
+    // lockfile-repair 与升级链路各消费点携带）均不归因本次运行，不计入失败动作——否则「仅既有失败 /
+    // 环境性失败且无告警/修复产出」的运行仍会被判 exit 2（平台 `engine_exit_2` 误标 failed）
     const hasFailures = allActions.some((a) => !a.success && !a.preExisting && !a.environmentalFailure)
     // 保守判定：dry-run 下成功仓库的 verificationPassed 为 undefined、alertsCount 可能为 0，
     // 与失败仓库并存时会被判为"无成功"（返回 2 而非 1）——fail-safe 方向可接受

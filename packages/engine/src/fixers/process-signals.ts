@@ -97,17 +97,29 @@ export function extractProcessSignals(err: ExecError): ProcessSignals {
 }
 
 /**
- * 安装失败是否由进程级环境问题导致（信号终止 / 超时）；不含静默 exit 1。
+ * 安装失败是否属于环境性问题（**单一判据**：lockfile 诊断链与依赖升级链共用）。
  *
- * 运行级取消（`aborted`）必须返回 false：中止是独立类别（`ABORTED`），
- * 不得伪装成「不归因目标仓库」的环境性失败。
+ * 判定顺序：
+ * 1. 运行级取消（`aborted`）→ false：中止是独立类别（`ABORTED`），不得伪装成
+ *    「不归因目标仓库」的环境性失败。
+ * 2. 信号终止 / 超时 → true：进程可能已吐出部分输出，但被杀死 / 超时本身说明执行环境异常，
+ *    不足以把失败归因目标仓库。
+ * 3. 有 stderr 诊断 → false：`ERR_PNPM_*` / 解析失败等可读失败归因目标仓库。
+ * 4. stderr 为空 → true（静默非零退出）。
+ *
+ * 归因只看 stderr，**不看 stdout**：pnpm 11 把安装脚本错误（`gyp ERR!` / `prebuild-install`）
+ * 写到 stdout，那类原生构建失败仍按环境性处理（stdout 作为证据保留，口径见
+ * docs/design/modules/pnpm-lockfile-fixer.md §2.4）。
  */
 export function isEnvironmentalInstallError(err: ExecError): boolean {
     if (err.aborted === true) {
         return false
     }
     const signals = extractProcessSignals(err)
-    return signals.signal !== null || signals.timedOut
+    if (signals.signal !== null || signals.timedOut) {
+        return true
+    }
+    return getRawStderrText(err).trim().length === 0
 }
 
 /** 渲染进程级信号的简短描述（用于失败详情）；无可用信号时返回空串。 */

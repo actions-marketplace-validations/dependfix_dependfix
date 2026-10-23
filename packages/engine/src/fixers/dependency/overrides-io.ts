@@ -28,7 +28,7 @@ export interface VersionedOverridesApplyResult {
      * `verify`（安装成功但回读 lockfile 仍有低于目标的实例，已回滚）——供单包包装保持既有 `toVersion` 口径。
      */
     failurePhase?: 'precheck' | 'install' | 'verify'
-    /** 安装失败是否由进程级环境问题导致（信号终止 / 超时）；调用方据此停止逐包重试 */
+    /** 安装失败是否由安装环境问题导致（信号终止 / 超时 / 无 stderr 诊断）；调用方据此停止逐包重试 */
     environmental?: boolean
 }
 
@@ -62,7 +62,10 @@ export function execPnpmInstall(workDir: string): Promise<void> {
         timeoutMs: resolveInstallTimeoutMs(),
     }).then((outcome) => {
         if (!outcome.started) {
-            throw new Error(`run aborted — install not started: ${command}`)
+            // 取消守卫命中（命令未启动）：与「启动后被信号杀死」同形但语义是运行级中止——
+            // 必须带 `aborted` 标记，否则空 stderr + 无信号的形态会被判成环境性失败
+            // （口径见 fixers/process-signals.ts 的单一判据与 dependency-fixer-records.md §12.16）
+            throw Object.assign(new Error(`run aborted — install not started: ${command}`), { aborted: true })
         }
         if (outcome.exitCode !== 0 || outcome.timedOut) {
             throw toExecLikeError(command, outcome)
@@ -292,7 +295,7 @@ export function describeInstallError(err: unknown): string {
     return signals ? `${signals}: ${detail}` : detail
 }
 
-/** 安装失败是否属于进程级环境问题（信号终止 / 超时），供调用方决定是否停止后续安装尝试。 */
+/** 安装失败是否属于安装环境问题（信号终止 / 超时 / 无 stderr 诊断），供调用方决定是否停止后续安装尝试。 */
 export function isInstallEnvironmentalFailure(err: unknown): boolean {
     return err instanceof Error && isEnvironmentalInstallError(err as ExecError)
 }

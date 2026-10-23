@@ -32,6 +32,7 @@ import { inferRepoFromGitRemote, type RuntimeConfig } from '../config'
 
 import { quickVerifyProject } from '../helpers'
 import { findInstallBlockedReposWithFixes, hasDeliverableFixes } from './delivery'
+import { markEnvironmentalInstallFailure } from './environmental-failure'
 import { handleOverrideProtection } from './override-protect'
 
 // ---------------------------------------------------------------------------
@@ -369,6 +370,11 @@ export async function upgradeAlert(
             logger.warn(`[upgrade] ${result.packageName}: ${result.warning}`)
         }
 
+        // 环境性安装失败不归因目标仓库：记审计条目 + 动作标记，调用方不得计入失败（见记录 §12.16）
+        const environmentalMark = !result.success && result.environmental === true
+            ? markEnvironmentalInstallFailure(ctx, { scope: 'upgrade', repository: alert.repository, target: alert.packageName, error: result.error })
+            : {}
+
         return {
             type: 'dependency-upgrade',
             repository: alert.repository,
@@ -380,6 +386,7 @@ export async function upgradeAlert(
             success: result.success,
             error: result.error,
             durationMs: Date.now() - startMs,
+            ...environmentalMark,
         }
     } catch (error: unknown) {
         const message = toErrorMessage(error)

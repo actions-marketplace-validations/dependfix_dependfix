@@ -28,7 +28,7 @@ export interface VersionedOverrideBatchItem {
 export interface VersionedOverrideBatchOutcome {
     /** `true` = 已应用（动作与计数已写入，调用方不得再逐包重试） */
     applied: boolean
-    /** `true` = 环境性失败（信号 / 超时），调用方应跳过逐包重试 */
+    /** `true` = 环境性失败（信号 / 超时 / 无 stderr 诊断），调用方应跳过逐包重试 */
     skipSequential?: boolean
     /** 失败原因（供日志 / 审计条目复用） */
     reason?: string
@@ -39,7 +39,7 @@ export interface VersionedOverrideBatchOutcome {
  *
  * @returns `applied: true` = 已应用（动作与计数已写入，调用方不得再逐包重试）；
  *          `applied: false` = 未应用（工作区已回滚到合批前，调用方应逐包重试）；
- *          `skipSequential: true` = 环境性失败（信号 / 超时），逐包重试无归因价值且会耗尽预算
+ *          `skipSequential: true` = 环境性失败（信号 / 超时 / 无 stderr 诊断），逐包重试无归因价值且会耗尽预算
  */
 export async function tryBatchVersionedOverrides(
     ctx: RepoFixCtx,
