@@ -231,10 +231,9 @@ onMounted(load)
                         <CaomeiSwitch
                             id="org-notify-weekly"
                             v-model="settings.categories.weeklyDigest"
-                            disabled
                         />
                     </div>
-                    <small class="text-muted">{{ t('notifications.weeklyDigestUnavailable') }}</small>
+                    <small class="text-muted">{{ t('notifications.weeklyDigestHint') }}</small>
                     <CaomeiButton
                         type="button"
                         :loading="saving"

@@ -587,16 +587,16 @@ onMounted(() => {
                         <div>
                             <label :for="`notification-${row.category}`">{{ notificationCategoryLabel(row.category) }}</label>
                             <small v-if="notificationReason(row)" class="text-muted">{{ notificationReason(row) }}</small>
+                            <small v-if="row.category === 'weekly_digest'" class="text-muted">
+                                {{ t('settings.notifications.weeklyDigestHint') }}
+                            </small>
                         </div>
                         <CaomeiSwitch
                             :id="`notification-${row.category}`"
                             :model-value="row.enabled"
-                            :disabled="!row.editable || notificationSaving || row.category === 'weekly_digest'"
+                            :disabled="!row.editable || notificationSaving"
                             @update:model-value="value => onNotificationToggle(row, value)"
                         />
-                        <small v-if="row.category === 'weekly_digest'" class="text-muted">
-                            {{ t('settings.notifications.weeklyDigestUnavailable') }}
-                        </small>
                     </div>
                     <small class="text-muted">{{ t('settings.notifications.hint') }}</small>
                     <small v-if="!notificationChannelAvailable" class="text-muted">
