@@ -350,7 +350,7 @@
 
 **6 原子条目**（🛠️ 5 + 🚀 1；🎨 / 🧪 独立条目缺口显式标注，测试随各条目内嵌）：
 
-- **M48.1** [P0 🛠️] 兄弟包 / peer 家族锁步升级（vitest / typescript-eslint / jest / react；`eslint` 只做 peer range 校验）
+- **M48.1** [P0 🛠️] 兄弟包 / peer 家族锁步升级（vitest / typescript-eslint / jest / react；`eslint` 只做 peer range 校验）—— **已闭环**（2026-10-25）
 - **M48.2** [P0 🛠️] CI 独有脚本纳入验证链（`--mirror-ci-scripts`，只执行 `pnpm/npm/yarn run` 子集）
 - **M48.3** [P0 🛠️] 同告警尝试指纹去重与降级（PR 正文计数 + 第 3 次尝试起跳过）
 - **M48.4** [P1 🛠️] 提交面白名单与 `pnpm-workspace.yaml` 定点编辑（`git add -- <paths>` + `parseDocument`）

@@ -32,7 +32,7 @@
 - **M48.5** [P1 🛠️] PR 创建后 CI 回环（CLI / Action 侧）
 - **M48.6** [P1 🚀] 外部作业归因与合并门禁
 
-### M48.1 [P0 🛠️] 兄弟包 / peer 家族锁步升级
+### M48.1 [P0 🛠️] 兄弟包 / peer 家族锁步升级（**已闭环** `251c392c` + `c15bf8a8` + `5fb836bc` + `4a358bde` + `88c52744` + `8ff42a74` + `5033125f` + `ca4a95aa` + `f94981f0` + `48ff3d96` + `e3600c94`）
 
 - **目标**：同一次修复内，同一生态成员必须保持同一版本线（首批 vitest / typescript-eslint / jest / react 四家族），禁止跨大版本混装进入 PR。
 - **范围**：新增 `packages/engine/src/fixers/dependency/families.ts`（家族清单 + `resolveFamily` / `planFamilyUpgrade` 纯函数）；`fixers/dependency/index.ts`、`app/repo-fix.ts`、`app/repo-fix-member.ts` 接入升级计划与动作记录；`packages/core/src/report/types.ts` 增加 `FixAction.family`；`github/pr-creator.ts` 的改动摘要；定向测试。
@@ -46,6 +46,11 @@
 - **依赖**：2026-10-24 巡检证据；既有 `upgradeDependency` / `upgradeAlert`；`docs/design/modules/dependency-grouping.md` §8「组内必须锁步」遗留项（M48.1 承接）；设计稿 §4。
 - **交付物**：3-4 commits / 6-9 files（`families.ts` 新增、`fixers/dependency/index.ts`、`app/repo-fix.ts`、`app/repo-fix-member.ts`、`packages/core/src/report/types.ts`、`github/pr-creator.ts`、测试与文档）/ 350-600 行（量级估算）；实际 > 10 文件则拆 a/b 两批。
 - **风险与缓解**：私有 registry 解析失败 → 整族回滚 + 记录；家族清单误配 → 反例夹具 + peer range 校验；显式分组冲突 → 优先级规则 + 整族放弃。
+
+**落地**（2026-10-25）：新增 `fixers/dependency/families.ts`（四家族清单 + `resolveFamily` / `planFamilyUpgrade` 两阶段纯函数，同 major / 同精确版本两种锁步维度）与 `family-versions.ts`（registry packument 解析 / peer 元数据 / URL 归一化与缓存）；`manifest.ts` + `manifest-upgrades.ts` 把单包与家族的「校验 → 备份 → 一次写盘 → 一次 install → 整体回滚」收敛到同一实现，回滚失败保留 `.bak` 并披露；`app/family-upgrade.ts` 编排（pending → 解析 → 重算 → 写盘），接入常规分组 / 拆组逐包（同批告警目标优先）、workspace 成员、跨线三条路径；`FixAction.family` + core `collectFamilySummaries`（只消费成功且非 noOp，仓库级收敛，`members ∩ skipped = ∅`）+ 报告 `Family Lockstep` 段 + PR 正文 Family 列 / 段；`FAMILY_LOCKSTEP_FAILED` 登记平台失败分类（fix + deterministic）。`eslint` 只做 peer range 校验（`eslint@9 + typescript-eslint@8` 合法反例）；peer 不可解析 fail-open 留痕；同版本家族成员高于目标 → 整族放弃（不降级）。为控制 max-lines，`upgradeAlert` 与跨线升级循环分别迁出为 `app/upgrade-alert.ts` / `app/repo-fix-major.ts`（纯搬迁）。
+- **审计**：B1 quick Reject（1 blocker：跨 manifest 摘要合并产生 `members ∩ skipped ≠ ∅`；5 warning）→ 收口（仓库级口径 + 成功/非 noOp 过滤 + 测试补强）；B2 standard Pass（0 blocker / 4 warning，全部收口：回滚失败保留备份、失败口径回归断言、写盘顺序不变量）；B3 standard Pass（0 blocker / 9 warning，收口安全与语义：工厂 URL 归一化、不跟随重定向、错误只暴露 host、同版本冲突整族放弃、alertTargets 精确判定、manifest 原型污染防护、peer fail-open 留痕、测试补强）；B4 standard Reject（1 blocker：提交粒度 11 文件 / 混类型）→ 拆 C1 纯搬迁 / C2 编排 / C3 接线三段并补齐环境性 / 非环境性失败与分组成员回滚用例；B5 quick Reject（2 blocker：失败/出口码文档与实现矛盾、范围外测试混入）→ 收口 → R2 quick Pass（1 非阻塞 warning 已修）；mutation 4/4（成员匹配 / 回滚分支 / peer 校验 / 摘要过滤）。
+- **证据**：`pnpm run typecheck` 7 包 Done；`pnpm test` 317 passed | 2 skipped 文件 / 4849 passed / 10 skipped（首跑 1 例偶发失败、复跑全绿）；`pnpm lint` 0 error（3 条存量 warning）；`pnpm run build` packages 全绿；`check:docs` OK / `check:doc-size` 0 warning / `lint:md` OK / `check:orphan-ids` 0（816 文件）/ `standards-redundant:strict` 0 / `experience-landing` OK / `verify-chain` OK / `docs:check:i18n` OK / `i18n:check:anchor` OK / `docs:build` exit 0（fallback 118）；mutation 工件 `artifacts/review-gate/2026-10-24-m48-1-mutation.md`（还原后 md5 一致）；新增/修改源文件编号标记 0 命中。
+- **边界**：只覆盖同一 manifest 内的直接依赖（跨 manifest 家族不合并）；registry 解析依赖可达，`.npmrc` 按既有 registry-discovery 信任模型、`@scope:registry` 不覆盖；解析 / peer / 非环境性写入失败 → failed + `FAMILY_LOCKSTEP_FAILED`（影响 exit code），环境性安装失败走 `ENVIRONMENT_ERROR`（不计 failed），override-protect 为 noOp + skipped；`peerCheckSkipped` 仅日志留痕（不进报告）；同版本家族出现成员高于目标时整族放弃（宁可不修也不降级混装）。
 
 ### M48.2 [P0 🛠️] CI 独有脚本纳入验证链
 
