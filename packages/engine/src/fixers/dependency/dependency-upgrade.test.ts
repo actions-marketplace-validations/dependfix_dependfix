@@ -221,6 +221,11 @@ describe('upgradeDependency', () => {
         expect(result.success).toBe(false)
         expect(result.error).toContain('pnpm install failed')
         expect(result.error).toContain('ERR_PNPM_LOCKFILE_BREAKING_CHANGE')
+        // install 失败保留「带原前缀」的目标版本与 isMajor（与 precheck 失败的裸版本口径区分）
+        expect(result.fromVersion).toBe('^4.17.20')
+        expect(result.toVersion).toBe('^4.17.21')
+        expect(result.isMajor).toBe(false)
+        expect(result.environmental).toBe(false)
 
         // Verify rollback: package.json restored
         const restored = readFileSync(project.pkgPath, 'utf-8')
@@ -434,6 +439,10 @@ describe('upgradeDependency (member manifest / manifestDir)', () => {
 
             expect(result.success).toBe(false)
             expect(result.error).toContain('non-semver declaration')
+            // precheck 失败保留既有口径：from 为原声明、to 为裸目标版本、isMajor=false
+            expect(result.fromVersion).toBe(declaration)
+            expect(result.toVersion).toBe('5.4.14')
+            expect(result.isMajor).toBe(false)
             expect(mockRunTrackedCommand).not.toHaveBeenCalled()
             expect(readFileSync(memberPkgPath, 'utf-8')).toBe(originalMember)
 
