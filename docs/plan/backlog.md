@@ -266,7 +266,8 @@
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
 - **critical 告警必选不可关闭（待评估，P1 🛠️）** —— 现象（2026-10-24 用户反馈）：当前 `severityThreshold` 只决定 `high` 是否纳入（`critical` 恒在集合内，见 `apps/platform/server/services/notification/high-risk.ts`），但类别开关 `categories.securityHigh` 是 `critical` + `high` 共用的单一开关，关闭后组织与个人的安全类邮件全部停发（`resolveNotificationRecipients` 在类别关闭时返回空数组）；即「`critical` 必定发送」目前不成立，只有「平台自身问题」是真正的必选类别。用户预期 `critical` 与「平台自身问题」同级、不可关闭。
-  - **待评估点**：① 拆分语义（新增必选的 `securityCritical` + 可选的 `securityHigh`）还是保留单开关但让 `critical` 走独立通道；② 阈值枚举如何演进（`critical | high` 改为「是否附加 high」的布尔或新增枚举）；③ 个人偏好是否允许关闭 `critical`（建议不允许，并与组织开关一致）；④ 存量迁移（现网 `securityHigh=false` 的组织是否自动改用新的 critical 通道 → 会新增邮件，需在发布说明中披露）；⑤ `critical` 是否豁免冷却 / 每小时上限 / 指纹去重；⑥ UI 禁用态与「必选，不可关闭」说明是否对齐平台自身问题那一行。
+  - **已决策（2026-10-24，用户）**：`critical` 豁免类别开关（`securityHigh` 关闭时 `critical` 仍发送），**保留每小时上限**。
+  - **待评估点**：① 拆分语义（新增必选的 `securityCritical` + 可选的 `securityHigh`）还是保留单开关但让 `critical` 走独立通道；② 阈值枚举如何演进（`critical | high` 改为「是否附加 high」的布尔或新增枚举）；③ 个人偏好是否允许关闭 `critical`（建议不允许，并与组织开关一致）；④ 存量迁移（现网 `securityHigh=false` 的组织是否自动改用新的 critical 通道 → 会新增邮件，需在发布说明中披露）；⑤ 每小时上限的计数口径——现为 channel 级共享桶（`delivery.ts` 统计近一小时全部非周报 `sent` 行），`critical` 若与其他类别共用同一额度会被 run 突发挤掉、与「必发」冲突，需在「单独计数但沿用同一数值上限」与「沿用共享桶」之间定口径；⑥ 冷却与指纹去重保持现状（不随类别开关豁免一起放开，除非另有决策）；⑦ UI 禁用态与「必选，不可关闭」说明是否对齐平台自身问题那一行。
   - **触发条件**：用户确认按「`critical` 必选」实现；或出现 `critical` 告警因类别关闭而漏发的实例。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
