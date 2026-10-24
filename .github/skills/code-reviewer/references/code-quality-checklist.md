@@ -334,6 +334,18 @@ if (value) { ... }  // 对 0, "", false 失效
 | [documentation.md §6](../../../../docs/standards/documentation.md) | 归档条目落点校验粒度 | 同一 `##` 下存在编号 `###` 子条目时是否**逐条**校验（不得由兄弟条目的落点代偿）？无编号子条目的 `##` 是否整体校验？自指落点（`本条` / `同上` / `详见本条`）是否判空？门禁：`pnpm check:experience-landing`。 |
 | [platform.md §10.6](../../../../docs/standards/platform.md#106-队列执行进程隔离独立-worker-进程) | `apps/platform/docker/entrypoint.sh` 双进程编排 / 信号处置改动 | 容器停止（TERM / INT）的转发 trap 是否**先于**「启动子进程」与「输出就绪行」安装（就绪行是外部观测方唯一同步点，晚装则落在窗口的信号按默认处置终止 PID 1 → 观测方读到 signal 终止而非 143、看护循环与 worker 失去父进程）？子进程尚未启动时是否直接退出而非吞掉停止信号后照旧启动？源码顺序断言（`entrypoint.test.mjs`）是否同步更新？退避等待是否用 `sleep N & wait $!`（前台 `sleep` 阻塞 trap）并有真实 `sleep` + `TERM` 计时用例 |
 
+| [development.md §5.1.48](../../../../docs/standards/development.md) | 新增统计项 / 去重键 / 「读不到就降级」分支 | 统计依赖的列 / 字段是否有**生产写入方**（`rg` 全部写入点，防基于死列统计恒 0）；去重前提是否随语义演进失效（计划命令 → 实际命令需改并集 / 失效键）；降级是否**整体**而非静默截断（只取前 N 个会漏判关键语义并产出假阳） |
+| [development.md §5.1.49](../../../../docs/standards/development.md) | 分散判据收敛 / 「停止剩余步骤」/ 一次性记账 | 判据单点化是否同时收口**适配层**（取消 / 超时 / 空输出先适配成同形错误）？停机是否以**返回值向上传导**（void 只停本步）？`addSkipped` 一类记账是否放在**分区处**（尾部会被提前 return 整段跳过）？ |
+| [development.md §5.1.50](../../../../docs/standards/development.md) | client / server 共享字符串哨兵 / 「是否未知」判定 | 是否导出**镜像常量**（或共享包导入）并在 server 测试断言两侧相等？「是否未知」类判定是否收敛到单一纯函数，而非两端各写裸字面量？（枚举 / 阈值镜像见 §5.1.43） |
+| [development.md §5.1.51](../../../../docs/standards/development.md) | 某通知 / 投递类别豁免限流（指纹 / 冷却 / 每小时上限） | 是否只跳过自身限流判定，却仍让该类别的 `sent` 行计入**共享计数查询**（一次批量投递可挤掉常规类别）？是否补「豁免类别发送后常规类别仍可发送」用例？ |
+| [testing.md §6.10](../../../../docs/standards/testing.md) | 脚本级测试中的 shell 管道 / 退出码断言 | 管道 + tail 后接双竖线 fail 在 dash（无 `pipefail`）下是否为死代码（管道状态取末命令）？是否拆分为「捕获输出（带失败判定）」与「解析输出」两步并单独断言关键日志行？ |
+| [testing.md §6.8](../../../../docs/standards/testing.md) | mutation / 审计取证工件 | 是否逐项记录**文件、变异前 md5、失败用例名、复现命令**，而非只写「N/N 击杀」汇总？还原后是否 md5 核对一致？ |
+| [git.md §3.7.1](../../../../docs/standards/git.md) | 拆批提交 / lint-staged 文件级任务 | 拆批前是否先把**未暂存文档** stash / 还原到 HEAD（lint-staged 的 updateIndex 会按任务前后 diff 重暂存，未暂存文档可能被带入 feat commit）？每组 `git add` 后是否 `git diff --cached --name-only` 核对、提交后 `git show --stat HEAD` 复核？ |
+| [documentation.md §2](../../../../docs/standards/documentation.md) | Markdown 表格单元格含双竖线 | 是否用「反斜杠 + 双竖线」转义？`check:docs` / `lint-md` / `docs:build` 都不校验列数（门禁全绿但渲染丢列），改完是否解析产物 HTML 复核列数？ |
+| [documentation.md §6](../../../../docs/standards/documentation.md) | 实现形态反转（如「先建后 chown」→「以运行身份创建」） | 检查点矩阵行是否与条款**同批更新**？矩阵仍写旧形态会让后续审计按矩阵「整改」重新引入缺陷 |
+| [planning.md §2.5](../../../../docs/standards/planning.md) | 设计 / 验收中出现计数 | 是否写明**单位与分母**（如「安装尝试数」而非「故障事件数」）？同一故障在多链路各落一条审计时，按事件理解会误判重复计数 |
+| [platform.md §10.1](../../../../docs/standards/platform.md) | 官方 Node 基础镜像 / pnpm / node-gyp 工具链 | 是否先移除 corepack shim 再钉 pnpm 版本？受限网络是否设 `npm_config_nodedir`？pnpm 11 是否使用 `pnpm_config_*` 前缀（`npm_config_registry` 不保证生效，构建期两种前缀同时导出）？ |
+
 > **维护纪律**：本矩阵为严格约束检查点的**单点落点**，其他文档 / skill / agent 只做一行链接引用（见上方「规范单点声明」）。矩阵行与条款对应（**同一条款可对应多行**，见上方说明）；条款废弃 / 合并时同步删行。
 
 ### todo.md / todo-archive.md 子任务详细度审计（必查项）

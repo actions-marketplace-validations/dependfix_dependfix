@@ -169,3 +169,57 @@
 - **现象**：聚合层引入「配置关注集走新路径 / 未配置沿用快照」双路径后，`overallStatus` / `checkRunId` 两个 null 分支的 mutant 在既有用例下存活。
 - **手法**：造一个「快照 5 个派生字段全部与 signals 派生态冲突」的用例，断言存储值等于快照值；逐字段冲突才能让任一分支改走派生即失败。
 - **落点**：[development.md §5.1.46](../../standards/development.md) + 检查点矩阵行。
+
+---
+
+> **批次**：2026-10-24 M47 阶段归档 + 沉淀批次。**准入依据**：21 条 wisdom 中 8 条涉及跨批次可复用教训（① 数据前提 / ② 停机语义 / ③ 门禁与提交卫生 / ④ 周报豁免）；其余 13 条已直接落规范条款或压缩为既有条款指针，不重复收录。
+
+## 七十四、M47 归档批次经验沉淀（数据前提 / 停机语义 / 门禁与提交卫生 / 周报豁免）
+
+### 1. 统计项必须核实数据列的生产写入方
+
+- **现象**：周报「豁免」最初按 `ScanResult.fixStatus='converged'` 统计，但该列自 per-alert 模型起只写 `not-tried`（修复结果不回写），生产恒 0；单测直接种 converged 行造成假绿；经全仓写入点核对后改为 `RunSummary.alertsConverged`。
+- **手法**：新增统计 / 去重 / 降级前先 `rg` 目标字段全部写入点；无法证实写入方时改用已落库的汇总字段，或把边界登记为残余。
+- **落点**：[development.md §5.1.48](../../standards/development.md) + 检查点矩阵行。
+
+### 2. 去重前提会随语义演进失效，「读不到」不得静默截断
+
+- **现象**：验证链记录口径从「计划命令」改为「实际执行命令」后，原「首写胜出」前提失效；读取目标仓库 workflow 时只取前 N 个文件会让被丢弃项的关键语义漏判并产出「一致」假阳。
+- **手法**：去重键 / 缓存前提与语义同批复核（改并集或失效键）；「无法读取 / 超限」整体降级并在文案写明原因，不静默截断。
+- **落点**：[development.md §5.1.48](../../standards/development.md) + 检查点矩阵行。
+
+### 3. 判据单点化要连适配层、停机与记账位置一起收口
+
+- **现象**：环境性失败判据收敛后，lockfile 链「未启动即取消」抛普通 Error 被「stderr 空 → 环境性」吞掉；子步骤停机只停本步，调用方仍进入下一链路；`addSkipped` 放函数尾部被提前 return 整段跳过。
+- **手法**：适配层先把取消 / 超时 / 空输出转成同形错误；停机状态以返回值向上传导；一次性记账前移到分区处。
+- **落点**：[development.md §5.1.49](../../standards/development.md) + 检查点矩阵行。
+
+### 4. 跨端哨兵与枚举必须镜像常量并等值断言
+
+- **现象**：构建版本 `unknown` 在 server 与前端各写裸字面量，`unknown` 判定两份实现；任一端口径漂移都会让「未知」显示与判定分叉。
+- **手法**：前端导出镜像常量（或共享包导入），server 测试断言两侧相等；「是否未知」收敛到单一纯函数。
+- **落点**：[development.md §5.1.50](../../standards/development.md) + 检查点矩阵行。
+
+### 5. 豁免限流时要同步排除共享计数查询
+
+- **现象**：周报逐封投递写入的 `sent` 行虽豁免自身限流，却仍计入共享每小时上限；一次周报即可把平台事件 / 安全告警全部挤成 `skipped_throttled`。
+- **手法**：豁免分支与计数查询同批修改（`category: Not('weekly_digest')`），并补「周报发送后常规类别仍可发送」用例。
+- **落点**：[development.md §5.1.51](../../standards/development.md) + [platform-notification.md §7.3](platform-notification.md) + 检查点矩阵行。
+
+### 6. lint-staged 的 `updateIndex` 会把未暂存文档带进 feat commit
+
+- **现象**：即使业务 glob 已移除裸 `git add`，lint-staged 仍按任务前后 `git diff` 差异重暂存；M47.4 / M47.5 两次把 `docs/standards/platform.md`、`docs/design/...` 吞进 feat commit。
+- **手法**：拆批前把未暂存文档 `git stash` / 还原到 HEAD；每组 `git add` 后核对 `git diff --cached --name-only`，提交后 `git show --stat HEAD` 复核；误入时 soft reset 重新分组。
+- **落点**：[git.md §3.7.1](../../standards/git.md) + 检查点矩阵行。
+
+### 7. 脚本管道状态与 mutation 证据可复核性
+
+- **现象**：`cmd | tail` 后接 `|| fail` 在 dash（无 `pipefail`）下是死代码；mutation 工件只写「N/N 击杀」无法复核，审计要求逐项文件 / md5 / 失败用例名。
+- **手法**：拆分「捕获输出（带失败判定）」与「解析输出」；mutation 工件记录文件、变异前 md5、失败用例名与复现命令，还原后 md5 核对。
+- **落点**：[testing.md §6.10 / §6.8](../../standards/testing.md) + 检查点矩阵行。
+
+### 8. 官方 Node 基础镜像的工具链口径
+
+- **现象**：官方镜像默认 corepack shim 会回源下载 pnpm 覆盖镜像内版本；node-gyp 默认回源 headers；pnpm 11 只认 `pnpm_config_*` 前缀。
+- **手法**：钉 pnpm 前先移除 shim；受限网络设 `npm_config_nodedir`；切 registry 时同时导出两种前缀，并在构建期断言版本基线。
+- **落点**：[platform.md §10.1](../../standards/platform.md) + 检查点矩阵行。
