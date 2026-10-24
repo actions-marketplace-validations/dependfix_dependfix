@@ -10,7 +10,8 @@ import {
     type ExecError,
 } from '../process-signals'
 import { runTrackedCommand } from '../../runners/process-control'
-import type { DependencyFixResult, PackageJson } from './index'
+import type { PackageJson } from './manifest'
+import type { DependencyFixResult } from './index'
 
 /** 版本化 overrides 批量应用条目（一条 = 一个包的多 key overrides）。 */
 export interface VersionedOverridesPlan {
@@ -132,12 +133,18 @@ export function rollbackOverrideWrite(params: {
     cleanupBackups({ pkgBackup, lockBackup, workspaceBackup })
 }
 
+/**
+ * 从备份还原 manifest / lockfile。
+ *
+ * @returns `true` = 还原成功（或无需还原）；`false` = 复制失败（文件可能处于半写状态）
+ * 调用方可据此决定是否保留 `.bak` 并显式披露，而不是静默删除唯一恢复源。
+ */
 export function rollback(
     pkgPath: string,
     pkgBackup: string,
     lockfilePath: string,
     lockBackup: string | null,
-): void {
+): boolean {
     try {
         if (existsSync(pkgBackup)) {
             copyFileSync(pkgBackup, pkgPath)
@@ -145,8 +152,10 @@ export function rollback(
         if (lockBackup !== null && existsSync(lockBackup)) {
             copyFileSync(lockBackup, lockfilePath)
         }
+        return true
     } catch {
-        // 回滚失败 → 已写入 result.error，不在此层二次抛异常
+        // 回滚失败 → 由调用方写入 result.error 并保留备份，不在此层二次抛异常
+        return false
     }
 }
 

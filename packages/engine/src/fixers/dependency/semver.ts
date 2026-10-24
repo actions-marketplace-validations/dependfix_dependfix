@@ -1,5 +1,6 @@
-// semver.ts — dependency fixer 的版本比较原语（从 index.ts 拆出以控制文件行数）。
+// semver.ts — dependency fixer 的版本比较原语与声明形态判定（从 index.ts 拆出以控制文件行数）。
 // 保持既有导出名与语义不变：index.ts 继续 re-export，外部消费者无需调整 import。
+// 家族锁步模块（families.ts）直接消费本文件，避免与 index.ts 形成运行时循环依赖。
 
 /**
  * 从版本声明中提取主版本号（major）。
@@ -44,4 +45,28 @@ export function compareSemver(a: string, b: string): number {
         return aMinor - bMinor
     }
     return aPatch - bPatch
+}
+
+/**
+ * 检测版本声明是否包含包管理器协议前缀
+ * （`workspace:` / `catalog:` / `link:` / `file:` / `npm:` / `github:` /
+ * `gitlab:` / `bitbucket:` / `gist:` / `git:` / `git+ssh:` / `git+https:` /
+ * `git+http:` / `git+file:` / `https:` / `ssh:` 等）。
+ *
+ * 这类声明不是 semver range，`extractPrefix` 会将其误归为 `^` 导致声明被
+ * 不可逆改写（如 `catalog:` → `^x.y.z`、`git+ssh:` 来源从 fork/私有源静默
+ * 切回 registry），升级前必须拒绝。
+ *
+ * @example
+ * isNonSemverDeclaration('^4.17.20')      // false
+ * isNonSemverDeclaration('workspace:*')   // true
+ * isNonSemverDeclaration('catalog:')      // true
+ * isNonSemverDeclaration('link:../pkg')   // true
+ * isNonSemverDeclaration('git+ssh://...') // true
+ * isNonSemverDeclaration('gitlab:...')    // true
+ * isNonSemverDeclaration('https://...tgz') // true
+ */
+export function isNonSemverDeclaration(version: string): boolean {
+    const trimmed = version.trim()
+    return /^(workspace|catalog|link|file|npm|github|gitlab|bitbucket|gist|git(?:\+ssh|\+https|\+http|\+file)?|portal|patch|https?|ssh)\s*:/.test(trimmed)
 }

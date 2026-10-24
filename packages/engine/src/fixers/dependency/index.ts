@@ -22,11 +22,15 @@ import { upsertOverride } from './override-key'
 import { parseMajorVersion } from './semver'
 import { readLockfileVersion, readLockfileVersions } from './lockfile-versions'
 import { remainingVersionsBelowTarget, verifyVersionedOverridesApplied } from './override-verification'
+import { ensurePnpmOverrides, extractPrefix, findDependencyVersion, type PackageJson } from './manifest'
+import { applyManifestUpgrades, type ManifestUpgradeApplied } from './manifest-upgrades'
 
 export { normalizeOverrideKey, normalizeOverrideSelector, upsertOverride } from './override-key'
-export { compareSemver, parseMajorVersion } from './semver'
+export { compareSemver, isNonSemverDeclaration, parseMajorVersion } from './semver'
 export { readLockfileVersion, readLockfileVersions } from './lockfile-versions'
 export type { OverrideUpsert } from './override-key'
+export { ensurePnpmOverrides, extractPrefix, findDependencyVersion, type PackageJson } from './manifest'
+export type { ManifestUpgradeApplied } from './manifest-upgrades'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -69,22 +73,12 @@ export interface DependencyFixResult {
     environmental?: boolean
 }
 
-export interface PackageJson {
-    name?: string
-    dependencies?: Record<string, string>
-    devDependencies?: Record<string, string>
-    optionalDependencies?: Record<string, string>
-    peerDependencies?: Record<string, string>
-    pnpm?: {
-        overrides?: Record<string, string>
-        [key: string]: unknown
-    }
-    [key: string]: unknown
-}
-
-interface DependencyInfo {
-    group: 'dependencies' | 'devDependencies' | 'optionalDependencies'
-    version: string
+/** 家族锁步升级结果：`updates` 在安装失败时也保留已尝试的声明，便于报告展示。 */
+export interface FamilyUpgradeDependenciesResult {
+    success: boolean
+    updates: ManifestUpgradeApplied[]
+    error?: string
+    environmental?: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -110,103 +104,68 @@ export async function upgradeDependency(
     params: UpgradeDependencyParams,
 ): Promise<DependencyFixResult> {
     const { packageName, targetVersion, workDir, manifestDir } = params
-    const pkgPath = join(workDir, manifestDir ?? '.', 'package.json')
-    const lockfilePath = join(workDir, 'pnpm-lock.yaml')
+    const outcome = await applyManifestUpgrades({
+        workDir,
+        manifestDir,
+        requests: [{ packageName, targetVersion }],
+    })
+    const applied = outcome.updates[0]
 
-    // ---- 1. 读取 package.json ----
-    if (!existsSync(pkgPath)) {
-        return failResult(packageName, targetVersion, '', `${pkgPath}: file not found`)
+    if (!outcome.success) {
+        // 校验类早退（未写盘）保留既有 `toVersion` 口径：目标版本裸串（无原前缀）
+        const error = outcome.error ?? 'unknown error'
+        return applied && outcome.failurePhase === 'install'
+            ? {
+                packageName,
+                fromVersion: applied.fromVersion,
+                toVersion: applied.toVersion,
+                isMajor: applied.isMajor,
+                success: false,
+                error,
+                ...(outcome.environmental !== undefined ? { environmental: outcome.environmental } : {}),
+            }
+            : failResult(packageName, targetVersion, applied?.fromVersion ?? '', error)
     }
-
-    let pkg: PackageJson
-    try {
-        pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as PackageJson
-    } catch {
-        return failResult(packageName, targetVersion, '', `${pkgPath}: invalid JSON`)
-    }
-
-    // ---- 2. 查找目标包 ----
-    const dep = findDependencyVersion(pkg, packageName)
-    if (!dep) {
-        return failResult(
-            packageName,
-            targetVersion,
-            '',
-            `package "${packageName}" not found in dependencies / devDependencies / optionalDependencies`,
-        )
-    }
-
-    // ---- 2.5 非 semver 声明防护 ----
-    // `workspace:` / `catalog:` / `link:` 等协议声明无法安全改写为 semver range
-    // （extractPrefix 会将其误归为 `^`，导致声明被不可逆改写），明确失败计 failed。
-    if (isNonSemverDeclaration(dep.version)) {
-        return failResult(
-            packageName,
-            targetVersion,
-            dep.version,
-            `package "${packageName}" has a non-semver declaration "${dep.version}" (workspace:/catalog:/link:/etc.); manual upgrade required`,
-        )
-    }
-
-    const fromVersion = dep.version
-    const prefix = extractPrefix(fromVersion)
-    const toVersion = `${prefix}${targetVersion}`
-    const isMajor = parseMajorVersion(fromVersion) !== parseMajorVersion(toVersion)
-        && parseMajorVersion(fromVersion) !== -1
-        && parseMajorVersion(toVersion) !== -1
-
-    // ---- 3. 备份 ----
-    const pkgBackup = `${pkgPath}.bak`
-    const lockBackup = `${lockfilePath}.bak`
-
-    try {
-        copyFileSync(pkgPath, pkgBackup)
-        if (existsSync(lockfilePath)) {
-            copyFileSync(lockfilePath, lockBackup)
-        }
-    } catch {
-        return failResult(packageName, targetVersion, fromVersion, 'failed to create backup files')
-    }
-
-    // ---- 4. 修改 package.json ----
-    const deps = pkg[dep.group]
-    if (!deps) {
-        // 不应发生: findDependencyVersion 已确认该组存在且包含目标包
-        return failResult(packageName, targetVersion, fromVersion, `dependency group "${dep.group}" is missing`)
-    }
-    deps[packageName] = toVersion
-    writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`, 'utf-8')
-
-    // ---- 5. 执行 pnpm install ----
-    try {
-        await execPnpmInstall(workDir)
-    } catch (installErr: unknown) {
-        // 回滚
-        rollback(pkgPath, pkgBackup, lockfilePath, lockBackup)
-
-        // 回滚后清理备份
-        cleanupBackups({ pkgBackup, lockBackup })
-
-        return {
-            packageName,
-            fromVersion,
-            toVersion,
-            isMajor,
-            success: false,
-            error: formatInstallFailure(describeInstallError(installErr)),
-            environmental: isInstallEnvironmentalFailure(installErr),
-        }
-    }
-
-    // 成功 — 清理备份文件
-    cleanupBackups({ pkgBackup, lockBackup })
 
     return {
         packageName,
-        fromVersion,
-        toVersion,
-        isMajor,
+        fromVersion: applied.fromVersion,
+        toVersion: applied.toVersion,
+        isMajor: applied.isMajor,
         success: true,
+    }
+}
+
+/**
+ * 家族锁步升级：一次写盘 + 一次安装，失败整体回滚（含 lockfile）。
+ *
+ * 与 [upgradeDependency] 的区别只有写盘条数：族成员的 manifest 声明全部改完再执行
+ * 一次 `pnpm install`，任一成员校验失败 / 安装失败 / 回滚失败都按「整族失败」返回，
+ * 不产生半族状态。成员清单由 [planFamilyUpgrade] 决定（含触发包）。
+ *
+ * @param params - 工作目录、可选成员目录、待写盘成员（包名 + 目标版本）
+ */
+export async function upgradeFamilyDependencies(
+    params: {
+        workDir: string
+        manifestDir?: string
+        updates: ReadonlyArray<{ packageName: string, targetVersion: string }>
+    },
+): Promise<FamilyUpgradeDependenciesResult> {
+    const { workDir, manifestDir, updates } = params
+    if (updates.length === 0) {
+        return { success: false, updates: [], error: 'no family member updates provided' }
+    }
+    const outcome = await applyManifestUpgrades({
+        workDir,
+        manifestDir,
+        requests: updates.map((update) => ({ packageName: update.packageName, targetVersion: update.targetVersion })),
+    })
+    return {
+        success: outcome.success,
+        updates: outcome.updates,
+        ...(outcome.error !== undefined ? { error: outcome.error } : {}),
+        ...(outcome.environmental !== undefined ? { environmental: outcome.environmental } : {}),
     }
 }
 
@@ -613,85 +572,6 @@ export async function applyVersionedOverrides(
 // ---------------------------------------------------------------------------
 // Exported helpers (for unit testing)
 // ---------------------------------------------------------------------------
-
-/**
- * 从版本声明中提取前缀（^ / ~ / 空）。
- *
- * @example
- * extractPrefix('^4.17.20')  // '^'
- * extractPrefix('~4.17.0')   // '~'
- * extractPrefix('4.17.20')   // ''
- * extractPrefix('*')         // '^'  (默认)
- */
-export function extractPrefix(version: string): string {
-    const trimmed = version.trim()
-    if (/^\d/.test(trimmed)) {
-        return ''
-    }
-    if (trimmed.startsWith('^')) {
-        return '^'
-    }
-    if (trimmed.startsWith('~')) {
-        return '~'
-    }
-    // 复杂 range / * / latest → 默认 ^
-    return '^'
-}
-
-/**
- * 检测版本声明是否包含包管理器协议前缀
- * （`workspace:` / `catalog:` / `link:` / `file:` / `npm:` / `github:` /
- * `gitlab:` / `bitbucket:` / `gist:` / `git:` / `git+ssh:` / `git+https:` /
- * `git+http:` / `git+file:` / `https:` / `ssh:` 等）。
- *
- * 这类声明不是 semver range，`extractPrefix` 会将其误归为 `^` 导致声明被
- * 不可逆改写（如 `catalog:` → `^x.y.z`、`git+ssh:` 来源从 fork/私有源静默
- * 切回 registry），升级前必须拒绝。
- *
- * @example
- * isNonSemverDeclaration('^4.17.20')      // false
- * isNonSemverDeclaration('workspace:*')   // true
- * isNonSemverDeclaration('catalog:')      // true
- * isNonSemverDeclaration('link:../pkg')   // true
- * isNonSemverDeclaration('git+ssh://...') // true
- * isNonSemverDeclaration('gitlab:...')    // true
- * isNonSemverDeclaration('https://...tgz') // true
- */
-export function isNonSemverDeclaration(version: string): boolean {
-    const trimmed = version.trim()
-    return /^(workspace|catalog|link|file|npm|github|gitlab|bitbucket|gist|git(?:\+ssh|\+https|\+http|\+file)?|portal|patch|https?|ssh)\s*:/.test(trimmed)
-}
-
-/**
- * 在 `package.json` 的 `dependencies` / `devDependencies` / `optionalDependencies` 中按顺序查找包。
- */
-export function findDependencyVersion(
-    pkg: PackageJson,
-    packageName: string,
-): DependencyInfo | null {
-    const groups = ['dependencies', 'devDependencies', 'optionalDependencies'] as const
-    for (const group of groups) {
-        const deps = pkg[group]
-        if (deps && typeof deps === 'object' && packageName in deps) {
-            return { group, version: deps[packageName] }
-        }
-    }
-    return null
-}
-
-/**
- * 确保 `package.json` 中存在 `pnpm.overrides` 对象，若不存在则创建。
- * 返回 `overrides` 对象的引用，调用方可直接写入。
- */
-export function ensurePnpmOverrides(pkg: PackageJson): Record<string, string> {
-    if (!pkg.pnpm) {
-        pkg.pnpm = {}
-    }
-    if (!pkg.pnpm.overrides) {
-        pkg.pnpm.overrides = {}
-    }
-    return pkg.pnpm.overrides
-}
 
 /**
  * 读取当前已生效的 pnpm overrides 映射（与写入位置保持一致）：
