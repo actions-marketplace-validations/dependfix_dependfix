@@ -34,6 +34,18 @@ export const buildNotificationDeliveryKey = (input: {
 /** 平台事件按 auditId 幂等（不参与指纹 / 冷却）。 */
 export const buildPlatformDeliveryKey = (auditId: string): string => `platform:${auditId}`
 
+/**
+ * 周报专用投递键：`sha256('digest', weekKey, recipientIdentity, channel, 'weekly_digest')`。
+ *
+ * 不含 `attemptWindow` 与内容指纹——同一用户 + 渠道 + ISO 周唯一；周报由逐用户投递保证
+ * 「内容未变化也按周发送」（见设计稿 §6.4 / §7.3）。`recipientIdentity` 取用户 id，
+ * 额外管理员收件人（无 userId）取规范化邮箱。
+ */
+export const buildDigestDeliveryKey = (weekKey: string, recipientIdentity: string, channel: string): string =>
+    createHash('sha256')
+        .update(['digest', weekKey, recipientIdentity, channel, 'weekly_digest'].join(':'))
+        .digest('hex')
+
 /** 距上次发送是否仍在冷却窗口内（cooldownHours=0 → 永不冷却）。 */
 export const isNotificationCooldownActive = (
     lastSentAt: Date | null | undefined,

@@ -163,3 +163,102 @@ describe('dispatchNotification', () => {
         expect(result.status).toBe('skipped_no_recipient')
     })
 })
+
+describe('dispatchNotification 周报例外', () => {
+    beforeEach(() => {
+        setupMemoryDatabase()
+        sendMessage.mockClear()
+        installSpyChannel()
+    })
+
+    afterEach(() => {
+        teardownMemoryDatabase()
+        restoreEmail()
+    })
+
+    it('weekly_digest：豁免指纹 / 冷却 / 每小时上限，按用户 + 渠道 + 周唯一键占位', async () => {
+        const settings = { ...DEFAULT_NOTIFICATION_SETTINGS, cooldownHours: 24, maxPerHour: 1 }
+        const base = {
+            category: 'weekly_digest' as const,
+            scopeType: 'digest' as const,
+            scopeId: '2026-W44',
+            message,
+            settings,
+        }
+        const first = await dispatchNotification({
+            ...base,
+            recipients: [{ userId: 'u1', email: 'u1@x.com', role: 'admin' }],
+            recipientUserId: 'u1',
+            recipientIdentity: 'u1',
+        })
+        expect(first.status).toBe('sent')
+
+        // 同用户同周：键冲突 → skipped_duplicate（内容指纹为 null 也照样去重）
+        const duplicate = await dispatchNotification({
+            ...base,
+            recipients: [{ userId: 'u1', email: 'u1@x.com', role: 'admin' }],
+            recipientUserId: 'u1',
+            recipientIdentity: 'u1',
+        })
+        expect(duplicate.status).toBe('skipped_duplicate')
+
+        // 不同用户：即使 maxPerHour=1 也照常发送（周报豁免每小时上限）
+        const other = await dispatchNotification({
+            ...base,
+            recipients: [{ userId: 'u2', email: 'u2@x.com', role: 'admin' }],
+            recipientUserId: 'u2',
+            recipientIdentity: 'u2',
+        })
+        expect(other.status).toBe('sent')
+        expect(sendMessage).toHaveBeenCalledTimes(2)
+
+        const ds = await ensureDatabaseInitialized()
+        const logs = await ds.getRepository(NotificationLog).find({ where: { category: 'weekly_digest' } })
+        expect(logs.find((log) => log.status === 'sent' && log.recipientUserId === 'u1')?.deliveryKey).toHaveLength(64)
+        expect(logs.find((log) => log.status === 'skipped_duplicate')?.recipientUserId).toBe('u1')
+        expect(logs.every((log) => log.fingerprint === null)).toBe(true)
+    })
+
+    it('周报 sent 行不占用共享每小时上限（后续安全告警不被限流）', async () => {
+        const settings = { ...DEFAULT_NOTIFICATION_SETTINGS, maxPerHour: 1 }
+        for (const userId of ['u1', 'u2']) {
+            const result = await dispatchNotification({
+                category: 'weekly_digest',
+                scopeType: 'digest',
+                scopeId: '2026-W50',
+                message,
+                settings,
+                recipients: [{ userId, email: `${userId}@x.com`, role: 'admin' }],
+                recipientUserId: userId,
+                recipientIdentity: userId,
+            })
+            expect(result.status).toBe('sent')
+        }
+        const security = await dispatchNotification({
+            category: 'security_high',
+            scopeType: 'run',
+            scopeId: 'run-after-digest',
+            fingerprint: 'fp-after-digest',
+            message,
+            settings,
+            recipients: [{ userId: 'u3', email: 'u3@x.com', role: 'admin' }],
+        })
+        expect(security.status).toBe('sent')
+    })
+
+    it('weekly_digest 多收件人且缺 recipientIdentity → failed，不静默共键', async () => {
+        const result = await dispatchNotification({
+            category: 'weekly_digest',
+            scopeType: 'digest',
+            scopeId: '2026-W44',
+            message,
+            settings: DEFAULT_NOTIFICATION_SETTINGS,
+            recipients: [
+                { userId: 'u1', email: 'u1@x.com', role: 'admin' },
+                { userId: 'u2', email: 'u2@x.com', role: 'admin' },
+            ],
+        })
+        expect(result).toMatchObject({ status: 'failed', delivered: false, recipientCount: 2 })
+        expect(sendMessage).not.toHaveBeenCalled()
+    })
+})

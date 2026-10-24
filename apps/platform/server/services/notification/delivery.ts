@@ -1,7 +1,7 @@
-import { MoreThanOrEqual } from 'typeorm'
+import { MoreThanOrEqual, Not } from 'typeorm'
 import { listNotificationChannels } from './registry'
 import type { NotificationChannel, RenderedNotification } from './channel'
-import { buildNotificationDeliveryKey, buildPlatformDeliveryKey, isNotificationCooldownActive, isNotificationThrottled } from './dedupe'
+import { buildDigestDeliveryKey, buildNotificationDeliveryKey, buildPlatformDeliveryKey, isNotificationCooldownActive, isNotificationThrottled } from './dedupe'
 import { isDeploymentNotificationEnabled } from './preferences'
 import { parseNotificationSettingsJson } from './settings'
 import { resolveNotificationRecipients } from './recipients'
@@ -66,6 +66,8 @@ export const recordNotificationLog = async (input: {
     status: NotificationLog['status']
     errorMessage?: string | null
     sentAt?: Date | null
+    /** 周报逐封投递时写入收件人用户 id；其余类别为 null。 */
+    recipientUserId?: string | null
 }): Promise<NotificationLog | null> => {
     try {
         const ds = await ensureDatabaseInitialized()
@@ -76,7 +78,7 @@ export const recordNotificationLog = async (input: {
             scopeId: input.scopeId,
             channel: input.channel,
             fingerprint: input.fingerprint,
-            recipientUserId: null,
+            recipientUserId: input.recipientUserId ?? null,
             recipientsJson: JSON.stringify(input.recipients),
             status: input.status,
             errorMessage: input.errorMessage ?? null,
@@ -116,6 +118,16 @@ export interface DispatchNotificationInput {
     /** 测试 / 调用方已解析时传入，避免重复查询。 */
     recipients?: NotificationRecipient[]
     settings?: NotificationSettings
+    /**
+     * 周报逐封投递的收件人用户 id（写入 notification_log.recipientUserId）；
+     * 额外管理员收件人无 userId 时为 null。
+     */
+    recipientUserId?: string | null
+    /**
+     * 周报逐封投递的稳定身份（userId，缺省用邮箱）：用于构造「用户 + 渠道 + ISO 周」唯一键。
+     * 仅在 `category === 'weekly_digest'` 时参与投递键计算。
+     */
+    recipientIdentity?: string
 }
 
 /**
@@ -159,6 +171,7 @@ export const dispatchNotification = async (input: DispatchNotificationInput): Pr
             scopeId: input.scopeId,
             channel: channel?.name ?? 'email',
             fingerprint: input.fingerprint ?? null,
+            recipientUserId: input.recipientUserId ?? null,
             recipients: [],
             status: 'skipped_no_recipient',
         })
@@ -173,6 +186,7 @@ export const dispatchNotification = async (input: DispatchNotificationInput): Pr
             scopeId: input.scopeId,
             channel: channel?.name ?? 'email',
             fingerprint: input.fingerprint ?? null,
+            recipientUserId: input.recipientUserId ?? null,
             recipients: emails,
             status: 'noop',
         })
@@ -182,8 +196,10 @@ export const dispatchNotification = async (input: DispatchNotificationInput): Pr
     const ds = await ensureDatabaseInitialized()
     const logRepo = ds.getRepository(NotificationLog)
     const isPlatform = input.category === 'platform_incident'
+    const isDigest = input.category === 'weekly_digest'
 
-    if (!isPlatform) {
+    // 周报豁免指纹 / 24h 冷却（设计稿 §7.3）：周期摘要按「用户 + 渠道 + ISO 周」唯一键去重。
+    if (!isPlatform && !isDigest) {
         const latest = await logRepo.findOne({
             where: {
                 scopeType: input.scopeType,
@@ -222,30 +238,44 @@ export const dispatchNotification = async (input: DispatchNotificationInput): Pr
         }
     }
 
-    const sentInLastHour = await logRepo.count({
-        where: {
-            channel: channel.name,
-            status: 'sent',
-            createdAt: MoreThanOrEqual(new Date(now.getTime() - 3_600_000)),
-        },
-    })
-    if (isNotificationThrottled(sentInLastHour, settings.maxPerHour)) {
-        await recordNotificationLog({
-            deliveryKey: null,
-            category: input.category,
-            scopeType: input.scopeType,
-            scopeId: input.scopeId,
-            channel: channel.name,
-            fingerprint: input.fingerprint ?? null,
-            recipients: emails,
-            status: 'skipped_throttled',
+    // 周报豁免每小时上限（自身已有「每用户每渠道每周一次」上限，设计稿 §7.3）。
+    if (!isDigest) {
+        const sentInLastHour = await logRepo.count({
+            where: {
+                channel: channel.name,
+                status: 'sent',
+                // 周报逐封写入的 sent 行不占用共享上限，避免一次周报挤掉平台事件 / 安全告警
+                category: Not('weekly_digest'),
+                createdAt: MoreThanOrEqual(new Date(now.getTime() - 3_600_000)),
+            },
         })
-        return { status: 'skipped_throttled', delivered: false, channel: channel.name, recipientCount: recipients.length }
+        if (isNotificationThrottled(sentInLastHour, settings.maxPerHour)) {
+            await recordNotificationLog({
+                deliveryKey: null,
+                category: input.category,
+                scopeType: input.scopeType,
+                scopeId: input.scopeId,
+                channel: channel.name,
+                fingerprint: input.fingerprint ?? null,
+                recipients: emails,
+                status: 'skipped_throttled',
+            })
+            return { status: 'skipped_throttled', delivered: false, channel: channel.name, recipientCount: recipients.length }
+        }
     }
 
-    const deliveryKey = isPlatform
-        ? buildPlatformDeliveryKey(input.scopeId)
-        : buildNotificationDeliveryKey({
+    let deliveryKey: string
+    if (isPlatform) {
+        deliveryKey = buildPlatformDeliveryKey(input.scopeId)
+    } else if (isDigest) {
+        const identity = input.recipientIdentity || (recipients.length === 1 ? recipients[0]?.email : '')
+        if (!identity) {
+            console.error('[notification:delivery] weekly_digest requires recipientIdentity for multi-recipient dispatch')
+            return { status: 'failed', delivered: false, channel: channel.name, recipientCount: recipients.length }
+        }
+        deliveryKey = buildDigestDeliveryKey(input.scopeId, identity, channel.name)
+    } else {
+        deliveryKey = buildNotificationDeliveryKey({
             scopeType: input.scopeType,
             scopeId: input.scopeId,
             category: input.category,
@@ -253,6 +283,7 @@ export const dispatchNotification = async (input: DispatchNotificationInput): Pr
             now: now.getTime(),
             cooldownHours: settings.cooldownHours,
         })
+    }
 
     await reclaimStaleSendingLog(deliveryKey, now)
 
@@ -265,7 +296,7 @@ export const dispatchNotification = async (input: DispatchNotificationInput): Pr
             scopeId: input.scopeId,
             channel: channel.name,
             fingerprint: input.fingerprint ?? null,
-            recipientUserId: null,
+            recipientUserId: input.recipientUserId ?? null,
             recipientsJson: JSON.stringify(emails),
             status: 'sending',
             errorMessage: null,
@@ -280,6 +311,7 @@ export const dispatchNotification = async (input: DispatchNotificationInput): Pr
                 scopeId: input.scopeId,
                 channel: channel.name,
                 fingerprint: input.fingerprint ?? null,
+                recipientUserId: input.recipientUserId ?? null,
                 recipients: emails,
                 status: 'skipped_duplicate',
             })

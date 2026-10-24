@@ -4,7 +4,7 @@
  * 业务通知统一入口见 `delivery.ts#dispatchNotification`；本文件保留 `notifyEnvEvent`
  * 的平台事件语义（audit_event.notified + 渠道循环），并补投递记录 / 每小时上限。
  */
-import { MoreThanOrEqual } from 'typeorm'
+import { MoreThanOrEqual, Not } from 'typeorm'
 import { shouldNotifyEnvEvent } from './policy'
 import { NotificationError, type NotificationEvent } from './channel'
 import { listNotificationChannels, ensureNotificationChannelsRegistered } from './registry'
@@ -81,6 +81,8 @@ export const notifyEnvEvent = async (event: NotificationEvent): Promise<void> =>
     const sentInLastHour = await ds.getRepository(NotificationLog).count({
         where: {
             status: 'sent',
+            // 周报逐封写入的 sent 行不占用平台事件的共享上限
+            category: Not('weekly_digest'),
             createdAt: MoreThanOrEqual(new Date(Date.now() - 3_600_000)),
         },
     })

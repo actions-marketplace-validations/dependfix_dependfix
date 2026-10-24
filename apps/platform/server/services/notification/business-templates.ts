@@ -31,16 +31,30 @@ export interface RunCompletedNotificationData {
     link?: string
 }
 
+export interface WeeklyDigestNotificationData {
+    /** ISO 周键（如 `2026-W43`） */
+    weekKey: string
+    counts: { critical: number, high: number, total: number }
+    repositories: Array<{ repository: string, critical: number, high: number, total: number }>
+    truncated: { critical: number, high: number, total: number }
+    /** 快照运行汇总的本地已满足（converged）告警数（仅披露，不改明细计数） */
+    exempted: number
+    link?: string
+}
+
 interface Strings {
     securityTitle: (total: number, repos: number) => string
     failureTitle: (scope: string, failed: number) => string
     completedTitle: (scope: string, fixed: number, found: number) => string
+    digestTitle: (repos: number, critical: number, high: number) => string
     critical: string
     high: string
     total: string
     repository: string
     repositories: string
     truncated: (n: number) => string
+    exempted: (n: number) => string
+    week: string
     scope: string
     failed: string
     failureCode: string
@@ -56,12 +70,17 @@ const ZH: Strings = {
     securityTitle: (total, repos) => `${total} 个高危告警未修复 — ${repos} 个仓库`,
     failureTitle: (scope, failed) => `${scope}失败 — ${failed} 个仓库`,
     completedTitle: (scope, fixed, found) => `${scope}完成 — 修复 ${fixed} / 告警 ${found}`,
+    digestTitle: (repos, critical, high) => critical + high === 0
+        ? '本周无未修复高危'
+        : `${repos} 个仓库存在未修复高危 — 严重 ${critical} / 高危 ${high}`,
     critical: '严重',
     high: '高危',
     total: '合计',
     repository: '仓库',
     repositories: '仓库',
     truncated: (n) => `另有 ${n} 条截断未纳入明细`,
+    exempted: (n) => `引擎汇总另有 ${n} 条告警本地已满足（converged）`,
+    week: '周次',
     scope: '范围',
     failed: '失败仓库数',
     failureCode: '失败码',
@@ -77,12 +96,17 @@ const EN: Strings = {
     securityTitle: (total, repos) => `${total} high-risk alerts unfixed — ${repos} repositories`,
     failureTitle: (scope, failed) => `${scope} failed — ${failed} repositories`,
     completedTitle: (scope, fixed, found) => `${scope} completed — ${fixed} fixed / ${found} alerts`,
+    digestTitle: (repos, critical, high) => critical + high === 0
+        ? 'No unfixed high-risk alerts this week'
+        : `${repos} repositories have unfixed high-risk alerts — ${critical} critical / ${high} high`,
     critical: 'Critical',
     high: 'High',
     total: 'Total',
     repository: 'Repository',
     repositories: 'Repositories',
     truncated: (n) => `${n} truncated alerts are not included in the details`,
+    exempted: (n) => `${n} additional alerts are already satisfied locally (converged) per the engine summary`,
+    week: 'Week',
     scope: 'Scope',
     failed: 'Failed repositories',
     failureCode: 'Failure code',
@@ -119,6 +143,22 @@ const cell = (label: string, value: string): string =>
 
 const textFooter = (s: Strings, link?: string): string => [s.footer, link ?? ''].filter(Boolean).join('\n')
 
+/** 仓库分组明细（最多 50 行，其余折叠为 `+N`）；安全告警与周报共用。 */
+const repositoryBreakdownHtml = (
+    repositories: ReadonlyArray<{ repository: string, critical: number, high: number, total: number }>,
+    s: Strings,
+): string => {
+    const shown = repositories.slice(0, 50)
+    if (shown.length === 0) {
+        return ''
+    }
+    const repoRows = shown.map((repo) =>
+        `<tr><td style="padding: 6px; border-bottom: 1px solid #e2e8f0;">${escapeHtml(repo.repository)}</td><td style="padding: 6px; border-bottom: 1px solid #e2e8f0;">${repo.critical}</td><td style="padding: 6px; border-bottom: 1px solid #e2e8f0;">${repo.high}</td><td style="padding: 6px; border-bottom: 1px solid #e2e8f0;">${repo.total}</td></tr>`,
+    ).join('')
+    const remaining = repositories.length - shown.length
+    return `<h3 style="font-size: 16px;">${escapeHtml(s.repositories)}</h3><table style="width: 100%; border-collapse: collapse;"><thead><tr><th style="text-align:left;padding:6px;">${escapeHtml(s.repository)}</th><th style="text-align:left;padding:6px;">${escapeHtml(s.critical)}</th><th style="text-align:left;padding:6px;">${escapeHtml(s.high)}</th><th style="text-align:left;padding:6px;">${escapeHtml(s.total)}</th></tr></thead><tbody>${repoRows}</tbody></table>${remaining > 0 ? `<p style="font-size: 12px;color:#64748b;">+${remaining}</p>` : ''}`
+}
+
 export const renderSecurityNotification = (
     data: SecurityNotificationData,
     locale: NotificationLocale = 'zh-CN',
@@ -127,10 +167,6 @@ export const renderSecurityNotification = (
     const scope = scopeLabel(data.scopeLabel, locale)
     const title = `[dependfix]${NOTIFICATION_CATEGORY_TAGS.security_high} ${s.securityTitle(data.counts.total, data.repositories.length)}`
     const shown = data.repositories.slice(0, 50)
-    const repoRows = shown.map((repo) =>
-        `<tr><td style="padding: 6px; border-bottom: 1px solid #e2e8f0;">${escapeHtml(repo.repository)}</td><td style="padding: 6px; border-bottom: 1px solid #e2e8f0;">${repo.critical}</td><td style="padding: 6px; border-bottom: 1px solid #e2e8f0;">${repo.high}</td><td style="padding: 6px; border-bottom: 1px solid #e2e8f0;">${repo.total}</td></tr>`,
-    ).join('')
-    const remaining = data.repositories.length - shown.length
     const rows = [
         cell(s.scope, escapeHtml(`${scope} ${data.scopeId}`)),
         cell(s.critical, String(data.counts.critical)),
@@ -138,9 +174,7 @@ export const renderSecurityNotification = (
         cell(s.total, String(data.counts.total)),
         data.truncated.total > 0 ? cell(s.truncated(data.truncated.total), `${data.truncated.critical} ${s.critical} / ${data.truncated.high} ${s.high}`) : '',
     ].join('')
-    const repoTable = shown.length > 0
-        ? `<h3 style="font-size: 16px;">${escapeHtml(s.repositories)}</h3><table style="width: 100%; border-collapse: collapse;"><thead><tr><th style="text-align:left;padding:6px;">${escapeHtml(s.repository)}</th><th style="text-align:left;padding:6px;">${escapeHtml(s.critical)}</th><th style="text-align:left;padding:6px;">${escapeHtml(s.high)}</th><th style="text-align:left;padding:6px;">${escapeHtml(s.total)}</th></tr></thead><tbody>${repoRows}</tbody></table>${remaining > 0 ? `<p style="font-size: 12px;color:#64748b;">+${remaining}</p>` : ''}`
-        : ''
+    const repoTable = repositoryBreakdownHtml(data.repositories, s)
     const html = wrap(title, rows, data.link, s.footer).replace('</table>', `</table>${repoTable}`)
     const text = [
         title,
@@ -206,6 +240,40 @@ export const renderRunCompletedNotification = (
         `${s.alertsFound}: ${data.alertsFound}`,
         `${s.alertsFixed}: ${data.alertsFixed}`,
         data.durationMs !== undefined ? `${s.duration}: ${Math.max(0, Math.round(data.durationMs / 1000))}s` : '',
+        textFooter(s, data.link),
+    ].filter(Boolean).join('\n')
+    return { subject: title, html, text }
+}
+
+/**
+ * 周汇总（`weekly_digest`）：按仓库分组的活跃未修复高危快照。
+ * 单项豁免 / 截断单独成行披露——周报是周期摘要，必须在正文说清「还有多少没列」。
+ */
+export const renderWeeklyDigestNotification = (
+    data: WeeklyDigestNotificationData,
+    locale: NotificationLocale = 'zh-CN',
+): RenderedNotification => {
+    const s = strings(locale)
+    const title = `[dependfix]${NOTIFICATION_CATEGORY_TAGS.weekly_digest} ${s.digestTitle(data.repositories.length, data.counts.critical, data.counts.high)}`
+    const rows = [
+        cell(s.week, escapeHtml(data.weekKey)),
+        cell(s.critical, String(data.counts.critical)),
+        cell(s.high, String(data.counts.high)),
+        cell(s.total, String(data.counts.total)),
+        data.truncated.total > 0 ? cell(s.truncated(data.truncated.total), `${data.truncated.critical} ${s.critical} / ${data.truncated.high} ${s.high}`) : '',
+        data.exempted > 0 ? cell(s.exempted(data.exempted), String(data.exempted)) : '',
+    ].join('')
+    const repoTable = repositoryBreakdownHtml(data.repositories, s)
+    const html = wrap(title, rows, data.link, s.footer).replace('</table>', `</table>${repoTable}`)
+    const text = [
+        title,
+        `${s.week}: ${data.weekKey}`,
+        `${s.critical}: ${data.counts.critical}`,
+        `${s.high}: ${data.counts.high}`,
+        `${s.total}: ${data.counts.total}`,
+        data.truncated.total > 0 ? s.truncated(data.truncated.total) : '',
+        data.exempted > 0 ? s.exempted(data.exempted) : '',
+        ...data.repositories.slice(0, 50).map((repo) => `${repo.repository}: ${repo.critical}/${repo.high}/${repo.total}`),
         textFooter(s, data.link),
     ].filter(Boolean).join('\n')
     return { subject: title, html, text }

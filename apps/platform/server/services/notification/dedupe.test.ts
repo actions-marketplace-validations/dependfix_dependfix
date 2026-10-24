@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+    buildDigestDeliveryKey,
     buildNotificationDeliveryKey,
     computeAttemptWindow,
     computeNotificationFingerprint,
@@ -41,5 +42,14 @@ describe('通知指纹与降噪纯函数', () => {
     it('每小时上限：达到即限流', () => {
         expect(isNotificationThrottled(5, 6)).toBe(false)
         expect(isNotificationThrottled(6, 6)).toBe(true)
+    })
+
+    it('周报投递键：同一用户 + 渠道 + 周稳定；周 / 用户 / 渠道任一变化即不同', () => {
+        const base = buildDigestDeliveryKey('2026-W44', 'user-1', 'email')
+        expect(base).toBe(buildDigestDeliveryKey('2026-W44', 'user-1', 'email'))
+        expect(base).toHaveLength(64)
+        expect(buildDigestDeliveryKey('2026-W45', 'user-1', 'email')).not.toBe(base)
+        expect(buildDigestDeliveryKey('2026-W44', 'user-2', 'email')).not.toBe(base)
+        expect(buildDigestDeliveryKey('2026-W44', 'user-1', 'slack')).not.toBe(base)
     })
 })
