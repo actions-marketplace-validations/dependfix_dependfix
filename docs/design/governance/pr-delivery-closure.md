@@ -1,0 +1,393 @@
+# 对外 PR 交付闭环设计（M48）
+
+> **状态**：🔶 设计先行稿（2026-10-24 P 阶段落地；实施待 M48 D 阶段）
+> **来源**：2026-10-24 对外 PR 巡检 + [backlog](../../plan/backlog.md) 8 项同源候选
+> **定位**：回答「dependfix 发出去的 PR 是否真的能绿、失败后是否还会原样重来、合并后的红 check 该归因给谁」
+
+## 1. 背景与问题
+
+### 1.1 巡检实证
+
+| 现象 | 样本 | 代表 PR |
+|:--|:--|:--|
+| 本地 4 项验证全绿、CI 仍有红 | 6 个已建 PR | `push-all-in-one#551` / `#556`（`pnpm run coverage` 崩） |
+| 同一生态跨大版本混装 | 2 个红 PR | `vitest@^4.1.11` + `@vitest/coverage-v8@^3.2.4` |
+| 同一告警反复开 PR | 4 次 / 3 次 | `push-all-in-one#551→#556→#569→#570`；`rss-impact-server#1093/#1095` |
+| 提交混入与修复无关的文件 | 7 个可查 PR | `CHANGELOG.md` 空改、`.nuxtrc`、`auto-imports.d.ts` |
+| `pnpm-workspace.yaml` 整文件重排 | 3 例 | `picgo-plugin-optimization#151`（+19/−18） |
+| 合并后红 check 无法归因 | 21 个已合并 PR | Dependabot updater 10 / ACR manifest 3 / 父提交已红 4 / 取消 1 |
+| 合并全部靠人工点击 | 60 个已合并 PR | 中位 48 分钟、p90 5.4 小时、最长 2.5 天 |
+
+**样本口径**：60 = 本轮巡检的已建 / 已合并 PR 样本；66 = 含历史可查 PR；测量时点 2026-10-24。两套分母不互换。
+
+### 1.2 根因链
+
+1. **写入侧不做家族约束**：依赖修复按告警逐包升级，兄弟包可以跨大版本共存 → 工具链内部崩溃。
+2. **验证侧只跑固定四语义项**：目标仓库 CI 独有的 `coverage` / `e2e` / `visual` 脚本永不执行 → 本地绿 ≠ CI 绿。
+3. **交付侧不记尝试**：去重只看 `state:'open'` 的 PR，关闭后下一次运行原样重来 → 红 PR 循环。
+4. **提交面过宽**：`git add .` 把安装 / 构建副产物一起提交 → diff 噪声与合并冲突面。
+5. **回环缺失**：CLI / Action 建完 PR 即结束；平台 PR Check 只看 open PR 且只告警。
+6. **归因缺失**：合并后的外部作业红与「本次修复改坏」同列 → 质量判断失真。
+
+### 1.3 与既有能力的边界
+
+- [验证链与目标仓库 CI 口径对齐](./verification-ci-alignment.md)（M47.1）已解析 workflow 并披露 `unrecognized`，**明确不执行、不阻断**；本设计在其上增加「可选执行」，并新增结构化命令导出，不复用展示字符串。
+- [PR 构建与部署信号采集](./pr-build-deploy-signals.md)（M24.1 / M43.2）只轮询 **open** PR，且「失败即显」与 mergify 决策解耦；本设计不改其解耦原则。
+- [PR 自动合并指南](../../guide/auto-merge.md)（M21.4）已提供 mergify 模板与启用说明；本设计只补条件与文档，**不自动在目标仓启用**。
+- [依赖分组升级设计](../modules/dependency-grouping.md) 已登记「组内必须锁步的包」遗留项；M48.1 承接该遗留项，但只覆盖精选家族，不扩成通用依赖图。
+
+## 2. 目标与非目标
+
+**目标**：把「一次修复尝试」从生成到合并收口为可观测、可去重、可归因的闭环，使「PR 绿」成为可验证事实而非本地推断。
+
+**非目标**：
+
+- 不做通用依赖图 / 全生态家族推导（仅精选家族 + peer range 校验）。
+- 不解析 workflow 的 matrix / secrets / services 完整语义（沿用 M47.1 边界）。
+- 不执行 `docker build` / 任意 shell（只执行目标仓库 `package.json` 中可解析的 `pnpm/npm/yarn run <script>` 子集）。
+- 不新建平台持久表（尝试计数以 PR 正文标记为权威载体）。
+- 不自动在目标仓启用 mergify，不做合并后 check 的新采集链路（登记后续候选）。
+- 归因只驱动报告 / 平台 UI / 关闭判定，**不绕过 mergify 的 `check-success` 门禁**。
+- 平台侧创建 PR 后的回环（等待 / 评论 / 关闭）不在本阶段；只覆盖 CLI / Action 路径。
+- 不改 exit code 语义、不改 `PRE_EXISTING_FAILURE` 既有归因口径。
+
+## 3. 总体模型
+
+```text
+alert ──▶ 家族解析（M48.1）──▶ 升级 + 验证（M48.2）──▶ 提交（M48.4）──▶ PR（M48.3 尝试计数）
+                                                                  │
+                                             ┌────────────────────┘
+                                             ▼
+                               PR checks 回环（M48.5）──▶ 结果分类（M48.6）
+                                             │
+                             ┌───────────────┼────────────────┐
+                             ▼               ▼                ▼
+                         self_caused      pre_existing     external_noise
+                             │               │                │
+                       关闭判定 / 评论      不归因            不归因
+```
+
+**单一事实源**：家族规则、尝试指纹算法、提交路径集合、check 分类规则均为纯函数 / 常量表，报告、CLI、平台共用；禁止三处各写一份。
+
+**实施顺序**：M48.6 的分类纯函数先落地（无副作用、可用夹具与平台现有数据验证），M48.5 的回环再消费它，避免 M48.5 → M48.6 的循环依赖。
+
+## 4. M48.1 家族锁步升级
+
+### 4.1 家族清单
+
+**决策 D1**：精选清单为权威，`peerDependencies` 仅作兼容性校验（不自动扩展成员）。
+
+| 家族 | 锁步成员 | 锁步维度 | 关联校验（不锁步） |
+|:--|:--|:--|:--|
+| vitest | `vitest` / `@vitest/coverage-v8` / `@vitest/ui` / `@vitest/browser` | 同 major | — |
+| typescript-eslint | `@typescript-eslint/parser` / `@typescript-eslint/eslint-plugin` / `typescript-eslint` | 同版本 | `eslint` 按 peer range 校验；`typescript` 兼容性不锁步 |
+| jest | `jest` / `@types/jest` | 同 major | `ts-jest` 按 peer range 校验 |
+| react | `react` / `react-dom` / `@types/react` / `@types/react-dom` | 同 major | — |
+
+**反例（必须锁定）**：`eslint@9` + `typescript-eslint@8` 是官方支持组合，**不得**判为锁步违规；把 `eslint` 塞进同 major 家族会把合法组合判红。
+
+### 4.2 升级规则
+
+1. **优先级**：显式 `upgradeGroups` > 家族规则 > 单包升级；同一包同时命中时只执行最高优先级一次。
+2. 命中家族的告警升级时，解析同家族在**同一旧 major / 旧版本线**的其它成员，统一升到目标 major / 版本线。
+3. 已在目标线的成员保持不动；**不在 manifest 中的 peer 成员**记 `familyMemberSkipped` 并继续。
+4. **版本解析失败**（registry 不可达 / 无法确定目标版本）→ 整族放弃并回滚，`FixAction.error = FAMILY_LOCKSTEP_FAILED`，不产生部分升级。
+5. 家族升级必须**原子**：任一成员安装 / 验证失败 → 整体回滚（含 lockfile），告警 `not-fixable`。
+6. `--allow-major-upgrade` 语义不变；本规则只保证同一次升级内部不劈叉。
+7. `override-protect` 命中任一成员时整族放弃并留痕，不先生成半族 PR。
+
+### 4.3 契约
+
+- `FixAction` 增加可选 `family?: { id: string, members: string[], skipped: string[] }`（`packages/core/src/report/types.ts`）。
+- 报告新增一行「家族锁步」摘要（命中家族 / 成员数 / 跳过成员 / 实际版本）。
+- 审计事件记录 `family_lockstep_applied` / `family_lockstep_failed`（登记到既有审计事件枚举）。
+
+### 4.4 已知边界
+
+- 只覆盖直接依赖与成员 manifest；间接依赖走既有 overrides 链，不做家族合并。
+- 成员版本解析依赖 registry 可达；离线 / 私有源失败按整族回滚。
+- 不承诺 TypeScript 编译器与 typescript-eslint 的兼容矩阵，只做 peer range 校验；不兼容时整族放弃并留痕。
+- [dependency-grouping](../modules/dependency-grouping.md) 的「组内必须锁步」遗留项由本条承接；分组（同批验证）与家族（版本一致）语义不同，不合并实现。
+
+## 5. M48.2 CI 独有脚本纳入验证链
+
+### 5.1 解析
+
+**不复用 `CiAlignmentRecord.unrecognized`**：该数组是展示用途（截断 120 字符、反引号替换、每 workflow 上限 5 条），不能作为执行源。
+
+`ci-alignment.ts` 新增结构化导出 `runFragments: Array<{ command: string, kind: 'recognized' | 'unrecognized', workflow: string }>`（原始命令，未截断）；M48.2 只消费 `kind === 'unrecognized'` 且能归一化为 `pnpm/npm/yarn run <script>` 的项，并要求 `script` 存在于目标仓库 `package.json#scripts`。
+
+### 5.2 执行开关
+
+**决策 D2**：新增 `RuntimeConfig.mirrorCiScripts`（CLI `--mirror-ci-scripts`、Action input `mirror-ci-scripts`，默认 `false`）。
+
+- 开启后，在默认验证链**之后**追加执行解析出的 CI 脚本；首个失败即停。
+- 只执行 `pnpm run <script>` / `npm run <script>` / `yarn <script>`；`docker` / `gh` / `curl` / 任意 shell 跳过并记 `mirrorSkipped`。
+- 最多执行 3 条（按 workflow 顺序去重），超限部分记 `mirrorSkipped` 并披露。
+- 平台 `verifyCommands` 优先级不变（显式配置整链替换，不与 mirror 叠加）；平台侧 M48 不新增配置入口（沿用默认 `false`）。
+
+### 5.3 预算与归因
+
+- 单条脚本沿用**验证命令**超时口径 `DEFAULT_COMMAND_TIMEOUT_MS`（10 分钟，`verification-runner.ts`），不引入第二个计时器；纳入运行级取消面。
+- **基线归因**：mirror 命令必须纳入修复前基线采样；基线已红 → `preExisting`，不参与回滚、不改变 exit code。
+- 非基线失败按本次改动归因，经 `enforceVerificationGate` 处理。
+
+### 5.4 契约
+
+- `CiAlignmentRecord` 增加 `mirrored: string[]` / `mirrorSkipped: Array<{ command: string, reason: string }>`。
+- PR 正文「CI 口径」区块增加一行「已镜像执行 N 条 / 跳过 M 条」。
+- 运行报告验证段记录每条命令 `source=default|repo-config|ci-mirror`。
+
+## 6. M48.3 同告警尝试指纹去重
+
+### 6.1 指纹键
+
+```text
+attemptKey = sha256([source, packageName, targetVersion, planStrategy].join('\u0000')).slice(0, 16)
+```
+
+- `planStrategy` = 本次计划的修复策略（如 `direct-upgrade` / `versioned-override` / `family-lockstep`）。
+- 该键在**创建 PR 前**即可计算，不依赖失败文本；命名空间隐含于仓库作用域（读取按单仓索引，键本身不含 repo）。
+- 若 M48.5 开启并观察到 CI 失败，可附带 `failureSignature`（失败命令 + 首 2KB 错误归一化）写入标记；**签名只增强证据，不改变计数口径**。
+
+### 6.2 载体与计数
+
+**决策 D3**：PR 正文 HTML 注释为权威载体（CLI / Action / 平台通用，无需迁移）：
+
+```html
+<!-- dependfix:attempt key=<key> n=<n> fp=<optional> failed=<0|1|?> -->
+```
+
+- 创建 PR 时写入 `n` = 同 key 的最近关闭 PR 数 + 1；`fp` / `failed` 仅在 M48.5 观察到结果后 PATCH 回写。
+- 读取：按仓库缓存一次最近 50 条 `state:'closed'` PR 索引（运行级缓存，不按告警重复拉取），按 `dependfix/auto-fix-` 前缀 + `key` 匹配。
+- 标记解析失败按未命中处理（fail-open），不误跳过。
+
+### 6.3 命中行为
+
+**决策 D7**：同 key 已有 2 个关闭 PR（即第 3 次尝试）起跳过并记账；前两次允许尝试。**判定时点**：家族 / 策略解析后、执行升级前；命中即跳过，不白跑安装与验证链。
+
+- 跳过时：`FixAction.noOp = true`；`alertsSkippedByReason['repeated-failure'] += 1`（`SKIP_REASONS` 新增 key，保持 `sum(...) === alertsSkipped`）；不创建 PR、不增 `alertsFailed`。
+- `--retry-failed`（CLI）/ `retry-failed`（Action input）显式忽略命中，强制再试一次，并在报告标注「人工强制」。
+- 目标版本变化、advisory 撤回 / 关闭 → key 自然失效。
+
+### 6.4 已知边界
+
+- 关闭 PR 不在最近 50 条时可能漏命中（fail-open）。
+- 无 CI 判定即被人工关闭的 PR 计为一次尝试；`--retry-failed` 为逃生通道。
+- 指纹依赖 PR 正文未被人工改写；被改写后退化为未命中。
+- 不在本阶段做「按失败签名跨仓库聚合」；平台侧不建表。
+
+## 7. M48.4 提交面白名单与 YAML 定点编辑
+
+### 7.1 提交路径集合
+
+**决策 D4**：fixer / AI patch 必须声明 `changedPaths`，提交时执行 `git add -- <paths>`（替换 `pr-creator.ts:230` 的 `git add .`）。
+
+固定白名单（glob，覆盖 monorepo 成员）：
+
+- `package.json` / `**/package.json`
+- `pnpm-lock.yaml` / `pnpm-workspace.yaml` / `.npmrc` / `.gitignore`
+- fixer 显式返回的源码路径（AI patch 的应用路径集合）
+
+**路径校验**：拒绝绝对路径、`..`、以 `:(` 开头的 pathspec magic、控制字符；白名单外路径必须由 fixer 显式声明。
+
+**生成物黑名单**（一律不提交）：`.nuxtrc`、`.nuxt/**`、`auto-imports.d.ts`、`components.d.ts`、`dist/**`、`node_modules/**`、`.pnpm-store/**`、`dependfix-reports/**`。
+
+### 7.2 未声明改动处理
+
+提交前用 `git status --porcelain` 比对：
+
+- 存在**未声明**的已跟踪文件改动 → 失败 `UNEXPECTED_CHANGES`（打印路径），不静默提交。
+- 存在未跟踪文件 → 默认忽略（除非在声明集合内）。
+- 空集合 → 失败 `NO_CHANGES`。
+
+### 7.3 YAML 定点编辑
+
+**现状**：`fixers/dependency/index.ts:481/526` 用 `YAML.stringify(doc)` 整文件重写，引号风格与键序被规范化。
+
+**目标**：改用 `YAML.parseDocument` + `doc.setIn(['overrides', key], value)`，保留注释、引号风格与键序；写回 `String(doc)` 并保证单个尾随换行。解析失败（重复键 / 锚点 / 非法语法）→ 保持原文件不写盘并留痕，不降级为整文件重写。
+
+### 7.4 验证
+
+- 黄金夹具：单引号 / 无引号 / 含注释三种风格，断言「仅目标键变化」。
+- 真实临时仓库：预置生成物 + 未声明改动，断言提交集合只含白名单 / 声明路径。
+- AI patch 路径集合与 fixer 声明取并集；缺失声明按 `UNEXPECTED_CHANGES` 失败。
+
+## 8. M48.5 PR 创建后 CI 回环（CLI / Action 侧）
+
+### 8.1 状态机
+
+```text
+created ──▶ polling ──▶ passed
+                    ├──▶ failed(self_caused | external_noise | pre_existing | unknown)
+                    ├──▶ cancelled（记录，不评论）
+                    ├──▶ no_ci_detected（宽限期后仍 0 check，不按 passed）
+                    └──▶ timeout（评论标注未判定）
+```
+
+数据源：`checks.listForRef` + **分页** `listCommitStatusesForRef`（与平台侧既有取舍一致，避免 combined status 明细上限）。
+
+**终态**：所有 check `status === 'completed'` 且**已观测到至少一条 check**（创建后宽限 ≥60s 且至少两轮轮询）；宽限期后仍为 0 → `no_ci_detected`，绝不判 `passed`。
+
+### 8.2 轮询与预算
+
+**决策 D5**：默认关闭，`--wait-pr-checks` / Action input `wait-pr-checks` 开启。
+
+- 间隔 15s 起，指数退避到 60s。
+- **per-PR 上限**默认 15 分钟（`DEPENDFIX_PR_CHECK_TIMEOUT_MS`）；**per-run 总预算**默认 20 分钟（`DEPENDFIX_PR_CHECK_RUN_BUDGET_MS`），且不超过剩余 job 预算的 70%。
+- 预算耗尽时，未完成的 PR 记 `checksTimedOut`，保留 PR，交给后续运行 / 平台 PR Check。
+- 每个仓库最多 1 个并发等待；API 429 按退避重试并记录。
+- 与平台 PR Check 轮询互不复用：CLI 侧只等待本次创建的 PR，不写平台库。
+
+### 8.3 处置动作
+
+| 动作 | 触发 | 默认 | dry-run |
+|:--|:--|:--|:--|
+| `report` | 任意终态 | 总是写运行报告 | 写报告 |
+| `comment` | failed / timeout | 是（附失败 job 名 + URL + 尝试标记） | 不评论 |
+| `close` | failed 且分类 `self_caused` | 否（`--close-failed-pr` 显式开启） | 不关闭 |
+
+- `unknown` **只评论不关闭**；`external_noise` / `pre_existing` 只评论。
+- 关闭时同步删除分支（`--close-failed-pr` 语义包含 cleanup），报告记 `closedByDependfix`。
+- `cancelled` 不评论；`no_ci_detected` 只报告。
+
+### 8.4 已知边界
+
+- 只在 PR 创建后的单次运行内等待，不做跨进程续等。
+- GitHub Actions job 总时长 25 分钟；per-run 预算必须低于该值。
+- **平台侧创建 PR 后的回环不在本阶段**（平台仍沿用 PR Check 轮询 + 告警），登记后续候选。
+
+## 9. M48.6 外部作业归因与自动合并门禁
+
+### 9.1 分类枚举
+
+```ts
+type CheckAttribution = 'self_caused' | 'pre_existing' | 'external_noise' | 'cancelled' | 'unknown'
+```
+
+规则表（纯函数 `classifyCheckFailure`）：
+
+| 规则 | 判定 | 归属 |
+|:--|:--|:--|
+| job 名含 `dependabot` / `updater` 且结论为 `security_update_not_possible` / advisory withdrawn | 文本 + 事件 | `external_noise` |
+| job 为镜像 / registry 推送且错误含 `unknown manifest class` / `manifest unknown` | 错误签名 | `external_noise` |
+| job 为 `Cloudflare Workers Builds` / `Release` 且父提交同 job 已红 | 父提交比对 | `pre_existing` |
+| 结论为 `cancelled` / `skipped` | 结论 | `cancelled` |
+| 其余失败 | 兜底 | `unknown` |
+
+**决策 D6**：未知形态一律 `unknown`，不得默认 `self_caused` 或 `external_noise`。
+
+### 9.2 呈现与关闭
+
+- 运行报告新增「check 归因」小节（按分类计数 + 代表 job）。
+- 平台 PR Check 详情使用同一分类标签。
+- 归因只驱动报告 / UI / 评论 / 关闭：关闭仅 `self_caused`；`unknown` 评论标注未判定。
+- **归因不参与自动合并放行**：mergify 仍以 `check-success` 全绿为唯一条件；`external_noise` / `pre_existing` 只是「解释」，不是「豁免」。
+
+### 9.3 mergify 条件
+
+`.github/mergify.yml` 的两条规则（dependabot / dependfix）统一补齐同批 job：
+
+- `check-success=Test`
+- `check-success=Coverage`
+- `check-success=E2E`
+- `check-success=Visual Regression`
+
+说明：`skipped` 不等于 `success`，目标仓若对某些 job 做路径过滤，需自行裁剪条件；`build` 属 `Publish Docker Image` 独立 workflow（仅 master push 触发），不产生 PR check，不纳入。
+
+**边界**：模板与文档更新仅作用于本仓库；目标仓库是否启用仍由用户按 [auto-merge 指南](../../guide/auto-merge.md) 执行。
+
+### 9.4 采集边界
+
+合并后 check 的**新采集链路**不在本阶段范围（平台 monitor 仍只拉 open PR）。本阶段消费：
+
+- CLI / Action 自带 PR 的 check 结果（M48.5）；
+- 平台已轮询到的 open PR check 结果；
+- 外部巡检脚本 / 人工提供的合并后快照（只做离线报告与分类）。
+
+## 10. 契约汇总
+
+### 10.1 配置
+
+| 键 | 形态 | 默认 | 作用域 |
+|:--|:--|:--|:--|
+| `mirrorCiScripts` | boolean | false | engine / CLI / Action |
+| `waitPrChecks` | boolean | false | engine / CLI / Action |
+| `prCheckTimeoutMs` | number | 900000（per PR） | engine |
+| `prCheckRunBudgetMs` | number | 1200000（per run） | engine |
+| `closeFailedPr` | boolean | false | engine / CLI / Action |
+| `retryFailed` | boolean | false | engine / CLI / Action |
+
+### 10.2 报告字段
+
+- `FixAction.family`（M48.1）；`SKIP_REASONS` 新增 `'repeated-failure'`（M48.3）。
+- `CiAlignmentRecord.mirrored` / `mirrorSkipped`（M48.2）。
+- core `RunResult.prCheckWatch?: { attempts: Array<{ pr: { number: number, htmlUrl: string }, state: 'passed' | 'failed' | 'cancelled' | 'no_ci_detected' | 'timeout', attribution?: CheckAttribution, closed: boolean }>, runBudgetExhausted: boolean }`（M48.5 / M48.6）；engine 的 `PullRequestResult` 只作内部返回，不承载报告字段。
+- 运行摘要：`prsOpened` / `prsSkippedByFingerprint` / `prsClosedAfterFailure` / `checksTimedOut`。
+
+### 10.3 PR 正文标记
+
+- 尝试计数：`<!-- dependfix:attempt key=<k> n=<n> fp=<optional> failed=<0|1|?> -->`
+- 家族锁步：在「改动摘要」中列成员（无隐藏标记）
+- 分类：在「CI 结果」区块按分类列出，不写隐藏标记
+
+## 11. 降级矩阵
+
+| 失败点 | 行为 | 是否影响 exit code |
+|:--|:--|:--|
+| registry 不可达 / 家族成员版本解析失败 | 整族回滚，告警 `not-fixable` | 否（`not-fixable` 既有语义） |
+| 显式分组 / override-protect 命中家族成员 | 整族放弃并留痕，不产生半族 PR | 否 |
+| CI 脚本解析失败 / 无 package.json / 命令超限 | 跳过 mirror，记 `mirrorSkipped` | 否 |
+| mirror 命令基线已红 | `preExisting`，不回滚、不改 exit code | 否 |
+| 最近关闭 PR 索引失败 / 标记解析失败 | fail-open，视为未命中 | 否 |
+| `git status` 出现未声明改动 / 路径非法 | 失败 `UNEXPECTED_CHANGES`，不开 PR | 是（本次修复失败） |
+| YAML `parseDocument` 失败 | 不写盘 + 留痕，不降级整文件重写 | 是（本次修复失败） |
+| PR check 轮询超时 / 429 / 预算耗尽 | 记 `checksTimedOut` / 退避，PR 保留 | 否 |
+| 宽限期后 0 check | `no_ci_detected`，不判 passed | 否 |
+| comment 权限不足（403） | 记录，不改变 PR 状态 | 否 |
+| PR 正文被模板覆盖 | 标记丢失 → fail-open | 否 |
+| 分类未知 | `unknown`，不判 passed、不关闭；合并仍由 mergify `check-success` 决定 | 否 |
+
+## 12. 验证矩阵
+
+| 层 | 内容 |
+|:--|:--|
+| 单元 | 家族解析（含 `eslint@9 + typescript-eslint@8` 合法反例）/ 尝试键 / 分类规则 / YAML 定点编辑 / 路径校验 |
+| 契约 | 配置解析、报告字段、PR 正文标记往返、`SKIP_REASONS` 求和 |
+| 集成 | 临时 Git 仓库：提交集合 + YAML diff；mock Octokit：轮询 / comment / close / 超时 / 0 check |
+| 回归 | 既有 `pr-creator` / `ci-alignment` / `dependency` / 报告测试全绿；mutation 逐条标定 |
+| 真实路径 | 目标仓库 dry-run（不推送）+ 本地 fixture 仓；外部仓库只做人工抽检 |
+
+## 13. 决策记录
+
+| 编号 | 决策 | 备选与否决理由 |
+|:--|:--|:--|
+| D1 | 精选家族清单为权威，peer 仅校验 | 自动推导误报高；`eslint` 与 `@typescript-eslint/*` 不是同 major 关系 |
+| D2 | `--mirror-ci-scripts` 可选执行脚本子集 | 默认执行成本不可控；`--strict-ci` 阻断会让存量仓库直接红 |
+| D3 | PR 正文**尝试计数**为权威载体，签名可选 | 平台表对 CLI / Action 不可用；运行报告不跨运行；创建时尚无失败文本 |
+| D4 | 声明路径 + 固定 glob 白名单 | 黑名单永远漏；整仓 `add` 已实证混入生成物 |
+| D5 | opt-in 有界轮询，per-PR + per-run 双预算 | 默认 close 风险高；无界 / 仅 per-PR 会突破 job 预算 |
+| D6 | 未知分类兜底 `unknown` | 默认 `self_caused` 会误关，默认 `external_noise` 会洗白回归 |
+| D7 | 同 key 第 3 次尝试起跳过 | 零重试放大瞬时失败；无限重试制造红 PR 循环 |
+| D8 | 合并后 check 采集不在本阶段 | 需新增平台轮询面，超出 6 原子容量；登记后续候选 |
+| D9 | 归因不绕过 mergify 门禁 | mergify 无归因扩展点；按归因放行会合并真实回归 |
+| D10 | 平台侧建 PR 后回环不在本阶段 | 平台已有 PR Check 告警；CLI / Action 是巡检红 PR 的主要来源 |
+
+## 14. 已知边界与后续候选
+
+1. 家族清单只覆盖首批 4 个；新增家族需补规则与夹具。
+2. 尝试计数依赖 PR 正文；人工改写后退化为未命中。
+3. 失败签名去重仅在 M48.5 开启时增强证据；默认按尝试次数。
+4. CI mirror 只执行 `pnpm/npm/yarn run` 子集；`docker build` / 复合 shell 只披露。
+5. CLI 侧回环不跨进程续等；平台侧建 PR 后回环为后续候选。
+6. 合并后 check 新采集、聚合 issue、自动启用 mergify 均不在本阶段；已登记 backlog 候选。
+
+## 15. 关联文档
+
+- [验证链与目标仓库 CI 口径对齐](./verification-ci-alignment.md)
+- [PR 构建与部署信号采集](./pr-build-deploy-signals.md)
+- [依赖分组升级设计](../modules/dependency-grouping.md)
+- [队列僵尸任务终结与去重键释放](./queue-stale-recovery.md)
+- [依赖修复执行记录](../modules/dependency-fixer-records.md)
+- [自动合并指南](../../guide/auto-merge.md)
+- [规划规范](../../standards/planning.md) / [测试规范](../../standards/testing.md)
