@@ -24,10 +24,12 @@ beforeEach(() => {
 // 失败回滚；成员独占 / 间接依赖 / 多版本共存维持人工；默认关闭行为不变。
 // ---------------------------------------------------------------------------
 
-const { mockRunVerification, mockUpgradeDependency, mockTryLockfileRepair } = vi.hoisted(() => ({
+const { mockRunVerification, mockUpgradeDependency, mockTryLockfileRepair, mockRunTrackedCommand, mockFamilyResolver } = vi.hoisted(() => ({
     mockRunVerification: vi.fn(),
     mockUpgradeDependency: vi.fn(),
     mockTryLockfileRepair: vi.fn(),
+    mockRunTrackedCommand: vi.fn(),
+    mockFamilyResolver: { resolve: vi.fn(), describe: vi.fn() },
 }))
 
 vi.mock('../runners/verification-runner', async (importOriginal) => {
@@ -52,6 +54,24 @@ vi.mock('./helpers', async (importOriginal) => {
     return {
         ...actual,
         tryLockfileRepair: mockTryLockfileRepair,
+    }
+})
+
+// 家族锁步写入会真实调用 pnpm install —— 在本文件中统一替身为「改写 lockfile 的成功安装」
+vi.mock('../runners/process-control', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('../runners/process-control')>()
+    return {
+        ...actual,
+        runTrackedCommand: mockRunTrackedCommand,
+    }
+})
+
+// 家族成员版本解析走 registry（fetch）——注入替身，避免与 nock / Octokit 的全局 fetch 抢拦截
+vi.mock('../fixers/dependency/family-versions', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('../fixers/dependency/family-versions')>()
+    return {
+        ...actual,
+        getFamilyVersionResolver: () => mockFamilyResolver,
     }
 })
 
@@ -207,9 +227,24 @@ describe('DependfixApp cross-major upgrade (--allow-major-upgrade)', () => {
             durationMs: 0,
         })
         mockRunVerification.mockResolvedValue(verificationResult(true))
+        mockFamilyResolver.resolve.mockReset()
+        mockFamilyResolver.describe.mockReset()
+        mockRunTrackedCommand.mockReset()
+        mockRunTrackedCommand.mockResolvedValue({
+            started: true,
+            exitCode: 0,
+            signal: null,
+            timedOut: false,
+            aborted: false,
+            errno: null,
+            stdout: '',
+            stderr: '',
+            durationMs: 0,
+        })
     })
 
     afterEach(() => {
+        vi.unstubAllGlobals()
         nock.cleanAll()
         rmSync(workDir, { recursive: true, force: true })
     })
@@ -558,5 +593,82 @@ describe('DependfixApp cross-major upgrade (--allow-major-upgrade)', () => {
         expect(majorVerifyCommands).toContain('pnpm typecheck')
         // 成功证据可审计：验证动作全部 success
         expect(verifyActions.every((a) => a.success)).toBe(true)
+    })
+
+    it('locks family members to the same major line on the cross-major path (vitest 3 -> 4)', async () => {
+        writeFileSync(join(workDir, 'package.json'), JSON.stringify({
+            name: 'fixture',
+            version: '1.0.0',
+            scripts: { lint: 'exit 0', build: 'exit 0', typecheck: 'exit 0', test: 'exit 0' },
+            devDependencies: { vitest: '^3.2.4', '@vitest/coverage-v8': '^3.2.4' },
+        }, null, 2))
+        writeFileSync(join(workDir, 'pnpm-lock.yaml'), [
+            'lockfileVersion: \'9.0\'',
+            '',
+            '  vitest@3.2.4:',
+            '    resolution: {integrity: sha512-a}',
+            '',
+            '  "@vitest/coverage-v8@3.2.4":',
+            '    resolution: {integrity: sha512-b}',
+            '',
+        ].join('\n'))
+        nockAlerts([{
+            number: 1,
+            state: 'open',
+            html_url: 'https://github.com/foo/bar/security/dependabot/1',
+            security_advisory: { ghsa_id: 'GHSA-family', severity: 'high', summary: 'vitest vuln' },
+            security_vulnerability: {
+                package: { ecosystem: 'npm', name: 'vitest' },
+                severity: 'high',
+                vulnerable_version_range: '< 4.0.1',
+                first_patched_version: { identifier: '4.0.1' },
+            },
+            dependency: { package: { ecosystem: 'npm', name: 'vitest' }, manifest_path: 'pnpm-lock.yaml' },
+        }])
+        // registry 解析：coverage-v8 取 4.x 最高稳定版
+        mockFamilyResolver.resolve.mockResolvedValue({
+            ok: true,
+            info: { version: '4.6.3', peerDependencies: {} },
+        })
+        // 安装替身：把 lockfile 更新为升级后的实例（跨线复核要求脆弱实例消失）
+        mockRunTrackedCommand.mockImplementation(async () => {
+            writeFileSync(join(workDir, 'pnpm-lock.yaml'), [
+                'lockfileVersion: \'9.0\'',
+                '',
+                '  vitest@4.0.1:',
+                '    resolution: {integrity: sha512-a}',
+                '',
+                '  "@vitest/coverage-v8@4.6.3":',
+                '    resolution: {integrity: sha512-b}',
+                '',
+            ].join('\n'))
+            return {
+                started: true,
+                exitCode: 0,
+                signal: null,
+                timedOut: false,
+                aborted: false,
+                errno: null,
+                stdout: '',
+                stderr: '',
+                durationMs: 0,
+            }
+        })
+
+        const { result } = await runApp({ cliOverrides: { allowMajorUpgrade: true } })
+
+        expect(result.summary.alertsFixed).toBe(1)
+        const action = result.actions.find((item) => item.target === 'vitest' && item.strategy === 'major-upgrade')
+        expect(action?.success).toBe(true)
+        expect(action?.family).toEqual({
+            id: 'vitest',
+            members: ['vitest', '@vitest/coverage-v8'],
+            skipped: ['@vitest/ui', '@vitest/browser'],
+        })
+        const pkg = JSON.parse(readFileSync(join(workDir, 'package.json'), 'utf-8')) as { devDependencies: Record<string, string> }
+        expect(pkg.devDependencies.vitest).toBe('^4.0.1')
+        expect(pkg.devDependencies['@vitest/coverage-v8']).toBe('^4.6.3')
+        // 单包升级路径未被调用（家族写入一次完成）
+        expect(mockUpgradeDependency).not.toHaveBeenCalled()
     })
 })

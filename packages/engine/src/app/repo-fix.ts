@@ -499,6 +499,13 @@ async function applyGroupUpgrades(
     }
 
     const alertByPackage = new Map(fixableAlerts.map((a) => [a.packageName, a]))
+    // 同批告警目标（显式 upgradeGroups / 组内告警）优先于家族规则解析结果
+    const familyTargets: Record<string, string> = {}
+    for (const alert of fixableAlerts) {
+        if (alert.recommendedVersion) {
+            familyTargets[alert.packageName] = alert.recommendedVersion
+        }
+    }
     let snapshot: ReturnType<typeof snapshotTrackedFiles>
 
     for (const group of groups) {
@@ -549,7 +556,7 @@ async function applyGroupUpgrades(
                 )
             }
 
-            const action = await upgradeAlert(ctx, alert)
+            const action = await upgradeAlert(ctx, alert, { familyTargets })
             pendingActions.push(action)
             if (!action.success) {
                 // 运行级取消：剩余包装不下去，也不该产出 K 条同因失败动作（口径同多版本路径）
@@ -629,7 +636,7 @@ async function applyGroupUpgrades(
 
         for (const alert of upgradedInGroup) {
             recordVerificationCheckpoint(ctx, repo, progress, `group:${group.name}:${alert.packageName}`)
-            const action = await upgradeAlert(ctx, alert)
+            const action = await upgradeAlert(ctx, alert, { familyTargets })
             ctx.allActions.push(action)
             if (!action.success) {
                 if (isAbortRequested()) {

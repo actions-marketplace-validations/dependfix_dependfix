@@ -25,10 +25,12 @@ beforeEach(() => {
 // 失败/残留回滚计 failed；降级风险 / 多版本共存维持人工；dry-run 不写盘。
 // ---------------------------------------------------------------------------
 
-const { mockRunVerification, mockUpgradeDependency, mockTryLockfileRepair } = vi.hoisted(() => ({
+const { mockRunVerification, mockUpgradeDependency, mockTryLockfileRepair, mockRunTrackedCommand, mockFamilyResolver } = vi.hoisted(() => ({
     mockRunVerification: vi.fn(),
     mockUpgradeDependency: vi.fn(),
     mockTryLockfileRepair: vi.fn(),
+    mockRunTrackedCommand: vi.fn(),
+    mockFamilyResolver: { resolve: vi.fn(), describe: vi.fn() },
 }))
 
 vi.mock('../runners/verification-runner', async (importOriginal) => {
@@ -53,6 +55,24 @@ vi.mock('./helpers', async (importOriginal) => {
     return {
         ...actual,
         tryLockfileRepair: mockTryLockfileRepair,
+    }
+})
+
+// 家族锁步写入会真实调用 pnpm install —— 在本文件中统一替身为「改写 lockfile 的成功安装」
+vi.mock('../runners/process-control', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('../runners/process-control')>()
+    return {
+        ...actual,
+        runTrackedCommand: mockRunTrackedCommand,
+    }
+})
+
+// 家族成员版本解析走 registry（fetch）——注入替身，避免与 nock / Octokit 的全局 fetch 抢拦截
+vi.mock('../fixers/dependency/family-versions', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('../fixers/dependency/family-versions')>()
+    return {
+        ...actual,
+        getFamilyVersionResolver: () => mockFamilyResolver,
     }
 })
 
@@ -218,6 +238,20 @@ describe('DependfixApp member upgrade (2.0.3)', () => {
             durationMs: 0,
         })
         mockRunVerification.mockResolvedValue(verificationResult(true))
+        mockFamilyResolver.resolve.mockReset()
+        mockFamilyResolver.describe.mockReset()
+        mockRunTrackedCommand.mockReset()
+        mockRunTrackedCommand.mockResolvedValue({
+            started: true,
+            exitCode: 0,
+            signal: null,
+            timedOut: false,
+            aborted: false,
+            errno: null,
+            stdout: '',
+            stderr: '',
+            durationMs: 0,
+        })
     })
 
     afterEach(() => {
@@ -559,5 +593,91 @@ describe('DependfixApp member upgrade (2.0.3)', () => {
             ) as { dependencies: Record<string, string> }
             expect(pkg.dependencies.vite).toBe('5.4.14')
         }
+    })
+
+    it('locks family members in the same member manifest to one version line', async () => {
+        // 成员 manifest 内 vitest 3.x + coverage-v8 2.x（半族状态）：vitest 同 major 升级时
+        // 必须把 coverage-v8 一并拉回 3.x，否则 PR 里仍是混装
+        writeFileSync(join(workDir, 'package.json'), JSON.stringify({
+            name: 'fixture-root',
+            version: '1.0.0',
+            scripts: { lint: 'exit 0' },
+        }, null, 2))
+        writeFileSync(join(workDir, 'pnpm-workspace.yaml'), 'packages:\n  - packages/*\n')
+        mkdirSync(join(workDir, 'packages', 'web'), { recursive: true })
+        writeFileSync(join(workDir, 'packages', 'web', 'package.json'), JSON.stringify({
+            name: 'web',
+            version: '1.0.0',
+            devDependencies: { vitest: '^3.2.0', '@vitest/coverage-v8': '^2.0.0' },
+        }, null, 2))
+        writeFileSync(join(workDir, 'pnpm-lock.yaml'), [
+            'lockfileVersion: \'9.0\'',
+            '',
+            '  vitest@3.2.0:',
+            '    resolution: {integrity: sha512-a}',
+            '',
+            '  "@vitest/coverage-v8@2.0.0":',
+            '    resolution: {integrity: sha512-b}',
+            '',
+        ].join('\n'))
+        nockAlerts([{
+            number: 1,
+            state: 'open',
+            html_url: 'https://github.com/foo/bar/security/dependabot/1',
+            security_advisory: { ghsa_id: 'GHSA-family', severity: 'high', summary: 'vitest vuln' },
+            security_vulnerability: {
+                package: { ecosystem: 'npm', name: 'vitest' },
+                severity: 'high',
+                vulnerable_version_range: '< 3.2.4',
+                first_patched_version: { identifier: '3.2.4' },
+            },
+            dependency: { package: { ecosystem: 'npm', name: 'vitest' }, manifest_path: 'packages/web/package.json' },
+        }])
+        mockFamilyResolver.resolve.mockResolvedValue({
+            ok: true,
+            info: { version: '3.2.5', peerDependencies: {} },
+        })
+        mockRunTrackedCommand.mockImplementation(async () => {
+            writeFileSync(join(workDir, 'pnpm-lock.yaml'), [
+                'lockfileVersion: \'9.0\'',
+                '',
+                '  vitest@3.2.4:',
+                '    resolution: {integrity: sha512-a}',
+                '',
+                '  "@vitest/coverage-v8@3.2.5":',
+                '    resolution: {integrity: sha512-b}',
+                '',
+            ].join('\n'))
+            return {
+                started: true,
+                exitCode: 0,
+                signal: null,
+                timedOut: false,
+                aborted: false,
+                errno: null,
+                stdout: '',
+                stderr: '',
+                durationMs: 0,
+            }
+        })
+
+        const { result } = await runApp()
+
+        expect(result.summary.alertsFixed).toBe(1)
+        const memberActions = result.actions.filter((a) => a.strategy === 'member-upgrade')
+        expect(memberActions).toHaveLength(1)
+        expect(memberActions[0]?.success).toBe(true)
+        expect(memberActions[0]?.family).toEqual({
+            id: 'vitest',
+            members: ['vitest', '@vitest/coverage-v8'],
+            skipped: ['@vitest/ui', '@vitest/browser'],
+        })
+        const memberPkg = JSON.parse(
+            readFileSync(join(workDir, 'packages', 'web', 'package.json'), 'utf-8'),
+        ) as { devDependencies: Record<string, string> }
+        expect(memberPkg.devDependencies.vitest).toBe('^3.2.4')
+        expect(memberPkg.devDependencies['@vitest/coverage-v8']).toBe('^3.2.5')
+        // 单包升级路径未被调用（家族写入一次完成）
+        expect(mockUpgradeDependency).not.toHaveBeenCalled()
     })
 })

@@ -6,6 +6,7 @@ import { compareSemver, readLockfileVersions, upgradeDependency } from '../fixer
 import { quickVerifyProject, restoreTrackedFiles, snapshotTrackedFiles, type MemberManifestAlert } from '../helpers'
 import { isAbortRequested } from '../runners/process-control'
 import type { LockfileAlertSets, RepoFixCtx, RepoFixProgress } from './repo-fix'
+import { attemptFamilyUpgrade, familyVersionsOf } from './family-upgrade'
 import { markEnvironmentalInstallFailure } from './environmental-failure'
 import { recordVerificationCheckpoint } from './verification-checkpoint'
 import { recordUpgradeFailure } from './upgrade-failure'
@@ -44,6 +45,20 @@ export async function applyMemberUpgrades(
             `[member-upgrade] ${memberManifestAlerts.length - memberByPackageAndDir.size} member alert(s) merged into package+dir representatives (highest target per package per member)`,
         )
     }
+    // 同批告警目标（按成员 manifest 分组）优先于家族规则解析结果
+    const familyTargetsByDir = new Map<string, Record<string, string>>()
+    for (const item of memberManifestAlerts) {
+        const target = item.alert.recommendedVersion
+        if (!target) {
+            continue
+        }
+        const targets = familyTargetsByDir.get(item.manifestDir) ?? {}
+        const existing = targets[item.alert.packageName]
+        if (!existing || compareSemver(target, existing) > 0) {
+            targets[item.alert.packageName] = target
+        }
+        familyTargetsByDir.set(item.manifestDir, targets)
+    }
     for (const item of [...memberByPackageAndDir.values()]) {
         const { alert, manifestDir } = item
         const memberManifestPath = `${manifestDir}/package.json`
@@ -69,12 +84,35 @@ export async function applyMemberUpgrades(
         ctx.logger.warn(
             `[member-upgrade] ${alert.packageName}: upgrading member declaration in ${memberManifestPath} → ${alert.recommendedVersion}`,
         )
-        const memberResult = await upgradeDependency({
-            packageName: alert.packageName,
-            targetVersion: alert.recommendedVersion!,
-            workDir: ctx.workDir,
+        // 家族锁步优先：同一成员 manifest 内的同族成员整体升到同一版本线
+        const familyAttempt = await attemptFamilyUpgrade(ctx, {
+            alert,
             manifestDir,
+            alertTargets: familyTargetsByDir.get(manifestDir),
         })
+        const memberFamily = familyAttempt.family
+        if (familyAttempt.action && familyAttempt.status !== 'applied') {
+            ctx.allActions.push(familyAttempt.action)
+            if (familyAttempt.status === 'failed') {
+                if (familyAttempt.environmental === true) {
+                    return true
+                }
+                if (isAbortRequested()) {
+                    return false
+                }
+                recordUpgradeFailure(ctx, progress, 'member-upgrade', `${alert.packageName} (${memberManifestPath})`, familyAttempt.action.error)
+            }
+            continue
+        }
+
+        const memberResult = familyAttempt.status === 'applied'
+            ? familyVersionsOf(familyAttempt, alert)
+            : await upgradeDependency({
+                packageName: alert.packageName,
+                targetVersion: alert.recommendedVersion!,
+                workDir: ctx.workDir,
+                manifestDir,
+            })
         if (!memberResult.success) {
             // 环境性安装失败：不归因仓库，并停止剩余成员尝试（多版本 / 合批 / 分组同口径）
             const environmentalMark = memberResult.environmental === true
@@ -168,6 +206,7 @@ export async function applyMemberUpgrades(
             success: true,
             durationMs: 0,
             filePath: memberManifestPath,
+            ...(memberFamily ? { family: memberFamily } : {}),
         })
         progress.fixed++
         ctx.logger.info(`[member-upgrade] ${alert.packageName}: member upgrade passed verification (${memberManifestPath})`)

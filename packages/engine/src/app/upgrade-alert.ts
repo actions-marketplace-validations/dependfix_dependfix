@@ -8,9 +8,21 @@ import {
     upgradeDependency,
     type DependencyFixResult,
 } from '../fixers/dependency'
+import { attemptFamilyUpgrade } from './family-upgrade'
 import { markEnvironmentalInstallFailure } from './environmental-failure'
 import type { AppContext } from './helpers'
 import { handleOverrideProtection } from './override-protect'
+
+/**
+ * `upgradeAlert` 可选行为。
+ */
+export interface UpgradeAlertOptions {
+    /**
+     * 同批告警的目标版本（包名 → 推荐版本）。
+     * 显式 `upgradeGroups` / 组内告警给出的目标优先于家族规则解析结果。
+     */
+    familyTargets?: Readonly<Record<string, string>>
+}
 
 /**
  * 升级单个告警对应的依赖（dry-run 仅记录）。
@@ -19,6 +31,7 @@ import { handleOverrideProtection } from './override-protect'
 export async function upgradeAlert(
     ctx: Pick<AppContext, 'config' | 'logger' | 'workDir' | 'allErrors' | 'summary'>,
     alert: NormalizedSecurityAlert,
+    options: UpgradeAlertOptions = {},
 ): Promise<FixAction> {
     const { config, logger, workDir } = ctx
     const startMs = Date.now()
@@ -37,7 +50,20 @@ export async function upgradeAlert(
         }
     }
 
+    // 家族锁步优先：同生态成员必须同一条版本线（vitest + @vitest/coverage-v8 等）。
+    // 不属家族 / 只有触发包可写时返回 not-applicable，继续既有单包路径。
+    // 整个调用放在 try 内：写盘 / 解析的意外异常必须收敛为单告警失败，不能冒泡成整仓失败。
+    let familyPhase = false
     try {
+        familyPhase = true
+        const familyAttempt = await attemptFamilyUpgrade(ctx, {
+            alert,
+            alertTargets: options.familyTargets,
+        })
+        familyPhase = false
+        if (familyAttempt.action) {
+            return familyAttempt.action
+        }
 
         // 优先尝试直接升级，失败自动回退到 overrides（处理间接依赖）
         let result: DependencyFixResult = await upgradeDependency({
@@ -104,6 +130,28 @@ export async function upgradeAlert(
         }
     } catch (error: unknown) {
         const message = toErrorMessage(error)
+        if (familyPhase) {
+            const errorText = `FAMILY_LOCKSTEP_FAILED: unexpected family lockstep error: ${message}`
+            logger.error(`Family lockstep error for ${alert.packageName}: ${message}`)
+            ctx.allErrors.push({
+                repository: alert.repository,
+                target: alert.packageName,
+                stage: 'fix',
+                category: 'FAMILY_LOCKSTEP_FAILED',
+                message: errorText,
+            })
+            return {
+                type: 'dependency-upgrade',
+                repository: alert.repository,
+                target: alert.packageName,
+                toVersion: alert.recommendedVersion,
+                isMajor: false,
+                strategy: 'family-lockstep',
+                success: false,
+                error: errorText,
+                durationMs: Date.now() - startMs,
+            }
+        }
         logger.error(`Upgrade error for ${alert.packageName}: ${message}`)
         return {
             type: 'dependency-upgrade',

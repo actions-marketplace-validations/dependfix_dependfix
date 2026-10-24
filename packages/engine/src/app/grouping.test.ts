@@ -22,11 +22,12 @@ beforeEach(() => {
 // 验证 app/index.ts 的组级循环语义：组级验证 / 整组回滚 / 拆组兜底 / 验证次数。
 // ---------------------------------------------------------------------------
 
-const { mockRunVerification, mockUpgradeDependency, mockOverrideTransitiveDependency, mockTryLockfileRepair } = vi.hoisted(() => ({
+const { mockRunVerification, mockUpgradeDependency, mockOverrideTransitiveDependency, mockTryLockfileRepair, mockRunTrackedCommand } = vi.hoisted(() => ({
     mockRunVerification: vi.fn(),
     mockUpgradeDependency: vi.fn(),
     mockOverrideTransitiveDependency: vi.fn(),
     mockTryLockfileRepair: vi.fn(),
+    mockRunTrackedCommand: vi.fn(),
 }))
 
 vi.mock('../runners/verification-runner', async (importOriginal) => {
@@ -52,6 +53,15 @@ vi.mock('./helpers', async (importOriginal) => {
     return {
         ...actual,
         tryLockfileRepair: mockTryLockfileRepair,
+    }
+})
+
+// 家族锁步写入会真实调用 pnpm install——替身为「改写 lockfile 的成功安装」
+vi.mock('../runners/process-control', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('../runners/process-control')>()
+    return {
+        ...actual,
+        runTrackedCommand: mockRunTrackedCommand,
     }
 })
 
@@ -147,6 +157,18 @@ describe('DependfixApp group upgrade', () => {
             isMajor: true,
             success: true,
         }))
+        mockRunTrackedCommand.mockReset()
+        mockRunTrackedCommand.mockResolvedValue({
+            started: true,
+            exitCode: 0,
+            signal: null,
+            timedOut: false,
+            aborted: false,
+            errno: null,
+            stdout: '',
+            stderr: '',
+            durationMs: 0,
+        })
     })
 
     afterEach(() => {
@@ -526,5 +548,91 @@ describe('DependfixApp group upgrade', () => {
         expect(result.summary.alertsSkipped).toBe(1)
         expect(result.summary.alertsSkippedByReason['subdirectory-manifest']).toBe(1)
         expect(Object.values(result.summary.alertsSkippedByReason).reduce((sum, value) => sum + value, 0)).toBe(1)
+    })
+
+    it('applies family lockstep as one action and re-applies it after group rollback', async () => {
+        // 双成员家族进入同一显式分组：组级验证失败 → 整组回滚 → 逐包重试再次家族写盘
+        writeFileSync(join(workDir, 'package.json'), JSON.stringify({
+            name: 'fixture',
+            scripts: { lint: 'exit 0' },
+            devDependencies: { vitest: '^3.2.4', '@vitest/coverage-v8': '^3.2.4' },
+        }, null, 2))
+        writeFileSync(join(workDir, 'pnpm-lock.yaml'), [
+            `lockfileVersion: '9.0'`,
+            '',
+            '  vitest@3.2.4:',
+            '    resolution: {integrity: sha512-a}',
+            '',
+            `  '@vitest/coverage-v8@3.2.4':`,
+            '    resolution: {integrity: sha512-b}',
+            '',
+        ].join('\n'))
+        const vitestAlert = alertJson('vitest', 1)
+        const coverageAlert = alertJson('@vitest/coverage-v8', 2)
+        const withTarget = (alert: Record<string, unknown>, name: string, target: string) => ({
+            ...alert,
+            security_advisory: {
+                ...(alert.security_advisory as Record<string, unknown>),
+                vulnerabilities: [{
+                    package: { ecosystem: 'npm', name },
+                    severity: 'high',
+                    vulnerable_version_range: `< ${target}`,
+                    first_patched_version: { identifier: target },
+                }],
+            },
+            security_vulnerability: {
+                package: { ecosystem: 'npm', name },
+                severity: 'high',
+                vulnerable_version_range: `< ${target}`,
+                first_patched_version: { identifier: target },
+            },
+        })
+        nockAlerts([withTarget(vitestAlert, 'vitest', '4.0.1'), withTarget(coverageAlert, '@vitest/coverage-v8', '4.6.3')])
+        mockRunTrackedCommand.mockImplementation(async () => {
+            writeFileSync(join(workDir, 'pnpm-lock.yaml'), [
+                `lockfileVersion: '9.0'`,
+                '',
+                '  vitest@4.0.1:',
+                '    resolution: {integrity: sha512-a}',
+                '',
+                `  '@vitest/coverage-v8@4.6.3':`,
+                '    resolution: {integrity: sha512-b}',
+                '',
+            ].join('\n'))
+            return {
+                started: true,
+                exitCode: 0,
+                signal: null,
+                timedOut: false,
+                aborted: false,
+                errno: null,
+                stdout: '',
+                stderr: '',
+                durationMs: 0,
+            }
+        })
+        mockRunVerification
+            .mockImplementationOnce(() => Promise.resolve(verificationResult(true))) // 修复前基线
+            .mockImplementationOnce(() => Promise.resolve(verificationResult(false))) // 组级验证失败
+            .mockResolvedValue(verificationResult(true)) // 逐包重试 + 最终验证
+
+        const { exitCode, result } = await runFix(
+            [withTarget(vitestAlert, 'vitest', '4.0.1'), withTarget(coverageAlert, '@vitest/coverage-v8', '4.6.3')],
+            { fam: ['vitest', '@vitest/coverage-v8'] },
+        )
+
+        expect(exitCode).toBe(0)
+        // 组级失败回滚后，逐包重试再次执行家族写盘（共两次安装）
+        expect(mockRunTrackedCommand).toHaveBeenCalledTimes(2)
+        expect(result.repositories[0].fixed).toBe(1)
+        const upgradeActions = result.actions.filter((action) => action.type === 'dependency-upgrade')
+        expect(upgradeActions).toHaveLength(1)
+        expect(upgradeActions[0]?.success).toBe(true)
+        expect(upgradeActions[0]?.family?.members).toEqual(['vitest', '@vitest/coverage-v8'])
+        const pkg = JSON.parse(readFileSync(join(workDir, 'package.json'), 'utf-8')) as {
+            devDependencies: Record<string, string>
+        }
+        expect(pkg.devDependencies.vitest).toBe('^4.0.1')
+        expect(pkg.devDependencies['@vitest/coverage-v8']).toBe('^4.6.3')
     })
 })

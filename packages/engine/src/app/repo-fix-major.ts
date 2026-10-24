@@ -5,7 +5,7 @@
 // （AI 修复失败时可转绿）→ 失败整体回滚。`--allow-major-upgrade` 的准入判定仍在
 // repo-fix.ts（本模块只处理已准入集合）。
 import type { Octokit } from '@octokit/rest'
-import type { NormalizedSecurityAlert } from '@dependfix/core'
+import type { FixActionFamily, NormalizedSecurityAlert } from '@dependfix/core'
 import {
     compareSemver,
     readLockfileVersions,
@@ -13,6 +13,7 @@ import {
 } from '../fixers/dependency'
 import { runAiIntegration } from '../ai/app-integration'
 import { restoreTrackedFiles, snapshotTrackedFiles } from '../helpers'
+import { attemptFamilyUpgrade, familyVersionsOf } from './family-upgrade'
 import { markEnvironmentalInstallFailure } from './environmental-failure'
 import { mergeAiUsage } from './helpers'
 import { recordUpgradeFailure } from './upgrade-failure'
@@ -52,6 +53,13 @@ export async function applyAutoMajorUpgrades(
             `[major-upgrade] ${autoMajorAlerts.length - autoMajorRepresentatives.length} cross-major alert(s) merged into package representatives (highest target per package)`,
         )
     }
+    // 同批告警目标（显式 upgradeGroups / 组内告警）优先于家族规则解析结果
+    const majorFamilyTargets: Record<string, string> = {}
+    for (const alert of autoMajorRepresentatives) {
+        if (alert.recommendedVersion) {
+            majorFamilyTargets[alert.packageName] = alert.recommendedVersion
+        }
+    }
     for (const alert of autoMajorRepresentatives) {
         if (ctx.config.dryRun) {
             // dry-run 不写盘：仅记录计划动作（与 2.0.1 dry-run 语义一致）
@@ -75,11 +83,34 @@ export async function applyAutoMajorUpgrades(
         ctx.logger.warn(
             `[major-upgrade] ${alert.packageName}: applying cross-major upgrade → ${alert.recommendedVersion} (explicit --allow-major-upgrade; full verification required)`,
         )
-        const majorResult = await upgradeDependency({
-            packageName: alert.packageName,
-            targetVersion: alert.recommendedVersion!,
-            workDir: ctx.workDir,
+        // 家族锁步优先：同 Eco 成员先整体升到同一版本线，再由下方完整验证兜底
+        const familyAttempt = await attemptFamilyUpgrade(ctx, {
+            alert,
+            alertTargets: majorFamilyTargets,
         })
+        let majorFamily: FixActionFamily | undefined
+        if (familyAttempt.action && familyAttempt.status !== 'applied') {
+            ctx.allActions.push(familyAttempt.action)
+            if (familyAttempt.status === 'failed') {
+                if (familyAttempt.environmental === true) {
+                    stopReason = 'environmental'
+                    break
+                }
+                recordUpgradeFailure(ctx, progress, 'major-upgrade', alert.packageName, familyAttempt.action.error)
+            }
+            continue
+        }
+
+        const majorResult = familyAttempt.status === 'applied'
+            ? familyVersionsOf(familyAttempt, alert)
+            : await upgradeDependency({
+                packageName: alert.packageName,
+                targetVersion: alert.recommendedVersion!,
+                workDir: ctx.workDir,
+            })
+        if (familyAttempt.status === 'applied') {
+            majorFamily = familyAttempt.family
+        }
         if (!majorResult.success) {
             // 环境性安装失败（信号 / 超时 / 无 stderr 诊断）：不归因目标仓库，也不值得继续
             // 尝试其余跨线 / 成员 / 分组安装（同一次环境故障会重复出现）
@@ -191,6 +222,7 @@ export async function applyAutoMajorUpgrades(
                 strategy: 'major-upgrade',
                 success: true,
                 durationMs: 0,
+                ...(majorFamily ? { family: majorFamily } : {}),
             })
             progress.fixed++
             ctx.logger.info(`[major-upgrade] ${alert.packageName}: cross-major upgrade passed full verification`)
