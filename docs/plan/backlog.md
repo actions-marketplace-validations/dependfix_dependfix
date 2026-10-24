@@ -212,6 +212,10 @@
   - **触发条件**：OOM 再次发生且 cgroup 标记无法解释；或 sandbox / action 成为主执行路径。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
+- **`ScanResult` 修复结果不回写（converged / success 状态缺失）（待评估，P2 🛠️）** —— 现象：per-alert 模型写入路径固定 `not-tried`，修复结果不回写，导致按明细聚合的通知（`security_high` / `weekly_digest`）无法剔除本地已满足告警，周报只能按 `RunSummary.alertsConverged` 单列披露（M47.5 审计 R1 实证）。**待评估点**：① 是否在 reconcile / 收尾链路回写 `fixStatus`（success / converged / failed）；② 回写后的历史数据兼容与迁移；③ 对告警列表「未修复」口径的影响。
+- **周报投递的重试与窗口锁语义（待评估，P3 🚀）** —— 现象：M47.5 同进程同周只尝试一次，部分收件人 `failed` 时本周内不重试；`skipped_no_recipient` 保留本周锁（避免 15 分钟级日志噪声），窗口内才开启个人开关需等下周。**待评估点**：① 按用户失败重试（不改逐用户键）；② 无收件人时是否降低检查频率或只在配置变更时重试；③ 崩溃遗留 `sending` 的回收前置。
+- **`/settings` 与通知页 dark 视觉覆盖（待评估，P3 🧪）** —— 现象：M47.5 只覆盖 `/notifications` light 基线，`/settings` 无视觉基线（改由 e2e 覆盖组织开启后个人开关可配置）；周汇总开关与提示文案的 dark 形态无像素守卫。
+
 ### 待上收候选（评估完成，等待用户决策）
 
 > 本节为「评估完成、等待用户决策」候选的暂存区；候选**不含 `M\d+` 阶段编号**（[规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement)）。
@@ -372,9 +376,9 @@
 
 | 内容类型 | 位置 |
 |:--|:--|
-| 当前阶段活跃任务 | **M47「交付判定可信与运行自证」**（6 原子条目，2026-10-22 用户决策方案 A′；见 [todo.md §M47](todo.md#m47-交付判定可信与运行自证-2026-10-22-用户决策方案-a′)）；插队容量治理见 [planning.md §3.1.1](../standards/planning.md#_3-1-1-插队后的阶段容量再平衡-hard-requirement-2026-10-19) |
-| 下一阶段（未授权） | 无——M47 闭环归档后按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 重新评估本文件候选池 |
+| 当前阶段活跃任务 | **无**——M47 已于 2026-10-24 归档（见 [todo-archive.md §M47](todo-archive.md#m47-交付判定可信与运行自证-2026-10-22-用户决策方案-a′-2026-10-24-归档)）；插队容量治理见 [planning.md §3.1.1](../standards/planning.md#_3-1-1-插队后的阶段容量再平衡-hard-requirement-2026-10-19) |
+| 下一阶段（未授权） | 无——按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 重新评估本文件候选池 |
 | 已完成阶段归档 | [todo-archive.md](todo-archive.md)（主窗口 + [archive/](archive/) 分片） |
-| 里程碑与阶段交付 | [roadmap.md](roadmap.md)（M0-M46 已归档，M47 进行中） |
+| 里程碑与阶段交付 | [roadmap.md](roadmap.md)（M0-M47 已归档） |
 | 长期主线 / 候选 / 待人工验收 / 已知边界 | 本文档（按四象限结构） |
 | 历史归档索引 | [archive/index.md](archive/index.md) |
