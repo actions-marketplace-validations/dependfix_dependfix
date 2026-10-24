@@ -260,6 +260,16 @@
   - **触发条件**：override 批量重排再次造成合并冲突；或用户要求 PR diff 可读性。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
+- **通知严重级别术语与阈值命名收敛（待评估，P2 🎨）** —— 现象（2026-10-24 用户反馈 + 截图）：通知页把 `critical` / `high` 译为「严重」/「高危」且同页并列，用户无法从字面判断哪个更危险；类别名「高危告警」看起来只覆盖 `high`，实际开关同时管 `critical`（关掉后 `apps/platform/server/services/notification/recipients.ts` 直接返回空收件人）；阈值标签「高危阈值」把 `critical` 也包含在内（选项「严重 + 高危」/「仅严重」，见 [zh-CN.json](../../apps/platform/i18n/locales/zh-CN.json) 与 [en-US.json](../../apps/platform/i18n/locales/en-US.json) 的 `High-risk threshold`），与同仓扫描侧口径冲突——`apps/platform/app/utils/scan-options.ts` 已明确把 Critical / High / Medium 定为**专有名词不走 i18n**，扫描配置页又写作「严重级别阈值」。邮件侧同样不统一：周报标题只写「N 个高危告警未修复」，正文才分列「严重 x / 高危 y」（`apps/platform/server/services/notification/business-templates.ts`）。
+  - **待评估点**：① 术语形态（直接保留 `Critical` / `High` 原文，还是「严重（critical）」括号注释，还是纯中文 + 图标 / 色阶辅助）；② 阈值字段改名（「风险等级阈值」/ 对齐扫描页「严重级别阈值」，同时调整 `severityThreshold` 的 UI 文案而非枚举值）；③ 选项文案（「严重及以上（critical + high）」/「仅严重（critical）」）；④ 统一范围（通知页 / 邮件标题与正文 / 周报 / 投递记录类别列 / 扫描页）；⑤ en-US 的 `High-risk alerts` / `High-risk threshold` 同步，避免中英各一套语义。
+  - **触发条件**：已由用户反馈触发；或下一次文案 / 国际化批次。
+  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
+
+- **critical 告警必选不可关闭（待评估，P1 🛠️）** —— 现象（2026-10-24 用户反馈）：当前 `severityThreshold` 只决定 `high` 是否纳入（`critical` 恒在集合内，见 `apps/platform/server/services/notification/high-risk.ts`），但类别开关 `categories.securityHigh` 是 `critical` + `high` 共用的单一开关，关闭后组织与个人的安全类邮件全部停发（`resolveNotificationRecipients` 在类别关闭时返回空数组）；即「`critical` 必定发送」目前不成立，只有「平台自身问题」是真正的必选类别。用户预期 `critical` 与「平台自身问题」同级、不可关闭。
+  - **待评估点**：① 拆分语义（新增必选的 `securityCritical` + 可选的 `securityHigh`）还是保留单开关但让 `critical` 走独立通道；② 阈值枚举如何演进（`critical | high` 改为「是否附加 high」的布尔或新增枚举）；③ 个人偏好是否允许关闭 `critical`（建议不允许，并与组织开关一致）；④ 存量迁移（现网 `securityHigh=false` 的组织是否自动改用新的 critical 通道 → 会新增邮件，需在发布说明中披露）；⑤ `critical` 是否豁免冷却 / 每小时上限 / 指纹去重；⑥ UI 禁用态与「必选，不可关闭」说明是否对齐平台自身问题那一行。
+  - **触发条件**：用户确认按「`critical` 必选」实现；或出现 `critical` 告警因类别关闭而漏发的实例。
+  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
+
 ### 待上收候选（评估完成，等待用户决策）
 
 > 本节为「评估完成、等待用户决策」候选的暂存区；候选**不含 `M\d+` 阶段编号**（[规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement)）。
