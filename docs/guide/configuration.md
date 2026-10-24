@@ -337,6 +337,7 @@ export DEPENDFIX_ALERTS_SOURCE=pnpm-audit
 | `DEPENDFIX_NOTIFICATION_ENABLED` | — | `true` | 通知总开关；`false` 熔断全部邮件（含平台事件） |
 | `DEPENDFIX_NOTIFICATION_RECIPIENT_CAP` | — | `50` | 单封邮件收件人上限 |
 | `DEPENDFIX_ENV_ALERT_RECIPIENTS` | — | 组织内 admin/org_admin 邮箱 | 环境告警邮件收件人（逗号分隔，覆盖默认） |
+| `DEPENDFIX_WEEKLY_DIGEST_HOUR` | — | `9` | 周汇总触发小时（0-23，服务器时区；非法值回退 9）；组织与个人同时开启后生效 |
 | `DEPENDFIX_LOCALE` | — | `zh-CN` | 通知邮件语言（`zh-CN` / `en-US`） |
 
 ### Docker / 部署

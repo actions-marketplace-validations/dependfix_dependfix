@@ -216,7 +216,10 @@ The management platform (`apps/platform`) is configured via env vars injected by
 
 | Variable | Required | Default | Description |
 |:---|:---:|:---|:---|
+| `DEPENDFIX_NOTIFICATION_ENABLED` | — | `true` | Notification master switch; `false` disables all email (including platform incidents) |
+| `DEPENDFIX_NOTIFICATION_RECIPIENT_CAP` | — | `50` | Recipient cap per email |
 | `DEPENDFIX_ENV_ALERT_RECIPIENTS` | — | org admin/org_admin emails | Environment alert email recipients (comma-separated, overrides default) |
+| `DEPENDFIX_WEEKLY_DIGEST_HOUR` | — | `9` | Weekly digest trigger hour (0-23, server timezone; invalid values fall back to 9); requires both organization and personal switches on |
 | `DEPENDFIX_LOCALE` | — | `zh-CN` | Notification email language (`zh-CN` / `en-US`) |
 
 ### Docker / deployment
