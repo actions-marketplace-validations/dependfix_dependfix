@@ -1,6 +1,6 @@
 # 平台通知与邮件推送设计
 
-> 状态：✅ B1-B4 已落地（2026-10-21）；B5 周汇总已随 M47.5 进入规划（2026-10-22，见 [todo.md §M47](../../plan/todo.md)）；来源 [issue #190](https://github.com/dependfix/dependfix/issues/190)）
+> 状态：✅ B1-B5 全部落地（B1-B4 2026-10-21；B5 周汇总随 M47.5，2026-10-24）；来源 [issue #190](https://github.com/dependfix/dependfix/issues/190)）
 > 关联：[系统架构](./architecture-platform.md) · [定时扫描与批量处理设计](./platform-scheduled-batch.md) · [运行失败分类与筛选设计](./run-failure-taxonomy.md) · [平台规范](../../standards/platform.md) · [安全规范](../../standards/security.md)
 
 ## 1. 背景与现状
@@ -85,7 +85,7 @@ ORG_KEY = {
 ```
 
 - 必选类别忽略组织与个人开关，仅受部署总开关约束。
-- B1-B4 的组织冷却默认值固定为 24（组织可在 0-168 内覆盖）；周报触发小时随 B5 落地时再新增部署变量。
+- 组织冷却默认值固定为 24（组织可在 0-168 内覆盖）。周报触发小时见 §4.5 的 `DEPENDFIX_WEEKLY_DIGEST_HOUR`（默认 9，进程级）。
 - `weekly_digest` 与其余可选类别走同一优先级：组织开启是前提，个人可再关闭。
 - **个人偏好缺行 = 取角色默认值**（admin / org_admin：`security_high` / `run_failure` 开，`run_completed` / `weekly_digest` 关；viewer 全关）；组织开关是前提条件，不替代个人默认。不写默认行，避免存量用户迁移。
 - 渠道可用性在**投递阶段**判定（`deliverable` 仅用于 UI / 测试展示，投递侧唯一落点是 §6.4 的 ⑤）；SMTP 未配置时记录 `noop` 且不占投递键，便于管理员在投递记录中看到「渠道不可用」。
@@ -132,6 +132,7 @@ interface NotificationPreference {
 | `DEPENDFIX_NOTIFICATION_ENABLED` | `true` | 总开关（紧急熔断） |
 | `DEPENDFIX_ENV_ALERT_RECIPIENTS` | — | 平台事件收件人覆盖（保持既有语义） |
 | `DEPENDFIX_NOTIFICATION_RECIPIENT_CAP` | `50` | 单封邮件收件人上限 |
+| `DEPENDFIX_WEEKLY_DIGEST_HOUR` | `9` | 周报触发小时（0-23，服务器时区）；非法值回退 9 并 warn；进程级，变更需重启 |
 
 ## 5. 收件人路由
 
@@ -194,7 +195,7 @@ interface NotificationLog {
 ```
 
 - **常规去重键**：`deliveryKey = sha256(scopeType:scopeId:category:fingerprint:attemptWindow)`；`now` 为 epoch 毫秒，`attemptWindow = floor(now / max(cooldownHours * 3_600_000, 60_000))`（`cooldownHours=0` 时回落为 1 分钟窗口，避免除零）。该键**仅用于并发占位**，不承担「内容是否变化」判定。
-- **周报专用键**：`deliveryKey = sha256('digest', weekKey, recipientUserId, channel, 'weekly_digest')`，不含 `attemptWindow` 与内容指纹；同一用户 + 渠道 + 周唯一。周报按用户逐封投递（`recipientUserId` 写入日志），不共用多收件人键。
+- **周报专用键**：`deliveryKey = sha256('digest', weekKey, recipientIdentity, channel, 'weekly_digest')`，不含 `attemptWindow` 与内容指纹；同一收件人 + 渠道 + 周唯一。`recipientIdentity` 取用户 id；额外管理员收件人没有 userId，取规范化邮箱（日志 `recipientUserId` 记 `null`），仍满足「每收件人每周一封」。周报按用户逐封投递，不共用多收件人键。
 - **投递前判定顺序**：① 查询该 scope + category 最近一次 `sent` 的指纹；相同 → 记录 `skipped_duplicate`（`weekly_digest` 除外，见 §7.3）；② 距最近一次 `sent` 未超过窗口 → 记录 `skipped_cooldown`（`weekly_digest` 除外）；③ 超过每小时上限 → `skipped_throttled`（`weekly_digest` 除外）；④ 收件人为空 → `skipped_no_recipient`；⑤ 渠道不可用 → 记录 `noop`（不写 `deliveryKey`）；⑥ 以上均通过 → 以 `status='sending'` 插入 `deliveryKey` 占位，再发送并回写 `sent` / `failed`。
 - **占位回收**：`sending` 超过 10 分钟视为进程崩溃遗留，可被下一次尝试回收（删除后重新占位）；`sent` 保留 `deliveryKey`。
 - **失败可重试**：`failed` 在回写时把 `deliveryKey` 置空，允许后续运行重试；`noop` 与 `skipped_*` 不写 `deliveryKey`。
@@ -204,11 +205,13 @@ interface NotificationLog {
 
 ### 6.5 周汇总触发
 
-- 固定周期插件在每周一 09:00（`DEPENDFIX_WEEKLY_DIGEST_HOUR` 可覆盖，默认 9）触发；按进程角色只在一个进程运行（复用 M45.3 的 role 守卫），避免 HTTP / worker 双发。
+- 固定周期插件在每周一 09:00（`DEPENDFIX_WEEKLY_DIGEST_HOUR` 可覆盖，默认 9）触发；按进程角色只在一个进程运行（复用 M45.3 的 role 守卫），避免 HTTP / worker 双发。周报插件与 `stale-cleanup` 同列 HTTP-only——容器双进程形态下 HTTP 主进程恒存在，worker 跳过（清单见 [platform.md §10.6](../../standards/platform.md#_10-6-队列执行进程隔离-独立-worker-进程)）。
 - `weekKey` 按 ISO 8601 周（如 `2026-W43`）与服务器时区计算；同一用户同一 `weekKey` 只发一次（键见 §6.4 周报专用键）。
-- 内容为当前活跃未修复高危快照（与 §7.1 同口径，含截断计数披露）；内容未变化也按周发送，这是显式订阅的周期摘要。
-- 周报豁免 §6.4 ③ 每小时上限（自身已有「每用户每渠道每周一次」上限），但仍走 ④ 收件人检查与 ⑤ 渠道检查。
-- 组织开启 `weeklyDigest` 后，管理员仍需个人开启才会收到；任一层关闭即不发送。
+- **触发窗口与补发**：本进程启动 30 秒后每 15 分钟检查一次；窗口为「本周一触发时刻起 24 小时」。窗口内重启会补发（周中晚些时候启动不会在工作日中途补发上周周报），窗口外等待下一周；同进程同周只尝试一次，跨进程 / 重启由逐用户投递键兜底。
+- **快照口径**：当前活跃未修复高危（与 §7.1 同口径，`supersededAt IS NULL` 即活跃，不限定 scanRunId），按仓库分组；截断计数取自快照内各告警所属运行（去重）的 `alertsTruncatedBySeverity`。`converged`（本地已满足）只存在于 `RunSummary.alertsConverged`（`ScanResult` 明细不标记），周报按快照运行汇总单列披露「引擎汇总另有 N 条本地已满足」，**不改明细计数**。内容未变化也按周发送，这是显式订阅的周期摘要。
+- **空快照也发送**：本周没有未修复高危时仍发送一封「本周无未修复高危」摘要——订阅方据此确认周期任务存活，避免把「零告警」误读为「周报停摆」。
+- 周报豁免 §6.4 ① 指纹 / ② 冷却 / ③ 每小时上限（自身已有「每用户每渠道每周一次」上限），但仍走 ④ 收件人检查与 ⑤ 渠道检查。
+- 组织开启 `weeklyDigest` 后，管理员仍需个人开启才会收到；任一层关闭即不发送。组织关闭时不查询快照、不写投递记录。
 
 ## 7. 高危判定与降噪
 
@@ -223,7 +226,7 @@ AND fixStatus IN ('not-tried', 'failed', 'skipped')
 AND scanRunId IN (<scope run ids>)
 ```
 
-- 「未修复」包含 `not-tried` / `failed` / `skipped`（覆盖跨 major 跳过与交付跳过）；`converged` 表示「本地已满足、无需升级」，不计入未修复，避免把无需动作的告警当成交付遗漏。
+- 「未修复」包含 `not-tried` / `failed` / `skipped`（覆盖跨 major 跳过与交付跳过）；`converged` 表示「本地已满足、无需升级」，不计入引擎的 `alertsUnfixed` 口径。**平台明细边界**：`ScanResult` 行不携带 converged 标记（写入路径固定 `not-tried`，修复结果不回写），因此按明细聚合的通知（`security_high` / `weekly_digest`）仍会把 converged 告警计入活跃明细；周报仅按 `RunSummary.alertsConverged` 单列披露该数量。
 - 已修复（`success`）与已关闭（`supersededAt` 非空）不计入，避免与 GitHub 的已关闭通知重复。
 - **截断告警不在 `ScanResult` 中**：引擎只持久化 `limited` 集合。扫描结果需同时读取 `summary.alertsTruncatedBySeverity`（M46.2 新增）的 critical / high 计数，在邮件正文以「另有 N 条截断未纳入明细」披露；无身份信息，不伪造逐条列表。
 - 严重级别阈值由组织设置 `severityThreshold` 控制：`high`（默认，含 critical + high）或 `critical`（仅 critical）。
@@ -244,7 +247,7 @@ AND scanRunId IN (<scope run ids>)
 - 指纹变化但仍在窗口内 → 记录 `skipped_cooldown`，窗口结束后的下一轮运行重新评估（以「上次已投递指纹」为基线）。
 - 每小时投递上限默认 6（组织可配 1-60）：超出时记录 `skipped_throttled`，不排队补发；下一轮运行重新评估。
 - 平台事件不参与 24 小时窗口（每条 `AuditEvent` 唯一），但受每小时上限约束。
-- `weekly_digest` 不参与指纹与 24 小时窗口：按 `scopeType='digest'` / `scopeId=weekKey` 与 §6.4 周报专用键去重，同一用户同一周最多一封；内容未变化也按周发送（这是显式订阅的周期摘要）。
+- `weekly_digest` 不参与指纹与 24 小时窗口：按 `scopeType='digest'` / `scopeId=weekKey` 与 §6.4 周报专用键去重，同一用户同一渠道同一周最多一封（当前渠道仅 email）；内容未变化也按周发送（这是显式订阅的周期摘要）。
 
 ## 8. 数据模型与迁移
 
@@ -283,7 +286,7 @@ AND scanRunId IN (<scope run ids>)
 | `security_high` | `[dependfix][告警] 3 个高危告警未修复 — 2 个仓库` | 严重级别计数、仓库分组表、告警链接、跳过原因提示 |
 | `run_failure` | `[dependfix][运行] 批次运行失败 — 2/10 仓库` | 失败码 / 阶段 / 可重试判定、失败仓库清单、详情链接 |
 | `run_completed` | `[dependfix][摘要] 批次完成 — 修复 8 / 告警 12` | 仓库数、告警数、修复数、耗时、详情链接 |
-| `weekly_digest` | `[dependfix][周报] 5 个仓库存在未修复高危 — 2 critical / 3 high` | 按仓库分组的活跃未修复高危快照、变化趋势、详情链接 |
+| `weekly_digest` | `[dependfix][周报] 5 个仓库存在未修复高危 — 严重 2 / 高危 3` | 按仓库分组的活跃未修复高危快照、截断 / 豁免计数、详情链接 |
 
 - 复用现有 `escapeHtml` / `escapeAttr`，所有动态字段必须转义；纯文本版本同步生成。
 - 链接使用公共基地址解析（`NUXT_PUBLIC_BETTER_AUTH_URL`，回退 `NUXT_PUBLIC_BASE_URL`），不写死域名。
@@ -305,7 +308,7 @@ AND scanRunId IN (<scope run ids>)
 | B2 策略层 | 事件分类、组织设置解析、个人偏好解析、收件人路由、高危查询、指纹与冷却纯函数 + 单测 | 10-14 文件 / 450-700 行（拆两个 commit） |
 | B3 投递层 | 统一通知入口、`notification_log` 写入与幂等、模板、run / batch 触发点、平台事件接续 + 单测 | 10-14 文件 / 450-700 行（拆两个 commit） |
 | B4 配置与展示 | 6 个 API + 个人卡片 + 管理员页 + i18n + 测试 | 10-14 文件 / 500-800 行（拆两个 commit） |
-| B5 周汇总（可选） | 周期性插件（按进程角色跳过 HTTP 进程）+ 周报查询与模板 + 测试；默认关闭 | 5-8 文件 / 200-350 行 |
+| B5 周汇总（可选） | ✅ 已落地（M47.5）：周期性插件（HTTP-only 角色守卫）+ 全局活跃快照查询 + 周报模板 + 逐用户投递 + 测试；默认关闭 | 5-8 文件 / 200-350 行 |
 
 - 每个 commit 独立可验证；B3 的触发点接入与模板分开提交，避免单 commit 超 [规划规范 §1.1](../../standards/planning.md) 任务粒度阈值。
 - B5 为可选增量：阶段容量不足时按 [规划规范 §3.1.1](../../standards/planning.md) 移出至 backlog，不影响 B1-B4 的交付完整性。
@@ -321,7 +324,7 @@ AND scanRunId IN (<scope run ids>)
 - **AC6** 失败语义：SMTP 未配置 noop；发送异常不阻断扫描；投递记录可查到对应状态与错误码。
 - **AC7** 迁移可重复执行且二次运行不报错；实体索引为类级声明（TypeORM 1.x 复合索引要求）。
 - **AC8** 测试覆盖：策略 / 路由 / 指纹 / 窗口 / 模板转义 / API 权限 / 迁移幂等单测通过；批次终态集成测试断言只发一封。
-- **AC9** 周汇总（若纳入）：默认关闭；组织开启且个人开启时，每周一发送一次活跃未修复高危快照（按 ISO 周去重，内容不变也发送）；任一层关闭后不再产生周报邮件。
+- **AC9** 周汇总（✅ M47.5 已落地）：默认关闭；组织开启且个人开启时，每周一发送一次活跃未修复高危快照（按 ISO 周去重，内容不变也发送）；任一层关闭后不再产生周报邮件；正文披露截断与豁免计数。
 
 ## 14. 风险与缓解
 
