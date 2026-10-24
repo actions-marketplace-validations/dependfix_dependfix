@@ -13,23 +13,19 @@
 # action.yml 不进容器：它由 GitHub Actions 消费（目标仓库 workflow uses: dependfix/dependfix），
 # 平台容器内执行走 DependfixApp 程序化接口，链路见 docs/design/governance/executor-sandbox.md。
 # 基础镜像固定 digest（可复现构建，避免 :latest 上游漂移）；digest 为 manifest list，覆盖 amd64 / arm64。
-# 服务端可由 BASE_IMAGE_REPO 覆盖（只换服务端，不换镜像；两仓是同一官方镜像的同一 manifest list，
-# digest 一致，2026-10-24 实测）：
-# - 默认 public.ecr.aws/docker/library：受限网络（中国大陆）可直连，供本地构建 / 本地冒烟（`SMOKE_BUILD=1`）；
-# - CI 覆盖为 docker.io/library：同一 digest 在 ECR Public 上间歇 429（2026-10-23 起 4 次，run
-#   39910195222 / 39955098604 / 39966687286 / 40063481847），docker.yml 已在构建前登录 Docker Hub，
-#   改走认证拉取（未认证 100 次/6h 按出口 IP，认证 Personal 200 次/6h；付费层不受 pull 限额约束）。
-# 抬升基线时同时改 BASE_IMAGE_DIGEST 与 FROM 行 tag；自动化 digest 追踪须解析 ARG 默认值
-# （Dependabot docker 生态不支持 FROM 内的全局 ARG，见 dependabot-core#2057），不能只改 FROM 行。
-# 构建参数勿传空值：`BASE_IMAGE_REPO=` 会拼出 `/node:…` 这类非法引用（fail-closed，但报错不直观）。
+# 走 Docker Hub（docker.io）而非 ECR Public：同一 digest 在 ECR Public 上间歇 429（10 月 23 日起 4 次，
+# 均落在推送前构建步骤），而 docker.yml 在构建前已登录 Docker Hub，认证拉取按账号配额计（未认证
+# 100 次/6h 按出口 IP，认证 Personal 200 次/6h）；两仓当前指向同一 manifest list（digest 一致，
+# 2026-10-24 实测）。发布镜像只在 CI 构建，故不留可切换服务端的构建参数；本地构建路径
+# （`docker-compose.build.yml` / `SMOKE_BUILD=1`）需可达 docker.io 或先配 registry mirror。
+# FROM 保持字面 image:tag@digest，便于工具解析（Dependabot docker 生态当前未接入，见 backlog 的
+# 运行面漏洞检测候选）；抬升基线时同时改 tag 与 digest。
 # 安全基线（2026-10-21 Node.js 安全公告）：运行时必须 >= 24.22.1（24.x 线）。
 # 暂用官方 node:24.22.1-alpine：自建 caomeiyouren/alpine-nodejs 走 `apk add nodejs`，而 Alpine
 # v3.24 与 edge 此刻仍停在 24.18.1（-r0 / -r5），重建自建镜像拿不到补丁。等 docker-builder
 # 改为官方 tarball 并发布 alpine3.24-node24.22 后再评估收敛（用户 2026-10-22 决定暂不迁移）；
 # 记录见 docs/plan/todo.md「追加临时待办（不占阶段条目编号）：Node 运行时安全基线升级」。
-ARG BASE_IMAGE_REPO=public.ecr.aws/docker/library
-ARG BASE_IMAGE_DIGEST=sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53
-FROM ${BASE_IMAGE_REPO}/node:24.22.1-alpine@${BASE_IMAGE_DIGEST} AS nodejs
+FROM docker.io/library/node:24.22.1-alpine@sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53 AS nodejs
 
 # pnpm 工具链：钉住当前运行时镜像实际携带的版本（11.18.0），切基底不改变目标仓库的安装语义。
 # 先移除官方镜像默认启用的 corepack shim：否则 `pnpm` 会按 packageManager 回源下载 11.17.0，

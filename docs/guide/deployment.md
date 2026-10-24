@@ -71,6 +71,8 @@ DEPENDFIX_IMAGE=caomeiyouren/dependfix:v0.3.0 docker compose up -d
 docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 ```
 
+> 本地源码构建会从 Docker Hub 拉取基础镜像（`docker.io/library/node:24.22.1-alpine`，digest 固定）；受限网络需先配置 registry mirror 或代理，否则会卡在 `failed to resolve source metadata`。
+
 > 可用仓库内脚本对任意镜像做「首次启动可用性」自检（验证自动建表 + HTTP 200 + 13 张业务表）：
 >
 > ```bash
