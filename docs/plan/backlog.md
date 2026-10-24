@@ -220,6 +220,46 @@
   - **触发条件**：真实告警同毫秒插入被报告顺序抖动；或列表分页 / 导出功能引入（届时并列顺序影响结果集边界）。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
+- **CI 独有脚本纳入验证链（待评估，P0 🛠️）** —— 现象（2026-10-24 对外 PR 巡检）：验证链按 `DEFAULT_VERIFY_COMMANDS` 跑 `lint / build / typecheck / test`，目标仓库 CI 还会跑 `pnpm run coverage`、`test:e2e`、`docker build` 等四类之外的脚本；这些命令只在 CI 生效，本地永远看不到。实证：`push-all-in-one#551 / #556` 的 CI 在 `pnpm run coverage` 段崩在 `@vitest/coverage-v8` 与 `vitest` 跨大版本混装，而 PR 正文写「Verifications passed 4 / failed 0」（[验证链与 CI 口径对齐设计](../design/governance/verification-ci-alignment.md) 已把这类命令记为 `unrecognized`，但按设计非目标「不按 workflow 动态替换验证命令」，只披露不阻断）。
+  - **待评估点**：① 形态（`--mirror-ci-scripts` 按 workflow 解析出的脚本名执行 vs `--strict-ci` 出现 CI 独有脚本即阻断交付）；② 与仓库级 `verifyCommands` 的优先级、以及"验证链更严格"口径的共存；③ 执行成本（每仓多一条完整测试链，与单命令 10 分钟超时的相互作用）；④ 与 `ciAlignment.unrecognized` 清单的衔接，避免两套解析。
+  - **触发条件**：再次出现「本地验证全绿、目标仓库 CI 红」且差异来自 CI 独有脚本；或用户要求「PR 正文红绿必须等于 CI 红绿」。
+  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
+
+- **兄弟包 / peer 家族锁步升级（待评估，P0 🛠️）** —— 现象（2026-10-24 对外 PR 巡检）：`push-all-in-one#551 / #556` 把 `vitest` 升到 `^4.1.11`，`@vitest/coverage-v8` 仍停在 `^3.2.4`（装上 3.2.6），CI 覆盖率阶段抛 `TypeError: Cannot read properties of undefined (reading 'fetchCache')`。同类家族还有 `jest` ↔ `@types/jest`、`eslint` ↔ `@typescript-eslint/*`、`react` ↔ `react-dom`、`@vitest/*` 全家。当前依赖修复按告警逐包处理，没有"同一生态必须同大版本"的约束。
+  - **待评估点**：① 家族清单来源（硬编码映射 vs 读 `peerDependencies` 自动推导 vs 两者结合）；② 升级后对"运行时实际加载版本"做一致性复核（pnpm store 里两个版本共存即判失败）；③ 只升一个家族成员时的策略（补齐兄弟包 / 阻断该修复 / 放弃该告警）；④ 与 `--allow-major-upgrade` 及 lockfile 单版本策略的交互。
+  - **触发条件**：再次出现跨大版本升级后 CI 在工具链内部崩溃；或 `--allow-major-upgrade` 面向更多仓库放开时。
+  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
+
+- **同告警失败指纹去重与降级（待评估，P0 🛠️）** —— 现象（2026-10-24 对外 PR 巡检）：同一告警被反复重开 PR，且大多以 CI 红收场。实证：`push-all-in-one` 的 vitest 告警连开 4 次（`#551` → `#556` → `#569` → `#570`，前 3 个红、全部人工关闭，第 4 次才合并）；`rss-impact-server` 的 `decode-uri-component` 连开 3 次（`#1093` / `#1095` 红，`#1092` 摘掉 override 才修好）。当前只有「同告警已有 open PR 就跳过」，PR 被关闭后下一次运行会原样重来。
+  - **待评估点**：① 失败指纹键（包名 + 目标版本 + 失败命令 + 失败签名摘要）的落点（运行报告 vs 平台持久表）；② 命中后的行为（跳过并记账 / 聚合为 issue / 强制更换修复策略 / 降级为人工）；③ 与 `findDependfixOpenPR` 现有去重的关系；④ 用户显式重跑通道与指纹失效条件（如上游发布新版本）。
+  - **触发条件**：同一告警再次出现"修复 → CI 红 → 关闭 → 重开"的循环。
+  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
+
+- **PR 创建后的 CI 回环（CLI 侧）（待评估，P1 🛠️）** —— 现象（2026-10-24 对外 PR 巡检）：60 个已建 PR 里 6 个 CI 红，全部靠人工发现并关闭，`dependfix` 自身对「发出去的 PR 挂了」无感知；平台侧已有 PR Check 三源轮询与 alerts firing（M24.1 / M43.2），但 CLI / Action 路径没有等价能力，且轮询只告警、不回环处置。
+  - **待评估点**：① 是否 wait `check-runs`（超时上限、API 配额、运行时长与队列 worker 占用的关系）；② 失败处置（写 PR 评论附失败摘要 / 自动关 PR + 删分支 / 仅写报告字段）；③ 是否把 PR Check 能力下沉为 core / engine 共享模块供平台与 CLI 复用；④ 与自动合并的前置关系（必须先绿才能合）。
+  - **触发条件**：再次出现红 PR 长时间挂起无人处置；或用户要求「dependfix 自己收掉坏 PR」。
+  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
+
+- **提交面白名单收敛（待评估，P1 🛠️）** —— 现象（2026-10-24 对外 PR 巡检）：`packages/engine/src/github/pr-creator.ts` 仍是 `git add .`，把 install / build 副产物一并提交。实证：`push-all-in-one#569` 混入 `CHANGELOG.md` 空白重写（`colors` 后多出空格）、`nuxt-latest-template#297` / `afdian-linker#467` 混入 `nuxt prepare` 生成的 `.nuxtrc`、`rss-impact-web#923` 混入 `auto-imports.d.ts`；66 个可查 PR 中 7 个含白名单外文件（其中 `push-all-in-one#573` 的源码改动属 AI 修复，应保留）。
+  - **待评估点**：① 白名单形态（`package.json` / `pnpm-lock.yaml` / `pnpm-workspace.yaml` / `.gitignore` 固定白名单 vs 黑名单排除生成物）；② AI fixer 的源码改动如何声明并纳入（按 fixer 产出的路径集合，而非整仓 `add`）；③ 生成文件（`auto-imports.d.ts` 类）是否允许提交；④ 与 `dependfix-reports/` 忽略规则的关系。
+  - **触发条件**：PR 中出现与修复无关的文件引发一次 review 误判或合并冲突。
+  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
+
+- **合并后红 check 的外部作业归因（待评估，P1 🛠️）** —— 现象（2026-10-24 对外 PR 巡检）：60 个已合并 PR 中 21 个（35%）在 merge commit 上出现红 check，但逐条比对父提交后**没有一条能归因到修复内容**：Dependabot 自身 updater 作业 10 个（`security_update_not_possible` / withdrawn advisory，且与合并同刻并发）、Docker buildx 推阿里云 ACR 的 `unknown manifest class for application/vnd.oci.empty.v1+json` 3 个、Cloudflare Workers Builds / Release 这类父提交已红 4 个、同批推送取消 1 个。当前报告把这几类与「本次改动失败」同列，容易被读成 dependfix 改坏了仓库。
+  - **待评估点**：① 外部作业清单与判定规则（Dependabot updater / Workers Builds / registry push / 取消态）；② 报告与平台 UI 的分类字段（`external_noise` / `pre_existing` / `self_caused`）；③ 是否在「等合并」判定里忽略外部作业的 `check-success`（与自动合并规则联动）；④ 与 `PRE_EXISTING_FAILURE` 既有归因口径的合并方式。
+  - **触发条件**：用户因合并后红灯质疑修复质量；或自动合并因外部作业红被卡住。
+  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
+
+- **自动合并闭环验证（待评估，P2 🚀）** —— 现象（2026-10-24 对外 PR 巡检）：60 个已合并 PR **全部由人工点击**，`docs/guide/auto-merge.md` 与 `.github/mergify.yml` 模板存在但未在目标仓启用；其中 58 个 CI 绿、平均 2-3 文件、纯依赖变更，属于可自动合并的低风险面；合并耗时中位 48 分钟、p90 5.4 小时、最长 2.5 天，人工介入是主要延迟来源。
+  - **待评估点**：① 启用形态（Mergify vs GitHub 原生 auto-merge）；② `check-success` 需覆盖 coverage / e2e / build 等 job 名，避免「Test 绿但 coverage 红」被自动合并；③ 与外部作业归因联动（否则会被 Dependabot 噪声卡住）；④ 回滚路径（合并后发现问题的 revert 入口）。
+  - **触发条件**：用户希望减少点击；或单个仓库月均 PR 数继续上升。
+  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
+
+- **`pnpm-workspace.yaml` 最小化重写（待评估，P2 🛠️）** —— 现象（2026-10-24 对外 PR 巡检）：修复 override 时会整文件重排该 YAML。实证：`picgo-plugin-optimization#151` 的 `pnpm-workspace.yaml` 出现 `+19/-18`，绝大多数是引号风格变化（`'ajv@6.12.6'` → `ajv@6.12.6`、`@eslint/eslintrc>ajv` 加引号），实际语义只多了一条 `sharp` override；`rss-image-download#103`、`push-all-in-one#551` 同类。大段无关 diff 既增加 review 成本，也放大后续 rebase 冲突面。
+  - **待评估点**：① YAML 序列化是否保留原引号风格与键序（行内改动 vs 重新 dump）；② 是否改为基于 `yaml` 文档树的定点编辑；③ 与 override 合并语义（同一键新旧值）的兼容；④ 是否需要一条"仅语义变化的 diff 校验"作为回归守卫。
+  - **触发条件**：override 批量重排再次造成合并冲突；或用户要求 PR diff 可读性。
+  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
+
 ### 待上收候选（评估完成，等待用户决策）
 
 > 本节为「评估完成、等待用户决策」候选的暂存区；候选**不含 `M\d+` 阶段编号**（[规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement)）。
