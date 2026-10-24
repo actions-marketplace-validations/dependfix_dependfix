@@ -183,7 +183,7 @@ interface FixError {
 
 ## 3. Markdown 报告模板
 
-### 3.1 报告结构（6 节 + 条件性 Skipped & Truncated）
+### 3.1 报告结构（6 节 + 条件性 Skipped & Truncated / Family Lockstep）
 
 > 条件性第 7 节 `Skipped & Truncated`（有跳过 / 截断 / 失败残差时渲染）见 [run-failure-taxonomy.md §5.8](../governance/run-failure-taxonomy.md#58-跳过与截断披露)。
 
@@ -252,6 +252,7 @@ interface FixError {
 - **Skipped & Truncated**：仅当存在跳过 / 截断 / 失败残差时渲染；旧 `summaryJson` 缺分组字段时按 `total - known` 补 `Other / unclassified`，不抛错
 - **版本列**：仅 `dependency-upgrade` 动作显示 from/to 版本；lockfile-repair 显示 strategy^；verification 显示 `—`，但**既有失败**（`FixAction.preExisting`，修复前即红、未归因本次改动）显示「既有失败（修复前即红，未归因本次改动）」
 - **环境性安装失败**：`lockfile-repair` 与升级链（`dependency-upgrade`：成员 / 分组 / 拆组逐包 / 跨线）的环境性失败（`FixAction.environmentalFailure === true`）在 **Fix Actions 表的失败原因**（渲染自 `FixAction.error`，见 `markdown-generator.ts` 的 `actionDetails`）展示证据，形态按链路分两种：lockfile-repair 为「进程信号（如 `signal SIGKILL` / `exit code 1`）+ `diagnostics: <stderr+stdout 尾部>`（无诊断时 `no stderr/stdout diagnostics`）」；升级链为 `pnpm install failed: <根因提示>: <诊断>`（无诊断时 `no error detail`）。`environmentalFailure` 字段本身不被渲染器消费，仅作非归因标记（见 [pnpm-lockfile-fixer.md §2.4](./pnpm-lockfile-fixer.md) 与 [dependency-fixer-records.md §12.16](./dependency-fixer-records.md)）
+- **Family Lockstep**：仅当存在**成功且非 noOp** 的家族锁步动作时渲染；按仓库 + 家族收敛（仓库级口径：根 / 成员 manifest 归并），`members` 取并集、`skipped` 剔除已写入成员（`members ∩ skipped = ∅`）；多仓库时增加 Repository 列
 - **空数据处理**：
   - 无错误 → 不渲染 Errors 节
   - 无修复动作 → Fix Actions 表显示 `No fix actions performed.`

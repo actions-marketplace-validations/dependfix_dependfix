@@ -134,6 +134,22 @@ export interface RepositoryResult {
 }
 
 /**
+ * 家族锁步记录（仅 `type === 'dependency-upgrade'` 且本次按家族规则写盘时存在）。
+ *
+ * 见 [pr-delivery-closure.md §4](../../../../docs/design/governance/pr-delivery-closure.md#4-m481-家族锁步升级)：
+ * 同一次修复内同一生态成员保持同一条版本线；`skipped` 承载 `familyMemberSkipped`
+ * （不在 manifest / 协议声明无法改写的成员），不参与写盘也不阻断。
+ */
+export interface FixActionFamily {
+    /** 家族标识（`vitest` / `typescript-eslint` / `jest` / `react`） */
+    id: string
+    /** 本次随族写盘的成员（含触发包） */
+    members: string[]
+    /** 家族中存在但未写盘的成员（familyMemberSkipped） */
+    skipped: string[]
+}
+
+/**
  * 修复动作记录（DependencyFixResult / LockfileRepairResult / VerificationResult 的扁平化表示）。
  */
 export interface FixAction {
@@ -145,6 +161,8 @@ export interface FixAction {
     isMajor?: boolean
     success: boolean
     error?: string
+    /** 家族锁步记录（仅按家族规则写盘的动作携带） */
+    family?: FixActionFamily
     /**
      * 仅 `type === 'verification'` 时有意义：该失败在**修复前的基线采样**中即已存在
      * （目标仓库本就为红，如长期失败的测试套件）→ 不归因本次改动，交付门禁不据此回滚。

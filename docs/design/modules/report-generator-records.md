@@ -82,6 +82,7 @@ export function verificationToFixAction(result: VerificationResult, repository: 
 | `packages/core/src/report/types.ts` | RunResult、RunSummary、RepositoryResult、FixAction、FixError、RunReportConfig |
 | `packages/core/src/report/markdown-generator.ts` | `generateMarkdownReport(runResult): string` |
 | `packages/core/src/report/json-generator.ts` | `generateJsonReport(runResult): string` |
+| `packages/core/src/report/family.ts` | `collectFamilySummaries(actions)`：家族锁步摘要（报告 / PR 正文共用） |
 | `packages/core/src/report/writer.ts` | `writeReport(mdContent, jsonContent, runId, outputDir?): ReportArtifact[]` |
 | `packages/core/src/report/mappers.ts` | `toFixAction` / `lockfileRepairToFixAction` / `verificationToFixAction`（可选） |
 | `packages/core/src/report/index.ts` | 更新导出，新增 re-export |
@@ -102,6 +103,7 @@ export function verificationToFixAction(result: VerificationResult, repository: 
 | 耗时格式化 | `< 1s` / `1.2s` / `2m 30s` 边界正确 |
 | 空错误列表 | 不渲染 Errors 节 |
 | major 升级标记 | Fix Actions 表中 isMajor=true 显示 "Yes" |
+| 家族锁步摘要 | 有成功且非 noOp 的 family 动作时渲染 Family Lockstep 段；多仓含 Repository 列、空 skipped 显示 `—`；回滚 / noOp 动作不渲染；`members ∩ skipped = ∅` |
 
 ### 8.2 JSON 生成器测试
 

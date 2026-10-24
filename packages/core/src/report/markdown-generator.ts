@@ -12,6 +12,7 @@ import {
 import { collectCodeScanningSuggestions } from './suggestions'
 import { collectCodeQualityFindings } from './code-quality-suggestions'
 import { describeCiAlignment } from './ci-alignment'
+import { collectFamilySummaries } from './family'
 import { countUnfixedAlerts, formatSeverity, formatSkipReason, skippedBreakdown, truncatedBreakdown } from './summary-counters'
 
 /**
@@ -25,6 +26,7 @@ import { countUnfixedAlerts, formatSeverity, formatSkipReason, skippedBreakdown,
  * 3.5. Supply Chain Warnings（有警示时才渲染）
  * 4. Alerts by Severity 表
  * 5. Repositories 明细
+ * 5.4. Family Lockstep（有家族锁步记录时才渲染）
  * 5.5. Code Scanning Suggestions（有建议时才渲染）
  * 5.6. Code Quality Findings（有 findings 时才渲染）
  * 5.7. Verification Alignment（有验证链口径记录时才渲染）
@@ -242,6 +244,29 @@ export function generateMarkdownReport(result: RunResult): string {
                 sections.push('_No alerts for this repository._', '')
             }
         }
+    }
+
+    // ---- 5.4 Family Lockstep（家族锁步摘要：命中家族 / 成员 / 跳过成员）----
+    const familySummaries = collectFamilySummaries(actions)
+    if (familySummaries.length > 0) {
+        const multiRepo = new Set(familySummaries.map((familySummary) => familySummary.repository)).size > 1
+        const headers = multiRepo
+            ? ['Repository', 'Family', 'Members', 'Skipped']
+            : ['Family', 'Members', 'Skipped']
+        sections.push('## Family Lockstep', '')
+        sections.push(`| ${headers.join(' | ')} |`)
+        sections.push(`|${headers.map(() => '---').join('|')}|`)
+        for (const familySummary of familySummaries) {
+            const members = familySummary.members.map((member) => `\`${escapeMd(member)}\``).join(', ')
+            const skipped = familySummary.skipped.length > 0
+                ? familySummary.skipped.map((member) => `\`${escapeMd(member)}\``).join(', ')
+                : '—'
+            const cells = multiRepo
+                ? [escapeMd(familySummary.repository), `\`${escapeMd(familySummary.family)}\``, members, skipped]
+                : [`\`${escapeMd(familySummary.family)}\``, members, skipped]
+            sections.push(`| ${cells.join(' | ')} |`)
+        }
+        sections.push('')
     }
 
     // ---- 5.5 Code Scanning Suggestions（无法自动修复的问题不静默丢失）----

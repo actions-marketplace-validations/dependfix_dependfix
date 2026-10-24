@@ -22,6 +22,7 @@ export function createEmptyExecutionSummary(): ExecutionSummary {
 export * from './types'
 export * from './ci-alignment'
 export * from './summary-counters'
+export { collectFamilySummaries, type FamilyLockstepSummary } from './family'
 export { generateMarkdownReport } from './markdown-generator'
 export { generateJsonReport } from './json-generator'
 export { writeReport } from './writer'

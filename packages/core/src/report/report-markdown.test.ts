@@ -789,3 +789,67 @@ describe('generateMarkdownReport dependency paths', () => {
         expect(md).not.toContain('**Dependency paths:**')
     })
 })
+
+describe('generateMarkdownReport family lockstep', () => {
+    it('renders the family lockstep section when a family action is present', () => {
+        const result = {
+            ...EMPTY_RUN_RESULT,
+            actions: [
+                makeAction({
+                    target: 'vitest',
+                    family: {
+                        id: 'vitest',
+                        members: ['vitest', '@vitest/coverage-v8'],
+                        skipped: ['@vitest/ui'],
+                    },
+                }),
+            ],
+        }
+        const md = generateMarkdownReport(result)
+
+        expect(md).toContain('## Family Lockstep')
+        expect(md).toContain('| `vitest` | `vitest`, `@vitest/coverage-v8` | `@vitest/ui` |')
+    })
+
+    it('renders the repository column for multi-repository runs', () => {
+        const result = {
+            ...EMPTY_RUN_RESULT,
+            actions: [
+                makeAction({
+                    target: 'vitest',
+                    family: { id: 'vitest', members: ['vitest'], skipped: [] },
+                }),
+                makeAction({
+                    repository: 'owner/other',
+                    target: 'jest',
+                    family: { id: 'jest', members: ['jest', '@types/jest'], skipped: [] },
+                }),
+            ],
+        }
+        const md = generateMarkdownReport(result)
+
+        expect(md).toContain('| Repository | Family | Members | Skipped |')
+        expect(md).toContain('| owner/other | `jest` | `jest`, `@types/jest` | — |')
+        expect(md).toContain('| owner/repo | `vitest` | `vitest` | — |')
+    })
+
+    it('renders an em dash when there are no skipped members', () => {
+        const result = {
+            ...EMPTY_RUN_RESULT,
+            actions: [
+                makeAction({
+                    target: 'vitest',
+                    family: { id: 'vitest', members: ['vitest', '@vitest/coverage-v8'], skipped: [] },
+                }),
+            ],
+        }
+        const md = generateMarkdownReport(result)
+
+        expect(md).toContain('| `vitest` | `vitest`, `@vitest/coverage-v8` | — |')
+    })
+
+    it('omits the section when no action carries family information', () => {
+        const md = generateMarkdownReport({ ...EMPTY_RUN_RESULT, actions: [makeAction({})] })
+        expect(md).not.toContain('## Family Lockstep')
+    })
+})
