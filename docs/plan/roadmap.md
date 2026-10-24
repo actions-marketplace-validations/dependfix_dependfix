@@ -55,6 +55,7 @@
 | M45: 运行可靠性与交付链收口 | 自用验证链面差收口 + 零告警仓库修复前基线采样成本 + 队列 worker 按 role 跳过周期插件 + 运行失败受约束重试入口 + 浮层类组件视觉覆盖扩面 + PR Check 告警关注集 | P2-P3 | 已完成（2026-10-15 用户决策方案 A / 2026-10-19 已闭环归档，见 [todo-archive.md §M45](archive/todo-archive-phases-m45.md#m45-运行可靠性与交付链收口-2026-10-15-用户决策方案-a-2026-10-19-归档)） |
 | M46: 运行结果可信度与可观测性 | 环境性失败与「有告警未修」可见性 + 跨 major / 截断 / 子目录跳过披露 + 基线完整链与门禁回滚粒度 + 执行容器内存下限与 OOM 归因 + 平台通知与邮件推送（issue #190）+ 视觉库 fixtures 前置断言 | P1-P3 | 已完成（2026-10-20 用户决策方案 A / 2026-10-22 已闭环归档，见 [todo-archive.md §M46](todo-archive.md#m46-运行结果可信度与可观测性-2026-10-20-用户决策方案-a-2026-10-22-归档)） |
 | M47: 交付判定可信与运行自证 | 验证链与目标仓库 CI 口径对齐 + 构建版本回执与安装日志语义 + 环境性失败归因收口 + pnpm store 持久化与提交卫生 + 通知周汇总（`weekly_digest`）+ 工程门禁与提交卫生收口 | P1-P3 | 已完成（2026-10-22 用户决策方案 A′ / 2026-10-24 已闭环归档，见 [todo-archive.md §M47](todo-archive.md#m47-交付判定可信与运行自证-2026-10-22-用户决策方案-a′-2026-10-24-归档)） |
+| M48: 对外 PR 交付闭环 | 兄弟包 / peer 家族锁步升级 + CI 独有脚本纳入验证链 + 同告警尝试指纹去重 + 提交面白名单与 YAML 定点编辑 + PR 创建后 CI 回环 + 外部作业归因与合并门禁 | P0-P1 | 进行中（2026-10-24 用户决策 D+E；见 [todo.md §M48](todo.md#m48-对外-pr-交付闭环-2026-10-24-用户决策-d-e)） |
 
 > **本路线图定位**：按 [规划规范 §2.1](../standards/planning.md) 仅维护阶段概览（目标 / 优先级 / 状态）。详细实施记录 / commit 引用 / 关键决策 / 经验教训见对应归档段（详见下方"## 详细任务"索引）。
 
@@ -341,11 +342,44 @@
 
 ---
 
+## M48: 对外 PR 交付闭环（2026-10-24 用户决策 D+E）
+
+承接 M47 归档后的交付可信链。2026-10-24 对外 PR 巡检（60 个已建 PR / 60 个已合并 PR；66 为含历史可查 PR）给出完整根因链：**写入侧不做家族约束**（`vitest@4` + `@vitest/coverage-v8@3` 混装 → CI 覆盖率阶段崩）→ **验证侧只跑固定四语义项**（目标仓 CI 的 `coverage` / `e2e` 永不执行 → 本地假绿）→ **交付侧不记尝试**（PR 关闭后原样重开）→ **提交面过宽**（`git add .` 混入 `.nuxtrc` / `auto-imports.d.ts` / `CHANGELOG.md`）→ **回环缺失**（红 PR 无人收）→ **归因缺失**（合并后外部作业红与本次修复同列）。设计依据 [pr-delivery-closure.md](../design/governance/pr-delivery-closure.md)。
+
+**阶段基线工作量（§3.1.1 再平衡分母）**：6 条目「交付物」区间和为 **35-55 文件 / 2200-3700 行**（量级估算，D 阶段按实际 diff 复测）。
+
+**6 原子条目**（🛠️ 5 + 🚀 1；🎨 / 🧪 独立条目缺口显式标注，测试随各条目内嵌）：
+
+- **M48.1** [P0 🛠️] 兄弟包 / peer 家族锁步升级（vitest / typescript-eslint / jest / react；`eslint` 只做 peer range 校验）
+- **M48.2** [P0 🛠️] CI 独有脚本纳入验证链（`--mirror-ci-scripts`，只执行 `pnpm/npm/yarn run` 子集）
+- **M48.3** [P0 🛠️] 同告警尝试指纹去重与降级（PR 正文计数 + 第 3 次尝试起跳过）
+- **M48.4** [P1 🛠️] 提交面白名单与 `pnpm-workspace.yaml` 定点编辑（`git add -- <paths>` + `parseDocument`）
+- **M48.5** [P1 🛠️] PR 创建后 CI 回环（CLI / Action 侧：可选等待 + comment / close）
+- **M48.6** [P1 🚀] 外部作业归因与合并门禁（五类分类 + mergify 同批 job 条件）
+
+**类型平衡复核**：🛠️ 5 + 🚀 1；🎨 / 🧪 独立条目缺口显式标注（UX 由已授权的 E 阶段承担，测试随各条目内嵌）。不新增第 7 原子以避免越过 5-6 项上限。
+
+**建议顺序**：M48.4 → M48.1 → M48.2 → M48.3 → M48.6 → M48.5。M48.4 最小且独立，先降后续 PR 的 diff 噪声；M48.1 断根因；M48.2 让验证结果可信；M48.3 收敛重复失败；M48.6 的分类纯函数先落地（无副作用），M48.5 的回环再消费它，避免循环依赖。
+
+**条目容量**：6 原子符合 [规划规范 §1.1](../standards/planning.md#11-硬性约束) 的 5-6 项上限。M48.4 单体最大（6-10 文件 / 400-700 行），在上界附近；实际 > 10 文件即按 a/b 拆分。实际 diff 触发 [设计文档硬阈值](../design/governance/spec-and-doc-governance.md#24-设计文档硬阈值hard-requirement) 时复用 [pr-delivery-closure.md](../design/governance/pr-delivery-closure.md)，不另立专项稿。
+
+**范围边界（不做什么）**：不做通用依赖图 / 自动家族推导；不执行 `docker build` / 任意 shell；不建平台尝试指纹表；不做聚合 issue；不新增合并后 check 采集；不自动在目标仓启用 mergify；归因不绕过 mergify `check-success` 门禁；平台侧建 PR 后回环不在本阶段；不改 exit code 语义与 `PRE_EXISTING_FAILURE` 口径。
+
+**§3.4 交叉核验**：6 项经 todo-archive 表格扫描（关键词 `锁步` / `peer` / `check-runs` / `git add .` / `失败指纹` / `external_noise` / `unrecognized` / `自动合并` / `mergify` 仅命中 M21.4 mergify 模板与 auto-merge 指南、M21 RG-W01 `git add .` 的 shell 注入修复、M24.1 PR Check open-only MVP——均为前置能力，非本阶段范围）+ `git log --all --grep=锁步`（命中 `8627edcb` 的 dependency-grouping 设计稿，已作为 M48.1 前置遗留项登记）+ `git log --oneline -- <路径>`（`ci-alignment.ts` 仅 `8888999e`；`pr-creator.ts` 最近 `612a457b` / `37c93068` / `8a6c84ef` / `cb5c1468`；`fixers/dependency/index.ts` 最近 `0d1dd455` / `873735d6` / `9f747fea`——均未覆盖本阶段范围（仅列最近条目，非穷举））+ 代码 anchor（`pr-creator.ts:230` 仍 `git add .`；`ci-alignment.ts:159/214` 仅记展示态 `unrecognized`；`findDependfixOpenPR` 仅 `state:'open'`；`fixers/dependency/index.ts:481/526` 仍 `YAML.stringify`；engine / cli 无 `check-runs` 调用；`external_noise` / `checkAttribution` 0 命中；`mergify.yml` dependfix 规则仅 `check-success=Test`），**0 项重复评估**。
+
+**审计 depth 预告**：M48.1 / M48.3 / M48.4 / M48.5 → `standard`（M48.3 / M48.5 跨 engine + cli + action，建议 2 分区并发）；M48.2 → `standard`（engine + cli，2 分区）；M48.6 → `deep`（core + platform + CI 模板，含治理定义与外部调用）。
+
+**后续阶段（已授权，待规划）**：**E：通知可信度收口**（4 项：`critical` 必选不可关闭 / 通知严重级别术语与阈值命名 / 周报投递重试与窗口锁 / `/settings` 与通知页 dark 视觉）。用户 2026-10-24 决策 D+E；E 待 M48 归档后启动 P 阶段，不占 M48 条目容量与编号；启动时按 §1.1 评估是否补足至 5 项。
+
+> 详细任务与 8 要素见 [todo.md §M48](todo.md#m48-对外-pr-交付闭环-2026-10-24-用户决策-d-e)；上一阶段（M47）见 [todo-archive.md §M47](todo-archive.md#m47-交付判定可信与运行自证-2026-10-22-用户决策方案-a′-2026-10-24-归档)。
+
+---
+
 ## 详细任务
 
-- 当前阶段任务：**无**——M47 已于 2026-10-24 归档（见 [todo-archive.md §M47](todo-archive.md#m47-交付判定可信与运行自证-2026-10-22-用户决策方案-a′-2026-10-24-归档)）；下一阶段待用户决策
+- 当前阶段任务：**M48 对外 PR 交付闭环**（2026-10-24 用户决策 D+E；六原子见 [todo.md §M48](todo.md#m48-对外-pr-交付闭环-2026-10-24-用户决策-d-e)）
 - 已归档阶段：[todo-archive.md](todo-archive.md)（主窗口保留最近阶段完整段 + 指针段；M0-M47 全部已归档；早期阶段见 [archive/index.md](archive/index.md) 分片索引）
-- 下一阶段（未授权）：无——按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 重新评估候选池
+- 下一阶段（已授权，待 M48 归档后规划）：**E：通知可信度收口**（4 项）
 - 后续阶段任务（延期项 + 未排期增强候选）：[backlog.md](backlog.md)
 
 ## 交付原则

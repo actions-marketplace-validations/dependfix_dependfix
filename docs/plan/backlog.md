@@ -60,6 +60,8 @@
 
 ### 候选评估中（待评估 / 本阶段延后项）
 
+> **E 阶段候选（2026-10-24 用户决策 D+E）**：`critical` 必选不可关闭 / 通知严重级别术语与阈值命名 / 周报投递重试与窗口锁 / `/settings` 与通知页 dark 视觉 4 项已获授权作为 M48 归档后的下一阶段，当前保持候选状态（不含阶段编号），待 M48 归档后启动 P 阶段。
+
 - **运行面漏洞检测：镜像基底 / 运行时二进制 / OS 包（待研究）** —— 背景（2026-10-22）：Node 24.18.1 基础镜像在 2026 年 10 月 21 日安全公告（CVE-2026-111497 Brotli 越界写、105483 / 106069 TLS 主机名校验绕过等）后仍只能靠**外部人工巡检**发现——Dependabot 未配置 docker 生态、基底此前为 digest 裸写（本轮已改为 tag + digest，但仍为手工钉定、无漂移与漏洞追踪）、`pnpm audit` 只覆盖 npm 依赖、GitHub 侧告警源为 Dependabot / Code Scanning / Code Quality findings（最后一类为代码静态分析），本地回退仅 `pnpm-audit`（同属 npm 依赖）；运行面与 OS 包无任何告警源。本批新增的 `check-node-version.mjs` 是**静态下限闸门**：只有人工抬升基线后才会拦截，**不能发现基线之后新披露的 CVE**。
   - **待研究问题**：① dependfix 自身的运行面（Docker 基底 / Node 二进制 / apk 包 / CI 运行时）能否自动检测并按严重级别分级？② 同一能力能否产品化，成为 dependfix 对**被管理仓库**的新告警源——扫描目标仓 Dockerfile / `.nvmrc` / `engines.node` 与已知运行时漏洞比对，复用现有验证链与 PR 创建提修复 PR？
   - **候选机制**（需比较权威数据源与误报成本）：
@@ -102,9 +104,9 @@
   - **触发条件**：后续以该文档为 API 契约参考产生歧义；或用户要求同步设计稿。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
-- **`scans.vue` / `alerts.vue` 体量超 `max-lines` 上限（待评估）** —— 现象：`apps/platform/app/pages/scans.vue` 达 834 行（>800）触发 `max-lines` warning；`alerts.vue` 为同类存量债（833 行）。当前 lint 以 `--max-warnings 10` 通过，未阻断。
-  - **待评估点**：① 抽取运行列表筛选工具栏（模板约 60 行）为独立组件，或抽 `exportLogs` 到 composable；② 是否一并治理 `alerts.vue`；③ 是否收紧 `max-lines` 阈值或引入 per-file 例外。
-  - **触发条件**：两页继续增长致 warning 逼近上限；或用户要求清理。
+- **`scans.vue` / `alerts.vue` / `repos.vue` 体量超 `max-lines` 上限（待评估）** —— 现象（2026-10-24 `wc -l` 实测）：`apps/platform/app/pages/scans.vue` 1001 行、`alerts.vue` 900 行、`repos.vue` 840 行，均 >800 触发 `max-lines` warning。当前 lint 以 `--max-warnings 10` 通过，未阻断。
+  - **待评估点**：① 抽取运行列表筛选工具栏（模板约 60 行）为独立组件，或抽 `exportLogs` 到 composable；② 是否一并治理 `alerts.vue` / `repos.vue`；③ 是否收紧 `max-lines` 阈值或引入 per-file 例外。
+  - **触发条件**：三页继续增长致 warning 逼近上限；或用户要求清理。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
 - **列表页筛选 / 分页能力的共享抽取（待评估）** —— 现象：`repos.vue` 与 `batch-runs.vue` 各自实现客户端筛选 + 重置 + 内建分页（形态相近但字段与语义不同），`scans.vue` 另有按仓库客户端分页实现；三处筛选 / 分页样板重复。展示口径统一批次（M42.5）判定两页形态尚未完全一致，故先页面内实现。
@@ -143,7 +145,7 @@
   - **触发条件**：新增 / 扩容经验分片时；或用户要求清理归档排序。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
-- **zh 设计文档拆分后的 en-US 镜像结构漂移（待评估）** —— 现象：M44.4 分片化改造仅作用于 zh 事实源（`docs/design/**`），`docs/i18n/en-US/design/governance/{architecture,platform-ai-integration}.md` 等镜像仍为未拆分全量译文；镜像不在 `check-doc-size` 计量面（阈值表 glob 为 `docs/design/governance/*.md`）、`docs:check:i18n` 仅查 legacy/i18n 重复页，故该漂移无机检。**待评估点**：① 镜像是否随 zh 结构同步拆分（成本较高）；② 或在 i18n 新鲜度台账登记「zh 结构 → 镜像结构」映射并在后续同步批次对齐。
+- **zh 设计文档拆分后的 en-US 镜像结构漂移（待评估）** —— 现象：M44.4 分片化改造仅作用于 zh 事实源（`docs/design/**`），`docs/i18n/en-US/design/governance/{architecture,platform-ai-integration}.md` 等镜像仍为未拆分全量译文；镜像不在 `check-doc-size` 计量面（阈值表 glob 为 `docs/design/governance/*.md`）、`docs:check:i18n` 仅查 legacy/i18n 重复页，故该漂移无机检（2026-10-24 M48 新增 `pr-delivery-closure.md` 索引行同样未同步 en 镜像）。**待评估点**：① 镜像是否随 zh 结构同步拆分（成本较高）；② 或在 i18n 新鲜度台账登记「zh 结构 → 镜像结构」映射并在后续同步批次对齐。
   - **触发条件**：下次 i18n 新鲜度同步批次；或 zh 侧继续分片化时。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
@@ -218,46 +220,6 @@
 - **alerts 原始列表的排序并列兜底（待评估，P2 🛠️）** —— 背景（2026-10-24）：CI `Visual Regression` 出现 flaky（`alerts 运行抽屉浮层（light）` 3284 px 差异，同 commit 重跑即绿）。根因：`GET /api/alerts` 的「原始列表」视图只按 `result.createdAt DESC` 排序、**无并列兜底**，而 `ScanResult.createdAt` 缺省为插入时刻 → 同批次插入落在同一毫秒形成并列 → 行序随数据库返回顺序漂移。视觉侧已用「fixtures 逐条钉死 `createdAt`」消除（见 `apps/platform/tests/visual/helpers/fixtures.ts` 与 [视觉 README](../../apps/platform/tests/visual/README.md)）；e2e 的原始列表用例经 `page.route` mock 单条告警，不依赖真实 tie 序，故无同类风险。
   - **待评估点**：默认排序是否补确定性兜底（`addOrderBy('result.id','DESC')` 或 `(createdAt, id)` 组合）；对现有视觉基线行序与未来分页 / 导出结果集边界的影响。
   - **触发条件**：真实告警同毫秒插入被报告顺序抖动；或列表分页 / 导出功能引入（届时并列顺序影响结果集边界）。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
-
-- **CI 独有脚本纳入验证链（待评估，P0 🛠️）** —— 现象（2026-10-24 对外 PR 巡检）：验证链按 `DEFAULT_VERIFY_COMMANDS` 跑 `lint / build / typecheck / test`，目标仓库 CI 还会跑 `pnpm run coverage`、`test:e2e`、`docker build` 等四类之外的脚本；这些命令只在 CI 生效，本地永远看不到。实证：`push-all-in-one#551 / #556` 的 CI 在 `pnpm run coverage` 段崩在 `@vitest/coverage-v8` 与 `vitest` 跨大版本混装，而 PR 正文写「Verifications passed 4 / failed 0」（[验证链与 CI 口径对齐设计](../design/governance/verification-ci-alignment.md) 已把这类命令记为 `unrecognized`，但按设计非目标「不按 workflow 动态替换验证命令」，只披露不阻断）。
-  - **待评估点**：① 形态（`--mirror-ci-scripts` 按 workflow 解析出的脚本名执行 vs `--strict-ci` 出现 CI 独有脚本即阻断交付）；② 与仓库级 `verifyCommands` 的优先级、以及"验证链更严格"口径的共存；③ 执行成本（每仓多一条完整测试链，与单命令 10 分钟超时的相互作用）；④ 与 `ciAlignment.unrecognized` 清单的衔接，避免两套解析。
-  - **触发条件**：再次出现「本地验证全绿、目标仓库 CI 红」且差异来自 CI 独有脚本；或用户要求「PR 正文红绿必须等于 CI 红绿」。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
-
-- **兄弟包 / peer 家族锁步升级（待评估，P0 🛠️）** —— 现象（2026-10-24 对外 PR 巡检）：`push-all-in-one#551 / #556` 把 `vitest` 升到 `^4.1.11`，`@vitest/coverage-v8` 仍停在 `^3.2.4`（装上 3.2.6），CI 覆盖率阶段抛 `TypeError: Cannot read properties of undefined (reading 'fetchCache')`。同类家族还有 `jest` ↔ `@types/jest`、`eslint` ↔ `@typescript-eslint/*`、`react` ↔ `react-dom`、`@vitest/*` 全家。当前依赖修复按告警逐包处理，没有"同一生态必须同大版本"的约束。
-  - **待评估点**：① 家族清单来源（硬编码映射 vs 读 `peerDependencies` 自动推导 vs 两者结合）；② 升级后对"运行时实际加载版本"做一致性复核（pnpm store 里两个版本共存即判失败）；③ 只升一个家族成员时的策略（补齐兄弟包 / 阻断该修复 / 放弃该告警）；④ 与 `--allow-major-upgrade` 及 lockfile 单版本策略的交互。
-  - **触发条件**：再次出现跨大版本升级后 CI 在工具链内部崩溃；或 `--allow-major-upgrade` 面向更多仓库放开时。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
-
-- **同告警失败指纹去重与降级（待评估，P0 🛠️）** —— 现象（2026-10-24 对外 PR 巡检）：同一告警被反复重开 PR，且大多以 CI 红收场。实证：`push-all-in-one` 的 vitest 告警连开 4 次（`#551` → `#556` → `#569` → `#570`，前 3 个红、全部人工关闭，第 4 次才合并）；`rss-impact-server` 的 `decode-uri-component` 连开 3 次（`#1093` / `#1095` 红，`#1092` 摘掉 override 才修好）。当前只有「同告警已有 open PR 就跳过」，PR 被关闭后下一次运行会原样重来。
-  - **待评估点**：① 失败指纹键（包名 + 目标版本 + 失败命令 + 失败签名摘要）的落点（运行报告 vs 平台持久表）；② 命中后的行为（跳过并记账 / 聚合为 issue / 强制更换修复策略 / 降级为人工）；③ 与 `findDependfixOpenPR` 现有去重的关系；④ 用户显式重跑通道与指纹失效条件（如上游发布新版本）。
-  - **触发条件**：同一告警再次出现"修复 → CI 红 → 关闭 → 重开"的循环。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
-
-- **PR 创建后的 CI 回环（CLI 侧）（待评估，P1 🛠️）** —— 现象（2026-10-24 对外 PR 巡检）：60 个已建 PR 里 6 个 CI 红，全部靠人工发现并关闭，`dependfix` 自身对「发出去的 PR 挂了」无感知；平台侧已有 PR Check 三源轮询与 alerts firing（M24.1 / M43.2），但 CLI / Action 路径没有等价能力，且轮询只告警、不回环处置。
-  - **待评估点**：① 是否 wait `check-runs`（超时上限、API 配额、运行时长与队列 worker 占用的关系）；② 失败处置（写 PR 评论附失败摘要 / 自动关 PR + 删分支 / 仅写报告字段）；③ 是否把 PR Check 能力下沉为 core / engine 共享模块供平台与 CLI 复用；④ 与自动合并的前置关系（必须先绿才能合）。
-  - **触发条件**：再次出现红 PR 长时间挂起无人处置；或用户要求「dependfix 自己收掉坏 PR」。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
-
-- **提交面白名单收敛（待评估，P1 🛠️）** —— 现象（2026-10-24 对外 PR 巡检）：`packages/engine/src/github/pr-creator.ts` 仍是 `git add .`，把 install / build 副产物一并提交。实证：`push-all-in-one#569` 混入 `CHANGELOG.md` 空白重写（`colors` 后多出空格）、`nuxt-latest-template#297` / `afdian-linker#467` 混入 `nuxt prepare` 生成的 `.nuxtrc`、`rss-impact-web#923` 混入 `auto-imports.d.ts`；66 个可查 PR 中 7 个含白名单外文件（其中 `push-all-in-one#573` 的源码改动属 AI 修复，应保留）。
-  - **待评估点**：① 白名单形态（`package.json` / `pnpm-lock.yaml` / `pnpm-workspace.yaml` / `.gitignore` 固定白名单 vs 黑名单排除生成物）；② AI fixer 的源码改动如何声明并纳入（按 fixer 产出的路径集合，而非整仓 `add`）；③ 生成文件（`auto-imports.d.ts` 类）是否允许提交；④ 与 `dependfix-reports/` 忽略规则的关系。
-  - **触发条件**：PR 中出现与修复无关的文件引发一次 review 误判或合并冲突。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
-
-- **合并后红 check 的外部作业归因（待评估，P1 🛠️）** —— 现象（2026-10-24 对外 PR 巡检）：60 个已合并 PR 中 21 个（35%）在 merge commit 上出现红 check，但逐条比对父提交后**没有一条能归因到修复内容**：Dependabot 自身 updater 作业 10 个（`security_update_not_possible` / withdrawn advisory，且与合并同刻并发）、Docker buildx 推阿里云 ACR 的 `unknown manifest class for application/vnd.oci.empty.v1+json` 3 个、Cloudflare Workers Builds / Release 这类父提交已红 4 个、同批推送取消 1 个。当前报告把这几类与「本次改动失败」同列，容易被读成 dependfix 改坏了仓库。
-  - **待评估点**：① 外部作业清单与判定规则（Dependabot updater / Workers Builds / registry push / 取消态）；② 报告与平台 UI 的分类字段（`external_noise` / `pre_existing` / `self_caused`）；③ 是否在「等合并」判定里忽略外部作业的 `check-success`（与自动合并规则联动）；④ 与 `PRE_EXISTING_FAILURE` 既有归因口径的合并方式。
-  - **触发条件**：用户因合并后红灯质疑修复质量；或自动合并因外部作业红被卡住。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
-
-- **自动合并闭环验证（待评估，P2 🚀）** —— 现象（2026-10-24 对外 PR 巡检）：60 个已合并 PR **全部由人工点击**，`docs/guide/auto-merge.md` 与 `.github/mergify.yml` 模板存在但未在目标仓启用；其中 58 个 CI 绿、平均 2-3 文件、纯依赖变更，属于可自动合并的低风险面；合并耗时中位 48 分钟、p90 5.4 小时、最长 2.5 天，人工介入是主要延迟来源。
-  - **待评估点**：① 启用形态（Mergify vs GitHub 原生 auto-merge）；② `check-success` 需覆盖 coverage / e2e / build 等 job 名，避免「Test 绿但 coverage 红」被自动合并；③ 与外部作业归因联动（否则会被 Dependabot 噪声卡住）；④ 回滚路径（合并后发现问题的 revert 入口）。
-  - **触发条件**：用户希望减少点击；或单个仓库月均 PR 数继续上升。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
-
-- **`pnpm-workspace.yaml` 最小化重写（待评估，P2 🛠️）** —— 现象（2026-10-24 对外 PR 巡检）：修复 override 时会整文件重排该 YAML。实证：`picgo-plugin-optimization#151` 的 `pnpm-workspace.yaml` 出现 `+19/-18`，绝大多数是引号风格变化（`'ajv@6.12.6'` → `ajv@6.12.6`、`@eslint/eslintrc>ajv` 加引号），实际语义只多了一条 `sharp` override；`rss-image-download#103`、`push-all-in-one#551` 同类。大段无关 diff 既增加 review 成本，也放大后续 rebase 冲突面。
-  - **待评估点**：① YAML 序列化是否保留原引号风格与键序（行内改动 vs 重新 dump）；② 是否改为基于 `yaml` 文档树的定点编辑；③ 与 override 合并语义（同一键新旧值）的兼容；④ 是否需要一条"仅语义变化的 diff 校验"作为回归守卫。
-  - **触发条件**：override 批量重排再次造成合并冲突；或用户要求 PR diff 可读性。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
 - **通知严重级别术语与阈值命名收敛（待评估，P2 🎨）** —— 现象（2026-10-24 用户反馈 + 截图）：通知页把 `critical` / `high` 译为「严重」/「高危」且同页并列，用户无法从字面判断哪个更危险；类别名「高危告警」看起来只覆盖 `high`，实际开关同时管 `critical`（关掉后 `apps/platform/server/services/notification/recipients.ts` 直接返回空收件人）；阈值标签「高危阈值」把 `critical` 也包含在内（选项「严重 + 高危」/「仅严重」，见 [zh-CN.json](../../apps/platform/i18n/locales/zh-CN.json) 与 [en-US.json](../../apps/platform/i18n/locales/en-US.json) 的 `High-risk threshold`），与同仓扫描侧口径冲突——`apps/platform/app/utils/scan-options.ts` 已明确把 Critical / High / Medium 定为**专有名词不走 i18n**，扫描配置页又写作「严重级别阈值」。邮件侧同样不统一：周报标题只写「N 个高危告警未修复」，正文才分列「严重 x / 高危 y」（`apps/platform/server/services/notification/business-templates.ts`）。
@@ -431,9 +393,9 @@
 
 | 内容类型 | 位置 |
 |:--|:--|
-| 当前阶段活跃任务 | **无**——M47 已于 2026-10-24 归档（见 [todo-archive.md §M47](todo-archive.md#m47-交付判定可信与运行自证-2026-10-22-用户决策方案-a′-2026-10-24-归档)）；插队容量治理见 [planning.md §3.1.1](../standards/planning.md#_3-1-1-插队后的阶段容量再平衡-hard-requirement-2026-10-19) |
-| 下一阶段（未授权） | 无——按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 重新评估本文件候选池 |
+| 当前阶段活跃任务 | **M48：对外 PR 交付闭环**（2026-10-24 用户决策 D+E；见 [todo.md §M48](todo.md#m48-对外-pr-交付闭环-2026-10-24-用户决策-d-e)）；插队容量治理见 [planning.md §3.1.1](../standards/planning.md#_3-1-1-插队后的阶段容量再平衡-hard-requirement-2026-10-19) |
+| 下一阶段（已授权，待 M48 归档后规划） | **E：通知可信度收口**（4 项，见 §候选评估中 E 阶段候选说明） |
 | 已完成阶段归档 | [todo-archive.md](todo-archive.md)（主窗口 + [archive/](archive/) 分片） |
-| 里程碑与阶段交付 | [roadmap.md](roadmap.md)（M0-M47 已归档） |
+| 里程碑与阶段交付 | [roadmap.md](roadmap.md)（M0-M47 已归档；M48 进行中） |
 | 长期主线 / 候选 / 待人工验收 / 已知边界 | 本文档（按四象限结构） |
 | 历史归档索引 | [archive/index.md](archive/index.md) |
