@@ -167,18 +167,29 @@
 - **范围**：
   - `apps/platform/server/plugins/` 新增周汇总插件（周一 09:00，`DEPENDFIX_WEEKLY_DIGEST_HOUR` 可覆盖），按进程角色单实例运行（复用 `server/utils/process-role.ts`；角色归属需与 `HTTP_ONLY_PLUGINS` / `NON_HTTP_ONLY_PLUGINS` 分类一致性用例同步）。
   - `apps/platform/server/services/notification/`：复用 `high-risk.ts` 查询 + 周报模板（按仓库分组 + 截断 / 豁免计数披露）+ `deliveryKey = sha256('digest', weekKey, recipientUserId, channel, 'weekly_digest')` 逐封投递；`weekly_digest` 豁免指纹 / 冷却 / 每小时上限（设计 §7.3 例外）。
-  - `apps/platform/app/pages/settings.vue:594-598` 与 `notifications.vue`：去掉 `weekly_digest` 的 disabled / `weeklyDigestUnavailable`，改为可配置。
+  - `apps/platform/app/pages/settings.vue` 与 `notifications.vue`：去掉 `weekly_digest` 的 disabled / `weeklyDigestUnavailable`，改为可配置。
   - i18n 双语；`docs/design/governance/platform-notification.md` 状态与 B5 段更新。
   - 测试：ISO 周键与跨年周边界（注入时钟）、组织 + 个人双层开关、内容不变仍发送、按用户逐封去重、角色单实例、无收件人 / 渠道不可用。
 - **验收标准**：
-  - [ ] ① 默认关闭；组织 + 个人同时开启时每周一 09:00（服务器时区）发送一次，按 ISO 周去重，内容未变化也发送。
-  - [ ] ② 同一用户 + 渠道 + 周仅一封（并发占位）；投递记录写入 `recipientUserId`。
-  - [ ] ③ 任一层关闭（组织 / 个人 / 全局 `DEPENDFIX_NOTIFICATION_ENABLED=false`）不产生周报。
-  - [ ] ④ 仅一个进程执行（role 守卫 + 单测），HTTP / worker 双进程不双发。
-  - [ ] ⑤ 周报正文披露截断 / 豁免计数；`settings.vue` 不再显示「暂不可用」；设计稿状态同步。
+  - [x] ① 默认关闭；组织 + 个人同时开启时每周一 09:00（服务器时区）发送一次，按 ISO 周去重，内容未变化也发送。
+  - [x] ② 同一用户 + 渠道 + 周仅一封（并发占位）；投递记录写入 `recipientUserId`。
+  - [x] ③ 任一层关闭（组织 / 个人 / 全局 `DEPENDFIX_NOTIFICATION_ENABLED=false`）不产生周报。
+  - [x] ④ 仅一个进程执行（role 守卫 + 单测），HTTP / worker 双进程不双发。
+  - [x] ⑤ 周报正文披露截断 / 豁免计数；`settings.vue` 不再显示「暂不可用」；设计稿状态同步。
 - **不做什么**：不做通用摘要调度器；不做周报历史归档页；不做时区逐用户配置；不做 Slack / Webhook 投递。
 - **依赖**：M46.5 B1-B4（通知服务 / 偏好 / 投递记录 / 去重键）；`platform-notification.md §6.5 / §7.3 / §B5`；`process-role.ts` 角色守卫。
-- **交付物**：预估 3-4 commits（插件 + 周期触发 / 周报查询与模板 + 测试 / UI 与 i18n / 设计稿状态），**5-8 文件 / 200-350 行**。
+- **D 阶段裁定**：
+  - **触发形态**：插件加入 `HTTP_ONLY_PLUGINS`（与 `stale-cleanup` 同列）——容器双进程形态下 HTTP 主进程恒存在，worker 跳过；启动 30 秒后每 15 分钟检查一次，触发窗口 = 本周一 `DEPENDFIX_WEEKLY_DIGEST_HOUR`（默认 9）起 24 小时（窗口内重启补发，周中晚些时候启动不补发上周）；同进程同周只尝试一次，跨进程 / 重启由逐用户投递键兜底。否决「精确 setTimeout 到下周」：长定时器对时钟跳变 / DST 不友好，且无法自然补发。
+  - **快照口径**：新增 `queryActiveUnfixedHighRisk`——不限定 `scanRunId`（`ScanResult` 为 per-alert 模型，`supersededAt IS NULL` 即当前活跃），与 alerts 视图同口径；截断计数取快照内各告警所属运行（去重）的 `alertsTruncatedBySeverity`。**豁免口径**：`ScanResult.fixStatus` 在生产只写 `not-tried`（修复结果不回写，M20.3 既有边界），故「豁免」改取快照运行的 `RunSummary.alertsConverged` 单列披露（「引擎汇总另有 N 条本地已满足」），不改明细计数——满足验收 ⑤ 的「截断 / 豁免计数」披露要求，且避免基于死列实现。否决「按本周新增 run 聚合」：会漏掉跨周仍未修复的存量高危。
+  - **零快照行为**：本周无未修复高危时仍发送「本周无未修复高危」摘要——显式订阅的周期摘要应证明任务存活，避免订阅方把零告警误读为周报停摆。
+  - **逐封投递**：`dispatchNotification` 新增 `recipientUserId` / `recipientIdentity`；`weekly_digest` 分支跳过指纹 / 冷却 / 每小时上限（设计 §7.3），投递键 `sha256('digest', weekKey, identity, channel, 'weekly_digest')`。额外管理员收件人无 userId → 身份取规范化邮箱、日志 `recipientUserId=null`（仍满足每收件人每周一封）。
+  - **UI**：`settings.vue` / `notifications.vue` 去掉 `weekly_digest` 的 `disabled` 与「后续版本提供」占位说明，改为可配置并补一句触发口径 hint；`/notifications` 页可见文案变化 → 连带重建 `notifications-light.png`（其余 16 张基线未变）。
+  - **交付物**：5 commits——① `feat(platform)` 周报核心（schedule / service / high-risk 全局快照 / delivery 例外 / 模板 / 插件 + 测试）；② `feat(platform)` UI 可配置 + i18n + e2e + 视觉基线；③ `docs(design)` 设计稿状态与触发口径 + `platform.md`；④ `docs(guide)` 配置指南双语 + `.env.full.example`；⑤ `docs(plan)` M47.5 闭环登记。实际 diff 见下条，F 阶段按此分组提交。
+  - **实际 diff**：执行角色 2026-10-24 以 `git diff --numstat`（含 `git add -N` 的新文件）统计为 **28 文件 / `+1439 −101`**；其中 `docs/plan/todo.md` 自身 +18 −7，业务与文档 **27 文件 / +1421 −94**；测试文件新增约 839 行（含 e2e），新增源码模块 3 个 + 新增测试文件 3 个（另修改 5 个既有测试文件）。原估 5-8 文件 / 200-350 行。已触发 [设计文档硬阈值](../design/governance/spec-and-doc-governance.md#_2-4-设计文档硬阈值-hard-requirement)（> 10 文件 / > 800 行），治理落点 = 既有 [platform-notification.md](../design/governance/platform-notification.md)（§4.5 / §6.4 / §6.5 / §10 / §12 / §13）+ [platform.md §10.6/§11](../standards/platform.md)，不另立专项稿（与 M47.2 / M47.3 / M47.4 同族）。
+  - **mutation 标定（6/6 击杀）**：周报不再豁免指纹 / 冷却 / 上限 → 1 例；去掉角色守卫 → 1 例；ISO 周偏移 → 1 例；投递键去收件人维度 → 1 例；豁免计数改数 success → 3 例；退回一封多收件人 → 2 例。工件 `artifacts/review-gate/2026-10-24-m47-5-mutation.md`（还原后 md5 逐项一致）。
+- **验证证据**：lint 0 error（3 条存量 warning）；`pnpm run typecheck` 7 包 Done；platform 全量 164 文件 / 2142 passed / 9 skipped；通知域定向 17 文件 / 137 passed；notifications e2e 文件 4 passed（含「组织开启后个人开关可配置」）；`test:visual:update` 一次 + 不带 update 连跑两遍 17 passed（仅 `notifications-light.png` 重建）；mutation 6/6（工件 `artifacts/review-gate/2026-10-24-m47-5-mutation.md`，逐项记录文件 / md5 / 失败用例）；文档九项 + `lint:md` + `docs:build`（fallback 116）全绿、`check:doc-size` 0 warning、`check:orphan-ids` 0；新增行编号标记扫描 0 命中。
+- **残余**：① 同进程同周只尝试一次——首次尝试部分用户 `failed` 时本周内不重试（投递键已释放，下周或进程重启可补发）；② 组织关闭 / 部署熔断时不写投递记录（审计面不可见「因开关跳过」）；`skipped_no_recipient` 同样保留本周锁（避免窗口内每 15 分钟写一条无收件人日志），窗口内才开启个人开关需等下周；③ 零告警仍发送，可能被部分订阅者视为噪声；④ 周报 locale 取部署级 `DEPENDFIX_LOCALE`，未按用户偏好；⑤ 若某仓库只有截断告警而无持久化明细则不披露其截断计数；⑥ 视觉仅覆盖 `/notifications` light，无 dark 基线（`/settings` 无视觉基线，改由 e2e 覆盖「组织开启后个人开关可配置」）；⑦ `ScanResult` 不标记 converged，周报明细计数仍含本地已满足告警（「豁免」仅按 `RunSummary.alertsConverged` 披露；跨 run 相加在脏数据下可能高估，正常 reconcile 后每仓活跃行指向最新 run）；⑧ 崩溃遗留 `sending` 行 + 窗口内重启的窄场景可能让该周停留 `skipped_duplicate`（10 分钟回收窗口后才可重试，实际下周由新键覆盖）。
+- **实际 diff（最终）**：`git add -N . && git diff --numstat | awk '{a+=$1; d+=$2; n++} END {print n, a, d}'` → **28 文件 / +1439 −101**（含 `docs/plan/todo.md` 自身 +18 −7 与 1 张重建 PNG；排除 todo 后 27 文件 / +1421 −94）。
 - **风险与缓解**：**R1 双进程双发** → role 守卫 + 单测；**R2 时区 / ISO 周边界** → 注入时钟用例；**R3 邮件量大** → 仅开启者接收 + 逐用户去重；**R4 与「内容未变化不重复推送」冲突** → 设计已声明周报例外，测试锁定。
 
 ### M47.6 [P3 🧪] 工程门禁与提交卫生收口
