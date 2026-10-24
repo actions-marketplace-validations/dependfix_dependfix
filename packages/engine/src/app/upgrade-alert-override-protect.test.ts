@@ -14,7 +14,7 @@ vi.mock('../fixers/dependency', () => ({
     overrideTransitiveDependency: mockOverrideTransitiveDependency,
 }))
 
-import { upgradeAlert } from './helpers'
+import { upgradeAlert } from './upgrade-alert'
 
 const alert = {
     repository: 'foo/bar',
