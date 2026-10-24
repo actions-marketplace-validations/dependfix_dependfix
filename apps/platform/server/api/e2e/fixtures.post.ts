@@ -159,6 +159,11 @@ const scanResultSchema = z.object({
     lastSeenAt: z.string().nullable().optional(),
     /** 上游已关闭时间（todo.md §M20.3 reconcile 函数写入，§M20.6 扩展到 fixtures 用例）；不传则 null（活跃） */
     supersededAt: z.string().nullable().optional(),
+    /**
+     * 创建时间：原始列表（alerts 页「原始列表」视图）按 `createdAt DESC` 排序，故视觉基线必须钉死——
+     * 不传时同批次插入落在同一毫秒会形成排序并列，并列顺序由数据库返回顺序决定 → 行序逐次漂移。
+     */
+    createdAt: z.string().optional(),
 })
 
 /**
@@ -364,6 +369,8 @@ export default defineEventHandler(async (event) => {
             const lastSeenAt = result.lastSeenAt ? new Date(result.lastSeenAt) : now
             const supersededAt = result.supersededAt ? new Date(result.supersededAt) : null
             const saved = await resultRepo.save(resultRepo.create({
+                // createdAt 走「传了才覆盖」：缺省交给实体默认值（插入时刻）
+                ...(result.createdAt ? { createdAt: new Date(result.createdAt) } : {}),
                 scanRunId: run.id,
                 repositoryId: run.repositoryId,
                 upstreamId,

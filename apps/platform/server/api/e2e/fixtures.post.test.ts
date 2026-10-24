@@ -5,6 +5,7 @@ import fixturesPostHandler from './fixtures.post'
 import { ensureDatabaseInitialized } from '#server/database'
 import { PRCheck } from '#server/entities/pr-check'
 import { Repository } from '#server/entities/repository'
+import { ScanResult } from '#server/entities/scan-result'
 import { ScanRun } from '#server/entities/scan-run'
 
 /**
@@ -244,6 +245,48 @@ describe('POST /api/e2e/fixtures 双门控（todo.md §M22.6）', () => {
         expect(defaults[0]!.id).not.toBe('')
         expect(defaults[0]!.startedAt).toBeNull()
         expect(defaults[0]!.finishedAt).toBeNull()
+    })
+
+    /**
+     * scanResults[].createdAt：alerts 页「原始列表」视图按 `createdAt DESC` 排序，视觉基线须逐像素可复现
+     * （同批次插入落在同一毫秒会形成排序并列 → 行序随数据库返回顺序漂移，见 tests/visual/helpers/fixtures.ts）。
+     */
+    it('scanResults[] 的 createdAt 可显式钉死，缺省走实体默认值', async () => {
+        vi.stubEnv('E2E_TEST', 'true')
+        vi.stubGlobal('useRuntimeConfig', () => ({ encryptionKey: 'test-encryption-key-32-bytes!!', e2eFixturesAllowed: true }))
+        await fixturesPostHandler(makeEvent('POST', '/api/e2e/fixtures', {
+            repos: [{ owner: 'fixture-result', name: 'pinned' }],
+            scanRuns: [{ repositoryOwner: 'fixture-result', repositoryName: 'pinned', status: 'completed' }],
+            scanResults: [
+                {
+                    scanRunIndex: 0,
+                    upstreamId: 'dependabot:pinned-001',
+                    source: 'dependabot',
+                    severity: 'high',
+                    packageName: 'pinned-pkg',
+                    createdAt: '2026-08-01T02:00:00.000Z',
+                },
+                {
+                    scanRunIndex: 0,
+                    upstreamId: 'dependabot:pinned-002',
+                    source: 'dependabot',
+                    severity: 'high',
+                    packageName: 'pinned-pkg',
+                },
+            ],
+        }))
+
+        const ds = await ensureDatabaseInitialized()
+        const resultRepo = ds.getRepository(ScanResult)
+        const pinned = await resultRepo.findOneByOrFail({ upstreamId: 'dependabot:pinned-001' })
+        expect(pinned.createdAt.toISOString()).toBe('2026-08-01T02:00:00.000Z')
+
+        // 缺省路径：未传 createdAt 的告警仍由实体 `@CreateDateColumn` 填插入时刻
+        const defaults = await resultRepo.findOneByOrFail({ upstreamId: 'dependabot:pinned-002' })
+        expect(defaults.createdAt).toBeInstanceOf(Date)
+        expect(defaults.createdAt.toISOString()).not.toBe('2026-08-01T02:00:00.000Z')
+        // 必须是「插入时刻」而非任何固定常量：60s 窗口足够宽以避免 CI 时钟抖动误报
+        expect(Date.now() - defaults.createdAt.getTime()).toBeLessThan(60_000)
     })
 
     it('prChecks 引用未在 repos 载荷中的仓库 → 400', async () => {

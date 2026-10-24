@@ -119,6 +119,10 @@ async function openAlertsRunDrawer(page: Page): Promise<Locator> {
     await page.locator('.caomei-select__content .caomei-select__item').filter({ hasText: '原始列表' }).click()
     const row = page.locator('.caomei-data-table__row').filter({ hasText: 'lodash' }).first()
     await expect(row).toBeVisible({ timeout: 15000 })
+    /* 行序由 fixtures 的 `createdAt` 钉死（原始列表按 `createdAt DESC`，并列会让 `.first()` 随数据库返回
+       顺序漂移）：此处显式断言选中的是 code-quality 那条（规则标识列有值），基线主体一旦被别的 lodash
+       告警替换会在此失败，而不是落成一张「看起来也像」的像素差异。 */
+    await expect(row).toContainText('typescript:S1854')
     await row.locator('button[aria-label="详情"]').click()
 
     const drawer = page.locator('.caomei-drawer__content')
@@ -301,6 +305,12 @@ test.describe('平台页面视觉基线', () => {
            若断言列未渲染则基线会落成空抽屉形态。 */
         await expect(drawer).toContainText(pinnedRunId(0).slice(0, 8))
         await expect(drawer).toContainText('12 秒')
+        /* 背景表格行数 = fixtures 告警数：行序由 fixtures 的 createdAt 钉死（见 helpers/fixtures.ts），
+           行数变化说明视图仍停留在分组态或数据未注入完整。定位必须限定在 `main` 内——
+           抽屉运行表（portal 到 body）同样使用 `caomei-data-table__row`，页面级 locator 会把两侧一起计数。 */
+        await expect(
+            page.locator('main .caomei-data-table tbody .caomei-data-table__row'),
+        ).toHaveCount(VISUAL_FIXTURES.scanResults.length)
 
         await waitForVisualStable(page)
         await expectThemeApplied(page, 'light')

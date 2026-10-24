@@ -95,6 +95,7 @@
 | `ScanRun.createdAt` | `@CreateDateColumn`（注入时刻） | 可选 `createdAt`；影响运行列表排序与「最近扫描」统计卡 |
 | `ScanRun.startedAt` / `finishedAt` | 端点填注入时刻 `now()` | 可选覆盖（`null` = 显式置空，与「不传走状态默认值」区分）；渲染在运行列表 / 运行抽屉的时间与时长列 |
 | `ScanRun.summaryJson` / `errorJson` | 可缺省 | 可选 `summary` / `error`；失败运行的详情横幅据此渲染 |
+| `ScanResult.createdAt` | `@CreateDateColumn`（注入时刻） | 可选 `createdAt`；**不直接渲染**，但决定 alerts 页「原始列表」的行序（端点按 `createdAt DESC` 排序，同批次插入并列会让行序漂移）→ 视觉 fixtures 逐条取同条 `firstSeenAt` |
 | 瞬时时刻（cron 预览、`now()` 派生文案） | 随运行时刻变化 | 页面侧 `data-visual-mask` 遮蔽（加遮蔽必须重生成基线） |
 
 用例侧以 `pinnedRunId(index)` 读取钉死取值并 **fail-fast**：fixtures 被改动去掉 `id` 时用例直接失败，而不是静默产出一张不可复现的基线。

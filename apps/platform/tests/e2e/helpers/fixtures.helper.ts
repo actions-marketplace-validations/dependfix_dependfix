@@ -111,6 +111,12 @@ export interface ScanResultFixture {
      * 跨次扫描累计出现次数（todo.md §M20.3）。默认 1。
      */
     occurrenceCount?: number
+    /**
+     * 创建时间。不提供时由实体默认值（插入时刻）填充。
+     * alerts 页「原始列表」视图按 `createdAt DESC` 排序——视觉基线需逐像素可复现时必须钉死，
+     * 否则同批次插入落在同一毫秒形成排序并列，行序随数据库返回顺序漂移。
+     */
+    createdAt?: string
 }
 
 /** 归一化构建 / 部署信号（写入 `signals_json`；`observedAt` 由 fixtures 端点写入时刻填充） */

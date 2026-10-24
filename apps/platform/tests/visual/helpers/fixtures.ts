@@ -106,6 +106,9 @@ export const VISUAL_FIXTURES: FixturesPayload = {
         },
     ],
     scanResults: [
+        // 每条告警钉死 `createdAt`（取同条 `firstSeenAt`）：alerts 页「原始列表」视图按 `createdAt DESC`
+        // 排序，缺省（插入时刻）会让同批次插入落在同一毫秒形成排序并列 → 行序随数据库返回顺序漂移，
+        // 视觉基线（alerts 运行抽屉浮层的背景表格）逐次抖动。firstSeenAt 已钉死且互不相同，取同值即稳定。
         // run 0 / web-app：lodash 三档 source（dependabot / code-scanning / code-quality），统一 high
         {
             scanRunIndex: 0,
@@ -121,6 +124,7 @@ export const VISUAL_FIXTURES: FixturesPayload = {
             recommendedVersion: '4.18.0',
             fixStatus: 'success',
             occurrenceCount: 2,
+            createdAt: '2026-08-01T02:00:00.000Z',
             firstSeenAt: '2026-08-01T02:00:00.000Z',
             lastSeenAt: '2026-08-20T02:00:00.000Z',
         },
@@ -137,6 +141,7 @@ export const VISUAL_FIXTURES: FixturesPayload = {
             fixStrategy: 'manual',
             fixStatus: 'failed',
             occurrenceCount: 1,
+            createdAt: '2026-08-02T02:00:00.000Z',
             firstSeenAt: '2026-08-02T02:00:00.000Z',
             lastSeenAt: '2026-08-21T02:00:00.000Z',
         },
@@ -153,6 +158,7 @@ export const VISUAL_FIXTURES: FixturesPayload = {
             fixStrategy: null,
             fixStatus: 'pending',
             occurrenceCount: 3,
+            createdAt: '2026-08-03T02:00:00.000Z',
             firstSeenAt: '2026-08-03T02:00:00.000Z',
             lastSeenAt: '2026-08-22T02:00:00.000Z',
         },
@@ -170,6 +176,7 @@ export const VISUAL_FIXTURES: FixturesPayload = {
             fixStrategy: 'lock',
             fixStatus: 'converged',
             occurrenceCount: 1,
+            createdAt: '2026-08-04T02:00:00.000Z',
             firstSeenAt: '2026-08-04T02:00:00.000Z',
             lastSeenAt: '2026-08-23T02:00:00.000Z',
         },
@@ -188,6 +195,7 @@ export const VISUAL_FIXTURES: FixturesPayload = {
             recommendedVersion: '1.7.5',
             fixStatus: 'pending',
             occurrenceCount: 1,
+            createdAt: '2026-08-05T02:00:00.000Z',
             firstSeenAt: '2026-08-05T02:00:00.000Z',
             lastSeenAt: '2026-08-24T02:00:00.000Z',
         },
@@ -205,6 +213,7 @@ export const VISUAL_FIXTURES: FixturesPayload = {
             recommendedVersion: '1.7.5',
             fixStatus: 'success',
             occurrenceCount: 4,
+            createdAt: '2026-08-06T02:00:00.000Z',
             firstSeenAt: '2026-08-06T02:00:00.000Z',
             lastSeenAt: '2026-08-25T02:00:00.000Z',
         },
@@ -222,6 +231,7 @@ export const VISUAL_FIXTURES: FixturesPayload = {
             fixStrategy: 'wait-upstream',
             fixStatus: 'not-tried',
             occurrenceCount: 1,
+            createdAt: '2026-08-07T02:00:00.000Z',
             firstSeenAt: '2026-08-07T02:00:00.000Z',
             lastSeenAt: '2026-08-26T02:00:00.000Z',
         },
@@ -240,6 +250,7 @@ export const VISUAL_FIXTURES: FixturesPayload = {
             recommendedVersion: '6.9.9',
             fixStatus: 'pending',
             occurrenceCount: 1,
+            createdAt: '2026-08-08T02:00:00.000Z',
             firstSeenAt: '2026-08-08T02:00:00.000Z',
             lastSeenAt: '2026-08-27T02:00:00.000Z',
         },
@@ -257,6 +268,7 @@ export const VISUAL_FIXTURES: FixturesPayload = {
             recommendedVersion: '6.9.9',
             fixStatus: 'not-tried',
             occurrenceCount: 1,
+            createdAt: '2026-08-09T02:00:00.000Z',
             firstSeenAt: '2026-08-09T02:00:00.000Z',
             lastSeenAt: '2026-08-28T02:00:00.000Z',
         },
