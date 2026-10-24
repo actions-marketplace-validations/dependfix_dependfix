@@ -136,6 +136,10 @@ jobs:
       # 先构建单架构（amd64）本地镜像并加载到 runner，跑 apps/platform/docker/smoke-test.sh：
       # 验证「不依赖部署侧 compose 注入 env」时首次启动自动建表（HTTP 200 + 13 业务表 + 无 no such table）。
       # 冒烟失败则后续 push 步骤不执行（同 job 顺序），避免发布不可用镜像。
+      # 三个构建步骤统一把基础镜像服务端覆盖为 Docker Hub（BASE_IMAGE_REPO，认证拉取）：同一 digest
+      # 在 ECR Public 上间歇 429（2026-10-23 起 4 次，均落在推送前构建步骤），而本 job 在构建前已登录
+      # Docker Hub，改走认证配额；两仓是同一 manifest list（digest 一致），换源不改变镜像内容，
+      # 详见 Dockerfile 顶部 ARG 说明。
       - name: Build local image for smoke test (amd64)
         uses: docker/build-push-action@v7
         with:
@@ -147,6 +151,7 @@ jobs:
           platforms: linux/amd64
           # 固定哨兵 build-arg：让冒烟能端到端校验「ARG → ENV → runtimeConfig → /api/health」注入链路
           build-args: |
+            BASE_IMAGE_REPO=docker.io/library
             BUILD_COMMIT=smoke-commit
             BUILD_VERSION=smoke-version
           cache-from: type=gha
@@ -171,6 +176,7 @@ jobs:
           labels: ${{ steps.metadata.outputs.labels }}
           platforms: linux/amd64,linux/arm64
           build-args: |
+            BASE_IMAGE_REPO=docker.io/library
             BUILD_COMMIT=${{ github.sha }}
             BUILD_VERSION=${{ steps.platform-version.outputs.platform_version }}
           cache-from: type=gha
@@ -185,6 +191,7 @@ jobs:
           labels: ${{ steps.metadata-acr.outputs.labels }}
           platforms: linux/amd64,linux/arm64
           build-args: |
+            BASE_IMAGE_REPO=docker.io/library
             BUILD_COMMIT=${{ github.sha }}
             BUILD_VERSION=${{ steps.platform-version.outputs.platform_version }}
           provenance: false
