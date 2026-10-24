@@ -5,6 +5,7 @@ import {
     type FixAction,
     type RunResult,
     collectCodeScanningSuggestions,
+    collectFamilySummaries,
     countUnfixedAlerts,
     formatSeverity,
     formatSkipReason,
@@ -503,6 +504,8 @@ interface AggregatedUpgrade {
     error?: string
     /** 成员级升级目标 manifest（相对路径，如 `packages/web/package.json`）；根升级缺省 */
     filePath?: string
+    /** 家族标识（仅按家族规则写盘的动作携带；成员 / 跳过成员由 Family Lockstep 段统一展示） */
+    familyId?: string
 }
 
 function aggregateUpgradeActions(
@@ -527,6 +530,7 @@ function aggregateUpgradeActions(
                 strategy: action.strategy,
                 error: action.error,
                 filePath: action.filePath,
+                ...(action.family ? { familyId: action.family.id } : {}),
             })
             continue
         }
@@ -537,6 +541,9 @@ function aggregateUpgradeActions(
         current.strategy = action.strategy === 'override' ? action.strategy : current.strategy
         if (action.error) {
             current.error = action.error
+        }
+        if (action.family && !current.familyId) {
+            current.familyId = action.family.id
         }
     }
 
@@ -631,12 +638,16 @@ export function generatePRBody(result: RunResult, supersededNumbers?: number[]):
 
     // Upgraded dependencies（按包聚合，每包一行）
     const upgrades = aggregateUpgradeActions(actions, (a) => a.success)
+    const hasFamilyColumn = upgrades.some((u) => u.familyId !== undefined)
     if (upgrades.length > 0) {
         const multiRepo = new Set(upgrades.map((u) => u.repository)).size > 1
         lines.push('### 📦 Upgraded Dependencies', '')
         const headers = multiRepo
             ? ['Repository', 'Package', 'From', 'To', 'Strategy', 'Major']
             : ['Package', 'From', 'To', 'Strategy', 'Major']
+        if (hasFamilyColumn) {
+            headers.push('Family')
+        }
         lines.push(`| ${headers.join(' | ')} |`)
         lines.push(`|${headers.map(() => '---').join('|')}|`)
         for (const u of upgrades) {
@@ -648,11 +659,40 @@ export function generatePRBody(result: RunResult, supersededNumbers?: number[]):
                 strategy = 'major-upgrade'
             } else if (u.strategy === 'member-upgrade') {
                 strategy = 'member upgrade'
+            } else if (u.strategy === 'family-lockstep') {
+                strategy = 'family lockstep'
             }
             const packageCell = u.filePath ? `\`${u.packageName}\` (${u.filePath})` : `\`${u.packageName}\``
             const cells = multiRepo
                 ? [u.repository, packageCell, u.fromVersion ?? '-', u.toVersion ?? '-', strategy, major]
                 : [packageCell, u.fromVersion ?? '-', u.toVersion ?? '-', strategy, major]
+            if (hasFamilyColumn) {
+                cells.push(u.familyId ? `\`${escapeTableCell(u.familyId)}\`` : '—')
+            }
+            lines.push(`| ${cells.join(' | ')} |`)
+        }
+        lines.push('')
+    }
+
+    // Family Lockstep（家族锁步：成员清单在改动摘要中显式列出，无隐藏标记）
+    const familySummaries = collectFamilySummaries(actions)
+    if (familySummaries.length > 0) {
+        const multiRepo = new Set(familySummaries.map((familySummary) => familySummary.repository)).size > 1
+        lines.push('### 🧩 Family Lockstep', '')
+        lines.push('> 同一次修复内同一生态成员保持同一条版本线；未写盘成员列在 Skipped 中。', '')
+        const headers = multiRepo
+            ? ['Repository', 'Family', 'Members', 'Skipped']
+            : ['Family', 'Members', 'Skipped']
+        lines.push(`| ${headers.join(' | ')} |`)
+        lines.push(`|${headers.map(() => '---').join('|')}|`)
+        for (const familySummary of familySummaries) {
+            const members = familySummary.members.map((member) => `\`${escapeTableCell(member)}\``).join(', ')
+            const skipped = familySummary.skipped.length > 0
+                ? familySummary.skipped.map((member) => `\`${escapeTableCell(member)}\``).join(', ')
+                : '—'
+            const cells = multiRepo
+                ? [escapeTableCell(familySummary.repository), `\`${escapeTableCell(familySummary.family)}\``, members, skipped]
+                : [`\`${escapeTableCell(familySummary.family)}\``, members, skipped]
             lines.push(`| ${cells.join(' | ')} |`)
         }
         lines.push('')

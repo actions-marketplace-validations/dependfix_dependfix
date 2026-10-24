@@ -1560,3 +1560,77 @@ describe('generatePRBody CI 口径', () => {
         expect(generatePRBody(buildRunResult())).not.toContain('CI 口径')
     })
 })
+
+describe('generatePRBody family lockstep', () => {
+    it('adds a Family column and lists members / skipped members', () => {
+        const result = buildRunResult()
+        result.actions = [
+            makeBodyAction({
+                target: 'vitest',
+                fromVersion: '^3.2.4',
+                toVersion: '^4.0.1',
+                isMajor: true,
+                strategy: 'family-lockstep',
+                family: {
+                    id: 'vitest',
+                    members: ['vitest', '@vitest/coverage-v8'],
+                    skipped: ['@vitest/ui'],
+                },
+            }),
+        ]
+
+        const body = generatePRBody(result)
+
+        expect(body).toContain('| Package | From | To | Strategy | Major | Family |')
+        expect(body).toContain('| `vitest` | ^3.2.4 | ^4.0.1 | family lockstep | ⚠️ Yes | `vitest` |')
+        expect(body).toContain('### 🧩 Family Lockstep')
+        expect(body).toContain('| `vitest` | `vitest`, `@vitest/coverage-v8` | `@vitest/ui` |')
+    })
+
+    it('renders an em dash for non-family rows when the Family column is present', () => {
+        const result = buildRunResult()
+        result.actions = [
+            makeBodyAction({
+                target: 'vitest',
+                family: { id: 'vitest', members: ['vitest', '@vitest/coverage-v8'], skipped: [] },
+            }),
+            makeBodyAction({ target: 'lodash', fromVersion: '4.17.20', toVersion: '4.17.21' }),
+        ]
+
+        const body = generatePRBody(result)
+
+        expect(body).toContain('| Package | From | To | Strategy | Major | Family |')
+        expect(body).toContain('| `lodash` | 4.17.20 | 4.17.21 | direct | No | — |')
+    })
+
+    it('renders the repository column and multi-repository family table', () => {
+        const result = buildRunResult()
+        result.actions = [
+            makeBodyAction({
+                target: 'vitest',
+                family: { id: 'vitest', members: ['vitest'], skipped: [] },
+            }),
+            makeBodyAction({
+                repository: 'owner/other',
+                target: 'jest',
+                family: { id: 'jest', members: ['jest', '@types/jest'], skipped: [] },
+            }),
+        ]
+
+        const body = generatePRBody(result)
+
+        expect(body).toContain('| Repository | Package | From | To | Strategy | Major | Family |')
+        expect(body).toContain('| Repository | Family | Members | Skipped |')
+        expect(body).toContain('| owner/other | `jest` | `jest`, `@types/jest` | — |')
+    })
+
+    it('keeps the table shape unchanged without family information', () => {
+        const result = buildRunResult()
+        result.actions = [makeBodyAction({ target: 'vite', fromVersion: '5.4.20', toVersion: '6.4.3' })]
+
+        const body = generatePRBody(result)
+
+        expect(body).toContain('| `vite` | 5.4.20 | 6.4.3 | direct | No |')
+        expect(body).not.toContain('Family Lockstep')
+    })
+})
