@@ -18,6 +18,9 @@
 #   SMOKE_PORT    宿主探测端口（默认 3999）
 #   SMOKE_EXPECT_VERSION / SMOKE_EXPECT_COMMIT  期望的版本戳（非空时校验 /api/health 端到端注入值；默认空，仅校验字段存在）
 #
+# 注意：宿主侧断言（场景 0c 的 `[ -d ]`）以**调用者身份**执行——本地常以 root 运行（恒真），
+# 权限类缺陷只在非 root 宿主暴露；复现请用非 root 用户执行本脚本。
+#
 # 断言：
 #   0. Node 运行时 ≥ 安全基线（check-node-version.mjs）
 #   0c. pnpm store 落在数据卷（入口派生默认值；供跨 run 复用）
@@ -41,8 +44,26 @@ MIN_TABLES=13
 log() { printf '[smoke] %s\n' "$*"; }
 fail() { printf '[smoke] FAIL: %s\n' "$*" >&2; exit 1; }
 
+# 数据目录对宿主调用者保持可穿越（755）：入口会把挂载目录 chown 给运行身份（默认 100:101），
+# mktemp 的 700 会让非 root 宿主（CI runner）失去 search 权限——宿主侧断言（`[ -d ]`）恒假。
+# chown 不改 mode，故放开后容器内行为不变（属主 100:101 仍是 owner rwx）；命名卷首次挂载亦为 755。
+# ONESHOT_DIR 无宿主侧断言，保持 mktemp 默认 700（迁移库副本不对同机其它用户开放）。
+chmod 755 "$DATA_DIR"
+
+# 清理前把临时目录所有权交还调用者：入口 chown 后非 root 宿主已无权删除其中条目
+# （`rm -rf` 报 EACCES 并残留目录），用被测镜像的 root 身份改回调用者 uid:gid。
+restore_owner() {
+    [ -d "$DATA_DIR" ] && [ -d "$ONESHOT_DIR" ] || return 0
+    # 镜像不存在时跳过：`docker run` 会触发拉取，清理阶段不应产生额外网络行为
+    docker image inspect "$IMAGE" >/dev/null 2>&1 || return 0
+    docker run --rm --user 0:0 --entrypoint chown \
+        -v "$DATA_DIR":/cleanup-data -v "$ONESHOT_DIR":/cleanup-oneshot "$IMAGE" \
+        -R "$(id -u):$(id -g)" /cleanup-data /cleanup-oneshot >/dev/null 2>&1 || true
+}
+
 cleanup() {
     docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+    restore_owner
     rm -rf "$DATA_DIR" "$ONESHOT_DIR" || true
 }
 trap cleanup EXIT
@@ -98,7 +119,10 @@ case "$store_path" in
     /app/data/pnpm-store/*) log "pnpm store 落在数据卷：$store_path" ;;
     *) fail "pnpm store 未落在持久目录：$store_path（期望 /app/data/pnpm-store/v*）" ;;
 esac
-[ -d "$DATA_DIR/pnpm-store" ] || fail "数据卷内未创建 pnpm store 目录"
+[ -d "$DATA_DIR/pnpm-store" ] || {
+    ls -ld "$DATA_DIR" "$DATA_DIR/pnpm-store" 2>&1 || true
+    fail "数据卷内未创建 pnpm store 目录"
+}
 
 # ── 场景 1：正常启动，不注入 DATABASE_MIGRATIONS_RUN（验证镜像级默认）──────────────
 log "场景 1：正常启动（不注入 DATABASE_MIGRATIONS_RUN）"
