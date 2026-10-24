@@ -41,6 +41,7 @@ const EXPECTED_MAPPINGS: Record<string, { stage: RunFailureStage, kind: RunFailu
     // fix
     PROCESS_FAILED: { stage: 'fix', kind: 'unknown' },
     OVERRIDE_PROTECTED: { stage: 'fix', kind: 'deterministic' },
+    FAMILY_LOCKSTEP_FAILED: { stage: 'fix', kind: 'deterministic' },
     // verify
     VERIFICATION_FAILED: { stage: 'verify', kind: 'deterministic' },
     PRE_EXISTING_FAILURE: { stage: 'verify', kind: 'deterministic' },

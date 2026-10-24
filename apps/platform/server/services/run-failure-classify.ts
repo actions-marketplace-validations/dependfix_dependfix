@@ -122,6 +122,7 @@ const FAILURE_CODE_MAP: Readonly<Record<string, FailureCodeMapping>> = {
     // fix — 修复应用
     PROCESS_FAILED: { stage: 'fix', kind: 'unknown' },
     OVERRIDE_PROTECTED: { stage: 'fix', kind: 'deterministic' },
+    FAMILY_LOCKSTEP_FAILED: { stage: 'fix', kind: 'deterministic' },
 
     // verify — 验证门禁
     VERIFICATION_FAILED: { stage: 'verify', kind: 'deterministic' },
