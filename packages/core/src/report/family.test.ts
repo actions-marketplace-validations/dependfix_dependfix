@@ -78,8 +78,8 @@ describe('collectFamilySummaries', () => {
 
     it('ignores failed and noOp actions (rolled back families are not rendered as applied)', () => {
         const summaries = collectFamilySummaries([
-            action({ success: false, family: { id: 'vitest', members: ['vitest'], skipped: [] } }),
-            action({ noOp: true, family: { id: 'vitest', members: ['vitest'], skipped: [] } }),
+            action({ success: false, family: { id: 'vitest', members: ['@vitest/coverage-v8'], skipped: [] } }),
+            action({ noOp: true, family: { id: 'vitest', members: ['@vitest/browser'], skipped: [] } }),
             action({ family: { id: 'vitest', members: ['vitest', '@vitest/ui'], skipped: [] } }),
         ])
 
