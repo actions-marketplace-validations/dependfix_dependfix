@@ -1,6 +1,6 @@
 # 对外 PR 交付闭环设计（M48）
 
-> **状态**：🔶 设计先行稿（2026-10-24 P 阶段落地；实施待 M48 D 阶段）
+> **状态**：🔶 实施中（2026-10-24 P 阶段落地；M48.1 家族锁步已落地，其余条目待实施）
 > **来源**：2026-10-24 对外 PR 巡检 + [backlog](../../plan/backlog.md) 8 项同源候选
 > **定位**：回答「dependfix 发出去的 PR 是否真的能绿、失败后是否还会原样重来、合并后的红 check 该归因给谁」
 
@@ -89,23 +89,30 @@ alert ──▶ 家族解析（M48.1）──▶ 升级 + 验证（M48.2）─�
 ### 4.2 升级规则
 
 1. **优先级**：显式 `upgradeGroups` > 家族规则 > 单包升级；同一包同时命中时只执行最高优先级一次。
-2. 命中家族的告警升级时，解析同家族在**同一旧 major / 旧版本线**的其它成员，统一升到目标 major / 版本线。
-3. 已在目标线的成员保持不动；**不在 manifest 中的 peer 成员**记 `familyMemberSkipped` 并继续。
-4. **版本解析失败**（registry 不可达 / 无法确定目标版本）→ 整族放弃并回滚，`FixAction.error = FAMILY_LOCKSTEP_FAILED`，不产生部分升级。
-5. 家族升级必须**原子**：任一成员安装 / 验证失败 → 整体回滚（含 lockfile），告警 `not-fixable`。
+2. 命中家族的告警升级时，解析同家族中**低于目标版本线**的其它成员，统一升到目标线（不要求与触发包同一旧线）。
+3. 已在 / 高于目标线的成员保持不动（不降级）；**不在 manifest 中**的成员与协议声明成员记 `familyMemberSkipped` 并继续；`version` 锁步家族中成员高于目标 → 整族放弃（无法在不降级前提下同步）。
+4. **版本解析失败**（registry 不可达 / 无法确定目标版本）→ 整族放弃（写盘前失败，无需回滚），`FixAction.error = FAMILY_LOCKSTEP_FAILED`；非环境性失败告警计 failed、影响 exit code，不产生部分升级。
+5. 家族升级必须**原子**：任一成员安装 / 验证失败 → 整体回滚（含 lockfile）；非环境性失败告警计 failed，环境性安装失败记 `ENVIRONMENT_ERROR`（不归因、不计 failed）。
 6. `--allow-major-upgrade` 语义不变；本规则只保证同一次升级内部不劈叉。
 7. `override-protect` 命中任一成员时整族放弃并留痕，不先生成半族 PR。
+
+**实施口径（D 阶段定稿，与 `dependency-fixer-records.md §12.17` 同源）**：
+
+- 触发包按**告警推荐版本**判定（同 major 内补丁升级同样写盘）；其它成员按锁步维度比较，`major` 取该 major 下最高**稳定版**（排除预发布），`version` 要求精确版本已发布。
+- `familyMemberSkipped` 覆盖不在 manifest 的成员与协议声明（`workspace:` / `catalog:` 等）成员；只有**同一 manifest** 内的直接依赖会同批写盘，间接依赖仍走 overrides 链。
+- 仅当「至少两个成员需要写盘」时走家族写入，否则退回既有单包路径（行为等价）；`dry-run` 不解析 registry、不写盘。
+- 显式 `upgradeGroups` 的组内告警目标 / 同批告警目标优先于 registry 解析结果；同版本家族「成员高于目标」→ 整族放弃（不允许降级）；peer range 不可解析 fail-open 并记 `peerCheckSkipped`，可解析且不满足 → 整族放弃。
 
 ### 4.3 契约
 
 - `FixAction` 增加可选 `family?: { id: string, members: string[], skipped: string[] }`（`packages/core/src/report/types.ts`）。
-- 报告新增一行「家族锁步」摘要（命中家族 / 成员数 / 跳过成员 / 实际版本）。
-- 审计事件记录 `family_lockstep_applied` / `family_lockstep_failed`（登记到既有审计事件枚举）。
+- 报告新增一段「家族锁步」摘要（命中家族 / 写盘成员 / 跳过成员；按仓库收敛，`members ∩ skipped = ∅`）：`packages/core/src/report/family.ts` 为报告与 PR 正文的单一摘要源，只消费成功且非 noOp 的动作（回滚动作不渲染为已落地）。
+- 审计事件记录 `FAMILY_LOCKSTEP_FAILED`（解析 / peer / 非环境性写入失败；环境性安装失败走 `ENVIRONMENT_ERROR`）与 `OVERRIDE_PROTECTED`（保护名单命中），均登记到既有审计类别口径与平台失败分类映射。
 
 ### 4.4 已知边界
 
-- 只覆盖直接依赖与成员 manifest；间接依赖走既有 overrides 链，不做家族合并。
-- 成员版本解析依赖 registry 可达；离线 / 私有源失败按整族回滚。
+- 只覆盖同一 manifest 内的直接依赖；间接依赖走既有 overrides 链，跨 manifest 家族（如根 vitest + 成员 coverage-v8）不做合并。
+- 成员版本解析依赖 registry 可达；基地址取 `npm_config_registry` → 目标仓库 `.npmrc` 裸 `registry=` → 官方 registry（**`@scope:registry` 不在覆盖范围**），解析失败整族放弃（未写盘）。目标仓库的 registry 配置按既有 registry-discovery 信任模型视为可信；解析请求不携带凭据（userinfo 剥离）、不跟随重定向、仅接受 http(s)，错误消息只暴露 host。
 - 不承诺 TypeScript 编译器与 typescript-eslint 的兼容矩阵，只做 peer range 校验；不兼容时整族放弃并留痕。
 - [dependency-grouping](../modules/dependency-grouping.md) 的「组内必须锁步」遗留项由本条承接；分组（同批验证）与家族（版本一致）语义不同，不合并实现。
 
@@ -328,15 +335,15 @@ type CheckAttribution = 'self_caused' | 'pre_existing' | 'external_noise' | 'can
 ### 10.3 PR 正文标记
 
 - 尝试计数：`<!-- dependfix:attempt key=<k> n=<n> fp=<optional> failed=<0|1|?> -->`
-- 家族锁步：在「改动摘要」中列成员（无隐藏标记）
+- 家族锁步：Upgraded 表新增 `Family` 列（家族 id），正文 `Family Lockstep` 段按仓库列出 members / skipped（无隐藏标记）
 - 分类：在「CI 结果」区块按分类列出，不写隐藏标记
 
 ## 11. 降级矩阵
 
 | 失败点 | 行为 | 是否影响 exit code |
 |:--|:--|:--|
-| registry 不可达 / 家族成员版本解析失败 | 整族回滚，告警 `not-fixable` | 否（`not-fixable` 既有语义） |
-| 显式分组 / override-protect 命中家族成员 | 整族放弃并留痕，不产生半族 PR | 否 |
+| registry 不可达 / 家族成员版本解析失败 | 整族放弃（未写盘），告警 failed + `FAMILY_LOCKSTEP_FAILED` | 是（本次修复失败） |
+| override-protect 命中家族成员 | 整族放弃并留痕（noOp + 跳过计数），不产生半族 PR | 否（计 skipped） |
 | CI 脚本解析失败 / 无 package.json / 命令超限 | 跳过 mirror，记 `mirrorSkipped` | 否 |
 | mirror 命令基线已红 | `preExisting`，不回滚、不改 exit code | 否 |
 | 最近关闭 PR 索引失败 / 标记解析失败 | fail-open，视为未命中 | 否 |

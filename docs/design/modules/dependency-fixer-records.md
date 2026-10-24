@@ -283,3 +283,13 @@ T108 (报告生成器)
 - **不回填**：历史 run 的 `scan_run.environmental_failure_count` 与 `summary` 快照不变，仅新 run 生效（不做数据迁移）。
 - **风险登记**：判据在升级链上比改前**更宽**（静默非零退出现在也算环境性）——仓库自身失败若只把诊断写到 stdout（pnpm 11 的 `gyp` / `prebuild-install` 形态）会被记为环境性（不增 `alertsFailed`、不计 exit code）；缓解是 stdout 证据仍进 `FixAction.error`、失败日志带 detail、`environmentalFailures` 单列可见，人工可复查。反向风险（真实环境故障被归因仓库）由「有 stderr → 非环境性」的保守判定与判据反例用例兜住。
 - **不做什么**：不改 `failure_kind` 枚举与平台分类表（`ENVIRONMENT_ERROR → install + transient` 仍为防御性映射）；不改验证链、出口码数值语义与交付守卫谓词；不把 stdout 诊断纳入归因判定；不回填历史数据。
+
+### 12.17 家族锁步升级（M48.1，2026-10-24）
+
+- **单一事实源**：家族清单与计划在 `fixers/dependency/families.ts`（`resolveFamily` / `planFamilyUpgrade` 纯函数，四家族：vitest / typescript-eslint / jest / react）；成员版本解析在 `family-versions.ts`；编排在 `app/family-upgrade.ts`；写盘在 `fixers/dependency/manifest-upgrades.ts`（与单包升级共用「校验 → 备份 → 一次写盘 → 一次 install → 整体回滚」实现）。
+- **计划语义**：触发包始终按告警推荐版本判定（同 major 内的补丁升级同样写盘）；其它成员只在低于目标线时解析目标版本——`major` 维度取该 major 下最高稳定版（排除预发布），`version` 维度要求精确版本已发布。已在目标线的成员不降级、不重复写盘；不在 manifest / 协议声明（`workspace:` / `catalog:` 等）的成员记 `familyMemberSkipped` 并继续。
+- **peer 校验**：`eslint` 不属于同 major 家族，只按成员目标版本的 `peerDependencies.eslint` 校验已安装版本（`eslint@9 + typescript-eslint@8` 为合法组合）；`ts-jest` 不参与锁步，按已安装版本的 `peerDependencies.jest` 校验目标 jest。不兼容（可解析且不满足）→ 整族放弃；range 无法解析时 fail-open 并记 `peerCheckSkipped`。
+- **同版本冲突**：`typescript-eslint` 等 `version` 锁步家族中，若某成员已高于目标版本，精确同版本锁步将要求降级 → 整族放弃（`FAMILY_LOCKSTEP_FAILED`），不做静默混装。
+- **registry 解析**：基地址取 `npm_config_registry` → 目标仓库 `.npmrc` 裸 `registry=` → 官方 registry；工厂与默认 resolver 统一归一化 URL（userinfo 剥离、仅 http(s)、不跟随重定向），错误消息只暴露 host。packument 按包缓存（成功缓存、失败驱逐，避免长驻进程把瞬时故障永久化；resolver 数量有上限）；单次请求 10s 超时。失败（不可达 / 4xx / 线内无稳定版）→ 整族放弃，不猜版本写入。
+- **失败与留痕**：解析 / peer / 写入失败 → `FixAction.error` 以 `FAMILY_LOCKSTEP_FAILED` 开头 + 同名审计类别（计入出口码）；安装的环境性失败走 `ENVIRONMENT_ERROR`（不计入失败，动作带 `environmentalFailure`）；`override-protect` 命中任一成员 → `OVERRIDE_PROTECTED` + 跳过计数 + `noOp` 动作（不归因失败）。
+- **边界**：只覆盖同一 manifest 内的直接依赖（跨 manifest 家族不做合并）；只有「至少两个成员需要写盘」时才走家族写入，否则退回既有单包路径；`dry-run` 不解析 registry、不写盘；不做自动家族推导与间接依赖家族合并；不承诺 TypeScript 编译器兼容矩阵。
