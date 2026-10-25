@@ -122,5 +122,6 @@ PR 正文的 `### ✅ Verification` 区块来自 engine 的**本地验证链**�
 
 - [依赖修复记录设计 §12.14](../modules/dependency-fixer-records.md#1214-验证链与目标仓库-ci-口径对齐m4712026-10-23)（实现落点）
 - [依赖修复记录设计 §12.9](../modules/dependency-fixer-records.md#129-验证链与既有失败基线默认链--既有失败归因--零告警按需采样)（默认链与既有失败归因）
+- [对外 PR 交付闭环 §5](./pr-delivery-closure.md) + [依赖修复记录 §12.18](../modules/dependency-fixer-records.md)（M48.2 的 `--mirror-ci-scripts`：只在默认链后**追加** CI 独有脚本，不替换 `verifyCommands`）
 - [数据模型](../modules/data-model.md)（`RunResult` 契约）
 - [平台规范](../../standards/platform.md)（平台执行链与 verifyCommands）

@@ -52,10 +52,10 @@
 - **证据**：`pnpm run typecheck` 7 包 Done；`pnpm test` 317 passed | 2 skipped 文件 / 4849 passed / 10 skipped（首跑 1 例偶发失败、复跑全绿）；`pnpm lint` 0 error（3 条存量 warning）；`pnpm run build` packages 全绿；`check:docs` OK / `check:doc-size` 0 warning / `lint:md` OK / `check:orphan-ids` 0（816 文件）/ `standards-redundant:strict` 0 / `experience-landing` OK / `verify-chain` OK / `docs:check:i18n` OK / `i18n:check:anchor` OK / `docs:build` exit 0（fallback 118）；mutation 工件 `artifacts/review-gate/2026-10-24-m48-1-mutation.md`（还原后 md5 一致）；新增/修改源文件编号标记 0 命中。
 - **边界**：只覆盖同一 manifest 内的直接依赖（跨 manifest 家族不合并）；registry 解析依赖可达，`.npmrc` 按既有 registry-discovery 信任模型、`@scope:registry` 不覆盖；解析 / peer / 非环境性写入失败 → failed + `FAMILY_LOCKSTEP_FAILED`（影响 exit code），环境性安装失败走 `ENVIRONMENT_ERROR`（不计 failed），override-protect 为 noOp + skipped；`peerCheckSkipped` 仅日志留痕（不进报告）；同版本家族出现成员高于目标时整族放弃（宁可不修也不降级混装）。
 
-### M48.2 [P0 🛠️] CI 独有脚本纳入验证链
+### M48.2 [P0 🛠️] CI 独有脚本纳入验证链（--mirror-ci-scripts）（**已闭环** `f28e4806` + `979a9775` + `c527f56d` + `c3750848`；文档随本批收口）
 
 - **目标**：开启 `--mirror-ci-scripts` 后，目标仓库 CI 独有的 `pnpm run <script>` 进入验证链，使「本地绿」与「CI 绿」的差异可见、可执行、可归因。
-- **范围**：`packages/engine/src/github/ci-alignment.ts` 新增结构化 `runFragments` 导出（不复用展示用 `unrecognized`）；`app/verify-project.ts` 在默认链后追加执行并接入基线采样；`config/index.ts` + CLI `--mirror-ci-scripts` + `action.yml`；`packages/core/src/report/ci-alignment.ts` 增加 `mirrored` / `mirrorSkipped`；PR 正文「CI 口径」区块。
+- **范围**：`packages/engine/src/github/ci-alignment.ts` 新增结构化 `runFragments` 与 `planCiMirrorCommands`（不复用展示用 `unrecognized`）；`app/verify-project.ts` 在默认链后追加执行并接入基线采样；`config/index.ts` + CLI `--mirror-ci-scripts` + `action.yml`；`runners/verification-runner.ts` 超时 env；`packages/core/src/report/ci-alignment.ts` 增加 `mirrored` / `mirrorSkipped`，`FixAction.commandSource`；PR 正文「CI 口径」区块；设计 / 规范 / 配置文档同步。
 - **验收标准**：
   1. 从 `runFragments` 解析出 `coverage` / `e2e` 等脚本并去重；`docker build` / `gh` / 任意 shell 记 `mirrorSkipped`；最多执行 3 条，超限披露。
   2. 开启时执行顺序为默认链 → CI 镜像脚本，首个失败即停；关闭时行为与现状等价（等价性用例锁定，不写「逐字节」）。
@@ -65,8 +65,12 @@
   6. mutation 至少 2 处（脚本筛选 / 首失败短路）被击杀；既有 `ci-alignment` 与验证链测试全绿。
 - **不做什么**：不执行 `docker build` / 任意 shell；不替换仓库级 `verifyCommands`；不解析 matrix / secrets / services；不改 M47.1 四语义比对口径；不在平台设置页新增开关（平台沿用默认 `false`）。
 - **依赖**：M47.1 `ci-alignment`；受管异步执行基座；`verification-runner.ts` 超时口径；设计稿 §5。
-- **交付物**：4-5 commits / 6-9 files（`ci-alignment.ts`、`verify-project.ts`、`config/index.ts`、`cli/index.ts`、`action.yml`、core 报告类型、测试）/ 400-650 行（量级估算）。
+- **交付物**：4-5 commits / 6-9 files（量级估算）。**实际**：5 commits / 27 文件 / +1237 −60（tracked +892/−60 + 3 个新测试文件 345 行；超估算原因为新增超时 env、3 个新测试文件与 7 个文档同步）。
 - **风险与缓解**：每仓多跑一条完整测试链导致时长上升 → 默认关闭 + 上限 3 条 + 单命令超时 + 报告耗时；基线红仓库误回滚 → mirror 纳入基线采样。
+- **落地**（2026-10-25）：`parseWorkflowCommands` 的 ok 结果新增 `runFragments`（原始命令 + `recognized|unrecognized` + workflow，仅镜像计划时收集，单 workflow 超 2000 片段整体降级）；`planCiMirrorCommands` 只接受单一形态 `pnpm|npm|yarn [run|run-script] <script>` 且脚本存在于根 `package.json#scripts`，按 workflow 顺序去重、最多 3 条，`docker` / `gh` / 任意 shell / 带 flag / env 赋值 / corepack 钉定记 `unsupported-command`，脚本不存在记 `script-not-found`，超限记 `over-limit`；语义项仅在**与默认链同形**时记 `recognized`（带 flag 者归 `unrecognized`，避免既不执行也不披露）。`resolveVerifyCommands` 统一产出命令来源与 mirror 计划，基线采样与修复后验证同源（同超时 / 同取消面 / 同 `preExisting` 归因），自定义链整链替换不叠加。`DEPENDFIX_VERIFY_TIMEOUT_MS`（严格整数，10s–30min）为默认链与镜像共用单命令超时。报告逐条标注 `commandSource`，PR 正文/报告披露「已镜像执行 N 条 / 跳过 M 条」（0 条也展示）；`ciAlignment` 只记实际执行集，多次验证取并集。
+- **审计**：R1 `standard` 两分区并发：A **Pass**（0B / 4W / 7S）、B **Reject**（1 blocker：带 flag 的语义项既不执行也不披露 + 2W / 7S）→ 实现侧将带 flag/env/corepack 的语义项归 `unrecognized`，并收口 W1-W4 / S1-S7 → R2 `quick`：A **Reject**（RG-W1 用例无法击杀 `mirrorKey` 守卫 → 删除不可达分支；RG-S1 `ci-alignment` 日志仍裸写多行解析原因 → 套用 `clipLogText` + 用例）、B **Pass**（0B/0W）→ 收口 → R3 `quick` 两分区 **Pass**（A 0B/0W/2S、B 0B/0W/3S，suggest 已应用：注释去符号名、跳过项并集语义、install 覆盖口径、env 示例等长）。实测用时：R1 发起 03:46:22Z → R2 发起 04:03:11Z（**16m49s，超 standard 10m 盒**，两分区并发含分区内取证）；R2 发起 → R3 发起 04:16:53Z（13m42s，含执行方修复与门禁复跑，非纯审计用时）；R3 发起 → 返回 ≈04:22Z（≈5m）。
+- **证据**：`pnpm -r build` 全绿；`pnpm run typecheck` 7 包 Done；`pnpm lint` 0 error / 3 条存量 warning；`pnpm test` 320 passed | 2 skipped 文件 / 4882 passed / 10 skipped；定向 `verify-project*.test.ts` 40 passed、`ci-alignment.test.ts` 41 passed；文档九项 + `docs:build` 全 exit 0（check:docs links 166 / doc-size 健康 90 warning 0 / orphan 0 818 文件）；mutation 7/7（工件 `artifacts/review-gate/2026-10-25-m48-2-mutation.md`，还原后 md5 一致）；新增行编号标记 0 命中。
+- **边界**：只执行根 `package.json#scripts` 中存在的单一形态脚本，不覆盖 workspace filter / 递归 / 额外参数 / env 前缀 / corepack 钉定（一律披露跳过）；install 类命令无论 flag 均视为默认链已覆盖（不镜像、不披露）；单 workflow 片段 >2000 / 文件数 >20 / >512KB 或非法 YAML → 整体不镜像且只记日志；每仓最多 3 条、默认关闭（平台不新增开关）；只校验命令形态与脚本存在性，不审计脚本体（脚本内命令与 `pre`/`post` 钩子照常执行）；`mirrorSkipped` 按并集披露，可能保留后续轮次已不再适用的原因（仅证据，不影响结论 / exit code）；存量 `SCRIPT_CATEGORY` / `BINARY_CATEGORY` 原型链查表问题未在本批修复（fail-safe，已记录残余）。
 
 ### M48.3 [P0 🛠️] 同告警尝试指纹去重与降级
 

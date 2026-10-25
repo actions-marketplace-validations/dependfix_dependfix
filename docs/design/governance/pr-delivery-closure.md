@@ -120,30 +120,19 @@ alert ──▶ 家族解析（M48.1）──▶ 升级 + 验证（M48.2）─�
 
 ### 5.1 解析
 
-**不复用 `CiAlignmentRecord.unrecognized`**：该数组是展示用途（截断 120 字符、反引号替换、每 workflow 上限 5 条），不能作为执行源。
-
-`ci-alignment.ts` 新增结构化导出 `runFragments: Array<{ command: string, kind: 'recognized' | 'unrecognized', workflow: string }>`（原始命令，未截断）；M48.2 只消费 `kind === 'unrecognized'` 且能归一化为 `pnpm/npm/yarn run <script>` 的项，并要求 `script` 存在于目标仓库 `package.json#scripts`。
+`parseWorkflowCommands` 的 ok 结果新增 `runFragments`（原始命令 + `recognized|unrecognized` + workflow）：`recognized` 为**与默认链形式等价**的单一形态语义项（lint / build / typecheck / test）与 install（install 无论 flag 均视为已覆盖，不重复执行、不披露）；带 flag / env 赋值 / corepack 钉定的语义项归 `unrecognized`（否则既不执行也不披露）。**不复用**展示用 `unrecognized`（截断 120 字符 / 每文件 5 条）。片段只在镜像计划时收集（口径比对不收集，避免大 workflow 内存占用）；单 workflow 片段超 2000 即整体降级（不拿截断结果执行）。`planCiMirrorCommands(workDir)` 只把**单一形态** `pnpm|npm|yarn [run|run-script] <script>` 且脚本存在于 `package.json#scripts` 的片段列为候选；带 flag（`--filter` / `-r` / `--if-present`）、额外参数、环境变量赋值、corepack 版本钉定、`docker` / `gh` / 任意 shell 记 `unsupported-command`，脚本不存在记 `script-not-found`，超 3 条记 `over-limit`。
 
 ### 5.2 执行开关
 
-**决策 D2**：新增 `RuntimeConfig.mirrorCiScripts`（CLI `--mirror-ci-scripts`、Action input `mirror-ci-scripts`，默认 `false`）。
-
-- 开启后，在默认验证链**之后**追加执行解析出的 CI 脚本；首个失败即停。
-- 只执行 `pnpm run <script>` / `npm run <script>` / `yarn <script>`；`docker` / `gh` / `curl` / 任意 shell 跳过并记 `mirrorSkipped`。
-- 最多执行 3 条（按 workflow 顺序去重），超限部分记 `mirrorSkipped` 并披露。
-- 平台 `verifyCommands` 优先级不变（显式配置整链替换，不与 mirror 叠加）；平台侧 M48 不新增配置入口（沿用默认 `false`）。
+**决策 D2**：`RuntimeConfig.mirrorCiScripts`（CLI `--mirror-ci-scripts` / Action `mirror-ci-scripts` / env `DEPENDFIX_MIRROR_CI_SCRIPTS`，默认 `false`）。开启后在默认链**之后**经同一 `runVerification` 执行（首失败即停、按 workflow 顺序去重、≤3 条）；**只校验命令形态与脚本存在性，不审计脚本体**（脚本内命令与 `pre`/`post` 钩子照常执行）；显式自定义链（`--commands` / Action `commands` / 平台 `verifyCommands`）整链替换、**不与 mirror 叠加**；平台不新增开关（默认 `false`）。
 
 ### 5.3 预算与归因
 
-- 单条脚本沿用**验证命令**超时口径 `DEFAULT_COMMAND_TIMEOUT_MS`（10 分钟，`verification-runner.ts`），不引入第二个计时器；纳入运行级取消面。
-- **基线归因**：mirror 命令必须纳入修复前基线采样；基线已红 → `preExisting`，不参与回滚、不改变 exit code。
-- 非基线失败按本次改动归因，经 `enforceVerificationGate` 处理。
+超时沿用 `DEFAULT_COMMAND_TIMEOUT_MS`（10 分钟；env `DEPENDFIX_VERIFY_TIMEOUT_MS` 可覆盖，10s–30min），不引入第二个计时器；mirror 命令经同一 `resolveVerifyCommands` 进入修复前基线与运行级取消面，基线已红 → `preExisting`（不回滚、不改 exit code），非基线失败经验证门禁归因本次改动。
 
 ### 5.4 契约
 
-- `CiAlignmentRecord` 增加 `mirrored: string[]` / `mirrorSkipped: Array<{ command: string, reason: string }>`。
-- PR 正文「CI 口径」区块增加一行「已镜像执行 N 条 / 跳过 M 条」。
-- 运行报告验证段记录每条命令 `source=default|repo-config|ci-mirror`。
+`CiAlignmentRecord.mirrored` / `mirrorSkipped`（**两者均可选**，兼容历史 JSON；`mirrored` 只含实际执行集）；`FixAction.commandSource`（`default` / `repo-config` / `ci-mirror`）逐条标注报告来源；PR 正文「CI 口径」增加「已镜像执行 N 条 / 跳过 M 条」（开启时 0 条也展示，占固定 ≤5 行预算首位）；同仓库多次验证 `mirrored` 取并集、`mirrorSkipped` 去重。
 
 ## 6. M48.3 同告警尝试指纹去重
 
@@ -318,7 +307,8 @@ type CheckAttribution = 'self_caused' | 'pre_existing' | 'external_noise' | 'can
 
 | 键 | 形态 | 默认 | 作用域 |
 |:--|:--|:--|:--|
-| `mirrorCiScripts` | boolean | false | engine / CLI / Action |
+| `mirrorCiScripts` | boolean | false | engine / CLI / Action（env `DEPENDFIX_MIRROR_CI_SCRIPTS`） |
+| （env）`DEPENDFIX_VERIFY_TIMEOUT_MS` | number | 600000 | engine（默认链与 CI 镜像脚本共用的单命令超时；10s–30min，越界回退默认） |
 | `waitPrChecks` | boolean | false | engine / CLI / Action |
 | `prCheckTimeoutMs` | number | 900000（per PR） | engine |
 | `prCheckRunBudgetMs` | number | 1200000（per run） | engine |
@@ -328,7 +318,8 @@ type CheckAttribution = 'self_caused' | 'pre_existing' | 'external_noise' | 'can
 ### 10.2 报告字段
 
 - `FixAction.family`（M48.1）；`SKIP_REASONS` 新增 `'repeated-failure'`（M48.3）。
-- `CiAlignmentRecord.mirrored` / `mirrorSkipped`（M48.2）。
+- `CiAlignmentRecord.mirrored` / `mirrorSkipped`（M48.2；字段可选以兼容历史 JSON）。
+- `FixAction.commandSource?: 'default' | 'repo-config' | 'ci-mirror'`（M48.2；仅 verification 动作）。
 - core `RunResult.prCheckWatch?: { attempts: Array<{ pr: { number: number, htmlUrl: string }, state: 'passed' | 'failed' | 'cancelled' | 'no_ci_detected' | 'timeout', attribution?: CheckAttribution, closed: boolean }>, runBudgetExhausted: boolean }`（M48.5 / M48.6）；engine 的 `PullRequestResult` 只作内部返回，不承载报告字段。
 - 运行摘要：`prsOpened` / `prsSkippedByFingerprint` / `prsClosedAfterFailure` / `checksTimedOut`。
 
@@ -344,8 +335,10 @@ type CheckAttribution = 'self_caused' | 'pre_existing' | 'external_noise' | 'can
 |:--|:--|:--|
 | registry 不可达 / 家族成员版本解析失败 | 整族放弃（未写盘），告警 failed + `FAMILY_LOCKSTEP_FAILED` | 是（本次修复失败） |
 | override-protect 命中家族成员 | 整族放弃并留痕（noOp + 跳过计数），不产生半族 PR | 否（计 skipped） |
-| CI 脚本解析失败 / 无 package.json / 命令超限 | 跳过 mirror，记 `mirrorSkipped` | 否 |
+| CI 脚本解析失败 / 无 workflow / 超解析上限 | 不镜像，记 `unreadableReason`（缺失 workflow 记 info、解析失败 warn；**不进** `mirrorSkipped`） | 否 |
+| 无 package.json / 脚本不存在 / 非单一形态（flag / env 赋值 / 额外参数 / corepack 钉定；install 类命令除外，视为已覆盖）/ 超 3 条 | 跳过该条或整体，记 `mirrorSkipped`（`script-not-found` / `unsupported-command` / `over-limit`） | 否 |
 | mirror 命令基线已红 | `preExisting`，不回滚、不改 exit code | 否 |
+| mirror 命令基线绿但本次失败 | 按本次改动归因，经验证门禁回滚 | 是（本次修复失败） |
 | 最近关闭 PR 索引失败 / 标记解析失败 | fail-open，视为未命中 | 否 |
 | `git status` 出现未声明改动 / 路径非法 | 失败 `UNEXPECTED_CHANGES`，不开 PR | 是（本次修复失败） |
 | YAML `parseDocument` 失败 | 不写盘 + 留痕，不降级整文件重写 | 是（本次修复失败） |
@@ -385,7 +378,7 @@ type CheckAttribution = 'self_caused' | 'pre_existing' | 'external_noise' | 'can
 1. 家族清单只覆盖首批 4 个；新增家族需补规则与夹具。
 2. 尝试计数依赖 PR 正文；人工改写后退化为未命中。
 3. 失败签名去重仅在 M48.5 开启时增强证据；默认按尝试次数。
-4. CI mirror 只执行 `pnpm/npm/yarn run` 子集；`docker build` / 复合 shell 只披露。
+4. CI mirror 只执行 `pnpm/npm/yarn [run] <script>` 单一形态（`./node_modules/.bin/` 前缀归一化；`corepack pnpm@<v>` 钉定、脚本名含 `.` 等不接受）；带 workspace filter / recursive / `--if-present` / 额外参数 / env 赋值、`docker build` / 复合 shell 均只披露。每仓最多 3 条，脚本需存在于根 `package.json#scripts`；多仓共享 workDir 时按该检出计算；只校验形态与存在性，不审计脚本体。
 5. CLI 侧回环不跨进程续等；平台侧建 PR 后回环为后续候选。
 6. 合并后 check 新采集、聚合 issue、自动启用 mergify 均不在本阶段；已登记 backlog 候选。
 

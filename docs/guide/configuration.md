@@ -40,6 +40,7 @@
 | `verbose` | — | `boolean` | `false` | 详细日志输出（仅 CLI `--verbose`） |
 | `commands` | — | `string[]` | — | 自定义验证命令（仅 CLI `--commands`）；**整链替换**默认链，不做合并 |
 | `rollbackGranularity` | `DEPENDFIX_ROLLBACK_GRANULARITY` | `unit` / `repo` | `unit` | 验证失败回滚粒度：`unit` 回退最近一个已通过 probe 的变更单元并重验一次（保留更早单元）；`repo` 保持整仓 `git reset --hard` 逃生语义。对应 CLI `--rollback-granularity` |
+| `mirrorCiScripts` | `DEPENDFIX_MIRROR_CI_SCRIPTS` | `boolean` | `false` | 把目标仓库 CI 独有的 `pnpm` / `npm` / `yarn` 脚本追加到验证链（CLI `--mirror-ci-scripts`；Action `mirror-ci-scripts`）。开启后在默认链**之后**执行，最多 3 条、首失败即停；`docker build` / `gh` / 任意 shell 与非单一形态片段（flag / env 赋值 / 额外参数；install 类命令视为已覆盖）只记 `mirrorSkipped` 不执行；**只校验命令形态与脚本存在性，不审计脚本体**（脚本内命令与 `pre`/`post` 钩子照常执行）；与默认链共用同一超时（`DEPENDFIX_VERIFY_TIMEOUT_MS`）与运行级取消面，并同样纳入修复前基线采样（基线已红 → 既有失败，不回滚、不改 exit code）。显式 `commands` 整链替换，**不与 mirror 叠加**；平台沿用默认关闭。详见 [对外 PR 交付闭环设计 §5](../design/governance/pr-delivery-closure.md) |
 | `history` | —（仅 CLI `--history`） | `string` | — | 查询仓库历史运行摘要（读 `dependfix-reports/index.json`，倒序时间，计数为仓库级口径），**不执行扫描**、不要求 token/仓库配置；与运行参数并存时 history 优先、其余参数忽略 |
 
 ## GitHub 认证 Token 权限映射
@@ -230,6 +231,10 @@ export DEPENDFIX_ALERTS_TOKEN=github_pat_xxx
 # 本地无 token 回退：使用 pnpm audit 扫描当前工作区 lockfile
 # （不要求 GITHUB_TOKEN / 不要求 git remote；repository 显示 git remote 或 local）
 export DEPENDFIX_ALERTS_SOURCE=pnpm-audit
+# 验证链：把目标仓库 CI 独有的包管理器脚本追加到默认链之后（默认关闭；最多 3 条）
+export DEPENDFIX_MIRROR_CI_SCRIPTS=false
+# 单条验证命令超时（默认 10 分钟；默认链与 CI 镜像脚本共用，默认链内的 pnpm install 仍按本条计时；修复器安装链超时不受影响）
+# export DEPENDFIX_VERIFY_TIMEOUT_MS=600000
 ```
 
 > `GITHUB_TOKEN` 环境变量会被自动识别，无需额外配置前缀。`DEPENDFIX_GITHUB_TOKEN` 优先级高于 `GITHUB_TOKEN`。
@@ -318,6 +323,7 @@ export DEPENDFIX_ALERTS_SOURCE=pnpm-audit
 | `RUN_WORK_ROOT` | — | `data/runs` | 运行工作根目录（clone / 执行产物） |
 | `EXECUTION_TIMEOUT_MS` | — | `1800000`（30 分钟） | 单仓库执行超时；容器执行器与队列 Worker 锁时长同源联动（`resolveExecutionTimeoutMs()`）。越界（< 1 分钟 / > 24 小时）/ 非法值回退默认 |
 | `DEPENDFIX_INSTALL_TIMEOUT_MS` | — | `300000`（5 分钟） | 安装类命令超时（引擎内依赖安装与锁文件修复链共用一处解析器）；越界（< 10 秒 / > 30 分钟）/ 非法值回退默认。超时后引擎按运行级取消终止子进程树 |
+| `DEPENDFIX_VERIFY_TIMEOUT_MS` | — | `600000`（10 分钟） | 验证链单命令超时（默认链与 CI 镜像脚本共用，**默认链内的 `pnpm install` 仍按本条计时**；修复器安装链的 `DEPENDFIX_INSTALL_TIMEOUT_MS` 不受影响）；严格正整数且落在 10 秒–30 分钟，越界 / 非法回退默认 |
 | `CLONE_TIMEOUT_MS` | — | `300000` | git clone 超时（毫秒） |
 | `CLONE_MAX_RETRIES` | — | `3` | clone 最大重试次数 |
 | `PNPM_CONFIG_STORE_DIR` | — | `/app/data/pnpm-store`（入口派生） | 目标仓库依赖安装共用的 pnpm store 目录：默认在数据卷内，跨 run / 容器重建复用。入口以**运行身份写探针**判定可用性（覆盖只读挂载）；不可用（只读 / 权限不足 / 非绝对路径）时 warn 并回退 `$HOME` 下 pnpm 默认位置（每次冷安装，不阻断）。自定义路径的父目录须对 `PUID`/`PGID` 可进入，且与 `RUN_WORK_ROOT` 同文件系统才走硬链接。清理用 `pnpm store prune`（见 [pnpm store 与依赖缓存](./deployment.md#pnpm-store-与依赖缓存)） |
