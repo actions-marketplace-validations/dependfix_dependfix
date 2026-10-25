@@ -183,37 +183,31 @@ attemptKey = sha256([source, packageName, targetVersion, planStrategy].join('\u0
 
 ### 7.1 提交路径集合
 
-**决策 D4**：fixer / AI patch 必须声明 `changedPaths`，提交时执行 `git add -- <paths>`（替换 `pr-creator.ts:230` 的 `git add .`）。
+**决策 D4**：提交时执行 `git add -- <paths>`（不再通配暂存），集合 = 固定白名单 ∪ fixer / AI patch 声明路径。
 
-固定白名单（glob，覆盖 monorepo 成员）：
-
-- `package.json` / `**/package.json`
-- `pnpm-lock.yaml` / `pnpm-workspace.yaml` / `.npmrc` / `.gitignore`
-- fixer 显式返回的源码路径（AI patch 的应用路径集合）
-
-**路径校验**：拒绝绝对路径、`..`、以 `:(` 开头的 pathspec magic、控制字符；白名单外路径必须由 fixer 显式声明。
-
-**生成物黑名单**（一律不提交）：`.nuxtrc`、`.nuxt/**`、`auto-imports.d.ts`、`components.d.ts`、`dist/**`、`node_modules/**`、`.pnpm-store/**`、`dependfix-reports/**`。
+- 固定白名单：任意层级 `package.json`（成员 manifest）+ 仓库根 `pnpm-lock.yaml` / `pnpm-workspace.yaml` / `.npmrc` / `.gitignore`
+- 声明路径：`FixAction.changedPaths`（AI patch 多文件）与 `FixAction.filePath`（code-scanning 单文件），仅取**成功且非 noOp** 的动作（回滚掉的写盘不留声明）
+- 生成物黑名单（一律不提交，且不触发未声明告警——构建会重写它们）：`.nuxtrc` / `auto-imports.d.ts` / `components.d.ts` / `.nuxt/**` / `dist/**` / `node_modules/**` / `.pnpm-store/**` / `dependfix-reports/**`
+- 路径校验：拒绝绝对路径（含 Windows 盘符）、`..` 段、pathspec magic（`:(` 开头）、控制字符、空路径；`\` 统一归一为 `/`
 
 ### 7.2 未声明改动处理
 
-提交前用 `git status --porcelain` 比对：
-
-- 存在**未声明**的已跟踪文件改动 → 失败 `UNEXPECTED_CHANGES`（打印路径），不静默提交。
-- 存在未跟踪文件 → 默认忽略（除非在声明集合内）。
-- 空集合 → 失败 `NO_CHANGES`。
+- 未声明的**已跟踪**改动 → `UNEXPECTED_CHANGES`（打印路径，不建 commit / PR）；平台映射 `deliver` + `deterministic`，并计入 `scan-run-state` 的交付失败类别
+- 未跟踪文件默认忽略，仅声明集合内的新文件会进入提交
+- 提交集合为空（只有生成物 / 未跟踪文件）→ `NO_CHANGES`
+- 索引区已有暂存内容同样纳入判定：不在提交集合内的暂存改动 → `UNEXPECTED_CHANGES`（`git commit` 会连带提交索引，故拒绝而不擅自 `git reset` 用户暂存区）
+- workDir 为仓库子目录时，仓库根范围内的已暂存改动同样拒绝（`(outside workDir)`）；未合并冲突（`UU` / `AA` / `DD`）直接拒绝（`git add` 会按工作树一侧静默「解决」冲突）
+- 已知边界：目标仓库存在运行前未提交改动时按「未声明改动」拒绝（不静默销毁、不混合提交）；`preExistingDirty` 的既有回滚保护面不变
 
 ### 7.3 YAML 定点编辑
 
-**现状**：`fixers/dependency/index.ts:481/526` 用 `YAML.stringify(doc)` 整文件重写，引号风格与键序被规范化。
-
-**目标**：改用 `YAML.parseDocument` + `doc.setIn(['overrides', key], value)`，保留注释、引号风格与键序；写回 `String(doc)` 并保证单个尾随换行。解析失败（重复键 / 锚点 / 非法语法）→ 保持原文件不写盘并留痕，不降级为整文件重写。
+`overrides` 写入改用 `YAML.parseDocument` + `setIn`（`fixers/dependency/workspace-yaml.ts`）：只改目标键，注释 / 引号风格 / 键序保留，写回保证单个尾随换行并沿用原文件行尾（CRLF / LF）。解析失败（重复键 / 别名 / 顶层非映射 / 非法语法）、`overrides` 非映射、键值非标量 → **不写盘**并返回原因（`precheck` 失败，不降级为整文件重写）；`overrides:` 空值先物化为映射再写入（段注释与键位保留，该行的行内尾注释会随空值节点被替换而丢失——已知边界）。回滚以**备份还原为权威**（字节级），定点删除 / 恢复旧值仅在备份不可用时兜底，且按**实际写入的 key** 回滚（归一化可能命中既有写法）。
 
 ### 7.4 验证
 
-- 黄金夹具：单引号 / 无引号 / 含注释三种风格，断言「仅目标键变化」。
-- 真实临时仓库：预置生成物 + 未声明改动，断言提交集合只含白名单 / 声明路径。
-- AI patch 路径集合与 fixer 声明取并集；缺失声明按 `UNEXPECTED_CHANGES` 失败。
+- 黄金夹具：单引号 / 无引号 / 含注释三种风格，断言「仅目标键变化」
+- 真实临时仓库：预置生成物 + 未声明改动，断言提交集合只含白名单 / 声明路径，未声明改动报 `UNEXPECTED_CHANGES`
+- AI patch 路径与 fixer 声明取并集；空集合报 `NO_CHANGES`；mutation 至少 2 处（路径集合 / 未声明检测）
 
 ## 8. M48.5 PR 创建后 CI 回环（CLI / Action 侧）
 

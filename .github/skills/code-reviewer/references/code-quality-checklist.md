@@ -284,6 +284,7 @@ if (value) { ... }  // 对 0, "", false 失效
 | [platform.md §3.8](../../../../docs/standards/platform.md) | `Repository.verifyCommands` 字段 / 仓库级自定义验证命令 | 「命令执行面 + 写入门槛 + 审计留痕」三条安全边界是否保持（详细检查点分别落在 code-auditor 主责边界「修复执行安全基线」与「shell 命令安全」必查项，本条不重复其条目内容） |
 | [development.md §5.1.52](../../../../docs/standards/development.md) | 新增验证命令来源（CI 镜像脚本 / 仓库声明脚本等） | 是否复用 `resolveVerifyCommands` → 同一 `runVerification`（超时 env / 取消面 / 基线归因 / 首失败短路同源）；动作是否标注 `commandSource`；显式自定义链是否仍整链替换且不与新来源叠加；新增来源是否有基线红 `preExisting` 与首失败短路用例 |
 | [development.md §5.1.53](../../../../docs/standards/development.md) | 跨运行状态（尝试次数 / 上次结果）落在 PR 正文标记等可读回载体 | 读取失败 / 越界 / 标记被改写是否 **fail-open**（不误跳过）；计数键是否只用写入前可确定的输入（是否混入执行结果字段）；跳过是否落在安装与验证**之前**且不改变失败计数（`noOp` + 跳过原因分组，分组之和仍等于总数）；缓存是否按仓库 / 按轮复用而非逐告警重复查询 |
+| [development.md §5.1.54](../../../../docs/standards/development.md) | 改自动提交的暂存面 / 新增写盘来源 | 是否以「固定白名单 ∪ 声明路径」执行 `git add -- <paths>`（无通配暂存）；未声明的**已跟踪**改动是否拒绝提交并打印路径；生成物是否不提交且不报未声明；空集合是否拒绝；索引区已有暂存内容是否全部落在提交集合内（越界即拒绝且不擅自 `git reset`）；新写盘来源是否声明 `FixAction.changedPaths`（仅成功且非 noOp）且路径经校验（绝对 / `..` / pathspec magic / 控制字符） |
 | [platform.md §3.9](../../../../docs/standards/platform.md) | `.github/dependfix.yml` 读取 / 合并 | **中央优先**（防目标仓库绕过）与**不提供 UI 入口**两条约束是否保持 |
 | [planning.md §2.3](../../../../docs/standards/planning.md) | 候选上收 / 关闭 | 父段标题括号枚举是否同步收敛；已失效候选是否清理 |
 | [planning.md §2.5](../../../../docs/standards/planning.md) | 条目含统计数字 / 跨文档引用同一批需求 | **量化断言**可复现口径：量级区间 + 测量方 + 可复现命令（第三方可复现）；**跨文档同源区分**：用户报告项数 / 登记候选数 / 上收原子数是否给出一致换算（无互相矛盾数字） |

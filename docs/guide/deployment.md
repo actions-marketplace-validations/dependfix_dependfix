@@ -147,7 +147,7 @@ docker compose exec -u 100:101 platform rm -rf /app/data/pnpm-store
 - **优先级**：pnpm 11+ 的 `storeDir` 只从命令行 / 环境变量 / `pnpm-workspace.yaml` / 全局配置读取（项目 `.npmrc` 只作用于认证与 registry），环境变量优先级最高——平台因此固定缓存位置，目标仓库在 `pnpm-workspace.yaml` 声明的 `storeDir` 不再生效（缓存位置属执行环境基础设施）。`pnpm store path` 的返回值带版本后缀（如 `/app/data/pnpm-store/v11`）。
 - **容量建议（经验值）**：store 随目标仓库依赖数量增长，中等规模仓库通常约 0.5-1.5 GB / 个；与数据库 / 备份共用 `dependfix-data` 卷，建议先预留 10 GB 并观察 `docker system df -v`，再按仓库数量调整。定期 `pnpm store prune` 清理无引用条目。
 - **备份注意**：卷级备份（下方「备份与恢复」的 tar 示例）会连同 store 一起打包；只需数据库时给 tar 加 `--exclude=./pnpm-store`。
-- **提交卫生**：安装产物不会进入交付提交——`fix` / `fix-and-pr`（且非 dry-run）运行开始时，引擎把 `.pnpm-store/` 与 `node_modules/` 写入目标仓库的 `.git/info/exclude`（幂等，不修改目标仓库的 `.gitignore`），`git add .` 因此不会带上依赖目录；写入失败会 warn 但继续运行。
+- **提交卫生**：安装产物不会进入交付提交——`fix` / `fix-and-pr`（且非 dry-run）运行开始时，引擎把 `.pnpm-store/` 与 `node_modules/` 写入目标仓库的 `.git/info/exclude`（幂等，不修改目标仓库的 `.gitignore`），交付提交本身按白名单与 fixer 声明路径收集（安装产物不在集合内，见 [pr-delivery-closure §7](../design/governance/pr-delivery-closure.md#7-m484-提交面白名单与-yaml-定点编辑)），排除条目另外保证它们不污染「无变更」判定；写入失败会 warn 但继续运行。
 
 ## 数据库初始化
 

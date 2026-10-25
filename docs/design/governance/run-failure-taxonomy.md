@@ -110,6 +110,7 @@
 ### 4.3 映射要点
 
 - `VERIFICATION_FAILED` → `verify` + `deterministic`：升级后验证链失败（可能破坏性更新），需重点研判；**不提供一键重试**。
+- `UNEXPECTED_CHANGES` / `NO_CHANGES` → `deliver` + `deterministic`：交付提交集合不合法（存在未声明的已跟踪改动 / 只有生成物与未跟踪文件）→ 远程未落地，需人工清理工作区后重跑（口径见 [pr-delivery-closure.md §7](./pr-delivery-closure.md#7-m484-提交面白名单与-yaml-定点编辑)）。两者均进 `scan-run-state` 的引擎交付失败类别，不误判 `completed`。
 - `PRE_EXISTING_FAILURE` → `verify` + `deterministic`：修复前基线即红，非本次引入（已有 `FixAction.preExisting` 信号可复用）。
 - `network_violation` → `verify` + `deterministic`：执行期外联审计命中黑名单（验证链外联违规），需研判；不提供一键重试。
 - `engine_exit_2` → `runtime` + `deterministic`（进程级全仓库失败 / 全量回滚）。

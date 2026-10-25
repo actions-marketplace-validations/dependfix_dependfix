@@ -153,6 +153,8 @@ interface FixAction {
     durationMs?: number
     /** lockfile diff 摘要（lockfile-repair 专用） */
     diff?: string
+    /** 本次动作实际写盘的相对路径（交付提交据此与白名单取并集；不参与报告渲染） */
+    changedPaths?: string[]
 }
 ```
 
