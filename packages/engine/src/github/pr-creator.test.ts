@@ -1016,6 +1016,24 @@ describe('generatePRBody', () => {
         expect(body).not.toContain('Supersedes')
     })
 
+    it('无尝试标记时不写入 dependfix:attempt 注释', () => {
+        expect(generatePRBody(buildRunResult())).not.toContain('dependfix:attempt')
+        expect(generatePRBody(buildRunResult(), [], [])).not.toContain('dependfix:attempt')
+    })
+
+    it('尝试标记置于正文头部（尾部截断不会丢标记）', () => {
+        const markers = [
+            { key: 'aaaaaaaaaaaaaaaa', n: 2 },
+            { key: 'bbbbbbbbbbbbbbbb', n: 1, failureSignature: 'deadbeef', failed: 1 as const },
+        ]
+        const body = generatePRBody(buildRunResult(), undefined, markers)
+
+        expect(body.startsWith('<!-- dependfix:attempt key=aaaaaaaaaaaaaaaa n=2 failed=? -->')).toBe(true)
+        expect(body).toContain('<!-- dependfix:attempt key=bbbbbbbbbbbbbbbb n=1 fp=deadbeef failed=1 -->')
+        // 标记位于标题之前；正文内容完整保留
+        expect(body.indexOf('dependfix:attempt')).toBeLessThan(body.indexOf('## 🔒 Dependfix Auto Fix'))
+    })
+
     it('renders skipped/truncated breakdown and unfixed count', () => {
         const result = buildRunResult()
         result.summary = {

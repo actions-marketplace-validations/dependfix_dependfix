@@ -144,6 +144,15 @@ export interface RuntimeConfig {
      */
     mirrorCiScripts?: boolean
     /**
+     * 忽略同告警尝试上限，强制再试一次（`--retry-failed` / `DEPENDFIX_RETRY_FAILED`，默认 `false`）。
+     *
+     * 仅 fix-and-pr 生效：同一告警 / 目标版本 / 修复策略连续两次关闭后，第 3 次起默认跳过
+     * （`alertsSkippedByReason['repeated-failure']`）；开启后仍执行并在报告标注「人工强制」。
+     * 尝试计数载体为 PR 正文 HTML 注释，计数口径见
+     * [pr-delivery-closure.md §6](../../../../docs/design/governance/pr-delivery-closure.md)。
+     */
+    retryFailed?: boolean
+    /**
      * 执行宿主的构建版本回执（平台容器注入；与 `/api/health`、平台启动 `[build]` 行同源）。
      * 未提供时引擎回退自身 `package.json` 版本（CLI / MCP 本地执行场景），最终回退 `unknown`。
      */
@@ -280,6 +289,8 @@ export interface CliConfigOverrides {
     rollbackGranularity?: RollbackGranularity
     /** 把目标仓库 CI 独有的包管理器脚本追加到验证链（`--mirror-ci-scripts`；默认关闭） */
     mirrorCiScripts?: boolean
+    /** 忽略同告警尝试上限并强制再试（`--retry-failed`；默认关闭，仅 fix-and-pr 生效） */
+    retryFailed?: boolean
     /** Dependabot alerts 专用 token（可选，最小权限；缺省回退 githubToken） */
     alertsToken?: string
     maxAlertsPerRepository?: number
@@ -344,6 +355,7 @@ export const DEFAULT_RUNTIME_CONFIG: Omit<RuntimeConfig, 'githubToken' | 'reposi
     allowMajorUpgrade: false,
     rollbackGranularity: 'unit',
     mirrorCiScripts: false,
+    retryFailed: false,
     maxAlertsPerRepository: 20,
     maxConcurrency: 1,
     maxRetries: 3,
@@ -591,6 +603,7 @@ export function readEnvConfig(env: NodeJS.ProcessEnv = process.env): CliConfigOv
         codeQualityEnabled: normalizeBoolean(readEnv(env, 'CODE_QUALITY'), `${ENV_PREFIX}CODE_QUALITY`),
         rollbackGranularity: readRollbackGranularity(readEnv(env, 'ROLLBACK_GRANULARITY'), `${ENV_PREFIX}ROLLBACK_GRANULARITY`),
         mirrorCiScripts: normalizeBoolean(readEnv(env, 'MIRROR_CI_SCRIPTS'), `${ENV_PREFIX}MIRROR_CI_SCRIPTS`),
+        retryFailed: normalizeBoolean(readEnv(env, 'RETRY_FAILED'), `${ENV_PREFIX}RETRY_FAILED`),
         maxAlertsPerRepository: normalizeInteger(readEnv(env, 'MAX_ALERTS_PER_REPOSITORY'), `${ENV_PREFIX}MAX_ALERTS_PER_REPOSITORY`),
         maxConcurrency: normalizeInteger(readEnv(env, 'MAX_CONCURRENCY'), `${ENV_PREFIX}MAX_CONCURRENCY`),
         maxRetries: normalizeNonNegativeInteger(readEnv(env, 'MAX_RETRIES'), `${ENV_PREFIX}MAX_RETRIES`),
@@ -759,6 +772,7 @@ export function resolveRuntimeConfig(options: ResolveRuntimeConfigOptions = {}):
         allowMajorUpgrade: cliOverrides.allowMajorUpgrade ?? DEFAULT_RUNTIME_CONFIG.allowMajorUpgrade,
         rollbackGranularity: cliOverrides.rollbackGranularity ?? envConfig.rollbackGranularity ?? DEFAULT_RUNTIME_CONFIG.rollbackGranularity,
         mirrorCiScripts: cliOverrides.mirrorCiScripts ?? envConfig.mirrorCiScripts ?? DEFAULT_RUNTIME_CONFIG.mirrorCiScripts,
+        retryFailed: cliOverrides.retryFailed ?? envConfig.retryFailed ?? DEFAULT_RUNTIME_CONFIG.retryFailed,
         maxAlertsPerRepository: cliOverrides.maxAlertsPerRepository ?? envConfig.maxAlertsPerRepository ?? DEFAULT_RUNTIME_CONFIG.maxAlertsPerRepository,
         maxConcurrency: cliOverrides.maxConcurrency ?? envConfig.maxConcurrency ?? DEFAULT_RUNTIME_CONFIG.maxConcurrency,
         maxRetries: cliOverrides.maxRetries ?? envConfig.maxRetries ?? DEFAULT_RUNTIME_CONFIG.maxRetries,

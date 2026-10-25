@@ -30,6 +30,7 @@ describe('resolveRuntimeConfig', () => {
             allowMajorUpgrade: false,
             rollbackGranularity: 'unit',
             mirrorCiScripts: false,
+            retryFailed: false,
             maxAlertsPerRepository: 20,
             maxConcurrency: 1,
             maxRetries: 3,
@@ -397,6 +398,29 @@ describe('resolveRuntimeConfig', () => {
             env: { ...base, DEPENDFIX_MIRROR_CI_SCRIPTS: 'true' },
             cliOverrides: { mirrorCiScripts: false },
         }).mirrorCiScripts).toBe(false)
+    })
+
+    it('defaults retryFailed to false and reads CLI override / env (CLI 优先)', () => {
+        const base = { GITHUB_TOKEN: 't', DEPENDFIX_REPOSITORIES: 'foo/bar' }
+
+        expect(resolveRuntimeConfig({ env: base }).retryFailed).toBe(false)
+        expect(resolveRuntimeConfig({
+            env: { ...base, DEPENDFIX_RETRY_FAILED: 'true' },
+        }).retryFailed).toBe(true)
+        expect(resolveRuntimeConfig({
+            env: { ...base, DEPENDFIX_RETRY_FAILED: 'true' },
+            cliOverrides: { retryFailed: false },
+        }).retryFailed).toBe(false)
+    })
+
+    it('rejects invalid DEPENDFIX_RETRY_FAILED value', () => {
+        expect(() => resolveRuntimeConfig({
+            env: {
+                GITHUB_TOKEN: 't',
+                DEPENDFIX_REPOSITORIES: 'foo/bar',
+                DEPENDFIX_RETRY_FAILED: 'maybe',
+            },
+        })).toThrow('Invalid boolean value')
     })
 
     it('rejects invalid DEPENDFIX_MIRROR_CI_SCRIPTS value', () => {

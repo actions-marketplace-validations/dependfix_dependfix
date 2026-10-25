@@ -15,6 +15,7 @@ import {
     formatCiAlignmentSection,
 } from '@dependfix/core'
 import { GIT_COMMIT_HOOKS_ISOLATION_ARGS, GIT_COMMIT_SIGNING_ISOLATION_ARGS, GIT_PUSH_HOOKS_ISOLATION_ARGS, GIT_PUSH_SIGNING_ISOLATION_ARGS } from './git-signing'
+import { formatAttemptMarker, type AttemptMarker } from './fix-fingerprint'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -80,7 +81,7 @@ const PAT_DEFAULT_COMMIT_AUTHOR = {
 } as const
 
 /** 自动修复分支统一前缀（分支名 = 前缀 + 内容指纹 8 位） */
-const BRANCH_PREFIX = 'dependfix/auto-fix-'
+export const DEPENDFIX_BRANCH_PREFIX = 'dependfix/auto-fix-'
 
 // ---------------------------------------------------------------------------
 // Fingerprint
@@ -140,10 +141,10 @@ export function computeFixFingerprint(actions: FixAction[]): string {
  * （如旧版 runId 分支，会被 supersede）。
  */
 export function extractFingerprintFromBranch(branchName: string): string | null {
-    if (!branchName.startsWith(BRANCH_PREFIX)) {
+    if (!branchName.startsWith(DEPENDFIX_BRANCH_PREFIX)) {
         return null
     }
-    const fingerprint = branchName.slice(BRANCH_PREFIX.length)
+    const fingerprint = branchName.slice(DEPENDFIX_BRANCH_PREFIX.length)
     return /^[0-9a-f]{8}$/.test(fingerprint) ? fingerprint : null
 }
 
@@ -284,7 +285,7 @@ export async function findDependfixOpenPR(
     })
 
     return data
-        .filter((pr) => pr.head.ref.startsWith(BRANCH_PREFIX))
+        .filter((pr) => pr.head.ref.startsWith(DEPENDFIX_BRANCH_PREFIX))
         .map((pr) => ({
             number: pr.number,
             htmlUrl: pr.html_url,
@@ -563,14 +564,24 @@ const MAX_PR_BODY_BYTES = 60 * 1024
  * 明细表在尾部被截断），并附加截断说明——避免大仓库 PR 创建 422。
  *
  * @param supersededNumbers 被本 PR 取代并已关闭的旧 PR 编号列表（用于 Supersedes 声明）
+ * @param attemptMarkers 同告警尝试标记（HTML 注释；必须置于正文头部——正文超 64KB 时从尾部截断，尾置标记会丢失）
  */
-export function generatePRBody(result: RunResult, supersededNumbers?: number[]): string {
+export function generatePRBody(
+    result: RunResult,
+    supersededNumbers?: number[],
+    attemptMarkers?: readonly AttemptMarker[],
+): string {
     const { summary, actions, errors } = result
     const unfixed = countUnfixedAlerts(summary)
     const skippedRows = skippedBreakdown(summary)
     const truncatedRows = truncatedBreakdown(summary)
 
-    const lines: string[] = [
+    const lines: string[] = []
+    if (attemptMarkers && attemptMarkers.length > 0) {
+        lines.push(...attemptMarkers.map((marker) => formatAttemptMarker(marker)), '')
+    }
+
+    lines.push(
         '## 🔒 Dependfix Auto Fix',
         '',
         `**Run ID**: \`${result.runId}\``,
@@ -594,7 +605,7 @@ export function generatePRBody(result: RunResult, supersededNumbers?: number[]):
         `| Verifications passed | ${summary.verificationsPassed} |`,
         `| Verifications failed | ${summary.verificationsFailed} |`,
         '',
-    ]
+    )
 
     // Not Fixed / Skipped（分组披露：避免「部分修复」被读成「全部修复」）
     if (unfixed > 0 || skippedRows.length > 0 || truncatedRows.length > 0) {
