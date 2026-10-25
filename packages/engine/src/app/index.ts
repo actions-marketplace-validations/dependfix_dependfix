@@ -29,6 +29,8 @@ import {
     findDependfixOpenPR,
     ClosedAttemptIndex,
     collectAttemptMarkers,
+    CommitScopeError,
+    collectDeclaredPaths,
     discoverRepositories,
     mergeRepositories,
     filterExplicitRepositories,
@@ -479,10 +481,12 @@ export class DependfixApp {
             } catch (error: unknown) {
                 const message = toErrorMessage(error)
                 this.logger.error(`Local commit failed: ${message}`)
+                const isScopeError = error instanceof CommitScopeError
                 this.allErrors.push({
                     repository: '*',
-                    stage: 'fix',
-                    category: 'COMMIT_FAILED',
+                    // 提交集合不合法统一记交付阶段（与 PR 路径一致），其余仍为 fix 阶段的 COMMIT_FAILED
+                    stage: isScopeError ? 'report' : 'fix',
+                    category: isScopeError ? error.category : 'COMMIT_FAILED',
                     message,
                 })
             }
@@ -629,7 +633,30 @@ export class DependfixApp {
 
             this.logger.info('Staging and committing changes')
             const author = this.githubAppAuth?.getCommitAuthor()
-            stageAndCommit(buildCommitMessage(this.allActions), this.workDir, author)
+            try {
+                const scope = stageAndCommit(buildCommitMessage(this.allActions), this.workDir, author, {
+                    declaredPaths: collectDeclaredPaths(this.allActions),
+                })
+                if (scope.ignored.length > 0) {
+                    this.logger.info(`Not committing ${scope.ignored.length} generated / undeclared path(s): ${scope.ignored.join(', ')}`)
+                }
+                if (scope.missing.length > 0) {
+                    this.logger.warn(`Declared path(s) had no changes in the worktree: ${scope.missing.join(', ')}`)
+                }
+            } catch (error: unknown) {
+                if (error instanceof CommitScopeError) {
+                    // 提交集合不合法：记录专属类别（平台据 category 判 deliver 失败），不进入 push / PR
+                    this.logger.error(`Staging rejected (${error.category}): ${error.message}`)
+                    this.allErrors.push({
+                        repository: firstRepo,
+                        stage: 'report',
+                        category: error.category,
+                        message: error.message,
+                    })
+                    return
+                }
+                throw error
+            }
 
             this.logger.info(`Pushing branch: ${branchName}`)
             pushBranch(branchName, this.workDir)

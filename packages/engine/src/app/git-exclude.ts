@@ -1,8 +1,9 @@
-// git-exclude.ts — 交付提交卫生：把安装 / 执行产物排除在 `git add .` 之外。
+// git-exclude.ts — 交付提交卫生：把安装 / 执行产物排除在交付变更集之外。
 //
-// 背景：引擎在目标仓库内执行安装与验证链，`stageAndCommit` 用 `git add .` 收集变更。目标仓库若未在
-// `.gitignore` 声明 `node_modules/`（或使用仓库内 pnpm store），安装产物会被一并提交；未排除的产物
-// 也会让「无变更」判定失效。两者都发生在提交边界，故在运行开始（安装前）一次性预置排除条目。
+// 背景：引擎在目标仓库内执行安装与验证链。目标仓库若未在 `.gitignore` 声明 `node_modules/`
+// （或使用仓库内 pnpm store），安装产物会污染工作区：既让「无变更」判定失效，也会在提交边界
+// 被收集。提交侧另有白名单 / 生成物黑名单收口（见 github/commit-scope.ts），本模块负责让这些产物
+// 从 `git status` 视角也不出现（`git status` 默认跳过 ignored 文件）——两侧互补而非重复。
 //
 // 落点口径（设计见 docs/design/governance/gitignore-management.md §7）：
 // - 只写 `.git/info/exclude`（本地元数据、不可提交），**不修改**目标仓库 `.gitignore`——后者是 tracked

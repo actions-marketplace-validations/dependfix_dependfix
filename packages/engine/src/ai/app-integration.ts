@@ -212,6 +212,8 @@ async function applyCodeChangeFix(
         isMajor: isMajorUpgrade(request),
         success: true,
         strategy: 'ai-patch',
+        // 交付提交按声明路径收口（源码不受白名单覆盖）：只在此处声明真正写盘的文件
+        changedPaths: applied.appliedFiles,
         diff: `AI 修复 ${assessment.changes.length} 个文件：${assessment.changes.map((c) => c.filePath).join(', ')}`,
         durationMs: 0,
     }
