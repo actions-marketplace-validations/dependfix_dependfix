@@ -1,3 +1,10 @@
+import {
+    classifyCheckFailure,
+    isCancelledConclusion,
+    isFailedConclusion,
+    type CheckAttribution,
+    type CheckConclusion,
+} from '@dependfix/core'
 import type { OverallBuildStatus, UnifiedBuildSignal, UnifiedBuildSignalState } from './types'
 import { PR_CHECK_CONCLUSIONS, type PRCheckConclusion } from '#server/entities/pr-check'
 
@@ -56,7 +63,93 @@ const CHECK_CONCLUSION_STATE: Readonly<Record<string, UnifiedBuildSignalState>> 
     skipped: 'skipped',
     timed_out: 'failure',
     action_required: 'failure',
+    // workflow 无法启动：与 CLI 回环同口径（fail-closed，绝不静默为跳过）
+    startup_failure: 'failure',
     stale: 'skipped',
+}
+
+/** 归因输入可接受的 check conclusion（由状态映射表派生，避免两份清单漂移）。 */
+const ATTRIBUTION_CHECK_CONCLUSIONS: ReadonlySet<string> = new Set(Object.keys(CHECK_CONCLUSION_STATE))
+
+/**
+ * 原始取值 → 归因输入结论（保留 `cancelled` / `timed_out` / `startup_failure` 粒度，不粗化为 state）。
+ *
+ * 与 core `classifyCheckFailure` 同口径：未知 / 缺失取值一律 `unknown`（不臆造 `self_caused` / `external_noise`）。
+ */
+function resolveAttributionConclusion(
+    kind: UnifiedBuildSignal['kind'],
+    rawState: string | null,
+): CheckConclusion {
+    // 三源共用：缺失原始值 = 未完成（deployment 无 status / status 无 state / check 未 completed）
+    if (rawState === null) {
+        return 'pending'
+    }
+    if (kind === 'status') {
+        switch (rawState) {
+            case 'success':
+                return 'success'
+            case 'failure':
+            case 'error':
+                return 'failure'
+            case 'pending':
+                return 'pending'
+            default:
+                return 'unknown'
+        }
+    }
+    if (kind === 'deployment') {
+        switch (rawState) {
+            case 'success':
+                return 'success'
+            case 'failure':
+            case 'error':
+                return 'failure'
+            case 'queued':
+            case 'in_progress':
+            case 'pending':
+                return 'pending'
+            case 'inactive':
+                return 'skipped'
+            default:
+                return 'unknown'
+        }
+    }
+    return ATTRIBUTION_CHECK_CONCLUSIONS.has(rawState) ? rawState as CheckConclusion : 'unknown'
+}
+
+/**
+ * 信号归因（同一纯函数 `classifyCheckFailure`；平台不采集父提交 → `parentConclusion` 恒缺省）。
+ *
+ * 只对**失败 / 取消**类结论产出归因（core 函数的前置条件）：成功 / 中性 / 未完成 / `completed`
+ * 但无 conclusion（历史怪态）一律 `undefined`——避免通过项在 `signals_json` 里留下「未判定」噪音。
+ * 平台侧只可能产出 `external_noise` / `cancelled` / `unknown`（`pre_existing` / `self_caused` 需父提交比对）。
+ */
+function resolveSignalAttribution(
+    kind: UnifiedBuildSignal['kind'],
+    name: string,
+    rawState: string | null,
+    detail: string | null,
+): CheckAttribution | undefined {
+    const conclusion = resolveAttributionConclusion(kind, rawState)
+    if (!isFailedConclusion(conclusion) && !isCancelledConclusion(conclusion)) {
+        return undefined
+    }
+    return classifyCheckFailure({
+        name,
+        conclusion,
+        detail: detail ?? undefined,
+    })
+}
+
+/**
+ * 归因文本证据：与 CLI 回环同口径取 `output.title + output.summary`（`output.text` 仍作展示摘要）。
+ *
+ * 两端用同一合成顺序，避免「同一 job 在 CLI 归 external_noise、平台归 unknown」的输入级漂移。
+ */
+function composeAttributionDetail(output: { title?: string | null, summary?: string | null } | null | undefined): string | null {
+    const parts = [output?.title, output?.summary]
+        .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    return parts.length > 0 ? parts.join(' — ') : null
 }
 
 /** commit status state → 归一化状态（`repos.listCommitStatusesForRef` 的 [].state） */
@@ -134,6 +227,22 @@ export const resolveDeploymentProvider = (creatorLogin: string | null | undefine
     return login && login.length > 0 ? login : 'unknown'
 }
 
+/**
+ * check run 状态推导（fail-closed）：
+ * - 未完成 → `pending`
+ * - `completed` 但无 conclusion（历史怪态）→ `skipped`（既有口径，不判失败）
+ * - 未识别的 conclusion（GitHub 新增枚举）→ `failure`，绝不静默为跳过 / 成功
+ */
+function resolveCheckRunState(status: string | null | undefined, conclusion: string | null): UnifiedBuildSignalState {
+    if (status !== 'completed') {
+        return PENDING_SIGNAL_STATE
+    }
+    if (conclusion === null) {
+        return 'skipped'
+    }
+    return CHECK_CONCLUSION_STATE[conclusion] ?? 'failure'
+}
+
 /** check run → 归一化信号（status !== 'completed' → `pending`） */
 export const normalizeCheckRun = (
     checkRun: {
@@ -143,26 +252,27 @@ export const normalizeCheckRun = (
         conclusion?: string | null
         details_url?: string | null
         html_url?: string | null
-        output?: { text?: string | null } | null
+        output?: { title?: string | null, summary?: string | null, text?: string | null } | null
         app?: { slug?: string | null } | null
     },
     observedAt: Date,
 ): UnifiedBuildSignal => {
     const rawConclusion = checkRun.status === 'completed' ? (checkRun.conclusion ?? null) : null
-    const state = checkRun.status !== 'completed'
-        ? PENDING_SIGNAL_STATE
-        : (CHECK_CONCLUSION_STATE[rawConclusion ?? ''] ?? 'skipped')
+    const state = resolveCheckRunState(checkRun.status, rawConclusion)
+    const name = checkRun.name?.trim() || 'check'
+    const summary = truncate(checkRun.output?.text, SIGNAL_SUMMARY_MAX_LENGTH)
     return {
         kind: 'check',
         provider: resolveCheckProvider(checkRun.app?.slug),
-        name: checkRun.name?.trim() || 'check',
+        name,
         state,
         rawState: rawConclusion,
         sourceId: checkRun.id !== undefined && checkRun.id !== null ? String(checkRun.id) : null,
         targetUrl: capUrl(checkRun.details_url ?? checkRun.html_url),
         logUrl: null,
-        summary: truncate(checkRun.output?.text, SIGNAL_SUMMARY_MAX_LENGTH),
+        summary,
         observedAt,
+        attribution: resolveSignalAttribution('check', name, rawConclusion, composeAttributionDetail(checkRun.output)),
     }
 }
 
@@ -178,17 +288,22 @@ export const normalizeCommitStatus = (
     observedAt: Date,
 ): UnifiedBuildSignal => {
     const rawState = status.state?.trim().toLowerCase() ?? null
+    const name = status.context?.trim() || 'status'
+    const summary = truncate(status.description, SIGNAL_SUMMARY_MAX_LENGTH)
+    // 未识别原始状态 fail-closed 为 failure（无 state 的缺失值仍按 skipped）
+    const state = rawState === null ? 'skipped' : (COMMIT_STATUS_STATE[rawState] ?? 'failure')
     return {
         kind: 'status',
         provider: resolveStatusProvider(status.context),
-        name: status.context?.trim() || 'status',
-        state: COMMIT_STATUS_STATE[rawState ?? ''] ?? 'skipped',
+        name,
+        state,
         rawState,
         sourceId: status.id !== undefined && status.id !== null ? String(status.id) : null,
         targetUrl: capUrl(status.target_url),
         logUrl: null,
-        summary: truncate(status.description, SIGNAL_SUMMARY_MAX_LENGTH),
+        summary,
         observedAt,
+        attribution: resolveSignalAttribution('status', name, rawState, summary),
     }
 }
 
@@ -216,17 +331,22 @@ export const normalizeDeployment = (
     observedAt: Date,
 ): UnifiedBuildSignal => {
     const rawState = latestStatus?.state?.trim().toLowerCase() ?? null
+    const name = deployment.environment?.trim() || deployment.ref?.trim() || 'deployment'
+    const summary = truncate(latestStatus?.description, SIGNAL_SUMMARY_MAX_LENGTH)
+    // 未识别原始状态 fail-closed 为 failure（无 status 的 deployment 仍按 pending）
+    const state = rawState === null ? PENDING_SIGNAL_STATE : (DEPLOYMENT_STATE[rawState] ?? 'failure')
     return {
         kind: 'deployment',
         provider: resolveDeploymentProvider(deployment.creator?.login),
-        name: deployment.environment?.trim() || deployment.ref?.trim() || 'deployment',
-        state: rawState ? (DEPLOYMENT_STATE[rawState] ?? 'skipped') : PENDING_SIGNAL_STATE,
+        name,
+        state,
         rawState,
         sourceId: deployment.id !== undefined && deployment.id !== null ? String(deployment.id) : null,
         targetUrl: capUrl(latestStatus?.environment_url ?? latestStatus?.target_url),
         logUrl: capUrl(latestStatus?.log_url),
-        summary: truncate(latestStatus?.description, SIGNAL_SUMMARY_MAX_LENGTH),
+        summary,
         observedAt,
+        attribution: resolveSignalAttribution('deployment', name, rawState, summary),
     }
 }
 

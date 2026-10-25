@@ -1,3 +1,4 @@
+import type { CheckAttribution } from '@dependfix/core'
 import type { PRCheckConclusion } from '#server/entities/pr-check'
 
 /**
@@ -84,6 +85,14 @@ export interface UnifiedBuildSignal {
     summary: string | null
     /** 观测时刻 */
     observedAt: Date
+    /**
+     * 失败归因（与 CLI 报告同一纯函数 `classifyCheckFailure`；未完成信号为 `undefined`）。
+     *
+     * 平台侧不采集父提交 check，因此 `self_caused` / `pre_existing` 在本数据面不可达——
+     * 只可能出现 `external_noise` / `cancelled` / `unknown`；字段可选以兼容历史 `signalsJson` 行。
+     * 归因只用于**解释**，不参与 `overallStatus` / 告警 / mergify 合并放行（见 pr-build-deploy-signals.md §3.9）。
+     */
+    attribution?: CheckAttribution
 }
 
 /**

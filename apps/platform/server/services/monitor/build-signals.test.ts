@@ -1,3 +1,4 @@
+import { classifyCheckFailure } from '@dependfix/core'
 import { describe, expect, it } from 'vitest'
 import {
     aggregateOverallStatus,
@@ -291,5 +292,161 @@ describe('monitor/build-signals 状态映射覆盖', () => {
             observedAt,
         )
         expect(signal.state).toBe(expected)
+    })
+})
+
+// ---------------------------------------------------------------------------
+// 归因：平台与 CLI 报告共用 core `classifyCheckFailure`，不出现第二套标签
+// ---------------------------------------------------------------------------
+describe('monitor/build-signals 归因', () => {
+    const checkRun = (conclusion: string, extra: Record<string, unknown> = {}) =>
+        normalizeCheckRun(
+            { id: 1, name: 'Test', status: 'completed', conclusion, app: { slug: 'github-actions' }, ...extra },
+            observedAt,
+        )
+
+    it('Dependabot updater 无更新文本 → external_noise', () => {
+        const signal = normalizeCheckRun(
+            {
+                id: 1,
+                name: 'dependabot[bot] updater',
+                status: 'completed',
+                conclusion: 'failure',
+                output: { summary: 'security_update_not_possible: no patched version' },
+            },
+            observedAt,
+        )
+        expect(signal.attribution).toBe('external_noise')
+    })
+
+    it('镜像 / registry manifest 错误签名 → external_noise（commit status 同口径）', () => {
+        const status = normalizeCommitStatus(
+            { id: 1, context: 'ACR push', state: 'failure', description: 'manifest unknown: tagged v1 not found' },
+            observedAt,
+        )
+        expect(status.attribution).toBe('external_noise')
+    })
+
+    it('cancelled / skipped → cancelled；无签名的硬失败 → unknown', () => {
+        expect(checkRun('cancelled').attribution).toBe('cancelled')
+        expect(checkRun('skipped').attribution).toBe('cancelled')
+        expect(checkRun('failure').attribution).toBe('unknown')
+        expect(checkRun('timed_out').attribution).toBe('unknown')
+    })
+
+    it('未完成 / completed 无 conclusion → 不产出归因', () => {
+        const pending = normalizeCheckRun({ id: 1, name: 'Test', status: 'in_progress', conclusion: null }, observedAt)
+        expect(pending.attribution).toBeUndefined()
+        const nullConclusion = normalizeCheckRun({ id: 2, name: 'Test', status: 'completed', conclusion: null }, observedAt)
+        expect(nullConclusion.attribution).toBeUndefined()
+    })
+
+    it('startup_failure / 未识别结论 → state failure + 归因 unknown（fail-closed）', () => {
+        const startup = checkRun('startup_failure')
+        expect(startup.state).toBe('failure')
+        expect(startup.attribution).toBe('unknown')
+        expect(aggregateOverallStatus([startup])).toBe('failure')
+
+        const future = checkRun('some_future_conclusion')
+        expect(future.state).toBe('failure')
+        expect(future.attribution).toBe('unknown')
+    })
+
+    it('等价性：平台归因 === core `classifyCheckFailure`（同一纯函数）', () => {
+        const fixtures = [
+            { name: 'dependabot[bot] updater', conclusion: 'failure' as const, summary: 'advisory was withdrawn' },
+            { name: 'Publish Docker Image', conclusion: 'failure' as const, summary: 'unknown manifest class' },
+            { name: 'Test', conclusion: 'failure' as const, summary: 'npm run build exited with code 1' },
+            { name: 'Test', conclusion: 'cancelled' as const, summary: null },
+        ]
+        for (const fixture of fixtures) {
+            const signal = normalizeCheckRun(
+                {
+                    id: 1,
+                    name: fixture.name,
+                    status: 'completed',
+                    conclusion: fixture.conclusion,
+                    output: { summary: fixture.summary },
+                },
+                observedAt,
+            )
+            expect(signal.attribution).toBe(classifyCheckFailure({
+                name: fixture.name,
+                conclusion: fixture.conclusion,
+                detail: fixture.summary ?? undefined,
+            }))
+        }
+    })
+
+    it('成功 / 中性信号不产出归因（避免通过项留「未判定」噪音）', () => {
+        expect(checkRun('success').attribution).toBeUndefined()
+        expect(checkRun('neutral').attribution).toBeUndefined()
+        // 成功信号即使文本命中 dependabot 签名也无归因（失败才谈归因）
+        expect(normalizeCheckRun(
+            {
+                id: 9,
+                name: 'dependabot[bot] updater',
+                status: 'completed',
+                conclusion: 'success',
+                output: { summary: 'security_update_not_possible' },
+            },
+            observedAt,
+        ).attribution).toBeUndefined()
+    })
+
+    it('归因文本证据取 output.title + summary（output.text 只作展示，与 CLI 同口径）', () => {
+        const fromTitle = normalizeCheckRun(
+            {
+                id: 1,
+                name: 'Publish Docker Image',
+                status: 'completed',
+                conclusion: 'failure',
+                output: { title: 'unknown manifest class' },
+            },
+            observedAt,
+        )
+        expect(fromTitle.attribution).toBe('external_noise')
+
+        const textOnly = normalizeCheckRun(
+            {
+                id: 2,
+                name: 'Publish Docker Image',
+                status: 'completed',
+                conclusion: 'failure',
+                output: { text: 'unknown manifest class' },
+            },
+            observedAt,
+        )
+        expect(textOnly.attribution).toBe('unknown')
+        // 展示摘要仍取 output.text
+        expect(textOnly.summary).toBe('unknown manifest class')
+    })
+
+    it('commit status / deployment 未识别原始状态 → fail-closed failure', () => {
+        const status = normalizeCommitStatus(
+            { id: 1, context: 'future-ci', state: 'some_future_state' },
+            observedAt,
+        )
+        expect(status.state).toBe('failure')
+        expect(status.attribution).toBe('unknown')
+
+        const deployment = normalizeDeployment(
+            { id: 2, environment: 'Preview' },
+            { state: 'some_future_state' },
+            observedAt,
+        )
+        expect(deployment.state).toBe('failure')
+        expect(deployment.attribution).toBe('unknown')
+    })
+
+    it('deployment 失败无签名 → unknown；pending → 无归因', () => {
+        const failed = normalizeDeployment(
+            { id: 1, environment: 'Preview', creator: { login: 'vercel[bot]' } },
+            { state: 'failure', description: 'build failed' },
+            observedAt,
+        )
+        expect(failed.attribution).toBe('unknown')
+        const pending = normalizeDeployment({ id: 2, environment: 'Preview' }, null, observedAt)
+        expect(pending.attribution).toBeUndefined()
     })
 })
