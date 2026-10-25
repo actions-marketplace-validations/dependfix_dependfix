@@ -2,7 +2,7 @@
  * regression-window.mjs
  * 回归日志窗口管理工具模块
  *
- * 管理 docs/reports/regression/current.md 文件的读写和滚动归档逻辑。
+ * 管理 artifacts/regression/current.md 文件的读写和滚动归档逻辑（证据产物，gitignored）。
  * 用于周期性回归检查的结果记录和窗口维护。
  *
  * 参考: momei 项目的 scripts/shared/regression-window.mjs 实现
@@ -11,7 +11,7 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
-const REGRESSION_WINDOW_RELATIVE_PATH = path.join('docs', 'reports', 'regression', 'current.md')
+const REGRESSION_WINDOW_RELATIVE_PATH = path.join('artifacts', 'regression', 'current.md')
 const FIRST_RECORD_HEADING_PATTERN = /^## \d{4}-\d{2}-\d{2} /mu
 
 /**

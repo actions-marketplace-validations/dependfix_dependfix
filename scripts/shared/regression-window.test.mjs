@@ -134,10 +134,10 @@ describe('toPosixRelativePath', () => {
 })
 
 describe('resolveRegressionWindowPath', () => {
-    it('返回包含 regression/current.md 的路径', () => {
+    it('指向 artifacts/regression/current.md（不再写入 docs/）', () => {
         const result = resolveRegressionWindowPath('/project')
-        expect(result).toContain('regression')
-        expect(result).toContain('current.md')
+        expect(result).toBe('/project/artifacts/regression/current.md')
+        expect(result).not.toContain('docs/reports')
     })
 
     it('使用绝对路径', () => {

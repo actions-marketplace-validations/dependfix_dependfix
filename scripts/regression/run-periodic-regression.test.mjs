@@ -360,6 +360,14 @@ describe('PERIODIC_REGRESSION_PROFILES', () => {
     it('phase-close archivePolicy 为 block', () => {
         expect(PERIODIC_REGRESSION_PROFILES['phase-close'].archivePolicy).toBe('block')
     })
+
+    it('证据落点统一指向 artifacts/regression/current.md', () => {
+        for (const profile of Object.values(PERIODIC_REGRESSION_PROFILES)) {
+            const text = profile.responsibilityBoundary.join('\n')
+            expect(text).toContain('artifacts/regression/current.md')
+            expect(text).not.toContain('docs/reports')
+        }
+    })
 })
 
 describe('LOG_WINDOW_LIMITS', () => {

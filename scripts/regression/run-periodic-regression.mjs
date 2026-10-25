@@ -107,7 +107,7 @@ export const PERIODIC_REGRESSION_PROFILES = {
         responsibilityBoundary: [
             '主责: @full-stack-master 或当前值班开发者执行脚本入口。',
             '审计: @code-auditor 仅对 blocker / warning 结论做 Review Gate 复核，不替代命令执行。',
-            '文档: @documentation-specialist 将结果摘要沉淀到 docs/reports/regression/current.md，不再另建散落记录。',
+            '证据: 结果摘要写入 artifacts/regression/current.md（gitignored，CI 上传），不写入 docs/。',
         ],
         steps: [
             createPnpmStep('test:coverage', 'test:coverage', { timeoutBudget: '30m' }),
@@ -130,7 +130,7 @@ export const PERIODIC_REGRESSION_PROFILES = {
         responsibilityBoundary: [
             '主责: @full-stack-master 负责跑完整发版前回归入口并确认结果。',
             '审计: @code-auditor 对 release blocker 结论做放行或退回判断。',
-            '文档: 结果摘要继续写入 docs/reports/regression/current.md，引用 artifacts/review-gate/ 证据，不复制第二份正文。',
+            '证据: 结果摘要写入 artifacts/regression/current.md，引用 artifacts/review-gate/ 证据，不复制第二份正文。',
         ],
         steps: [
             createPnpmStep('test:coverage', 'test:coverage', { timeoutBudget: '30m' }),
@@ -154,7 +154,7 @@ export const PERIODIC_REGRESSION_PROFILES = {
         responsibilityBoundary: [
             '主责: @full-stack-master 执行阶段收口前回归并补齐 Review Gate 证据。',
             '审计: @code-auditor 必须给出 Pass / Reject 结论；若存在 blocker 不得宣称阶段可归档。',
-            '文档: @documentation-specialist / @todo-manager 仅在本轮通过后更新 todo、归档与 roadmap 状态。',
+            '文档: @documentation-specialist / @todo-manager 仅在本轮通过后更新 todo、归档与 roadmap 状态；结果摘要写入 artifacts/regression/current.md（不进入 docs/）。',
         ],
         steps: [
             createPnpmStep('test:coverage', 'test:coverage', { timeoutBudget: '30m' }),
@@ -369,8 +369,8 @@ export function buildEvidence({ artifactJsonPath, artifactMarkdownPath, dryRun =
     lines.push('')
     lines.push('## 记录落点')
     lines.push('')
-    lines.push('- 本轮结果摘要应继续沉淀到 docs/reports/regression/current.md。')
-    lines.push('- 当活动日志超过窗口时，先滚动迁移旧记录到 docs/reports/regression/archive/，再继续推进阶段收口。')
+    lines.push('- 本轮结果摘要写入 artifacts/regression/current.md（不进入 docs/）。')
+    lines.push('- 当活动日志超过窗口时，先滚动迁移旧记录到 artifacts/regression/archive/。')
     lines.push('- 不新增第二套周期性回归正文文档；artifact 仅作为引用证据。')
     lines.push('')
 
