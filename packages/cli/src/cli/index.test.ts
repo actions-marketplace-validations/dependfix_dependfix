@@ -91,6 +91,7 @@ describe('parseCliArgs', () => {
             allowMajorUpgrade: false,
             rollbackGranularity: 'unit',
             mirrorCiScripts: false,
+            retryFailed: false,
             maxAlertsPerRepository: 3,
             maxConcurrency: 1,
             maxRetries: 3,

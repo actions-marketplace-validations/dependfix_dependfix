@@ -175,6 +175,11 @@ export const argsDef = {
         description: '把目标仓库 CI 独有的 pnpm/npm/yarn 脚本追加到验证链（默认关闭；最多 3 条、首失败即停；docker / gh / 任意 shell 只披露不执行；与 --commands 不叠加）',
         negativeDescription: '不镜像 CI 独有脚本（默认）',
     },
+    'retry-failed': {
+        type: 'boolean' as const,
+        description: '忽略同告警尝试上限并强制再试（仅 fix-and-pr；第 3 次起默认跳过并在报告标注「人工强制」）',
+        negativeDescription: '遵守同告警尝试上限（默认）',
+    },
     verbose: {
         type: 'boolean' as const,
         description: '输出详细日志',
@@ -462,6 +467,11 @@ function parsedArgsToCliOverrides(parsed: ParsedArgs<typeof argsDef>): CliConfig
     // mirror-ci-scripts (three-state: true / false / undefined)
     if (parsed['mirror-ci-scripts'] !== undefined) {
         overrides.mirrorCiScripts = parsed['mirror-ci-scripts']
+    }
+
+    // retry-failed (three-state: true / false / undefined)
+    if (parsed['retry-failed'] !== undefined) {
+        overrides.retryFailed = parsed['retry-failed']
     }
 
     // upgrade-groups

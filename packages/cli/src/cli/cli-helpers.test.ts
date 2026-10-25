@@ -162,6 +162,12 @@ describe('parseCliArgs', () => {
         expect(parseCliArgs([]).configOverrides.mirrorCiScripts).toBeUndefined()
     })
 
+    it('解析 retry-failed（三态）', () => {
+        expect(parseCliArgs(['--retry-failed']).configOverrides.retryFailed).toBe(true)
+        expect(parseCliArgs(['--no-retry-failed']).configOverrides.retryFailed).toBe(false)
+        expect(parseCliArgs([]).configOverrides.retryFailed).toBeUndefined()
+    })
+
     it('解析 history', () => {
         const result = parseCliArgs(['--history', 'owner/repo'])
         expect(result.configOverrides.history).toBe('owner/repo')

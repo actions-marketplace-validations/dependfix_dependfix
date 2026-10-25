@@ -120,6 +120,10 @@ inputs:
     description: "把目标仓库 CI 独有的 pnpm/npm/yarn 脚本追加到验证链（默认 false；最多 3 条、首失败即停；docker / gh / 任意 shell 与非单一形态只披露不执行；只校验命令形态与脚本存在性，不审计脚本体；与 commands 不叠加。注意每仓多跑一条完整测试链会拉长 job 时长）"
     required: false
     default: "false"
+  retry-failed:
+    description: "忽略同告警尝试上限并强制再试（默认 false；仅 fix-and-pr 生效——同一告警 / 目标版本 / 修复策略连续两次关闭后第 3 次起默认跳过。用于人工确认要再试一次的场景）"
+    required: false
+    default: "false"
 
 outputs:
   report-artifact:
@@ -182,6 +186,7 @@ runs:
         CODE_SCANNING="${{ inputs.code-scanning }}"
         COMMANDS="${{ inputs.commands }}"
         MIRROR_CI_SCRIPTS="${{ inputs.mirror-ci-scripts }}"
+        RETRY_FAILED="${{ inputs.retry-failed }}"
         if [ -z "$REPOS" ] && [ -z "$OWNER" ]; then
           REPOS="${{ github.repository }}"
         fi
@@ -206,6 +211,7 @@ runs:
         if [ "$CODE_SCANNING" = 'true' ]; then args+=("--code-scanning"); fi
         if [ -n "$COMMANDS" ]; then args+=("--commands" "$COMMANDS"); fi
         if [ "$MIRROR_CI_SCRIPTS" = 'true' ]; then args+=("--mirror-ci-scripts"); fi
+        if [ "$RETRY_FAILED" = 'true' ]; then args+=("--retry-failed"); fi
         args+=("--verbose")
         node "${{ github.action_path }}/packages/cli/dist/bin.mjs" "${args[@]}"
       shell: bash
