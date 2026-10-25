@@ -2,7 +2,7 @@
 
 ## 1. 文档结构
 
-`docs/` 顶层：`index.md`（站点首页）+ `design/modules/`（模块设计，与 monorepo 包一一对应）+ `design/governance/`（专项设计与治理，不按包拆分）+ `guide/`（使用指南）+ `plan/`（roadmap / todo / todo-archive / backlog）+ `research/`（调研）+ `standards/`（本目录）+ `.vitepress/`（站点配置）。逐目录内容见 [治理索引](../design/governance/index.md) 与 [模块索引](../design/modules/index.md)。
+`docs/` 顶层：`index.md`（站点首页）+ `design/modules/`（模块设计，与 monorepo 包一一对应）+ `design/governance/`（专项设计与治理，不按包拆分）+ `guide/`（使用指南）+ `plan/`（roadmap / todo / todo-archive 索引 / backlog）+ `plan/archive/`（阶段正文与批次日志）+ `research/`（调研）+ `standards/`（本目录）+ `.vitepress/`（站点配置）。**不设 `docs/reports/`**：CI 产物与回归摘要写入 `artifacts/`，`docs/` 只保留需要长期阅读与评审的内容（见 [文档治理执行规范 §2](../design/governance/doc-governance.md#2-四条基本原则)）。逐目录内容见 [治理索引](../design/governance/index.md) 与 [模块索引](../design/modules/index.md)。
 
 ## 2. Markdown 约定
 
@@ -10,7 +10,7 @@
 - **中文语境**：统一使用全角括号 `（）`，禁止半角括号混用。
 - **代码块 / 图表 / 容器**：代码块标注语言（`typescript` / `bash` / `yaml`）；图表优先 Mermaid，不嵌入难维护的图片描述；关键信息使用 VitePress 容器（`::: info` / `::: warning` / `::: danger`）。
 - **链接**：使用相对路径并确保真实可用；本地文件链接默认**不带锚点**（锚点 slug 规则跨平台不一致——GitHub 移除全角标点 `（）` / `、` 等，VS Code / VitePress 保留）；必须带锚点时目标标题避免全角标点，且需通过 `check:docs` 校验。**归档 / 重命名标题后**必须全局检索指向该标题的锚点链接（`rg -n '\[[^]]*\]\([^)]*#.*'` 链接文本）并同步改指。
-- **链接检查**：`pnpm run check:docs`（`scripts/check-docs.mjs`，零依赖）按七类规则校验 markdown——`links`（本地路径存在性 / 锚点匹配 / 绝对路径与路径穿越拒绝 / gitignored 路径拒绝 / 正文个人机器路径拒绝）+ `vue-interp`（行内代码含 Vue 插值）+ `link-text`（链接文本 `§N` ↔ 目标锚点编号一致性；文本与锚点编号**互为前缀**即通过，多 `§` 引用与纯文字锚点不参与比对）+ `link-syntax`（畸形链接：残留 `](` 或「`.md` 片段 + `#锚点` + 孤立 `)`」）+ `emphasis`（`**` 未配对，按段落 / 表格行计；水平线与行内代码不计入）+ `site-links`（VitePress nav / sidebar / 首页 frontmatter 的绝对链接指向的源文件与锚点）+ `archive-anchors`（`docs/plan/archive/**` 锚点子集，file-dead 维持豁免）。锚点比较按宽松规范化（小写 + 移除标点 / 符号 / 空白）兼容 GitHub / VS Code / VitePress 三种 slug 规则差异，只抓真实断链与假锚点；**同时拒绝本地绝对路径**（POSIX 斜杠开头 / Windows 盘符 / UNC 网络共享前缀）与**路径穿越**（解析超出仓库根）。**覆盖边界**：`links` 与 `link-text` 面排除 `docs/plan/archive/**`（归档动作会让历史相对链接指向预期外位置，file-dead 属独立批次）；`link-syntax` / `emphasis` 按**目录名** `archive` 放回（实际含 `docs/plan/archive/**` 与 `docs/reports/regression/archive/**`）；`archive-anchors` 仅 `docs/plan/archive/**`；运行期生成的站点链接（语言切换器等主题内建行为）不在 `site-links` 的静态面内。已接入 CI（test.yml 静态检查簇，位于 `docs:build` 之前），是最后防线。
+- **链接检查**：`pnpm run check:docs`（`scripts/check-docs.mjs`，零依赖）按七类规则校验 markdown——`links`（本地路径存在性 / 锚点匹配 / 绝对路径与路径穿越拒绝 / gitignored 路径拒绝 / 正文个人机器路径拒绝）+ `vue-interp`（行内代码含 Vue 插值）+ `link-text`（链接文本 `§N` ↔ 目标锚点编号一致性；文本与锚点编号**互为前缀**即通过，多 `§` 引用与纯文字锚点不参与比对）+ `link-syntax`（畸形链接：残留 `](` 或「`.md` 片段 + `#锚点` + 孤立 `)`」）+ `emphasis`（`**` 未配对，按段落 / 表格行计；水平线与行内代码不计入）+ `site-links`（VitePress nav / sidebar / 首页 frontmatter 的绝对链接指向的源文件与锚点）+ `archive-anchors`（`docs/plan/archive/**` 锚点子集，file-dead 维持豁免）。锚点比较按宽松规范化（小写 + 移除标点 / 符号 / 空白）兼容 GitHub / VS Code / VitePress 三种 slug 规则差异，只抓真实断链与假锚点；**同时拒绝本地绝对路径**（POSIX 斜杠开头 / Windows 盘符 / UNC 网络共享前缀）与**路径穿越**（解析超出仓库根）。**覆盖边界**：`links` 与 `link-text` 面排除 `docs/plan/archive/**`（归档动作会让历史相对链接指向预期外位置，file-dead 属独立批次）；`link-syntax` / `emphasis` 按**目录名** `archive` 放回；`archive-anchors` 仅 `docs/plan/archive/**`；运行期生成的站点链接（语言切换器等主题内建行为）不在 `site-links` 的静态面内。已接入 CI（test.yml 静态检查簇，位于 `docs:build` 之前），是最后防线。
 - **正文路径禁令**：正文与行内代码禁止出现个人机器绝对路径（Windows 盘符 / UNC 等）；引用项目内位置用相对路径或 `<repo-root>/` 占位符（fenced code block 内示例不受限）；`check:docs` 会拒绝正文中的 Windows 盘符 / UNC。
 - **条款标题内禁止嵌套强调标记**：为条款标题补「与相邻条款的边界说明」时，不得把 `**...**` 嵌进已加粗的标题内；markdown 渲染会破损（外露字面 `**` + 强调范围错乱）；`lint:md` 与 `docs:build` **均不报错**（属「合法 HTML、错误强调」类盲区）；`check:docs` 的 `emphasis` 规则只覆盖**未配对**（块内计数为奇数）形态，成对但语义错位仍属盲区，只有渲染级实测能检出。**做法**：边界说明 / 交叉引用一律放**正文**，标题只保留规则名。
 - **Markdown 格式检查**：`pnpm run lint:md`（`@lint-md/cli`，`--fix` 自动格式化中英文 / 数字间距、标题规范、列表缩进）与 `pnpm run lint:md:check`（无 `--fix`，CI 门禁用，已接入 test.yml / release.yml）；规则裁剪见根目录 [`.lintmdrc`](../../.lintmdrc)；lint-staged 已挂载 `*.md` 自动执行。
@@ -27,14 +27,18 @@
 | `docs/standards/*.md`（规范） | <= 200 行 | 201-400 | > 400 行 |
 | `docs/design/modules/*.md`（模块设计） | <= 300 行 | 301-500 | > 500 行 |
 | `docs/design/governance/*.md`（治理设计） | <= 400 行 | 401-700 | > 700 行 |
-| `docs/plan/roadmap.md`（路线图） | <= 800 行 | 801-900 | > 900 行 |
+| `docs/plan/roadmap.md`（路线图） | <= 300 行 | 301-400 | > 400 行 |
 | `docs/plan/todo.md`（当前阶段） | <= 500 行 | 501-600 | > 600 行 |
-| `docs/plan/todo-archive.md`（归档主窗口） | <= 500 行 | 501-700 | > 700 行 |
+| `docs/plan/todo-archive.md`（归档索引） | <= 100 行 | 101-150 | > 150 行 |
 | `docs/plan/backlog.md`（积压） | <= 500 行 | 501-700 | > 700 行 |
+| `docs/plan/archive/index.md`（归档治理） | <= 140 行 | 141-200 | > 200 行 |
+| `docs/plan/archive/archive-log.md`（批次日志） | <= 400 行 | 401-600 | > 600 行 |
 | `docs/research/*.md`（调研） | <= 500 行 | 501-800 | > 800 行 |
 | `docs/guide/*.md`（使用指南） | <= 500 行 | 501-800 | > 800 行 |
 
-**强制分片执行规则**：超阈值文档必须按内容逻辑拆分（如 `todo-archive.md` 按阶段分片 → `archive/todo-archive-phases-m{xx}.md`；`experience-archive.md` 按章节分片 → `experience-archive-§{xx}-{slug}.md`；`design/{modules,governance}/<slug>.md` 按连续尾部章节分片 → 同级 `<slug>-<主题>.md`），主文档保留近线窗口 + 索引入口；拆到 `archive/` 分片时主文档保留索引入口。**存量超标**（既有文件在阈值入表时已超「强制分片」线）由 `scripts/check-doc-size.mjs` 的豁免表逐条显式登记（含理由），不以缩小计量面代替。
+> **字符与规则条数预算**：行数不足以约束长段落堆叠，`docs/standards/*.md` 的字符上限、`development.md §5.1` 的规则条数与单条字符上限见 [文档治理执行规范 §4.2](../design/governance/doc-governance.md#42-字符与密度预算)，由 `check-doc-governance` 计量。
+
+**强制分片执行规则**：超阈值文档必须按内容逻辑拆分（如 `todo-archive.md` 按阶段分片 → `archive/todo-archive-phases-m{xx}.md`；`experience-archive.md` 按章节分片 → `experience-archive-§{xx}-{slug}.md`；`design/{modules,governance}/<slug>.md` 按连续尾部章节分片 → 同级 `<slug>-<主题>.md`），主文档保留近线窗口 + 索引入口（`todo-archive.md` 例外：只保留阶段索引，正文全部在分片）；拆到 `archive/` 分片时主文档保留索引入口。**存量超标**（既有文件在阈值入表时已超「强制分片」线）由 `scripts/check-doc-size.mjs` 的豁免表逐条显式登记（含理由），不以缩小计量面代替。
 
 ## 4. 事实源层次
 
@@ -99,18 +103,29 @@
 | 文档 | 范围 | 禁止内容 |
 |:--|:--|:--|
 | `todo.md` | 当前阶段未完成待办 | 已闭环摘要 / commit 序列 / 验证矩阵 / ahead 数 / known-issue / 延期项 / 远期登记 |
-| `todo-archive.md` | 已闭环阶段归档（主窗口保留 3-5 段） | 当前阶段待办 / 未排期增强候选 |
+| `todo-archive.md` | 已闭环阶段**索引**（按阶段倒序；正文在 `archive/todo-archive-phases-*.md`） | 当前阶段待办 / 未排期增强候选 / 阶段正文 |
+| `plan/archive/index.md` | 归档治理规则、阈值引用、当前基线、批次日志入口 | 阶段正文 / 批次流水账（入 `archive-log.md`） |
+| `plan/archive/archive-log.md` | 追加型批次操作记录（日期 / 范围 / 结论 / commits） | 阶段正文 |
 | `backlog.md` | 未排期 / 延期 / 远期 + known-issue | 已闭环阶段归档 / 当前阶段待办 |
-| `roadmap.md` | 里程碑概览 | 单任务级管理 / commit / 待办 |
+| `roadmap.md` | 里程碑概览 + 当前阶段 | 单任务级管理 / commit / 待办 / 已闭环阶段详情（入 `archive/roadmap-phases-*.md`） |
 
-**条目分流判定**：当前阶段需要推进 → `todo.md`；已完成但本批归档 → `todo-archive.md`；延期 / 用户指示暂缓 → `backlog.md`（延期暂缓段）；远期登记 / 触发条件未达 → `backlog.md`（远期登记段）；known-issue / 已知边界 → `backlog.md`（已知边界段）或对应阶段归档段。
+**条目分流判定**：当前阶段需要推进 → `todo.md`；已完成但本批归档 → `archive/todo-archive-phases-<阶段>.md` + `todo-archive.md` 索引；延期 / 用户指示暂缓 → `backlog.md`（延期暂缓段）；远期登记 / 触发条件未达 → `backlog.md`（远期登记段）；known-issue / 已知边界 → `backlog.md`（已知边界段）或对应阶段归档段。
 
 **反模式（违规）**：`todo.md` 顶部 banner 写已闭环内容；`backlog.md` 重复登记已闭环项（双点维护漂移）；`todo.md` 罗列远期项；known-issue 写在 `todo.md`；把 ahead 数 / commit 序列 / 验证矩阵当「进度信息」塞 `todo.md`（这些是归档元数据，不是待办）。
 
 **执行检查**：每次编辑 `docs/plan/` 任一文档前，用本节表自检条目归属；编辑后用 `rg` 扫描违规关键词（`ahead / commit.*[0-9a-f]{7} / 验证矩阵 / 已闭环 / M\d 闭环 / done / completed / closed`），命中即重新分类。
 
-## 8. 相关文档
+## 8. 文档治理周期
+
+文档治理的执行流程、字符与规则条数预算、归档结构不变量、角色与批次记录见 [文档治理执行规范](../design/governance/doc-governance.md)。本节只声明触发口径：
+
+- **每次阶段归档**：运行 `check:docs` / `check:doc-size` / `check:doc-governance`，处理全部 blocker 与 freshness warning。
+- **每 5 个阶段或连续 2 个阶段出现预算 warning**：执行一次完整治理批次（盘点 → 分类 → 排批 → 执行 → 重指 → 验证 → 审计 → 登记）。
+- **预算进入阻断列 / 归档索引失序**：立即治理，不得带入下一阶段。
+
+## 9. 相关文档
 
 - [开发规范](./development.md) / [项目规划规范](./planning.md) / [Git 规范](./git.md)
+- [文档治理执行规范](../design/governance/doc-governance.md) / [工程实践判例](../design/governance/engineering-practice-notes.md)
 
 > 本文档在 1.0.0 前参考 momei 项目的成熟做法完成继承与适配；1.0.0 后按项目自身实践持续演进，形成自有规范。

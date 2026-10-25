@@ -85,6 +85,14 @@ jobs:
       # 自指面：本文件为 yml，不在脚本扫描面（仅 md）内，新增注释不参与扫描。
       # 阻断强度：workflow 级阻断信号（仓库未配置 required status checks，与 visual job 同口径）。
       - run: pnpm run check:doc-size
+      # 文档治理结构与密度门禁：字符预算与规则条数预算取自
+      # docs/design/governance/doc-governance.md §4.2（单一事实源，脚本不硬编码）；
+      # 归档索引必须覆盖全部阶段分片、倒序、无正文标题、无重复（todo-archive.md 只做索引）；
+      # 超阻断列或归档结构不满足不变量即 exit 1；freshness warning 仅报告不阻断。
+      # 负例标定：索引漏登记一个分片 / 把阶段正文写回索引即 exit 1（本地已验）。
+      # 自指面：本文件为 yml，不在脚本扫描面（仅 md）内，新增注释不参与扫描。
+      # 阻断强度：workflow 级阻断信号（仓库未配置 required status checks，与 visual job 同口径）。
+      - run: pnpm run check:doc-governance
       # 经验条目落点门禁：每个经验归档条目必须含非空「落点」（L1 脚本 / L2 检查点 / 规范条款），
       # 占位符视为空——对治「只留条目、不留落点」反模式。脚本零依赖，置于静态检查簇内。
       # 负例标定：新增无落点条目即 exit 1（本地已验），修复后删除脚手架。

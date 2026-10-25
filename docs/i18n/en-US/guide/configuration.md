@@ -149,7 +149,7 @@ The management platform (`apps/platform`) is configured via env vars injected by
 | `DATABASE_PATH` | — | `data/dependfix.sqlite` | SQLite file path (compose injects `/app/data/dependfix.sqlite`) |
 | `DATABASE_TYPE` / `DATABASE_URL` | — | inferred | Non-SQLite backend (PostgreSQL, etc.) |
 | `DATABASE_SSL` / `DATABASE_CHARSET` / `DATABASE_TIMEZONE` / `DATABASE_ENTITY_PREFIX` | — | empty | Connection tuning |
-| `DATABASE_SYNCHRONIZE` | — | `false` | TypeORM auto-sync; ⚠️ forbidden in production ([development §5.1.19](https://github.com/dependfix/dependfix/blob/master/docs/standards/development.md)) |
+| `DATABASE_SYNCHRONIZE` | — | `false` | TypeORM auto-sync; ⚠️ forbidden in production ([engineering practice note EP-17](https://github.com/dependfix/dependfix/blob/master/docs/design/governance/engineering-practice-notes.md)) |
 | `DATABASE_MIGRATIONS_RUN` | — | `true` in image | Run pending migrations on startup (fresh DB auto-creates tables) |
 | `DEPENDFIX_MIGRATIONS_ONLY` | — | `false` | Internal: migration-only mode (used by `docker/init-db.sh`) |
 | `BACKUP_SKIP` | — | `false` | Skip startup backup (e2e only) |

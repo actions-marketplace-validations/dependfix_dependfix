@@ -20,14 +20,16 @@
 | [MCP Server 设计](./mcp-server.md) | 未来规划（M6） | 🔶 未开始 |
 | [平台认证与用户体系设计](./platform-auth-users.md) | 专项设计（M7.1 T701/T707 设计先行） | ✅ 已落地（2026-08-09，Review Gate Pass） |
 | [定时扫描与批量处理设计](./platform-scheduled-batch.md) | 专项设计（M7.2 T704 设计先行） | 🔶 设计中（2026-08-10） |
-| [平台 AI 研判集成设计](./platform-ai-integration.md) | 专项设计（apps/platform AI 研判端到端联通） | ✅ 已落地（M25.2a 基础层 + M26.1 应用层，见 [todo-archive.md §M26](../../plan/todo-archive.md#m26-平台-ai-研判应用层--批量导入-resource-owner-化--文档站-i18n--license-收口--经验沉淀m261m262m263m264am264bm264cm265-全部已闭环--2026-09-10-归档)） |
-| [文档站 + 包 README 多语言实施设计](./docs-and-readme-i18n.md) | 专项设计（en-US 接入，参照 momei） | ✅ 已实施（M26.3 文档站 + 包 README en-US P0，见 [todo-archive.md §M26](../../plan/todo-archive.md#m26-平台-ai-研判应用层--批量导入-resource-owner-化--文档站-i18n--license-收口--经验沉淀m261m262m263m264am264bm264cm265-全部已闭环--2026-09-10-归档)） |
+| [平台 AI 研判集成设计](./platform-ai-integration.md) | 专项设计（apps/platform AI 研判端到端联通） | ✅ 已落地（M25.2a 基础层 + M26.1 应用层，见 [M26](../../plan/archive/todo-archive-phases-m26.md)） |
+| [文档站 + 包 README 多语言实施设计](./docs-and-readme-i18n.md) | 专项设计（en-US 接入，参照 momei） | ✅ 已实施（M26.3 文档站 + 包 README en-US P0，见 [M26](../../plan/archive/todo-archive-phases-m26.md)） |
 | [apps/platform PrimeUI 主题库降级设计](./primeui-themes-v2-downgrade.md) | 专项设计（@primeuix/themes 3.x → 2.x MIT 降级） | ✅ 已实施（M25.1 完成 3.x → 2.x MIT 降级；M31.5 全链卸载 PrimeVue 后本方案载体退役，主题能力见 [caomei-ui 迁移评估](./caomei-ui-migration.md)） |
-| [apps/platform UI 组件库迁移评估（PrimeVue → caomei-ui）](./caomei-ui-migration.md) | 迁移方案（规避 PrimeUI 商业许可 + 下游组件库统一） | ✅ 已实施（M31 迁移闭环 / 2026-09-29 归档，见 [todo-archive.md §M31](../../plan/archive/todo-archive-phases-m31.md#m31-appsplatform-ui-组件库迁移primevue--caomei-ui-m311m316-全部已闭环--2026-09-29-归档)） |
+| [apps/platform UI 组件库迁移评估（PrimeVue → caomei-ui）](./caomei-ui-migration.md) | 迁移方案（规避 PrimeUI 商业许可 + 下游组件库统一） | ✅ 已实施（M31 迁移闭环 / 2026-09-29 归档，见 [M31](../../plan/archive/todo-archive-phases-m31.md#m31-appsplatform-ui-组件库迁移primevue--caomei-ui-m311m316-全部已闭环--2026-09-29-归档)） |
 | [overrides 保护名单](./override-protect-policy.md) | 方案 B / A1 载体（按仓库粒度） | ✅ 已实施（M29.4） |
 | [C22 PAT 无感升级评估](./c22-pat-backward-compat.md) | 评估报告（M18.0 P0 docs only 子阶段） | ✅ 已落地（2026-08-29，Review Gate Pass） |
-| [规范与文档治理设计](./spec-and-doc-governance.md) | 专项设计（文档治理边界 + modules/governance 分流依据 + 写作规范 + 实施计划） | ✅ 已落地（2026-09-09，G1 P 阶段产出；v2 重构见下条） |
-| [规范与经验管理体系重构设计](./standards-experience-refactor.md) | 专项设计（规范方法论层化 + 经验三层收敛 + 导航分层 + 阈值/门禁统一；承接 spec-and-doc-governance v2） | ✅ 已落地（2026-10-10：M41.1~M41.5 全部闭环归档，见 [todo-archive.md §M41](../../plan/todo-archive.md#m41-规范与经验管理体系重构m411m415-全部已闭环--2026-10-10-归档)） |
+| [文档治理执行规范](./doc-governance.md) | 文档治理（字符/条数预算 + 处置矩阵 + 8 步流程 + 归档不变量） | ✅ 已落地（2026-10-26 首版；`check:doc-governance` 机检） |
+| [工程实践判例](./engineering-practice-notes.md) | 规范配套（从 `development.md §5.1` 迁出的实现细节与旧编号映射） | ✅ 持续追加（非规范，不作为放行依据） |
+| [规范与文档治理设计](./spec-and-doc-governance.md) | 专项设计（文档治理边界 + modules/governance 分流依据 + 写作规范 + 实施计划） | 📚 历史参考（2026-09-09 v1；现行流程见 doc-governance） |
+| [规范与经验管理体系重构设计](./standards-experience-refactor.md) | 专项设计（规范方法论层化 + 经验三层收敛 + 导航分层 + 阈值/门禁统一；承接 spec-and-doc-governance v2） | ✅ 已落地（2026-10-10：M41.1~M41.5 全部闭环归档，见 [M41](../../plan/archive/todo-archive-phases-m41.md#m41-规范与经验管理体系重构m411m415-全部已闭环--2026-10-10-归档)） |
 | [运行失败分类与筛选设计](./run-failure-taxonomy.md) | 专项设计（运行失败阶段分类 + 可重试判定 + 筛选 / 重试入口） | ✅ 已落地（2026-10-07：分类 + 落库回填 + 筛选 + 展示；2026-10-16 补受约束重试入口） |
 | [扫描偏好（设备级）设计](./scan-preferences.md) | 专项设计（设备级 localStorage 偏好：优先级 / 写入时机 / SSR 与可测性） | ✅ 已落地（2026-10-07，M37.2） |
 | [平台执行模型隔离设计](./executor-process-isolation.md) | 专项设计（M38 设计先行：BullMQ 锁续期失败根因 + 三方案选型） | ✅ 已落地（2026-10-09 M38 闭环归档，选型 ①′ 独立 worker 进程） |

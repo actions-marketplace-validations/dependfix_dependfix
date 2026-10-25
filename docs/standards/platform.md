@@ -19,7 +19,7 @@ Nuxt 4（全栈 SSR + API Routes，`app/` + `server/`）/ TypeScript strict / UI
 
 ## 3. 数据库规范（多后端兼容 + 时区）
 
-- **3.1 环境变量（DATABASE_* 族）**：`DATABASE_TYPE` · `DATABASE_URL` · `DATABASE_PATH` · `DATABASE_SSL` · `DATABASE_ENTITY_PREFIX` · `DATABASE_SYNCHRONIZE` · `MACHINE_ID`——默认值与口径以 [平台配置指南](../guide/configuration.md) + [`.env.full.example`](../../apps/platform/.env.full.example) 为准（[§11](#11-环境变量总表env-example-对齐) 只列平台差异点）；`DATABASE_SYNCHRONIZE` 的反模式禁止见 [development.md §5.1.19](./development.md#51-工程实践规则)。
+- **3.1 环境变量（DATABASE_* 族）**：`DATABASE_TYPE` · `DATABASE_URL` · `DATABASE_PATH` · `DATABASE_SSL` · `DATABASE_ENTITY_PREFIX` · `DATABASE_SYNCHRONIZE` · `MACHINE_ID`——默认值与口径以 [平台配置指南](../guide/configuration.md) + [`.env.full.example`](../../apps/platform/.env.full.example) 为准（[§11](#11-环境变量总表env-example-对齐) 只列平台差异点）；`DATABASE_SYNCHRONIZE` 的反模式禁止见 [工程实践判例 EP-17](../design/governance/engineering-practice-notes.md)。
 - **3.2 时区与列类型（关键约束）**：时间列**必须**经 `getDateType()` 取列类型（`server/database/type.ts`），**禁止**硬编码 `'datetime'` / `'timestamp'`（PostgreSQL 会静默产生时区偏移）；`postgres` 映射 `timestamp with time zone`；`CreateDateColumn` / `UpdateDateColumn` / 日期字段统一 `{ type: getDateType() }`，代码一律用 `Date` 对象。
 
 ### 3.3 DataSource 初始化
@@ -87,7 +87,7 @@ Nuxt 4（全栈 SSR + API Routes，`app/` + `server/`）/ TypeScript strict / UI
 
 - 派生字段（`_severityRank` / `_statusRank` / `_roleRank`）的**运行时修改路径必须同步**（每次 `updateXxxRank`），否则排序引用陈旧 rank → 业务语义错位。
 - 图表组件：优先自实现 `chart-canvas.vue`（仅注册用到的 controllers / elements / scales / plugins，避免全量 `chart.js/auto` 体积）；用 `<ClientOnly>` 包裹避免 SSR `window is not defined`。
-- **类型 vs 运行时契约核验**：编写 v-model / ref / callback 契约时**必须直读依赖包源码**（`node_modules/<pkg>/dist/*.mjs`）——Vue 对未知 prop / 事件**静默忽略**，类型声明可能滞后或过宽；bugfix 可用一次性 smoke 脚本（`tests/e2e/_smoke-xxx.mjs`，跑完即删）监听 `pageerror` / `console.error`、过滤已知噪声（如 preload warnings）并断言关键错误文本，比单纯 typecheck 更具说服力，验证后清理不留痕（[开发规范 §5.1.11](./development.md#51-工程实践规则)）。
+- **类型 vs 运行时契约核验**：编写 v-model / ref / callback 契约时**必须直读依赖包源码**（`node_modules/<pkg>/dist/*.mjs`）——Vue 对未知 prop / 事件**静默忽略**，类型声明可能滞后或过宽；bugfix 可用一次性 smoke 脚本（`tests/e2e/_smoke-xxx.mjs`，跑完即删）监听 `pageerror` / `console.error`、过滤已知噪声（如 preload warnings）并断言关键错误文本，比单纯 typecheck 更具说服力，验证后清理不留痕（[工程实践判例 EP-10](../design/governance/engineering-practice-notes.md)）。
 
 ### 7.2 i18n 配置单点声明
 
@@ -103,7 +103,7 @@ Nuxt 4（全栈 SSR + API Routes，`app/` + `server/`）/ TypeScript strict / UI
 - 一旦抽到 `utils/<feature>.ts`，所有 SFC（含 dialog）一律 import 复用，禁止在第二处复制定义（即使仅微调）。
 - **有状态 composable 的 SSR 与可测性**：localStorage 偏好**不得**在构造期读存储（SSR 首帧错配），由 `onMounted` 或打开弹窗时填充；存储以可选参数注入，读写与解析全路径 try/catch（访问 `localStorage` 本身可能抛错）；单测用内存实现 + 抛错 getter 覆盖读写 / 脏数据 / 抛错分支。实例见 `app/composables/use-scan-preferences.ts`。
 
-- 依赖注入型 composable 的**缺省实现求值时机**（setup 期 vs 事件期）见 [development.md §5.1.42](./development.md)（条目为列表项无独立锚点，按 §2「本地文件链接默认不带锚点」引用）。
+- 依赖注入型 composable 的**缺省实现求值时机**（setup 期 vs 事件期）见 [工程实践判例 EP-31](../design/governance/engineering-practice-notes.md)（条目为列表项无独立锚点，按 §2「本地文件链接默认不带锚点」引用）。
 
 ### 7.4 caomei-ui 接线约定
 
@@ -177,7 +177,7 @@ Nuxt 4（全栈 SSR + API Routes，`app/` + `server/`）/ TypeScript strict / UI
 - **向后兼容与回退**：入口层不设 `DEPENDFIX_QUEUE_WORKER` 时默认 `0`（单进程）；compose 默认 `QUEUE_WORKER=1`，设 `0` 回退；`NUXT_QUEUE_ENABLED=false` 时入口跳过 worker 并 warn；本地 `pnpm dev` / 直接 `node .output/server/index.mjs` 不经 entrypoint，仍用进程内 worker。
 - **崩溃自愈（看护循环）**：entrypoint 以看护子 shell 托管 worker——异常退出按指数退避自动重启（1s 起翻倍、封顶 30s，记录退出码 / 次数 / 时间）；连续快速失败超上限（5 次）后**转为慢重试**（`DEPENDFIX_QUEUE_WORKER_SLOW_RETRY_SECONDS`，缺省 300s，日志降噪），**不得永久停止重启**——`stale-cleanup` 只能改 DB、不能消费队列，worker 永久退出会让所有任务无声挂起；**HTTP 主进程始终继续服务**；稳定运行 60s 后快速计数与慢重试状态归零；容器停止（TERM / INT）时终止看护循环与 worker。**退避等待必须可被信号打断**：用 `sleep N & wait $!`（前台 `sleep` 会阻塞 trap，容器 `docker stop` 宽限内被 SIGKILL 成 137，破坏约定的 143 退出语义），并以真实 `sleep` + `TERM` 计时用例锁定。
 - **信号处置顺序**：双进程形态下，容器停止（TERM / INT）的转发 trap **必须**先于「启动子进程」与「输出就绪行」安装（本条为**严格约束**，已登记 [review 检查点矩阵](../../.github/skills/code-reviewer/references/code-quality-checklist.md#规范条款-review-检查点矩阵严格约束逐条挂接)）。就绪行是外部观测方（容器编排 / 健康检查 / 行为测试）唯一的同步点，落在 trap 安装之前的信号按默认处置直接终止 PID 1——看护循环与 worker 因此失去父进程，观测方读到的也是 signal 终止而非约定的 143 退出码；主进程尚未启动（`MAIN_PID` 未赋值）时无主进程可转发，应直接退出（看护进程仍由 `stop_queue_worker` 兜底）而非吞掉停止信号后照旧启动。机检落点为 `apps/platform/docker/entrypoint.test.mjs` 的源码顺序断言。
-- **已知边界**：① 两进程共享 SQLite（WAL + `busy_timeout` 由 DataSource 初始化落地）；② **插件面已按进程角色收敛**：worker 侧不再重复启动 HTTP-only 插件（周期清理 / 版本戳），仅保留两进程共用的启动期数据源引导与资源探测（判定与清单见上「进程角色与 HTTP-only 插件」）；③ 连续快速重启超上限后转慢重试（消费者不会永久消失，见 [队列僵尸任务终结与去重键释放设计](../design/governance/queue-stale-recovery.md)）；④ **空库首启时序**——worker 插件首次查询可能命中未建表，由 `stale-cleanup` 首跑延迟 + 幂等重试承担；⑤ **入口脚本前导段**（权限 / 路径校验等 `run_platform` 之前的步骤）尚无 trap，此窗口内的 TERM / INT 仍按默认处置终止 PID 1，但此时子进程尚未创建，无孤儿面；⑥ **子进程启动窗口**——trap 已生效但 `SUPERVISOR_PID` / `MAIN_PID` 尚未捕获的极窄窗口内到达的 TERM / INT 无变量可转发（仅 `stop_queue_worker` 的 pid 文件兜底），未命中部分短暂孤儿化，由容器运行时随 PID 1 退出一并回收；⑦ **启动期备份的双份副作用**——`ensureDatabaseInitialized()` 的 once 保护内含 SQLite 启动期自动备份（[development.md §5.1.18](./development.md#51-工程实践规则)，hard requirement），双进程形态下每容器启动**各备份一次**，保留份数（`BACKUP_RETENTION_COUNT` 默认 5）的实际时间覆盖窗口随之减半。当前**不改备份触发链**（其语义属该 hard requirement 的独立治理面），治本须在独立条目内与保留策略一并评估。
+- **已知边界**：① 两进程共享 SQLite（WAL + `busy_timeout` 由 DataSource 初始化落地）；② **插件面已按进程角色收敛**：worker 侧不再重复启动 HTTP-only 插件（周期清理 / 版本戳），仅保留两进程共用的启动期数据源引导与资源探测（判定与清单见上「进程角色与 HTTP-only 插件」）；③ 连续快速重启超上限后转慢重试（消费者不会永久消失，见 [队列僵尸任务终结与去重键释放设计](../design/governance/queue-stale-recovery.md)）；④ **空库首启时序**——worker 插件首次查询可能命中未建表，由 `stale-cleanup` 首跑延迟 + 幂等重试承担；⑤ **入口脚本前导段**（权限 / 路径校验等 `run_platform` 之前的步骤）尚无 trap，此窗口内的 TERM / INT 仍按默认处置终止 PID 1，但此时子进程尚未创建，无孤儿面；⑥ **子进程启动窗口**——trap 已生效但 `SUPERVISOR_PID` / `MAIN_PID` 尚未捕获的极窄窗口内到达的 TERM / INT 无变量可转发（仅 `stop_queue_worker` 的 pid 文件兜底），未命中部分短暂孤儿化，由容器运行时随 PID 1 退出一并回收；⑦ **启动期备份的双份副作用**——`ensureDatabaseInitialized()` 的 once 保护内含 SQLite 启动期自动备份（[工程实践判例 EP-16](../design/governance/engineering-practice-notes.md)，hard requirement），双进程形态下每容器启动**各备份一次**，保留份数（`BACKUP_RETENTION_COUNT` 默认 5）的实际时间覆盖窗口随之减半。当前**不改备份触发链**（其语义属该 hard requirement 的独立治理面），治本须在独立条目内与保留策略一并评估。
 
 - **10.7 部署产物版本戳（构建期注入 + 运行时核对）**：链路为 CI `--build-arg BUILD_COMMIT/BUILD_VERSION` → Dockerfile `ARG` → `ENV NUXT_BUILD_COMMIT/NUXT_BUILD_VERSION` → Nuxt 以 `NUXT_` 前缀运行时覆盖 `runtimeConfig`（未注入缺省 `unknown`，不阻断启动）。**暴露面**：`GET /api/health`（**公开只读，无鉴权**）返回 `{ version, commit, startedAt }`，启动日志输出 `[build] version=… commit=… startedAt=…`；用途是消除「代码已修复但线上仍复现」的陈旧产物误判。**CI 接线**：`docker.yml` 三个构建步骤均传 `--build-arg`；镜像冒烟额外断言 `/api/health` 200 + JSON 字段与启动版本戳行；env 命名用 `NUXT_BUILD_*`（对齐 Nuxt 运行时覆盖通道，避免 esbuild define 折叠，与 3.6 同源原则）。**运行级回执**：同一值经 `server/utils/run-build-info.ts` 写入每次 run 的 `scan_run.build_version` / `build_commit` 并透传 `RuntimeConfig.buildVersion/buildCommit`，引擎在 run 日志中输出 `[build] dependfix version=… commit=… source=host|engine-package`（`source=engine-package` 为 CLI / MCP 无宿主注入时的包版本回退）；`github-action` 模式两列记录受理 / 派发本次 run 的平台构建，实际执行镜像在目标仓库 runner。口径与降级见 [run-failure-taxonomy.md §5.11](../design/governance/run-failure-taxonomy.md)。
 
@@ -192,7 +192,7 @@ Nuxt 4（全栈 SSR + API Routes，`app/` + `server/`）/ TypeScript strict / UI
 ## 12. 决策记录（2026-08-07 人工审查确认）
 
 - **多后端时机**：默认 SQLite 交付，`getDateType()` + driver 注入 + `DATABASE_URL` 推断一次性做对，MySQL / PG 真实部署验证延后。—— ✅ 确认
-- **表前缀**：默认 `dependfix_`（`DATABASE_ENTITY_PREFIX` 可配）；**synchronize 策略**：后续统一演进为 `synchronize` / `migrationsRun` 均显式 opt-in（见 [development.md §5.1.19](./development.md#51-工程实践规则)）。—— ✅ 确认
+- **表前缀**：默认 `dependfix_`（`DATABASE_ENTITY_PREFIX` 可配）；**synchronize 策略**：后续统一演进为 `synchronize` / `migrationsRun` 均显式 opt-in（见 [工程实践判例 EP-17](../design/governance/engineering-practice-notes.md)）。—— ✅ 确认
 - **雪花 ID**：48 位时间戳 + 10 位机器 + 12 位序列（hex 输出），全局统一；**首用户 admin**：首个注册用户自动 `role=admin`；**文件命名**：文件与 Vue 组件统一 kebab-case（已同步 [开发规范 §2](./development.md)）。—— ✅ 确认
 
 ## 13. 相关文档

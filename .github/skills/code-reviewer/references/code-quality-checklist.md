@@ -210,7 +210,7 @@ if (value) { ... }  // 对 0, "", false 失效
 - **git 忽略文件依赖**：脚本/测试是否隐式依赖 `.session/`、`temp/` 等 git 忽略目录文件的存在性（本地有、CI 无 → 行为分叉）？依赖路径是否可注入或已模拟缺失场景验证
 - **典型故障**：依赖缺失文件时 main() 内 `process.exit(0)` 被 vitest 拦截 → catch 再 `process.exit(1)` → `process.exit unexpectedly called` Unhandled Rejection，仅 CI 暴露
 
-规范见 [development.md §5.1.5/§5.1.6](../../../../docs/standards/development.md)，详见 [经验归档 §三十九](../../../../docs/design/governance/experience-archive.md)。
+规范见 [engineering-practice-notes.md EP-04 / EP-05](../../../../docs/design/governance/engineering-practice-notes.md)，详见 [经验归档 §三十九](../../../../docs/design/governance/experience-archive.md)。
 
 ### 发布链路 tag 推送核验（必查项）
 
@@ -264,13 +264,13 @@ if (value) { ... }  // 对 0, "", false 失效
 
 | 规范条款 | 触发改动 | review 检查动作 |
 |:--|:--|:--|
-| [development.md §5.1.24](../../../../docs/standards/development.md) | overrides / 映射 / 统计等「多输入 → 同 key」生成循环 | 同 key 多输入是否先预聚合（`Map<key, value>` 取 max）再统一写入；是否存在循环内 `map[key] = value` 的 last-write-wins |
+| [engineering-practice-notes.md EP-21](../../../../docs/design/governance/engineering-practice-notes.md) | overrides / 映射 / 统计等「多输入 → 同 key」生成循环 | 同 key 多输入是否先预聚合（`Map<key, value>` 取 max）再统一写入；是否存在循环内 `map[key] = value` 的 last-write-wins |
 | [development.md §5.1.25](../../../../docs/standards/development.md) | 声明「修复点单一 / 影响范围」的改动 | 是否以**行为特征**（argv / env 读取）为锚点全仓库穷举同根因调用点；共用映射 / 判定层改动是否**集中**在共用层；下游消费方是否硬编码单一场景文案 |
-| [development.md §5.1.26](../../../../docs/standards/development.md) | `packages/*/tsdown.config.ts` / 多 entry 构建 | 构建后 `dist/` 是否出现 `index2.d.mts` / `index2.mjs`；共享 dts chunk 是否隔离到 `chunks/` 子目录 |
-| [development.md §5.1.27](../../../../docs/standards/development.md) | 「迁移 / 等价性」判断、组件默认值或属性语义结论 | 是否用 `git show HEAD:<file>` **回读迁移前源码**（而非凭库文档推断仓库现状）；差异成因解释与仓库现状是否分开 |
-| [development.md §5.1.28](../../../../docs/standards/development.md) | 「依赖卸载 + 引用归零」类任务 | 是否定义 `rg` 归零口径（含注释 / 文档 / 历史编号）；包体基线是否**回溯迁移前 commit 现场构建** |
+| [engineering-practice-notes.md EP-22](../../../../docs/design/governance/engineering-practice-notes.md) | `packages/*/tsdown.config.ts` / 多 entry 构建 | 构建后 `dist/` 是否出现 `index2.d.mts` / `index2.mjs`；共享 dts chunk 是否隔离到 `chunks/` 子目录 |
+| [engineering-practice-notes.md EP-23](../../../../docs/design/governance/engineering-practice-notes.md) | 「迁移 / 等价性」判断、组件默认值或属性语义结论 | 是否用 `git show HEAD:<file>` **回读迁移前源码**（而非凭库文档推断仓库现状）；差异成因解释与仓库现状是否分开 |
+| [engineering-practice-notes.md EP-24](../../../../docs/design/governance/engineering-practice-notes.md) | 「依赖卸载 + 引用归零」类任务 | 是否定义 `rg` 归零口径（含注释 / 文档 / 历史编号）；包体基线是否**回溯迁移前 commit 现场构建** |
 | [development.md §5.1.29](../../../../docs/standards/development.md) | 写「A 优先于 B」的配置优先级 | 口径是否写明「字段级整体忽略 vs 逐条合并」；是否配**证伪用例**（高优先级来源存在但未覆盖该对象） |
-| [development.md §5.1.30](../../../../docs/standards/development.md) | 构造期用外部数据合并 effective config | 是否保持 `readonly` 单次赋值（未改成可写）、是否避免引入第二份 effectiveConfig |
+| [development.md §5.1.29](../../../../docs/standards/development.md) | 构造期用外部数据合并 effective config | 是否保持 `readonly` 单次赋值（未改成可写）、是否避免引入第二份 effectiveConfig |
 | [development.md §5.1.31](../../../../docs/standards/development.md) | 代码路径声明「只读 / 与环境解耦」 | 是否**穷举同族开关**（如 `migrationsRun` + `synchronize`）并各自配断言；是否打印 effective 覆盖行（**实际生效值**而非按 env 打印值） |
 | [development.md §6](../../../../docs/standards/development.md) | 从父页拆出子组件 / 同行 label + 控件对齐 | 父页 `<style scoped>` 的同名规则是否随迁子组件（子组件 `<style>` 数与父页残留核对）；同行 `flex-end` 矮控件是否以「控件区补足控制档高度 + 居中」处理 |
 | [testing.md §6.1](../../../../docs/standards/testing.md) | 新增 Playwright 容器 / e2e 用例 / 本机取证 / vitest 或文档遍历的排除配置 | 新容器是否同步 vitest `test.exclude` 并跑全量 `pnpm test`；容器内 Chromium 是否 `TMPDIR=/dev/shm`；权威证据是否 `--workers=1` 连跑两遍；**排除模式是否覆盖仓库根与包目录两个 root**（分别在两个模式下跑 `vitest list` 计数）；大目录排除是否在遍历器内**下降前剪枝**且用**路径前缀**（非通用目录名），相邻前缀是否有回归用例 |
@@ -299,21 +299,21 @@ if (value) { ... }  // 对 0, "", false 失效
 | [documentation.md §6](../../../../docs/standards/documentation.md) | 文档状态口径改写 / 双语镜像同步 | 反向改写是否有三重实证（commit + 代码现状 + 现存产物）、是否只改状态与元数据而未改写历史正文；镜像是否做到**链接级**一致（非仅行数）；状态口径清理是否**三向扫描**（同文档全状态字段 + zh/en 镜像成对 + 索引行 parity）；绝对 GitHub URL 锚点拼写是否人工核对 |
 | [development.md §5.1.34](../../../../docs/standards/development.md) | 依赖升级差异 / 等价性结论、上游变更说明缺失；**依赖升级批次（含 dependabot PR）** | 是否按语义级 diff（剥 hash 与 scope，md5 判同文件）而非归一化近似；无 release 时是否以产物（tarball / dist）为权威；**升级是否只改「版本号 + lockfile」而未跑完整门禁（lint / typecheck / test / e2e / 视觉 `--update-snapshots=all`）与版本口径文档同步；是否存在未适配的断言级契约变化（类名 / token 取值）** |
 | [planning.md §4.4 第 15 条](../../../../docs/standards/planning.md) | 执行期发现 AC 范围外的同源陈旧 / 同构遗漏 | 是否带 `file:line` 证据提请用户决策（未自行扩范围）；用户授权后是否在条目「范围」段与 commit 说明记录授权来源；AC 排除项是否以**无阶段编号**候选登记且登记位置与区块定义自洽；复扫面是否覆盖 `packages/**/*.ts` + `scripts/**/*.mjs` 注释 |
-| [development.md §5.1.38](../../../../docs/standards/development.md) | 失败路径写回（全部入队失败 / 孤儿批次 / 零子项孤儿） | 是否只写 `status` / `finishedAt` / `updatedAt`（可选补空 `summary`）而非整行 `save` 或写回整份聚合载荷（内存实体为初值 / 旧快照，会覆盖并发聚合的计数）；`affected === 0` 时是否不改库不改实体且调用方不计数；收敛后无生产调用方的「整份载荷」变体是否删除 |
+| [development.md §5.1.36](../../../../docs/standards/development.md) | 失败路径写回（全部入队失败 / 孤儿批次 / 零子项孤儿） | 是否只写 `status` / `finishedAt` / `updatedAt`（可选补空 `summary`）而非整行 `save` 或写回整份聚合载荷（内存实体为初值 / 旧快照，会覆盖并发聚合的计数）；`affected === 0` 时是否不改库不改实体且调用方不计数；收敛后无生产调用方的「整份载荷」变体是否删除 |
 | [testing.md §6.9](../../../../docs/standards/testing.md) | 把本地检查脚本接入 CI 并声明阻断 | 三件套是否齐备：负例标定（植入违例确认退出码非 0，跑后删脚手架）/ 自指面核对（步骤所在文件若在扫描面内，新增注释不得含无指针规划编号）/ 阻断强度声明（无 required status checks 时写明仅为 workflow 级信号）；**mutation 是否打到数据落库 / 分支复用层**（仅端点传参覆盖不足） |
 | [platform.md §7 前端规范（列表并发守卫 bullet）](../../../../docs/standards/platform.md#7-前端规范app) | 列表 / 表单页的并发请求守卫（inflight 短路） | 请求在途期间的筛选 / 分页 / 提交参数变更是否被静默丢弃（应记录最后一次待补跑参数并在收尾后补跑）；写入型守卫是否吞掉用户动作 |
 | [development.md §5.1.43](../../../../docs/standards/development.md) | 前端 / 下游为预判引入上游阈值或枚举常量的镜像（上限、窗口大小、枚举取值） | 镜像侧是否用具名常量（非裸魔数）且注释指向权威常量？是否存在**权威侧等值断言**（`expect(镜像值).toBe(权威值)`）锁定两侧？权威侧校验（413 / 400）是否保留、镜像是否只决定预判提示？漂移后果是否限于「提示与响应不一致」（不得据此放行越权操作）？（条目为列表项无独立锚点，按 [documentation.md §2](../../../../docs/standards/documentation.md)「本地文件链接默认不带锚点」引用） |
 | [development.md §5.1.44](../../../../docs/standards/development.md) | `packages/engine/src/**` 出现同步子进程 API（`execSync` / `execFileSync`）或新增长命令调用（安装 / 锁文件修复 / 验证类） | 是否走 `runners/process-control` 受管异步执行（Windows 经 shell、其余平台直接 spawn 已由 `resolveShellOption` 覆盖）？命令启动前是否有取消前置守卫（已取消 → `started:false` 且不 spawn）？超时 / 取消后是否跳过 commit 与 PR？中止是否以独立类别上报（`ABORTED`，非 `ENVIRONMENT_ERROR`）？声明"已超时 / 已取消"是否有子进程真正终止的证据（仅 `Promise.race` 放弃等待不算完成）？（条目为列表项无独立锚点，按 [documentation.md §2](../../../../docs/standards/documentation.md)「本地文件链接默认不带锚点」引用） |
 | [development.md §5.1.47](../../../../docs/standards/development.md) | 读取子进程失败证据 / 带执行超时的执行器日志 | 是否按「原始 stderr（非空时）→ **stdout（非空时）** → `err.message`」回退，并渲染 signal / exit code / errno / timed-out？失败原因是否**在失败发生点**写日志（不得只依赖收尾汇总——超时截断拿到的是早于收尾的快照）？（条目为列表项无独立锚点） |
 | [planning.md §3.1.1 插队后的阶段容量再平衡](../../../../docs/standards/planning.md#_3-1-1-插队后的阶段容量再平衡-hard-requirement-2026-10-19) | 阶段期间出现插队（例外清单 3 类或用户授权追加） | 是否做了阶段容量影响评估（插队工作量 + 剩余原子 + 剩余验证预算）？命中阈值（累计 ≥ 3 批 / 插队 ≥ 原计划 50% / 无法在窗口内完成）时是否**移出低优先级原子到 backlog**（保留 8 要素并标注原因，不删除）？是否以压缩验收 / 跳过 Review Gate / 合并验证替代再平衡？三处记录（todo 阶段头 / 插队条目 / archive/index 批次记录）是否一致？ |
-| [development.md §5.1.45 / §5.1.46](../../../../docs/standards/development.md) | 新增 / 修改仓库级 JSON 配置列（`prCheckFocus` 一类）或引入「已配置走新路径 / 未配置沿用旧值」双路径 | 写入闸门是否**宽容输入**（trim / 去重 / 枚举收敛）且对象 `.strict()` 拒绝未知键（防「配了但静默不生效」）？校验常量与规范化实现是否共用同一组常量？双路径是否补了**逐字段冲突**等价性用例（每个派生字段一个 mutant 可击杀）？（条目为列表项无独立锚点） |
+| [development.md §5.1.45](../../../../docs/standards/development.md) | 新增 / 修改仓库级 JSON 配置列（`prCheckFocus` 一类）或引入「已配置走新路径 / 未配置沿用旧值」双路径 | 写入闸门是否**宽容输入**（trim / 去重 / 枚举收敛）且对象 `.strict()` 拒绝未知键（防「配了但静默不生效」）？校验常量与规范化实现是否共用同一组常量？双路径是否补了**逐字段冲突**等价性用例（每个派生字段一个 mutant 可击杀）？（条目为列表项无独立锚点） |
 | [planning.md §3.1 追加临时待办标记口径](../../../../docs/standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) | `todo.md` 当前阶段出现清单外（经用户授权）的追加事项 | 是否**追加在阶段段落末尾**并以「追加临时待办（不占阶段条目编号）」显式标记？是否**未占用 / 未重排**既有原子条目、**未分配编号**、未计入阶段条目容量与类型平衡？条目正文是否含评估结论（目标 / 范围 / 验收 / 风险）？是否存在把清单外需求包装成清单内例外的措辞？ |
 | [git.md §3.7.2](../../../../docs/standards/git.md) | 未提交工作区上做临时变更 / 还原（mutation、探针） | 还原是否用备份回写或反向 patch（**禁用 `git checkout --` / `git restore`**——会整文件回退抹掉未提交实现）；还原后是否 `git diff --stat` / `git status` 核对与变更前一致；探针文件是否按明确路径一次删一个 |
-| [development.md §5.1.33](../../../../docs/standards/development.md) | 「统一同类写法 / 复用化」类改动的范围穷举 | 是否用**构建产物**穷举（合并同选择器规则；注意 `server/chunks/build/*styles*.mjs`），而非只靠源码 grep（只能发现「值不同」的站点）；「范围已穷举」的结论是否经得起「筛选条件是否只命中目标一部分」的追问 |
+| [engineering-practice-notes.md EP-26](../../../../docs/design/governance/engineering-practice-notes.md) | 「统一同类写法 / 复用化」类改动的范围穷举 | 是否用**构建产物**穷举（合并同选择器规则；注意 `server/chunks/build/*styles*.mjs`），而非只靠源码 grep（只能发现「值不同」的站点）；「范围已穷举」的结论是否经得起「筛选条件是否只命中目标一部分」的追问 |
 | [platform.md §10.1 / §10.2](../../../../docs/standards/platform.md) | `apps/platform/Dockerfile` / `docker-compose*.yml` / `.github/workflows/docker.yml` 或 runtime 镜像改动 | 关键启动默认值（如 `DATABASE_MIGRATIONS_RUN`）是否用 Dockerfile runtime `ENV` 固化（非仅 compose）；推送门禁是否含真实镜像首启冒烟（不注入该 env，断言 HTTP 200 + 业务表数下限 + 无 `no such table`）；空库且未开迁移时启动是否打明确告警；runtime 阶段是否只 `COPY .output`（未复制根 `node_modules` / workspace dist）、`.output/server/package.json` 依赖是否逐项 `existsSync` 命中；**目标仓库原生模块回退编译工具链**是否逐个 `command -v python3/make/g++` 命中（`smoke-test.sh` 场景 0）且 `docker build --check` 无告警 |
 | [platform.md §10.3 / §10.4 / §10.5](../../../../docs/standards/platform.md) | `server/services/queue/**` / `server/plugins/database-bootstrap.ts` / 队列 env 改动 | `auto` 模式是否含消费者维度（Redis 可用且 `inProcessWorker` 才 async，无合法消费者降级 sync）；容器 env 是否用 `NUXT_` 前缀；`DEPENDFIX_MIGRATIONS_ONLY=true` 的 `.catch` 是否补 `process.exit(1)`；锁参数是否显式配置且 `lockDuration` 引用 `resolveExecutionTimeoutMs()` 单一事实源（缺省 `DEFAULT_EXECUTION_TIMEOUT_MS`，非 BullMQ 隐式默认 30 秒）、`lockRenewTime` 为其一半且单测锁定对齐；`EXECUTION_TIMEOUT_MS` 变更时 ScanRun 孤儿清理阈值（`server/plugins/stale-cleanup.ts`）是否同源联动；`stalled` / `lockRenewalFailed` / `error` 三类事件是否注册、结构化日志的 `runId` 解析失败是否降级为显式 `null`（不吞告警）；续期类 `error` 是否标注 `duplicateOf` 供去重且 message 经 `sanitizeString` 脱敏；`error` 载荷是否不含 job 上下文 |
 | [development.md §5.1.36](../../../../docs/standards/development.md) | 并发终态写 / 聚合状态写回 / 条件更新 | 是否用条件 `update({ id, status: <读取时状态> }, payload)` 而非整行 `save`；乐观锁条件是否取读取时状态（非固定 `'running'`）；`affected === 0` 是否跳过；payload 是否显式写 `updatedAt` |
-| [development.md §5.1.37](../../../../docs/standards/development.md) | 多源 / 多分支「全部失败」判定 | 存在第三态（如 `ALERTS_DISABLED`）时判据是否为「失败数 > 0 且成功数 === 0」（非 `失败数 === 总数`）；抛错前 per-source 状态是否完整写入；仓库级 catch 追加同 `category` 信号前是否先判「该仓库已有带 `source` 的同类信号」（避免重复信号与日志汇总 `unknown` 归组） |
+| [engineering-practice-notes.md EP-28](../../../../docs/design/governance/engineering-practice-notes.md) | 多源 / 多分支「全部失败」判定 | 存在第三态（如 `ALERTS_DISABLED`）时判据是否为「失败数 > 0 且成功数 === 0」（非 `失败数 === 总数`）；抛错前 per-source 状态是否完整写入；仓库级 catch 追加同 `category` 信号前是否先判「该仓库已有带 `source` 的同类信号」（避免重复信号与日志汇总 `unknown` 归组） |
 | [testing.md §6.4](../../../../docs/standards/testing.md) | e2e 控制服务端 locale / 操作请求 cookie header | 是否用显式 `cookie` header 剥离 / 附加（而非操作浏览器上下文 cookie，避免客户端框架异步回写竞态）；未认证 API 是否显式空 `storageState` |
 | [git.md §3.7.1](../../../../docs/standards/git.md) | 多 atomic commit 隔离 / complement-stash | stash 补集前是否判断补集非空（为空直接 `git add` 目标，防 `git stash push --` 无路径暂存全部）；提交后 `git show --stat HEAD` 是否核对文件数；`git add -N` 的 intent-to-add 新文件是否先 `git reset --` 退回未跟踪再 stash；隔离脚本是否带 **EXIT trap 恢复补集**（commit 被拒时不得滞留 stash） |
 | [planning.md §3.4](../../../../docs/standards/planning.md) | 规划条目标注历史 commit 的 C 编号 / M 阶段 | 是否 `git show --stat <hash>` + 归档分片核实归属（非凭同域描述推断） |
@@ -327,21 +327,21 @@ if (value) { ... }  // 对 0, "", false 失效
 | [testing.md §6.7](../../../../docs/standards/testing.md) | 页面可见改动 → 视觉基线 | 改动页面（含**文案**）的整页基线是否重建？**以该页为背景的视口基线**是否连带重建？重建后是否**不带 update 连跑两遍**验证幂等（update 落盘帧可能不是稳定帧）？基线含**运行时派生值**（主键短 ID / 时间戳）时须在 fixtures 侧钉死（关键取值以 fail-fast 读取器兜底）而非靠遮蔽或容差兜底？归因前是否比对失败谱跨运行一致性（一致即确定性变更，不得归为抖动）？无视觉守卫的页面是否显式登记？ |
 | [testing.md §6.10](../../../../docs/standards/testing.md) | 脚本级测试 / 被测服务同进程验证 | 入口脚本是否用真实 shell + PATH 桩测试？被测服务与测试同进程时是否**避免** `spawnSync`（阻塞事件循环导致观察为空）？以脚本输出行为同步点发信号的用例是否同时断言 `{ code, signal }`，并在竞态无法稳定复现时补**源码顺序断言**？ |
 | [platform.md §10.8](../../../../docs/standards/platform.md) | pnpm store 持久化 / 目标仓库 `.git/info/exclude` 改动 | store 可写性是否按**真实运行身份写探针**判定（`test -w` 不看挂载只读属性，只读卷上已存在的 store 会误判可写）？不可用（只读挂载 / 权限不足 / 非绝对路径）是否 **unset 变量回退** pnpm 默认位置（只 warn 不 unset 会让 pnpm 继续用坏路径）？store 目录是否**以运行身份创建**（root 经 `su-exec`；不对用户指定路径做 `chown`，`/` 等根路径拒绝并回退）？提交卫生是否只写 `.git/info/exclude`（不改 `.gitignore`）、幂等且按 git「最后一条匹配胜出」处理取反行、写入失败 warn 不阻断，且仅在 `fix` / `fix-and-pr` 非 `dry-run` 预置？`entrypoint.test.mjs` 是否覆盖 root / 非 root 两条路径与绝对路径校验？ |
-| [development.md §5.1.39](../../../../docs/standards/development.md) | 删除公共导出 | 是否全仓（**含全部测试目录**）grep 引用？是否区分代码引用与文档 / 归档描述性文本？ |
+| [development.md §5.1.25](../../../../docs/standards/development.md) | 删除公共导出 | 是否全仓（**含全部测试目录**）grep 引用？是否区分代码引用与文档 / 归档描述性文本？ |
 | [development.md §5.1.40](../../../../docs/standards/development.md) | 与外部工具语义对齐的判定 | 是否用该工具权威实现逐形态（**含反例**）实测比对？等价类扩展方向是否倾向保守（宁可多报不可漏判）？ |
 | [documentation.md §6](../../../../docs/standards/documentation.md) | 阶段状态口径翻转 | 「暂无进行中阶段」↔「Mxx 进行中」翻转时，是否同步**全部承载位置**（待办速查表 + 路线图指针 + 各文档速查表 + 首页里程碑）？ |
 | [documentation.md §6](../../../../docs/standards/documentation.md) | 规范 / 文档声明「覆盖面」（如「全部 N 处调用点」） | 是否限定**作用对象**并显式列出**不适用面**（防 repo-wide 读成零遗漏）？ |
 | [documentation.md §6](../../../../docs/standards/documentation.md) | 文档示例形态（如指针写法）与实现不一致 | 该形态是否属**既有文档已声明的约定**（是 → 在实现侧扩展容忍并补测，而非把文档改窄）？ |
 | [development.md §5.1.41](../../../../docs/standards/development.md) | 「收窄 / 跳过」类改动（省成本、消除假失败、提前返回、降级） | 被跳过步骤的产物是否有**别的消费者**（字段级穷举）？跳过后面临的判据空洞是否显式补上（新增信号 / 跨用例不变量）？ |
-| [development.md §5.1.42](../../../../docs/standards/development.md) | 给 composable 引入依赖注入（`useXxx(deps)`） | 缺省实现是否在 **setup 期**求值（`deps.x ?? resolveXxx()`）而非事件期延迟调用 setup-only composable（`useI18n` / `useRoute` / `useState`）？事件期是否只用 event-safe 全局？ |
+| [engineering-practice-notes.md EP-31](../../../../docs/design/governance/engineering-practice-notes.md) | 给 composable 引入依赖注入（`useXxx(deps)`） | 缺省实现是否在 **setup 期**求值（`deps.x ?? resolveXxx()`）而非事件期延迟调用 setup-only composable（`useI18n` / `useRoute` / `useState`）？事件期是否只用 event-safe 全局？ |
 | [testing.md §6.11](../../../../docs/standards/testing.md) | 门禁 / 脚本类单测（`scripts/**`） | CLI 早返回分支是否 `process.exit` **兼** `return`（mock 下不终止会 fall-through，使 mutation 存活）？夹具字面量是否会被被测门禁脚本自身扫到（改运行时拼接）？ |
 | [documentation.md §6](../../../../docs/standards/documentation.md) | 归档条目落点校验粒度 | 同一 `##` 下存在编号 `###` 子条目时是否**逐条**校验（不得由兄弟条目的落点代偿）？无编号子条目的 `##` 是否整体校验？自指落点（`本条` / `同上` / `详见本条`）是否判空？门禁：`pnpm check:experience-landing`。 |
 | [platform.md §10.6](../../../../docs/standards/platform.md#106-队列执行进程隔离独立-worker-进程) | `apps/platform/docker/entrypoint.sh` 双进程编排 / 信号处置改动 | 容器停止（TERM / INT）的转发 trap 是否**先于**「启动子进程」与「输出就绪行」安装（就绪行是外部观测方唯一同步点，晚装则落在窗口的信号按默认处置终止 PID 1 → 观测方读到 signal 终止而非 143、看护循环与 worker 失去父进程）？子进程尚未启动时是否直接退出而非吞掉停止信号后照旧启动？源码顺序断言（`entrypoint.test.mjs`）是否同步更新？退避等待是否用 `sleep N & wait $!`（前台 `sleep` 阻塞 trap）并有真实 `sleep` + `TERM` 计时用例 |
 
 | [development.md §5.1.48](../../../../docs/standards/development.md) | 新增统计项 / 去重键 / 「读不到就降级」分支 | 统计依赖的列 / 字段是否有**生产写入方**（`rg` 全部写入点，防基于死列统计恒 0）；去重前提是否随语义演进失效（计划命令 → 实际命令需改并集 / 失效键）；降级是否**整体**而非静默截断（只取前 N 个会漏判关键语义并产出假阳） |
 | [development.md §5.1.49](../../../../docs/standards/development.md) | 分散判据收敛 / 「停止剩余步骤」/ 一次性记账 | 判据单点化是否同时收口**适配层**（取消 / 超时 / 空输出先适配成同形错误）？停机是否以**返回值向上传导**（void 只停本步）？`addSkipped` 一类记账是否放在**分区处**（尾部会被提前 return 整段跳过）？ |
-| [development.md §5.1.50](../../../../docs/standards/development.md) | client / server 共享字符串哨兵 / 「是否未知」判定 | 是否导出**镜像常量**（或共享包导入）并在 server 测试断言两侧相等？「是否未知」类判定是否收敛到单一纯函数，而非两端各写裸字面量？（枚举 / 阈值镜像见 §5.1.43） |
-| [development.md §5.1.51](../../../../docs/standards/development.md) | 某通知 / 投递类别豁免限流（指纹 / 冷却 / 每小时上限） | 是否只跳过自身限流判定，却仍让该类别的 `sent` 行计入**共享计数查询**（一次批量投递可挤掉常规类别）？是否补「豁免类别发送后常规类别仍可发送」用例？ |
+| [development.md §5.1.43](../../../../docs/standards/development.md) | client / server 共享字符串哨兵 / 「是否未知」判定 | 是否导出**镜像常量**（或共享包导入）并在 server 测试断言两侧相等？「是否未知」类判定是否收敛到单一纯函数，而非两端各写裸字面量？（枚举 / 阈值镜像见 §5.1.43） |
+| [engineering-practice-notes.md EP-34](../../../../docs/design/governance/engineering-practice-notes.md) | 某通知 / 投递类别豁免限流（指纹 / 冷却 / 每小时上限） | 是否只跳过自身限流判定，却仍让该类别的 `sent` 行计入**共享计数查询**（一次批量投递可挤掉常规类别）？是否补「豁免类别发送后常规类别仍可发送」用例？ |
 | [testing.md §6.10](../../../../docs/standards/testing.md) | 脚本级测试中的 shell 管道 / 退出码断言 | 管道 + tail 后接双竖线 fail 在 dash（无 `pipefail`）下是否为死代码（管道状态取末命令）？是否拆分为「捕获输出（带失败判定）」与「解析输出」两步并单独断言关键日志行？ |
 | [testing.md §6.8](../../../../docs/standards/testing.md) | mutation / 审计取证工件 | 是否逐项记录**文件、变异前 md5、失败用例名、复现命令**，而非只写「N/N 击杀」汇总？还原后是否 md5 核对一致？ |
 | [git.md §3.7.1](../../../../docs/standards/git.md) | 拆批提交 / lint-staged 文件级任务 | 拆批前是否先把**未暂存文档** stash / 还原到 HEAD（lint-staged 的 updateIndex 会按任务前后 diff 重暂存，未暂存文档可能被带入 feat commit）？每组 `git add` 后是否 `git diff --cached --name-only` 核对、提交后 `git show --stat HEAD` 复核？ |
@@ -464,7 +464,7 @@ P 阶段规划 / 阶段实施 / 阶段归档批次触及 `docs/plan/todo.md` / `
 - **准确语义**：`spec.env` 隔离，避免 cmd/test 日志、git URL、daemon config 可见 token（凭据走 `http.extraheader` 等带外通道，与 argv 无关）
 - **注释必须真实反映防御机制**：错把"防 argv 回显"当成威胁模型会导致后续审计按错误方向找漏洞
 
-规范见 [development.md §5.1.7](../../../../docs/standards/development.md)。
+规范见 [engineering-practice-notes.md EP-06](../../../../docs/design/governance/engineering-practice-notes.md)。
 
 ### JSDoc 注释与可见性声明一致性（必查项）
 
@@ -474,7 +474,7 @@ P 阶段规划 / 阶段实施 / 阶段归档批次触及 `docs/plan/todo.md` / `
 - **拼装类函数应在测试中 snapshot 验证**：拼装 bug 在真起容器前难暴露，靠运行时回显只能发现一半问题
 - **注释与实现脱节会被 audit 作为 warning 处置**
 
-规范见 [development.md §5.1.8](../../../../docs/standards/development.md)。
+规范见 [engineering-practice-notes.md EP-07](../../../../docs/design/governance/engineering-practice-notes.md)。
 
 ### 测试 Spy 与生产实现同模块时 @internal 标注（必查项）
 
@@ -484,7 +484,7 @@ P 阶段规划 / 阶段实施 / 阶段归档批次触及 `docs/plan/todo.md` / `
 - **避免业务模块误用 spy 路径**：会导致测试覆盖率虚高、运行时行为错位
 - **强约束**：eslint `no-restricted-imports` 规则限制生产代码 import spy 路径是最稳护栏
 
-规范见 [development.md §5.1.9](../../../../docs/standards/development.md)。
+规范见 [engineering-practice-notes.md EP-08](../../../../docs/design/governance/engineering-practice-notes.md)。
 
 ### 删除"自动状态赋值"时被动接收路径审查（必查项）
 
@@ -494,7 +494,7 @@ P 阶段规划 / 阶段实施 / 阶段归档批次触及 `docs/plan/todo.md` / `
 - **被动接收态风险**：成功提交后重新调用 `loadImportable()` 时，已删的自动赋值语句留下的旧状态会导致 UI 状态不一致
 - **修复范式**：在 `emit('success')` 后 `await reload()` 前主动重置状态，让"删除"与"主动重置"形成完整闭环
 
-规范见 [development.md §5.1.10](../../../../docs/standards/development.md)。
+规范见 [engineering-practice-notes.md EP-09](../../../../docs/design/governance/engineering-practice-notes.md)。
 
 ### 调试临时代码清理（必查项）
 
@@ -505,7 +505,7 @@ P 阶段规划 / 阶段实施 / 阶段归档批次触及 `docs/plan/todo.md` / `
 - **调试完成后立即清理不留痕**：`git diff --staged` 容易遗漏单行 `console.log`，养成实时清理习惯
 - **范围扩展**：ui-validator agent 视觉验证时自建的截图脚本也属同类
 
-规范见 [development.md §5.1.11](../../../../docs/standards/development.md)。
+规范见 [engineering-practice-notes.md EP-10](../../../../docs/design/governance/engineering-practice-notes.md)。
 
 ### TypeORM 实体时间列类型（必查项）
 

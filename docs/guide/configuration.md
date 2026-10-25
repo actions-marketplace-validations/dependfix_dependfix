@@ -280,7 +280,7 @@ export DEPENDFIX_RETRY_FAILED=false
 | `DATABASE_PATH` | — | `data/dependfix.sqlite` | SQLite 数据库文件路径（compose 注入 `/app/data/dependfix.sqlite`） |
 | `DATABASE_TYPE` / `DATABASE_URL` | — | 自动推断 | 非 SQLite 后端（PostgreSQL 等） |
 | `DATABASE_SSL` / `DATABASE_CHARSET` / `DATABASE_TIMEZONE` / `DATABASE_ENTITY_PREFIX` | — | 空 | 数据库连接调节 |
-| `DATABASE_SYNCHRONIZE` | — | `false` | TypeORM 自动同步；⚠️ 生产禁止开启（[开发规范 §5.1.19](../standards/development.md)） |
+| `DATABASE_SYNCHRONIZE` | — | `false` | TypeORM 自动同步；⚠️ 生产禁止开启（[工程实践判例 EP-17](../design/governance/engineering-practice-notes.md)） |
 | `DATABASE_MIGRATIONS_RUN` | — | 镜像内 `true` | 启动时自动执行 pending migration（全新库自动建表） |
 | `DEPENDFIX_MIGRATIONS_ONLY` | — | `false` | 内部：迁移专用模式（`docker/init-db.sh` 使用） |
 | `BACKUP_SKIP` | — | `false` | 跳过启动期备份（仅 e2e 等场景） |
