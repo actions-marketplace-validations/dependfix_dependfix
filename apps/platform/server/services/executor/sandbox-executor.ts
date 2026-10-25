@@ -179,6 +179,10 @@ export class SandboxExecutor implements ScanExecutor {
                 lockfileRepairs: 0,
                 verificationsPassed: 0,
                 verificationsFailed: 0,
+                prsOpened: 0,
+                prsSkippedByFingerprint: 0,
+                prsClosedAfterFailure: 0,
+                checksTimedOut: 0,
             },
             repositories: [{
                 repository: repo,

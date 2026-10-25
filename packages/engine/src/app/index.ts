@@ -16,6 +16,7 @@ import {
     type FixAction,
     type FixError,
     type RepeatedAttemptRecord,
+    type PrCheckWatchReport,
 } from '@dependfix/core'
 import { fromApp, type AuthProvider } from '../auth'
 import {
@@ -72,6 +73,7 @@ import {
 } from './helpers'
 import { findInstallBlockedReposWithFixes, hasDeliverableFixes } from './delivery'
 import { prepareDeliveryHygiene } from './git-exclude'
+import { runPrCheckWatch } from './pr-check-watch-run'
 import { rollbackForSkippedDelivery, skipDeliveryForInstallFailure } from './skipped-delivery'
 import { pullRequestCreationHint } from './token-hints'
 import { handleDuplicatePRs } from './duplicate-prs'
@@ -214,6 +216,8 @@ export class DependfixApp {
     private readonly attemptTracking: RepeatedAttemptRecord[] = []
     /** PR 落点仓库（第一个仓库；尝试标记只能写进该仓库的 PR） */
     private attemptRepo: string | undefined
+    /** PR check 回环结果（run 级；仅在 `--wait-pr-checks` 且创建 PR 时递增） */
+    private readonly prCheckWatchReport: PrCheckWatchReport = { attempts: [], runBudgetExhausted: false }
 
     constructor(options: DependfixAppOptions) {
         this.workDir = options.workDir ?? process.cwd()
@@ -302,6 +306,7 @@ export class DependfixApp {
             attemptTracking: this.attemptTracking,
             attemptIndex: this.attemptIndex,
             attemptRepo: this.attemptRepo,
+            prCheckWatch: this.prCheckWatchReport,
         }
     }
 
@@ -604,6 +609,7 @@ export class DependfixApp {
                 this.logger.info(
                     `Open PR #${plan.sameContentPR.number} already contains identical fixes — skipping PR creation`,
                 )
+                this.summary.prsSkippedByFingerprint += 1
                 this.allActions.push({
                     type: 'dependency-upgrade',
                     repository: firstRepo,
@@ -686,6 +692,7 @@ export class DependfixApp {
             })
 
             this.logger.info(`PR created: ${pr.htmlUrl}`)
+            this.summary.prsOpened += 1
 
             // Record PR as a fix action before closing superseded PRs,
             // so a close failure never hides the successfully created PR
@@ -714,6 +721,10 @@ export class DependfixApp {
 
             // 7. Close superseded PRs only after new PR created successfully
             await closeSupersededPRs(this.ctx, client, owner, repo, plan.supersedePRs)
+
+            if (this.config.waitPrChecks) {
+                await runPrCheckWatch({ ctx: this.ctx, octokit: client, owner, repo, pr, branchName })
+            }
         } catch (error: unknown) {
             const message = toErrorMessage(error)
             const hint = pullRequestCreationHint(error)

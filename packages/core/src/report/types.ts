@@ -1,5 +1,6 @@
 import type { NormalizedSecurityAlert, AlertSeverity } from '../alerts'
 import type { CiAlignmentRecord } from './ci-alignment'
+import type { CheckAttribution } from './check-attribution'
 
 /**
  * 跳过原因枚举（`alertsSkippedByReason` 的 key）。
@@ -105,6 +106,14 @@ export interface RunSummary {
     lockfileRepairs: number
     verificationsPassed: number
     verificationsFailed: number
+    /** 本次运行创建的 PR 数（fix-and-pr 恒为 0 或 1） */
+    prsOpened: number
+    /** 因内容指纹相同被跳过的 PR 数（已有同内容 PR） */
+    prsSkippedByFingerprint: number
+    /** PR check 回环中因归因 `self_caused` 被关闭的 PR 数（需显式 `--close-failed-pr`） */
+    prsClosedAfterFailure: number
+    /** PR check 等待超预算（per-PR / per-run）次数 */
+    checksTimedOut: number
 }
 
 /**
@@ -295,6 +304,13 @@ export interface RunResult {
      * 尝试键与计数口径见 [pr-delivery-closure.md §6](../../../../docs/design/governance/pr-delivery-closure.md)。
      */
     attemptTracking?: RepeatedAttemptRecord[]
+    /**
+     * PR 创建后的 check 回环结果（仅 `--wait-pr-checks` 且实际创建 / 命中 PR 时存在）。
+     *
+     * CLI / Action 侧单次运行内等待，不跨进程续等；轮询与预算口径见
+     * [pr-delivery-closure.md §8](../../../../docs/design/governance/pr-delivery-closure.md)。
+     */
+    prCheckWatch?: PrCheckWatchReport
 }
 
 /**
@@ -320,6 +336,59 @@ export interface RepeatedAttemptRecord {
     /** 本次尝试序号（同键已关闭 PR 数 + 1；上限 2 次，第 3 次起跳过） */
     attempt: number
     status: RepeatedAttemptStatus
+}
+
+/**
+ * PR check 回环的终态。
+ *
+ * - `passed`：全部 check 完成且至少一条成功、无失败
+ * - `failed`：存在失败 check（`attribution` 为聚合归因）
+ * - `cancelled`：全部完成但没有任何成功（均为 cancelled / skipped / neutral）
+ * - `no_ci_detected`：宽限期后仍未观测到任何 check（**绝不**判 passed）
+ * - `timeout`：per-PR / per-run 预算耗尽，结果未判定（PR 保留）
+ */
+export type PrCheckWatchState = 'passed' | 'failed' | 'cancelled' | 'no_ci_detected' | 'timeout'
+
+/** 回环中记录的失败 check 摘要（评论与报告共用，最多 5 条）。 */
+export interface PrCheckFailureSummary {
+    name: string
+    /** check 详情页 URL（可空） */
+    url?: string
+    attribution: CheckAttribution
+}
+
+/** 单个 PR 的 check 回环结果。 */
+export interface PrCheckWatchAttempt {
+    pr: {
+        number: number
+        htmlUrl: string
+    }
+    state: PrCheckWatchState
+    /** `failed` 时的聚合归因（混合归因 → `unknown`） */
+    attribution?: CheckAttribution
+    /** 是否由 dependfix 关闭（仅 `failed` + `self_caused` + 显式开关） */
+    closed: boolean
+    /** 是否已发表评论（failed / timeout 且非 dry-run） */
+    commented: boolean
+    /** 轮询次数 */
+    polls: number
+    /** 实际等待时长（毫秒） */
+    durationMs: number
+    /** 失败 check 摘要 */
+    failedChecks?: PrCheckFailureSummary[]
+    /** 未判定 / 降级原因（timeout / no_ci_detected / API 错误 / 评论关闭失败） */
+    reason?: string
+    /** 评论失败原因（不改变 PR 状态） */
+    commentError?: string
+    /** 关闭失败原因（不改变运行结论） */
+    closeError?: string
+}
+
+/** 一次运行的 PR check 回环汇总。 */
+export interface PrCheckWatchReport {
+    attempts: PrCheckWatchAttempt[]
+    /** per-run 总预算是否耗尽（后续 PR 不再等待） */
+    runBudgetExhausted: boolean
 }
 
 /**
@@ -630,5 +699,9 @@ export function createEmptyRunSummary(): RunSummary {
         lockfileRepairs: 0,
         verificationsPassed: 0,
         verificationsFailed: 0,
+        prsOpened: 0,
+        prsSkippedByFingerprint: 0,
+        prsClosedAfterFailure: 0,
+        checksTimedOut: 0,
     }
 }

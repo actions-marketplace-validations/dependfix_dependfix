@@ -91,10 +91,12 @@ export function computeSummary(
     summary.lockfileRepairs = lockfileRepairs
     summary.verificationsPassed = verificationsPassed
     summary.verificationsFailed = verificationsFailed
+    // PR 交付计数器由编排层在事件点累加（此处不重置，避免 computeSummary 多次调用清零）：
+    // prsOpened / prsSkippedByFingerprint / prsClosedAfterFailure / checksTimedOut
 }
 
 export function buildRunResult(
-    ctx: Pick<AppContext, 'config' | 'runId' | 'startedAt' | 'finishedAt' | 'summary' | 'repoResults' | 'allAlerts' | 'allActions' | 'allErrors' | 'alertsDisabled' | 'ciAlignment' | 'attemptTracking'>,
+    ctx: Pick<AppContext, 'config' | 'runId' | 'startedAt' | 'finishedAt' | 'summary' | 'repoResults' | 'allAlerts' | 'allActions' | 'allErrors' | 'alertsDisabled' | 'ciAlignment' | 'attemptTracking' | 'prCheckWatch'>,
     aiUsage?: AiUsageAggregate, supplyChainWarnings?: SupplyChainWarning[],
 ): RunResult {
     const reportConfig: RunReportConfig = {
@@ -124,6 +126,7 @@ export function buildRunResult(
         alertsDisabled: ctx.alertsDisabled.length > 0 ? ctx.alertsDisabled : undefined,
         ciAlignment: ctx.ciAlignment && ctx.ciAlignment.length > 0 ? ctx.ciAlignment : undefined,
         attemptTracking: ctx.attemptTracking && ctx.attemptTracking.length > 0 ? ctx.attemptTracking : undefined,
+        prCheckWatch: ctx.prCheckWatch && ctx.prCheckWatch.attempts.length > 0 ? ctx.prCheckWatch : undefined,
     }
 }
 

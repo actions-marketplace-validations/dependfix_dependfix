@@ -14,6 +14,7 @@ import {
     type NormalizedSecurityAlert,
     type RepeatedAttemptRecord,
     type RepositoryResult,
+    type PrCheckWatchReport,
     type RunSummary,
 } from '@dependfix/core'
 import { stageAndCommit } from '../github/pr-creator'
@@ -164,6 +165,11 @@ export interface AppContext {
      * 不做跳过判定（避免「在 A 仓计 B 仓的尝试」造成永久跳过）。
      */
     attemptRepo?: string
+    /**
+     * PR check 回环结果（仅 `--wait-pr-checks` 且实际创建 PR 时存在）。
+     * 缺省 ⇒ 不等待（行为与引入前一致）。
+     */
+    prCheckWatch?: PrCheckWatchReport
 }
 
 // ---------------------------------------------------------------------------
