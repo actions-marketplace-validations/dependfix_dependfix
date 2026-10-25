@@ -163,6 +163,11 @@ describe('展示顺序与 core 枚举同步', () => {
         expect(SKIP_REASON_ORDER).toEqual(SKIP_REASONS)
         expect(SEVERITY_DISPLAY_ORDER).toEqual(ALERT_SEVERITIES)
     })
+
+    it('同告警重复失败计入跳过分组（平台视图与 core 同键）', () => {
+        const rows = skippedBreakdown({ alertsSkipped: 2, alertsSkippedByReason: { 'repeated-failure': 2 } })
+        expect(rows).toEqual([{ key: 'repeated-failure', count: 2 }])
+    })
 })
 
 describe('formatBytes', () => {

@@ -102,6 +102,7 @@ const scanRunSchema = z.object({
             'cross-major': z.number().int().min(0).optional(),
             'not-fixable': z.number().int().min(0).optional(),
             'override-protected': z.number().int().min(0).optional(),
+            'repeated-failure': z.number().int().min(0).optional(),
         }).optional(),
         /** 截断总数与按严重级别分组（结果披露） */
         alertsTruncated: z.number().int().min(0).optional(),

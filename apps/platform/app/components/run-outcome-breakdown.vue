@@ -47,6 +47,7 @@ const reasonLabel = (key: string) => {
         'cross-major': 'runs.breakdown.reason.crossMajor',
         'not-fixable': 'runs.breakdown.reason.notFixable',
         'override-protected': 'runs.breakdown.reason.overrideProtected',
+        'repeated-failure': 'runs.breakdown.reason.repeatedFailure',
         other: 'runs.breakdown.other',
     }
     return t(keys[key] ?? 'runs.breakdown.other')

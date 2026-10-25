@@ -844,7 +844,8 @@
                 "subdirectoryManifest": "Sub-directory / root direct manifest",
                 "crossMajor": "Cross-major / manual review",
                 "notFixable": "Not auto-fixable",
-                "overrideProtected": "Protected by policy"
+                "overrideProtected": "Protected by policy",
+                "repeatedFailure": "Repeated failure (attempt limit)"
             }
         },
         "failureStage": {

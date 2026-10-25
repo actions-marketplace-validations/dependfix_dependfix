@@ -53,7 +53,7 @@ export interface ScanRunFixture {
         /** 跳过总数与按原因分组（结果披露） */
         alertsSkipped?: number
         alertsSkippedByReason?: Partial<Record<
-            'subdirectory-manifest' | 'cross-major' | 'not-fixable' | 'override-protected',
+            'subdirectory-manifest' | 'cross-major' | 'not-fixable' | 'override-protected' | 'repeated-failure',
             number
         >>
         /** 截断总数与按严重级别分组（结果披露） */
