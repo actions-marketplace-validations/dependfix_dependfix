@@ -170,6 +170,11 @@ export const argsDef = {
         type: 'string' as const,
         description: '自定义验证命令（逗号分隔），整链替换默认的 install/lint/build/typecheck/test（不做合并；默认链扩展不会自动跟随，默认链内的条目须显式保留）',
     },
+    'mirror-ci-scripts': {
+        type: 'boolean' as const,
+        description: '把目标仓库 CI 独有的 pnpm/npm/yarn 脚本追加到验证链（默认关闭；最多 3 条、首失败即停；docker / gh / 任意 shell 只披露不执行；与 --commands 不叠加）',
+        negativeDescription: '不镜像 CI 独有脚本（默认）',
+    },
     verbose: {
         type: 'boolean' as const,
         description: '输出详细日志',
@@ -452,6 +457,11 @@ function parsedArgsToCliOverrides(parsed: ParsedArgs<typeof argsDef>): CliConfig
     const commandsValue = parsed.commands
     if (commandsValue) {
         overrides.commands = parseCommandsFlag(commandsValue)
+    }
+
+    // mirror-ci-scripts (three-state: true / false / undefined)
+    if (parsed['mirror-ci-scripts'] !== undefined) {
+        overrides.mirrorCiScripts = parsed['mirror-ci-scripts']
     }
 
     // upgrade-groups

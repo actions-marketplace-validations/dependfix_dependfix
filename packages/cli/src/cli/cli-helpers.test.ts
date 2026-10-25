@@ -156,6 +156,12 @@ describe('parseCliArgs', () => {
         expect(result.configOverrides.commands).toEqual(['lint', 'test'])
     })
 
+    it('解析 mirror-ci-scripts（三态）', () => {
+        expect(parseCliArgs(['--mirror-ci-scripts']).configOverrides.mirrorCiScripts).toBe(true)
+        expect(parseCliArgs(['--no-mirror-ci-scripts']).configOverrides.mirrorCiScripts).toBe(false)
+        expect(parseCliArgs([]).configOverrides.mirrorCiScripts).toBeUndefined()
+    })
+
     it('解析 history', () => {
         const result = parseCliArgs(['--history', 'owner/repo'])
         expect(result.configOverrides.history).toBe('owner/repo')

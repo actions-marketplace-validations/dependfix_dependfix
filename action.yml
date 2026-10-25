@@ -116,6 +116,10 @@ inputs:
     description: "自定义验证命令（逗号分隔，整链替换默认 install + lint + build + typecheck + test——不做合并，默认链扩展不会自动跟随，默认链内的条目须显式保留）。例如 Nuxt 项目需要先 prepare：`pnpm install --frozen-lockfile, pnpm --filter @dependfix/platform exec nuxt prepare, pnpm lint, pnpm build, pnpm typecheck, pnpm test`"
     required: false
     default: ""
+  mirror-ci-scripts:
+    description: "把目标仓库 CI 独有的 pnpm/npm/yarn 脚本追加到验证链（默认 false；最多 3 条、首失败即停；docker / gh / 任意 shell 与非单一形态只披露不执行；只校验命令形态与脚本存在性，不审计脚本体；与 commands 不叠加。注意每仓多跑一条完整测试链会拉长 job 时长）"
+    required: false
+    default: "false"
 
 outputs:
   report-artifact:
@@ -177,6 +181,7 @@ runs:
         CLEANUP_BRANCHES_AUTO="${{ inputs.cleanup-branches-auto }}"
         CODE_SCANNING="${{ inputs.code-scanning }}"
         COMMANDS="${{ inputs.commands }}"
+        MIRROR_CI_SCRIPTS="${{ inputs.mirror-ci-scripts }}"
         if [ -z "$REPOS" ] && [ -z "$OWNER" ]; then
           REPOS="${{ github.repository }}"
         fi
@@ -200,6 +205,7 @@ runs:
         if [ "$CLEANUP_BRANCHES_AUTO" = 'true' ]; then args+=("--cleanup-branches-auto"); fi
         if [ "$CODE_SCANNING" = 'true' ]; then args+=("--code-scanning"); fi
         if [ -n "$COMMANDS" ]; then args+=("--commands" "$COMMANDS"); fi
+        if [ "$MIRROR_CI_SCRIPTS" = 'true' ]; then args+=("--mirror-ci-scripts"); fi
         args+=("--verbose")
         node "${{ github.action_path }}/packages/cli/dist/bin.mjs" "${args[@]}"
       shell: bash
