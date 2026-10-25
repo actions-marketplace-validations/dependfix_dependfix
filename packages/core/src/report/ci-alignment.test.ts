@@ -141,6 +141,24 @@ describe('describeCiAlignment', () => {
         expect(failed.notes.join('\n')).not.toContain('other.yml')
         expect(healthy.notes.some((note) => note.includes('非本 PR 引入'))).toBe(false)
     })
+
+    it('mirror 开启时披露「已镜像执行 N 条 / 跳过 M 条」（0 条也展示，证明开关生效）', () => {
+        const withMirror = describeCiAlignment(makeRecord({
+            mirrored: ['pnpm run coverage'],
+            mirrorSkipped: [
+                { command: 'docker build -t app .', reason: 'unsupported-command' },
+                { command: 'pnpm run e2e', reason: 'over-limit' },
+            ],
+        }))
+        const emptyMirror = describeCiAlignment(makeRecord({ mirrored: [], mirrorSkipped: [] }))
+
+        expect(withMirror.notes[0]).toBe('已镜像执行 1 条 / 跳过 2 条')
+        expect(emptyMirror.notes[0]).toBe('已镜像执行 0 条 / 跳过 0 条')
+    })
+
+    it('mirror 关闭（字段缺省）时不渲染镜像行（与现状等价）', () => {
+        expect(describeCiAlignment(makeRecord()).notes.some((note) => note.includes('已镜像执行'))).toBe(false)
+    })
 })
 
 describe('isFailedWorkflowConclusion', () => {
@@ -164,6 +182,22 @@ describe('formatCiAlignmentLines / Section', () => {
 
     it('无执行命令时给出显式占位（不渲染空命令链）', () => {
         expect(formatCiAlignmentLines(makeRecord({ commands: [] }))[0]).toContain('本次未执行验证命令')
+    })
+
+    it('mirror 行进入正文区块且总行数仍 ≤5（优先级最高）', () => {
+        const lines = formatCiAlignmentLines(makeRecord({
+            mirrored: ['pnpm run coverage'],
+            mirrorSkipped: [{ command: 'docker build -t app .', reason: 'unsupported-command' }],
+            workflows: [{
+                path: '.github/workflows/ci.yml',
+                categories: ['lint'],
+                unrecognized: ['pnpm test:e2e', 'pnpm format', 'pnpm release'],
+            }],
+            defaultBranchHealth: [{ path: '.github/workflows/ci.yml', conclusion: 'failure' }],
+        }))
+
+        expect(lines.length).toBe(5)
+        expect(lines[2]).toBe('- 已镜像执行 1 条 / 跳过 1 条')
     })
 
     it('多仓库共享总行预算并显式收尾', () => {

@@ -413,9 +413,18 @@ function actionDetails(action: FixAction, error?: string): string {
                 return action.strategy
                     ? `${action.strategy}: ${action.diff ?? ''}`
                     : action.diff ?? '—'
-            case 'verification':
-                // 既有失败（修复前即红）不归因本次改动，必须在报告层可与「本次引入的失败」区分
-                return action.preExisting ? '既有失败（修复前即红，未归因本次改动）' : '—'
+            case 'verification': {
+                // 既有失败（修复前即红）不归因本次改动，必须在报告层可与「本次引入的失败」区分；
+                // source 逐条标注命令来源（默认链 / 仓库自定义链 / CI 镜像脚本）
+                const parts: string[] = []
+                if (action.preExisting) {
+                    parts.push('既有失败（修复前即红，未归因本次改动）')
+                }
+                if (action.commandSource) {
+                    parts.push(`source=${action.commandSource}`)
+                }
+                return parts.length > 0 ? parts.join('；') : '—'
+            }
             case 'branch-cleanup':
                 return action.diff ?? '—'
             case 'code-scanning-fix':

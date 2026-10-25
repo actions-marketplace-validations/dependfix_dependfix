@@ -150,6 +150,15 @@ export interface FixActionFamily {
 }
 
 /**
+ * 验证命令来源。
+ *
+ * - `default`：引擎默认验证链（`DEFAULT_VERIFY_COMMANDS`）
+ * - `repo-config`：仓库级自定义链（CLI `--commands` / Action `commands` / 平台 `verifyCommands`）
+ * - `ci-mirror`：`--mirror-ci-scripts` 追加的目标仓库 CI 独有脚本
+ */
+export type VerificationCommandSource = 'default' | 'repo-config' | 'ci-mirror'
+
+/**
  * 修复动作记录（DependencyFixResult / LockfileRepairResult / VerificationResult 的扁平化表示）。
  */
 export interface FixAction {
@@ -168,6 +177,11 @@ export interface FixAction {
      * （目标仓库本就为红，如长期失败的测试套件）→ 不归因本次改动，交付门禁不据此回滚。
      */
     preExisting?: boolean
+    /**
+     * 仅 `type === 'verification'` 时有意义：该命令来自默认链 / 仓库自定义链 / CI 镜像脚本。
+     * 报告据此逐条标注来源（同一次运行可能混有三种来源）。
+     */
+    commandSource?: VerificationCommandSource
     /**
      * 仅失败动作有意义：该失败为**环境性安装失败**
      * （信号终止 / 超时 / 无 stderr 诊断：无法归因目标仓库）→ 不计入「本次改动引入的失败」

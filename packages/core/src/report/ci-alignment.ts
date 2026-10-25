@@ -9,7 +9,8 @@
 // - 「本次执行但 CI 未跑」= 本次更严格，披露不判不一致；
 // - 「CI 运行但本次未执行」= 口径缺口，判不一致；
 // - 无法解析 / 非法 YAML / 无 workflow → 未能读取 CI 配置（不阻断运行）；
-// - 只描述命令口径，不承诺 CI 结果。
+// - 只描述命令口径，不承诺 CI 结果；
+// - `--mirror-ci-scripts` 的 `mirrored` / `mirrorSkipped` 只做披露与审计，不参与比对判定。
 
 /** 参与口径比对的验证命令类别（install 等准备类命令不参与）。 */
 export type VerifyCommandCategory = 'lint' | 'build' | 'typecheck' | 'test'
@@ -32,6 +33,21 @@ export interface CiWorkflowEvidence {
     categories: VerifyCommandCategory[]
     /** 带包管理器但脚本名无法归类的命令（如 `pnpm test:e2e`；最多保留 5 条） */
     unrecognized: string[]
+}
+
+/**
+ * CI 脚本镜像跳过原因。
+ *
+ * - `unsupported-command`：不是「包管理器 + 脚本名」形态（`docker build` / `gh` / 任意 shell / 带 filter 等）
+ * - `script-not-found`：脚本名可解析，但目标仓库 `package.json#scripts` 中不存在
+ * - `over-limit`：可执行候选超出单次运行上限（按 workflow 顺序取前 N 条）
+ */
+export type CiMirrorSkipReason = 'unsupported-command' | 'script-not-found' | 'over-limit'
+
+/** 一条被跳过的 CI 镜像命令（`command` 为原始片段，超长时截断到 200 字符）。 */
+export interface CiMirrorSkipped {
+    command: string
+    reason: CiMirrorSkipReason
 }
 
 /** 默认分支上口径依据 workflow 的最近一次运行结论。 */
@@ -74,6 +90,16 @@ export interface CiAlignmentRecord {
     healthUnavailableReason?: string
     /** 比对依据的默认分支名（API 返回默认分支或配置取值；未知时缺省） */
     defaultBranch?: string
+    /**
+     * 本次**实际执行**的 CI 镜像命令（`--mirror-ci-scripts` 开启时有意义；关闭时缺省）。
+     * 与 `commands` 同口径：只含真正 spawn 过的命令（默认链首失败短路时为空）。
+     */
+    mirrored?: string[]
+    /**
+     * 被跳过的 CI 镜像命令与原因（仅 `--mirror-ci-scripts` 开启时记录；已按命令 + 原因去重）。
+     * 本字段只做披露与审计，不影响验证结论、exit code 与交付判定。
+     */
+    mirrorSkipped?: CiMirrorSkipped[]
 }
 
 /** 单条记录的可渲染描述（PR 正文与报告共用，避免双份文案漂移）。 */
@@ -154,6 +180,11 @@ export function describeCiAlignment(record: CiAlignmentRecord): CiAlignmentDescr
             break
     }
 
+    if (record.mirrored !== undefined || record.mirrorSkipped !== undefined) {
+        // 镜像开关开启时总是披露（0 条也展示，证明开关生效而非静默未执行）
+        notes.push(`已镜像执行 ${record.mirrored?.length ?? 0} 条 / 跳过 ${record.mirrorSkipped?.length ?? 0} 条`)
+    }
+
     if (record.status !== 'unreadable' && record.extraInExecution.length > 0) {
         notes.push(`本仓库 CI 未跑 ${categoryLabels(record.extraInExecution)}，本次已验证`)
     }
@@ -184,7 +215,7 @@ function truncateCommandChain(commands: readonly string[], maxLength = 200): str
  * 生成单仓库 PR 正文字行（≤5 行）：命令链 + 结论句 + 最多 3 条补充说明。
  *
  * PR 正文行预算固定（避免正文膨胀），所以补充说明按固定优先级截断
- * （多余覆盖 → 未识别命令 → 默认分支失败）。
+ * （CI 脚本镜像 → 多余覆盖 → 未识别命令 → 默认分支失败）。
  */
 export function formatCiAlignmentLines(record: CiAlignmentRecord): string[] {
     const description = describeCiAlignment(record)

@@ -574,6 +574,22 @@ describe('generateMarkdownReport', () => {
 
         expect(md).toContain('既有失败（修复前即红，未归因本次改动）')
     })
+
+    it('verification action 逐条标注命令来源（source=default / repo-config / ci-mirror）', () => {
+        const result = {
+            ...EMPTY_RUN_RESULT,
+            actions: [
+                makeAction({ type: 'verification', target: 'pnpm lint', success: true, commandSource: 'default' }),
+                makeAction({ type: 'verification', target: 'pnpm test', success: true, commandSource: 'repo-config' }),
+                makeAction({ type: 'verification', target: 'pnpm run coverage', success: true, commandSource: 'ci-mirror' }),
+            ],
+        }
+        const md = generateMarkdownReport(result)
+
+        expect(md).toContain('source=default')
+        expect(md).toContain('source=repo-config')
+        expect(md).toContain('source=ci-mirror')
+    })
 })
 
 describe('generateMarkdownReport supply chain warnings', () => {
