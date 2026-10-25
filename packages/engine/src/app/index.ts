@@ -15,6 +15,7 @@ import {
     type RepositoryResult,
     type FixAction,
     type FixError,
+    type RepeatedAttemptRecord,
 } from '@dependfix/core'
 import { fromApp, type AuthProvider } from '../auth'
 import {
@@ -26,9 +27,8 @@ import {
     computeFixFingerprint,
     computeFixAndPrPlan,
     findDependfixOpenPR,
-    commentOnPullRequest,
-    addLabelToPullRequest,
-    type DependfixOpenPR,
+    ClosedAttemptIndex,
+    collectAttemptMarkers,
     discoverRepositories,
     mergeRepositories,
     filterExplicitRepositories,
@@ -72,6 +72,7 @@ import { findInstallBlockedReposWithFixes, hasDeliverableFixes } from './deliver
 import { prepareDeliveryHygiene } from './git-exclude'
 import { rollbackForSkippedDelivery, skipDeliveryForInstallFailure } from './skipped-delivery'
 import { pullRequestCreationHint } from './token-hints'
+import { handleDuplicatePRs } from './duplicate-prs'
 
 // 仅 re-export 平台直接调用的辅助函数（PR 创建在平台 A 模式复用）
 export { buildPrTitle } from './helpers'
@@ -205,6 +206,12 @@ export class DependfixApp {
     private readonly verificationCheckpoints: VerificationCheckpoint[] = []
     /** 验证链口径记录（run 级；`verifyProject` 写入，报告与 PR 正文消费） */
     private readonly ciAlignment: CiAlignmentRecord[] = []
+    /** 最近关闭 PR 的尝试索引（run 级缓存；仅 fix-and-pr 模式参与判定） */
+    private readonly attemptIndex: ClosedAttemptIndex
+    /** 同告警尝试记录（run 级；报告与 PR 正文标记数据源） */
+    private readonly attemptTracking: RepeatedAttemptRecord[] = []
+    /** PR 落点仓库（第一个仓库；尝试标记只能写进该仓库的 PR） */
+    private attemptRepo: string | undefined
 
     constructor(options: DependfixAppOptions) {
         this.workDir = options.workDir ?? process.cwd()
@@ -232,6 +239,9 @@ export class DependfixApp {
         if (this.config.githubApp) {
             this.githubAppAuth = fromApp(this.config.githubApp)
         }
+
+        // 同告警尝试索引：运行级缓存（每仓库每轮只查一次已关闭 PR）
+        this.attemptIndex = new ClosedAttemptIndex({ logger: this.logger })
 
         // Code Scanning 规则分类配置：env `CODE_SCANNING_RULES_CONFIG_PATH`
         // 指向的 JSON 文件加载并替换默认分类表；env 未设 / 文件缺失 / 解析失败
@@ -287,6 +297,9 @@ export class DependfixApp {
             finishedAt: this.finishedAt,
             authProvider: this.githubAppAuth,
             ciAlignment: this.ciAlignment,
+            attemptTracking: this.attemptTracking,
+            attemptIndex: this.attemptIndex,
+            attemptRepo: this.attemptRepo,
         }
     }
 
@@ -505,6 +518,8 @@ export class DependfixApp {
     private async executeFixAndPrMode(): Promise<void> {
         const client = createConfiguredGitHubClient(this.config)
         const repositories = await this.resolveRepositories(client)
+        // PR 落点仓库 = 第一个仓库（尝试标记只能写进它的 PR；其余仓库不参与尝试计数）
+        this.attemptRepo = repositories[0]
 
         // 1. Run fix pipeline for all repos (same as fix mode)
         // （config 校验已保证 fix-and-pr 仅 github-dependabot 源，client 恒非 null）
@@ -629,6 +644,7 @@ export class DependfixApp {
             const prBody = generatePRBody(
                 runResult,
                 plan.supersedePRs.map((pr) => pr.number),
+                collectAttemptMarkers(this.attemptTracking, this.allActions),
             )
             const prTitle = buildPrTitle(this.summary, this.allActions)
 
@@ -660,7 +676,14 @@ export class DependfixApp {
             // 6.5 Duplicate PR handling: comment + label on the new PR
             // pointing to the superseded PRs (avoid manual dedup by users).
             // Requires `issues: write` token scope; failure is logged but not fatal.
-            await this.handleDuplicatePRs(client, owner, repo, pr.number, plan.supersedePRs)
+            await handleDuplicatePRs({
+                client,
+                owner,
+                repo,
+                newPRNumber: pr.number,
+                supersededPRs: plan.supersedePRs,
+                logger: this.logger,
+            })
 
             // 7. Close superseded PRs only after new PR created successfully
             await closeSupersededPRs(this.ctx, client, owner, repo, plan.supersedePRs)
@@ -693,63 +716,6 @@ export class DependfixApp {
         const client = createConfiguredGitHubClient(this.config)
         for (const repo of this.config.repositories) {
             await runBranchCleanupForRepo(this.ctx, client, repo)
-        }
-    }
-
-    /**
-     * 重复 PR 处理：在新 PR 上添加评论指向被取代的旧 PR + 添加 `duplicate` label。
-     *
-     * 失败仅记录 warning（家务活 best-effort），不阻断主流程：
-     * - 新 PR 已创建成功，用户已可访问
-     * - 评论失败不影响 PR 本身的可用性
-     * - 但需要 `issues: write` token scope（比 `pull-requests: write` 宽）；
-     *   若 token 权限不足，error 会被记录但不阻塞
-     */
-    private async handleDuplicatePRs(
-        client: Octokit,
-        owner: string,
-        repo: string,
-        newPRNumber: number,
-        supersededPRs: DependfixOpenPR[],
-    ): Promise<void> {
-        if (supersededPRs.length === 0) {
-            return
-        }
-
-        const supersededLinks = supersededPRs
-            .map((pr) => `- [#${pr.number}](${pr.htmlUrl})`)
-            .join('\n')
-
-        const commentBody = [
-            '## ⚠️ Duplicate PR Notice',
-            '',
-            'This PR supersedes the following dependfix PR(s) with different content:',
-            '',
-            supersededLinks,
-            '',
-            'The superseded PR(s) have been closed. Please review this PR as the new canonical fix.',
-        ].join('\n')
-
-        try {
-            await commentOnPullRequest(client, owner, repo, newPRNumber, commentBody)
-            this.logger.info(`Added duplicate notice comment to PR #${newPRNumber}`)
-        } catch (error: unknown) {
-            const message = toErrorMessage(error)
-            this.logger.warn(
-                `Failed to add duplicate notice comment to PR #${newPRNumber}: ${message}`
-                + '（token may lack `issues: write` scope）',
-            )
-        }
-
-        try {
-            await addLabelToPullRequest(client, owner, repo, newPRNumber, ['duplicate'])
-            this.logger.info(`Added 'duplicate' label to PR #${newPRNumber}`)
-        } catch (error: unknown) {
-            const message = toErrorMessage(error)
-            this.logger.warn(
-                `Failed to add 'duplicate' label to PR #${newPRNumber}: ${message}`
-                + '（token may lack `issues: write` scope）',
-            )
         }
     }
 

@@ -12,10 +12,12 @@ import {
     type FixError,
     type Logger,
     type NormalizedSecurityAlert,
+    type RepeatedAttemptRecord,
     type RepositoryResult,
     type RunSummary,
 } from '@dependfix/core'
 import { stageAndCommit } from '../github/pr-creator'
+import type { ClosedAttemptIndex } from '../github/attempt-history'
 import { type AuthProvider } from '../auth'
 import {
     compareSemver,
@@ -144,6 +146,23 @@ export interface AppContext {
      * 并集未增长时复用既有记录与首轮健康预检结果，避免重复发起 API 调用。
      */
     ciAlignment?: CiAlignmentRecord[]
+    /**
+     * 同告警尝试记录（run 级累积；`repo-fix` 的计划阶段写入，报告与 PR 正文标记消费）。
+     * 缺省（测试直接构造 ctx）⇒ 不记录。
+     */
+    attemptTracking?: RepeatedAttemptRecord[]
+    /**
+     * 最近关闭 dependfix PR 的尝试索引（运行级缓存；仅 fix-and-pr 模式注入）。
+     * 缺省 ⇒ 不做同告警尝试判定（行为与引入前一致）。
+     */
+    attemptIndex?: ClosedAttemptIndex
+    /**
+     * PR 落点仓库（`owner/repo`，= 本次运行的第一个仓库）。
+     *
+     * 尝试标记只能写进该仓库的 PR，故只有该仓库的告警参与尝试计数；多仓运行其余仓库
+     * 不做跳过判定（避免「在 A 仓计 B 仓的尝试」造成永久跳过）。
+     */
+    attemptRepo?: string
 }
 
 // ---------------------------------------------------------------------------

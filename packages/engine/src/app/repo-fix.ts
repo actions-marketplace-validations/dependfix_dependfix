@@ -46,6 +46,7 @@ import { recordUpgradeFailure } from './upgrade-failure'
 import { ensureVerificationBaseline, finalizeRepoFix, recordInstallBaselineFailure } from './repo-fix-finalize'
 import { recordVerificationCheckpoint, type VerificationCheckpoint } from './verification-checkpoint'
 import { applyAutoMajorUpgrades } from './repo-fix-major'
+import { applyRepeatedFailureSkips } from './repeated-failure'
 
 // ---------------------------------------------------------------------------
 // 单仓库修复管线（fix / fix-and-pr 模式共用）
@@ -130,11 +131,16 @@ export async function processRepoFix(
         // 只读抓取前置（不写工作区）：本仓库是否有工作决定是否付一次修复前基线验证链——
         // 零告警仓库无任何写操作，其验证失败在 pristine 工作区下必然也是既有失败（判定见 ensureVerificationBaseline）
         const alertInputs = await fetchRepoFixInputs(ctx, client, repo, progress)
+        // 告警分区 + 同告警尝试判定（纯读）：在基线采样之前完成，使「全部命中尝试上限」与
+        // 零告警仓库同语义（无任何写操作 ⇒ 不必付一次完整基线验证链）
+        const planned = await planRepoFixAlerts(ctx, client, repo, alertInputs)
         // 修复前按需采样验证基线（首个有工作的仓库处采样，在任何改动之前；用于区分「本次引入」与「既有」失败）
-        const { exemptAttribution, baseline } = await ensureVerificationBaseline(ctx, repo, { hasWork: alertInputs.length > 0 })
+        const { exemptAttribution, baseline } = await ensureVerificationBaseline(ctx, repo, {
+            hasWork: alertInputs.length - planned.skippedCount > 0,
+        })
         // pristine 安装失败 ⇒ overrides 安装必然同因失败；逐包重试只会耗尽预算，写盘前快速失败
         const installBaselineFailure = recordInstallBaselineFailure(ctx, repo, baseline)
-        const sets = await prepareRepoFixSets(ctx, repo, alertInputs, progress)
+        const sets = await prepareRepoFixSets(ctx, repo, planned, alertInputs, progress)
         if (installBaselineFailure) {
             ctx.logger.warn(`[multi-version] ${repo}: dependency upgrade chain skipped (pristine install baseline failed)`)
         } else {
@@ -216,12 +222,66 @@ async function fetchRepoFixInputs(
 }
 
 /**
- * 步骤 1b（写盘段）：Code Scanning 模板修复 → 依赖告警分区。
+ * 告警分区 + 同告警尝试判定的只读产物（在基线采样之前完成，不写工作区）。
+ */
+interface PlannedRepoFixAlerts {
+    rootManifestAlerts: NormalizedSecurityAlert[]
+    memberManifestAlerts: MemberManifestAlert[]
+    /** 子目录 / 根直接依赖 lockfile 等需人工复核的告警（不进入修复链路） */
+    submanifestAlerts: NormalizedSecurityAlert[]
+    /** 因同告警尝试上限被跳过的告警数（用于 hasWork 判定） */
+    skippedCount: number
+}
+
+/**
+ * 步骤 1b（只读段）：依赖告警分区 + 同告警尝试判定。
+ *
+ * 拆出理由：两者都不写盘，可以在**修复前基线采样之前**跑完；这样「全部告警命中尝试上限」
+ * 的运行不会为一次必然被跳过的工作付完整验证链，与零告警仓库的「无改动即豁免」同语义。
+ */
+async function planRepoFixAlerts(
+    ctx: RepoFixCtx,
+    client: Octokit | null,
+    repo: string,
+    limited: NormalizedSecurityAlert[],
+): Promise<PlannedRepoFixAlerts> {
+    // 子目录 / 根直接依赖 lockfile 告警（防护：docs vite 告警曾误降级根 vite@8→6）→ 剔除修复链路
+    // 收尾审查遗留修复：code-scanning / code-quality 告警（manifestPath 为源码路径）不参与依赖清单分区，
+    // 避免全部落 sub 桶产生 skip 计数噪音（其可见性由 §Code Scanning Suggestions / §Code Quality Findings 承担）
+    const dependencyAlerts = limited.filter((a) => a.source !== 'code-scanning' && a.source !== 'code-quality')
+    const partition = partitionSubmanifestAlerts(dependencyAlerts, ctx.workDir)
+    const { rootAlerts: rootManifestAlerts, memberAlerts: memberManifestAlerts } = await applyRepeatedFailureSkips({
+        ctx,
+        index: ctx.attemptIndex,
+        client,
+        repo,
+        attemptRepo: ctx.attemptRepo,
+        rootAlerts: partition.root,
+        memberAlerts: partition.member,
+    })
+    const skippedCount = (partition.root.length + partition.member.length)
+        - (rootManifestAlerts.length + memberManifestAlerts.length)
+    if (skippedCount > 0) {
+        ctx.logger.info(
+            `[repeated-failure] ${repo}: ${skippedCount} alert(s) skipped at the attempt limit — upgrade chain not started for them`,
+        )
+    }
+    return {
+        rootManifestAlerts,
+        memberManifestAlerts,
+        submanifestAlerts: partition.sub,
+        skippedCount,
+    }
+}
+
+/**
+ * 步骤 1c（写盘段）：Code Scanning 模板修复 → 修复链路前置计数（必须在基线采样之后）。
  * @returns 依赖告警分区产物（root/member/lockfilePath）
  */
 async function prepareRepoFixSets(
     ctx: RepoFixCtx,
     repo: string,
+    planned: PlannedRepoFixAlerts,
     limited: NormalizedSecurityAlert[],
     progress: RepoFixProgress,
 ): Promise<LockfileAlertSets> {
@@ -231,11 +291,7 @@ async function prepareRepoFixSets(
     progress.fixed += csCounts.fixed
     progress.failed += csCounts.failed
 
-    // 2.1 子目录 / 根直接依赖 lockfile 告警（防护：docs vite 告警曾误降级根 vite@8→6）→ 剔除修复链路
-    // 收尾审查遗留修复：code-scanning / code-quality 告警（manifestPath 为源码路径）不参与依赖清单分区，
-    // 避免全部落 sub 桶产生 skip 计数噪音（其可见性由 §Code Scanning Suggestions / §Code Quality Findings 承担）
-    const dependencyAlerts = limited.filter((a) => a.source !== 'code-scanning' && a.source !== 'code-quality')
-    const { root: rootManifestAlerts, member: memberManifestAlerts, sub: submanifestAlerts } = partitionSubmanifestAlerts(dependencyAlerts, ctx.workDir)
+    const { rootManifestAlerts, memberManifestAlerts, submanifestAlerts } = planned
     if (submanifestAlerts.length > 0) {
         ctx.logger.warn(
             `[alerts] ${submanifestAlerts.length} alert(s) from sub-directory / root-direct-dep manifest(s) skipped — manual review required: ${submanifestAlerts.map((a) => `${a.packageName} (${a.manifestPath})`).join(', ')}`,

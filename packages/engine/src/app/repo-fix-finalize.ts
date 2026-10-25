@@ -102,15 +102,20 @@ export async function finalizeRepoFix(
     options: { exemptAttribution?: boolean, client?: Octokit | null } = {},
 ): Promise<void> {
     let lockfileRepairFailed = false
-    if (progress.alertsCount > 0) {
+    // 归因豁免（`exemptAttribution`）的前提是「本次没有写过任何文件」——因此零工作仓库
+    // 连 lockfile repair 也不跑：repair 若真改了文件，`noChanges` 豁免就不再成立，
+    // repair 引起的失败会被误标为既有失败（修复器尝试前缀的归因评审项）。
+    if (progress.alertsCount > 0 && options.exemptAttribution !== true) {
         const repairAction = await tryLockfileRepair(ctx, repo)
         ctx.allActions.push(repairAction)
         lockfileRepairFailed = !repairAction.success && !repairAction.noOp
         if (repairAction.success && !repairAction.noOp) {
             progress.lockfileRepaired = true
         }
-    } else {
+    } else if (progress.alertsCount === 0) {
         ctx.logger.info(`[skip] No alerts for ${repo} — skipping lockfile repair`)
+    } else {
+        ctx.logger.info(`[skip] No effective work for ${repo} — skipping lockfile repair (workspace stays pristine for attribution)`)
     }
     // 仅当首次 repair 真正改了文件时，选择性回滚后才需要重做；noOp 不额外跑安装
     const lockfileRepairChanged = progress.lockfileRepaired
