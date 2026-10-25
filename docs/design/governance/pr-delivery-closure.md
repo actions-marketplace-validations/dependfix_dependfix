@@ -142,36 +142,42 @@ alert ──▶ 家族解析（M48.1）──▶ 升级 + 验证（M48.2）─�
 attemptKey = sha256([source, packageName, targetVersion, planStrategy].join('\u0000')).slice(0, 16)
 ```
 
-- `planStrategy` = 本次计划的修复策略（如 `direct-upgrade` / `versioned-override` / `family-lockstep`）。
+- `planStrategy` 是**计划**标签（`direct-upgrade` / `override` / `member-upgrade` / `family-lockstep`），由告警 `dependencyType` + manifest 归属 + 家族清单解析；执行结果策略（`versioned-override` 等）不参与，两类标签不得混用。
 - 该键在**创建 PR 前**即可计算，不依赖失败文本；命名空间隐含于仓库作用域（读取按单仓索引，键本身不含 repo）。
 - 若 M48.5 开启并观察到 CI 失败，可附带 `failureSignature`（失败命令 + 首 2KB 错误归一化）写入标记；**签名只增强证据，不改变计数口径**。
 
 ### 6.2 载体与计数
 
-**决策 D3**：PR 正文 HTML 注释为权威载体（CLI / Action / 平台通用，无需迁移）：
+**决策 D3**：PR 正文 HTML 注释为权威载体（CLI / Action 通用，无需迁移；平台交付链不写标记，见 §6.4）：
 
 ```html
 <!-- dependfix:attempt key=<key> n=<n> fp=<optional> failed=<0|1|?> -->
 ```
 
-- 创建 PR 时写入 `n` = 同 key 的最近关闭 PR 数 + 1；`fp` / `failed` 仅在 M48.5 观察到结果后 PATCH 回写。
-- 读取：按仓库缓存一次最近 50 条 `state:'closed'` PR 索引（运行级缓存，不按告警重复拉取），按 `dependfix/auto-fix-` 前缀 + `key` 匹配。
-- 标记解析失败按未命中处理（fail-open），不误跳过。
+- 标记写在正文**头部**（正文超 64KB 时从尾部截断，尾部标记会被丢）；一个 PR 可携带多条标记（一次修复覆盖多条告警），同键去重取最大 `n`。
+- 创建 PR 时写入 `n` = 同 key 的最近关闭 PR 数 + 1（同日被 supersede 关闭的同键 PR 不计入该次快照，故 `n` 可能小于下一次实际计数；跳过判定按 PR 数而非 `n`，不影响正确性）；`fp` / `failed` 仅在 M48.5 观察到结果后 PATCH 回写。
+- 只有**真正执行过**的键才写标记：计划阶段记录但随后因 pristine 安装基线失败 / 验证门禁回滚 / 无交付物而未执行的键不写（否则会白耗一次尝试额度）。
+- 读取：按仓库缓存一次最近 50 条 `state:'closed'` PR 索引（运行级缓存，不按告警重复拉取），按 `dependfix/auto-fix-` 前缀 + `key` 匹配；**只计未合并**的关闭 PR（合并即修复落地，不消耗尝试额度）。
+- 标记解析失败 / 查询失败按未命中处理（fail-open）：只可能多尝试一次，不会误跳过。
 
 ### 6.3 命中行为
 
-**决策 D7**：同 key 已有 2 个关闭 PR（即第 3 次尝试）起跳过并记账；前两次允许尝试。**判定时点**：家族 / 策略解析后、执行升级前；命中即跳过，不白跑安装与验证链。
+**决策 D7**：同 key 已有 2 个关闭 PR（即第 3 次尝试）起跳过并记账；前两次允许尝试。**判定时点**：告警分区完成、**修复前基线采样与任何写盘之前**；命中即跳过，不白跑升级安装与验证链。
 
-- 跳过时：`FixAction.noOp = true`；`alertsSkippedByReason['repeated-failure'] += 1`（`SKIP_REASONS` 新增 key，保持 `sum(...) === alertsSkipped`）；不创建 PR、不增 `alertsFailed`。
-- `--retry-failed`（CLI）/ `retry-failed`（Action input）显式忽略命中，强制再试一次，并在报告标注「人工强制」。
+- 跳过时：`FixAction.noOp = true`（`strategy: 'repeated-failure'`）；`alertsSkippedByReason['repeated-failure'] += 1`（`SKIP_REASONS` 新增 key，保持 `sum(...) === alertsSkipped`）；不创建 PR、不增 `alertsFailed`。
+- 全部告警命中时与零告警仓库同语义：不采样修复前基线（`hasWork = 剩余告警数 > 0`）。
+- `--retry-failed`（CLI）/ `retry-failed`（Action input）/ env `DEPENDFIX_RETRY_FAILED` 显式忽略命中，强制再试一次，报告 `Repeated Failure Attempts` 段标注 `forced (manual retry)`。
 - 目标版本变化、advisory 撤回 / 关闭 → key 自然失效。
 
 ### 6.4 已知边界
 
-- 关闭 PR 不在最近 50 条时可能漏命中（fail-open）。
+- 关闭 PR 不在最近 50 条、或查询失败时可能漏命中（fail-open）。
 - 无 CI 判定即被人工关闭的 PR 计为一次尝试；`--retry-failed` 为逃生通道。
 - 指纹依赖 PR 正文未被人工改写；被改写后退化为未命中。
-- 不在本阶段做「按失败签名跨仓库聚合」；平台侧不建表。
+- 跳过只覆盖依赖升级链路，且与「无工作」同语义：**全部**告警命中时不采样修复前基线、也不跑 lockfile repair（保持工作区 pristine，否则 `noChanges` 归因豁免前提被打破），仅保留终验；**部分**命中时 repair 与终验照既有语义执行。
+- 多仓运行只有 PR 落点仓库（第一个仓库）参与计数，其余仓库不判定（避免在 A 仓计 B 仓的尝试）。
+- 平台交付链（容器执行器固定 `fix` 模式 + `platform-delivery` 建 PR）不产出也不读取尝试标记：平台建的 dependfix PR 关闭后**不消耗**尝试额度；跨 runner 混用（平台关 PR、CLI 计数）只会少计（fail-open），不会误跳过。平台侧计数支持为独立候选（backlog），不在本阶段。
+- 不在本阶段做「按失败签名跨仓库聚合」；平台侧不建表、不加设置页开关。
 
 ## 7. M48.4 提交面白名单与 YAML 定点编辑
 

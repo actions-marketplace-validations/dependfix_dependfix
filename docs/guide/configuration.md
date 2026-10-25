@@ -41,6 +41,7 @@
 | `commands` | — | `string[]` | — | 自定义验证命令（仅 CLI `--commands`）；**整链替换**默认链，不做合并 |
 | `rollbackGranularity` | `DEPENDFIX_ROLLBACK_GRANULARITY` | `unit` / `repo` | `unit` | 验证失败回滚粒度：`unit` 回退最近一个已通过 probe 的变更单元并重验一次（保留更早单元）；`repo` 保持整仓 `git reset --hard` 逃生语义。对应 CLI `--rollback-granularity` |
 | `mirrorCiScripts` | `DEPENDFIX_MIRROR_CI_SCRIPTS` | `boolean` | `false` | 把目标仓库 CI 独有的 `pnpm` / `npm` / `yarn` 脚本追加到验证链（CLI `--mirror-ci-scripts`；Action `mirror-ci-scripts`）。开启后在默认链**之后**执行，最多 3 条、首失败即停；`docker build` / `gh` / 任意 shell 与非单一形态片段（flag / env 赋值 / 额外参数；install 类命令视为已覆盖）只记 `mirrorSkipped` 不执行；**只校验命令形态与脚本存在性，不审计脚本体**（脚本内命令与 `pre`/`post` 钩子照常执行）；与默认链共用同一超时（`DEPENDFIX_VERIFY_TIMEOUT_MS`）与运行级取消面，并同样纳入修复前基线采样（基线已红 → 既有失败，不回滚、不改 exit code）。显式 `commands` 整链替换，**不与 mirror 叠加**；平台沿用默认关闭。详见 [对外 PR 交付闭环设计 §5](../design/governance/pr-delivery-closure.md) |
+| `retryFailed` | `DEPENDFIX_RETRY_FAILED` | `boolean` | `false` | 忽略同告警尝试上限并强制再试（CLI `--retry-failed`；Action `retry-failed`）。仅 `fix-and-pr` 生效：同一告警 / 同一目标版本 / 同一修复策略连续两次关闭后，第 3 次起**不执行升级、不建 PR**，落 `alertsSkippedByReason['repeated-failure']`（报告 `Skipped: Repeated failure`）；开启后仍执行并在报告 `Repeated Failure Attempts` 段标注 `forced (manual retry)`。计数载体是 PR 正文 HTML 注释（只计未合并的关闭 PR，最近 50 条，读取失败 fail-open）；全部命中时与零告警仓库同语义（不采样修复前基线）。详见 [对外 PR 交付闭环设计 §6](../design/governance/pr-delivery-closure.md#6-m483-同告警尝试指纹去重) |
 | `history` | —（仅 CLI `--history`） | `string` | — | 查询仓库历史运行摘要（读 `dependfix-reports/index.json`，倒序时间，计数为仓库级口径），**不执行扫描**、不要求 token/仓库配置；与运行参数并存时 history 优先、其余参数忽略 |
 
 ## GitHub 认证 Token 权限映射
@@ -233,6 +234,8 @@ export DEPENDFIX_ALERTS_TOKEN=github_pat_xxx
 export DEPENDFIX_ALERTS_SOURCE=pnpm-audit
 # 验证链：把目标仓库 CI 独有的包管理器脚本追加到默认链之后（默认关闭；最多 3 条）
 export DEPENDFIX_MIRROR_CI_SCRIPTS=false
+# 同告警尝试上限：默认第 3 次起跳过；置 true 强制再试（仅 fix-and-pr 生效）
+export DEPENDFIX_RETRY_FAILED=false
 # 单条验证命令超时（默认 10 分钟；默认链与 CI 镜像脚本共用，默认链内的 pnpm install 仍按本条计时；修复器安装链超时不受影响）
 # export DEPENDFIX_VERIFY_TIMEOUT_MS=600000
 ```
