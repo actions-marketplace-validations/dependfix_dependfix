@@ -40,7 +40,7 @@ features:
       details: 模块边界、依赖分组升级、依赖图与执行矩阵；系统级设计见架构文档。
       link: /design/governance/architecture
     - title: 路线图
-      details: M0-M48 已全部闭环归档（M48 对外 PR 交付闭环于 2026-10-25 归档：家族锁步升级、CI 独有脚本镜像、尝试指纹去重、提交面白名单、PR 后 CI 回环、外部作业归因与合并门禁）；下一阶段 E 通知可信度收口已授权、待规划；插队容量治理规则见规划规范 §3.1.1。
+      details: M0-M48 已全部闭环归档；M49：0.6.0 发版清障进行中（code scanning / 依赖 / Security 门禁 / 发版文档 / 发布验证）；1.0 发布门槛（G1-G8）与批次计划见 design/governance/release-1.0-readiness；插队容量治理规则见规划规范 §3.1.1。
       link: /plan/roadmap
     - title: 当前任务
       details: 查看进行中的开发任务、验收指标与依赖；待办积压与归档历史。

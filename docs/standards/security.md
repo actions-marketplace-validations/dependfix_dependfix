@@ -48,7 +48,7 @@
 ## 5. 依赖与供应链安全 (Dependency & Supply Chain Security)
 
 - **5.1 依赖管理**：定期关注依赖漏洞公告；引入新包须经必要性评估；升级时检查版本发布时间与 diff 并在沙箱中验证；出现「依赖升级了但漏洞还在」时先排查 `pnpm-workspace.yaml` 中同包是否同时存在通用 / 版本化两条覆盖（通用钉定会胜出）——机制与清理以 [development.md §5.1.32](./development.md#51-工程实践规则) 为**唯一权威**。
-- **5.2 供应链信任边界（AI 推荐包与外部工具引入必查）**：**AI 推荐包来源验证**（AI 推荐的依赖包约 20% 在官方 registry 中不存在——安装前必须查官方 registry 页面，警惕 typosquatting 拼写相近包）；**钉版本 + 锁文件**（新增依赖锁定精确版本并提交锁文件；CI 中 GitHub Actions 必须钉不可变版本）；**外部工具 / 技能来源可信**（引入 MCP server / agent / skill / `git+https` 依赖前核对来源仓库 URL 与维护组织，只装官方组织或自有仓库，警惕「伪装成有用文档 / 技能」的诱导信任）；**最小权限**（MCP server 与自动化 agent 不运行于 root、不挂载全盘、数据库端口不暴露公网）；**依赖审计进 CI**（本地抽查不能代替；当前强度为信号级，转正条件见 [§5.6](#56-依赖审计阻断语义信号级--阻断的转正条件2026-09-30-用户决策方案-c)，无可用修复版本的豁免见 [§5.7](#57-无可用修复版本漏洞的审计豁免auditignore2026-10-05)）。
+- **5.2 供应链信任边界（AI 推荐包与外部工具引入必查）**：**AI 推荐包来源验证**（AI 推荐的依赖包约 20% 在官方 registry 中不存在——安装前必须查官方 registry 页面，警惕 typosquatting 拼写相近包）；**钉版本 + 锁文件**（新增依赖锁定精确版本并提交锁文件；CI 中 GitHub Actions 必须钉不可变版本）；**外部工具 / 技能来源可信**（引入 MCP server / agent / skill / `git+https` 依赖前核对来源仓库 URL 与维护组织，只装官方组织或自有仓库，警惕「伪装成有用文档 / 技能」的诱导信任）；**最小权限**（MCP server 与自动化 agent 不运行于 root、不挂载全盘、数据库端口不暴露公网）；**依赖审计进 CI**（本地抽查不能代替；当前强度为信号级，转正条件见 [§5.6](#_5-6-依赖审计阻断语义-信号级-→-阻断的转正条件-2026-09-30-用户决策方案-c)，无可用修复版本的豁免见 [§5.7](#_5-7-无可用修复版本漏洞的审计豁免-audit-ignore-2026-10-05)）。
 - **5.3 修复执行安全（dependfix 自身不得成为漏洞扩散工具）**：dependfix 的核心动作是升级第三方依赖（拉取并执行不可信代码），所有执行路径（本地 CLI / GitHub Action / 平台容器 / 沙箱容器）必须满足以下基线，完整工程化解读见 [沙箱与恶意依赖防护治理](../design/governance/sandbox-security-governance.md)。
   - **执行环境基线（必须）**：**非 root 执行**（镜像 `USER` 降权，不挂载 `docker.sock`、不授予额外特权）；**工作目录隔离**（独立临时目录如 `runs/{runId}/`，执行后清理）；**超时兜底**（每次执行须有总超时，新增命令 / 子进程须自带单命令超时）；**保持 pnpm 默认脚本防护**（不得扩大 lifecycle scripts 执行面，不代目标仓库追加 `allowBuilds` 批准）；**资源与网络**（资源上限 + 执行期网络受限，保留外联日志）。
   - **凭据基线（必须）**：**平台密钥隔离**（`NUXT_ENCRYPTION_KEY` / `AUTH_SECRET` 等永不传入执行进程环境）；**按仓库最小注入**（仅注入本次执行所需最小集合，解密仅执行时内存、用后即弃）；**防泄露通道**（凭据不得进 argv / URL，走 `http.extraheader` 等带外通道；错误消息 / 命令输出 / 报告日志必须脱敏）；**权限面收敛**（扫描不可信仓库必须使用专用低权限 token，不得用全量 scope 的 PAT）。
@@ -72,7 +72,7 @@
 `test.yml` 的 `pnpm audit (all deps, moderate+)` 步骤当前以 `|| true` 运行——**信号级，不阻断**（2026-09-30 用户决策**方案 C（观察期）**：上游新披露 devDeps 漏洞时不应突然把 Test workflow 变红、阻塞无关 PR）。
 
 - **口径权威**：本节为转正条件的权威声明；`.github/workflows/test.yml` 的 audit 步骤注释承载**可复现统计命令**（面向 CI 操作者）。
-- **观察期条件（可判定）**：自存量清零（2026-09-30：audit 由 13 条〔5 moderate / 8 high〕降为 0）起，**连续 3 次 `master` push 的 Test workflow** 中该步骤输出 clean——判据为步骤日志含 `No known vulnerabilities found`。任一 run 不 clean 则计数归零，自其后首个 clean run 重新起算。**豁免提示**：`pnpm-workspace.yaml` 存在 `audit.ignore` 条目时该 clean 字面串不可达（见 [§5.7](#57-无可用修复版本漏洞的审计豁免auditignore2026-10-05)），观察期计数挂起，转阻断前须先移除豁免。
+- **观察期条件（可判定）**：自存量清零（2026-09-30：audit 由 13 条〔5 moderate / 8 high〕降为 0）起，**连续 3 次 `master` push 的 Test workflow** 中该步骤输出 clean——判据为步骤日志含 `No known vulnerabilities found`。任一 run 不 clean 则计数归零，自其后首个 clean run 重新起算。**豁免提示**：`pnpm-workspace.yaml` 存在 `audit.ignore` 条目时该 clean 字面串不可达（见 [§5.7](#_5-7-无可用修复版本漏洞的审计豁免-audit-ignore-2026-10-05)），观察期计数挂起，转阻断前须先移除豁免。
 - **统计命令**（第三方可复现，需 `gh` 已认证）：`gh run list --workflow test.yml --branch master --event push --limit 3 --json databaseId` 取最近 3 个 run → `gh run view <id> --json jobs` 取 Test job → `gh run view --job <job> --log | grep -q "No known vulnerabilities found"` 判定 clean。
 - **转阻断配套**：移除 `|| true` 时**必须同时追加 `--ignore-registry-errors`**（registry 返回错误时退出码 0），避免 registry 故障把 CI 判红——这是「阻断语义」与「registry 可用性」两个独立维度的分离。
 - **触发转正时的动作清单**：① 移除 `|| true` 并追加 `--ignore-registry-errors`；② 更新本节与 workflow 注释（记录转正日期 + 作为依据的 3 个 run id）；③ `--audit-level=moderate` 维持不变。
@@ -86,7 +86,7 @@
 - **配置位置**：`pnpm-workspace.yaml` 顶层 `audit.ignore`（GHSA 列表）；脚本命令维持 `pnpm audit --prod --audit-level=moderate` 不变。
 - **禁止用 `--ignore` / `--ignore-unfixable` 进脚本**：pnpm 的 `--ignore` 是「一次性配置写入器」——只把编号写回配置并直接 exit 0（不执行审计），写进 CI 或 npm script 会使审计步骤恒为 exit 0、门禁彻底失效；`--ignore-unfixable` 还依赖 advisory 的 patched 元数据，对「声明了 patched 版本但未发布」的条目判为可修复、实际不写入任何编号。
 - **保留阻断强度**：`audit.ignore` 仅过滤列表内编号，未列入的新漏洞仍使 `pnpm audit` exit 1。
-- **对 §5.6 观察期计数的影响**：豁免在册时 `pnpm audit --audit-level=moderate` 输出不含 [§5.6](#56-依赖审计阻断语义信号级--阻断的转正条件2026-09-30-用户决策方案-c) 所依赖的字面串 `No known vulnerabilities found` → 观察期 clean 计数在豁免移除前不可达；转阻断动作前**必须先移除豁免**（或修订该 clean 判据）。
+- **对 §5.6 观察期计数的影响**：豁免在册时 `pnpm audit --audit-level=moderate` 输出不含 [§5.6](#_5-6-依赖审计阻断语义-信号级-→-阻断的转正条件-2026-09-30-用户决策方案-c) 所依赖的字面串 `No known vulnerabilities found` → 观察期 clean 计数在豁免移除前不可达；转阻断动作前**必须先移除豁免**（或修订该 clean 判据）。
 - **当前豁免清单与依据**（每条必须登记 GHSA + 依赖路径 + 复核条件，禁止只写编号）：
 
 | GHSA | 包 / 受影响范围 | 依赖路径 | 复核条件（满足即移除） |
@@ -96,6 +96,13 @@
 
 - **复核节奏**：条目同步登记于 [backlog.md 已知边界](../plan/backlog.md)（持续观察）；每周回归或依赖升级时复查上游是否已发布修复版本，发布后立即移除豁免并复跑 `pnpm audit`。
 - **审计必查项**：新增 `audit.ignore` 条目必须同时给出 GHSA + 依赖路径 + 复核条件；禁止把 `--ignore` / `--ignore-unfixable` 写入任何 CI workflow 或 npm script；上游发布修复版本后必须移除对应豁免条目，不得长期挂账。
+
+### 5.8 仓库自身安全门禁与 Security Auto Fix 停用（2026-10-25 用户决策）
+
+- **Security Auto Fix 定时任务保持停用**：本仓库的 `.github/workflows/security-auto-fix.yml` 自 2026-10-17 起 `disabled_manually`。理由：dependfix 自身（及平台）已会创建修复 PR，定时 Action 再建同类 PR 会与人工 / 平台 PR 冲突；**本仓库不再依赖该 Action 做自修**。
+- **替代为 Security 门禁**：Dependabot alerts 作发现面 → 依赖审计作**阻断面**（`pnpm audit --prod --audit-level=moderate`，周回归使用同一命令）→ 全量依赖审计仅作 `test.yml` 的信号步骤（不进周回归）→ code scanning 覆盖代码质量告警。1.0 门槛另要求「未被 §5.7 豁免的 critical / high 为 0」。
+- **门禁强度不得回退**：禁止用 `--ignore` / `--ignore-unfixable` 放宽；无修复版本的豁免按 [§5.7](#_5-7-无可用修复版本漏洞的审计豁免-audit-ignore-2026-10-05) 逐条登记；转正判据沿用 [§5.6](#_5-6-依赖审计阻断语义-信号级-→-阻断的转正条件-2026-09-30-用户决策方案-c)（3 个 clean run id）。
+- **1.0 门槛**：依赖审计必须为阻断级、**未被 §5.7 豁免的** critical / high 为 0，详见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md#_2-门槛与判定-g1-g8)。
 
 ## 6. 终端命令与自动化安全 (CLI & Automation)
 
