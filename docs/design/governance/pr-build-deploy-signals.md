@@ -97,6 +97,7 @@ interface UnifiedBuildSignal {
     logUrl: string | null      // deployment status.log_url（如有）
     summary: string | null     // check_run.output.text（截断，避免单条过大）
     observedAt: Date
+    attribution?: 'self_caused' | 'pre_existing' | 'external_noise' | 'cancelled' | 'unknown'  // §3.9
 }
 ```
 
@@ -162,6 +163,26 @@ interface UnifiedBuildSignal {
 **空信号守卫（承接项 ④）**：`applyOne` 对 `signals.length === 0` 直接跳过并返回「未落库」，`pollOnce` 的 `processed` 只统计实际落库数（避免把「无信号」误写为聚合 `success`，也避免计数虚高）。
 
 **API 视图**：`GET /api/pr-checks` 增 `overallStatus` / `signals` / `failureSources` 三字段（JSON 列解析，`observedAt` 经往返为 ISO 字符串；列值损坏或缺失时回退 `null`，不抛错）。
+
+### 3.9 归因标签（M48.6，2026-10-25）
+
+- **同源**：`signals[].attribution` 由 core `classifyCheckFailure` 计算（与 CLI 报告 / PR 评论同一纯函数），
+  平台不维护第二套标签。归因输入取 `rawState`（保留 `cancelled` / `timed_out` / `startup_failure` 粒度）
+  与 **`output.title + output.summary`**（文本签名，与 CLI 回环同口径；`output.text` 仍只作展示摘要），
+  `parentConclusion` 因平台不采集父提交而恒缺省。
+- **只对失败 / 取消结论产出归因**：`success` / `neutral` / 未完成 / `completed` 但无 conclusion 一律
+  `undefined`——避免通过项在 `signals_json` 留下「未判定」噪音。
+- **可达集合**：平台数据面只可能产出 `external_noise`（Dependabot / registry 签名）、`cancelled`
+  （`cancelled` / `skipped` / `stale`）、`unknown`；`pre_existing` / `self_caused` 需要父提交比对，
+  只出现在 CLI 回环报告。扩展平台侧父提交比对属后续候选，不在 M48.6 范围。
+- **fail-closed（三源）**：check conclusion 未识别（GitHub 新增枚举）→ `state='failure'`（不再静默
+  `skipped`）、归因 `unknown`；`startup_failure` 显式映射 `failure`；commit status / deployment 的
+  未识别原始状态同样回落 `failure`（缺失值仍为 `pending` / `skipped`）。
+- **已知差异（已裁定）**：`completed` + `conclusion=null` 在平台维持 `skipped`（GitHub 历史怪态，
+  不判失败），而 CLI 回环按 fail-closed 计为失败（`unknown` 结论）；平台侧不产出该形态的归因标签，
+  CLI 侧仍在报告与失败评论中标「未判定（unknown）」。暂不统一，登记为后续候选。
+- **只解释、不放行**：归因不参与 `overallStatus` / 告警状态机 / mergify `check-success` 判定；
+  UI 仅在非成功信号上展示标签，历史 `signalsJson` 行无该字段时直接不渲染。
 
 ## 4. 数据模型（两个选项）
 
