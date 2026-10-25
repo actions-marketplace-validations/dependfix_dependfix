@@ -203,6 +203,12 @@ export interface FixAction {
      * 用于告警级修复状态关联（同 ruleId 多实例区分）。
      */
     filePath?: string
+    /**
+     * 本次动作实际写盘的相对路径（AI patch 可改多文件；仅成功且非 noOp 的动作携带）。
+     * 交付提交按「固定白名单 ∪ 声明路径」收集，未声明的已跟踪改动会被拒绝提交。
+     * 相对工作目录，POSIX 或平台分隔符均可（提交侧统一归一化）。
+     */
+    changedPaths?: string[]
 }
 
 /**
