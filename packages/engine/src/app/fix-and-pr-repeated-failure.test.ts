@@ -137,7 +137,7 @@ describe('DependfixApp fix-and-pr repeated failure attempts', () => {
             scripts: { lint: 'exit 0' },
         }))
         writeFileSync(join(workDir, '.gitignore'), 'node_modules\n')
-        writeFileSync(join(workDir, 'upgraded.txt'), 'v0\n')
+        writeFileSync(join(workDir, 'pnpm-lock.yaml'), 'lockfileVersion: "9.0"\n')
         execSync('git add . && git commit -qm init', { cwd: workDir })
 
         mockRunVerification.mockReset().mockResolvedValue({
@@ -145,7 +145,7 @@ describe('DependfixApp fix-and-pr repeated failure attempts', () => {
             commandResults: [{ command: 'pnpm lint', exitCode: 0, durationMs: 0, stdout: '', stderr: '' }],
         })
         mockUpgradeDependency.mockReset().mockImplementation(({ packageName }: { packageName: string }) => {
-            writeFileSync(join(workDir, 'upgraded.txt'), `upgraded ${packageName}\n`)
+            writeFileSync(join(workDir, 'pnpm-lock.yaml'), `lockfileVersion: "9.0"\n# upgraded ${packageName}\n`)
             return { packageName, fromVersion: '0.24.0', toVersion: '0.25.12', isMajor: false, success: true }
         })
         mockTryLockfileRepair.mockReset().mockReturnValue({

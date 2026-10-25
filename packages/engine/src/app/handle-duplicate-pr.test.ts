@@ -143,8 +143,8 @@ describe('DependfixApp handleDuplicatePRs', () => {
             scripts: { lint: 'exit 0' },
         }))
         writeFileSync(join(workDir, '.gitignore'), 'node_modules\n')
-        // 已跟踪的占位文件：升级 mock 修改它以制造 tracked 改动（hasGitChanges 只认 tracked）
-        writeFileSync(join(workDir, 'upgraded.txt'), 'v0\n')
+        // 已跟踪的白名单占位文件：升级 mock 改写 lockfile 以制造 tracked 改动（提交集合只收白名单与声明路径）
+        writeFileSync(join(workDir, 'pnpm-lock.yaml'), 'lockfileVersion: "9.0"\n')
         execSync('git add . && git commit -qm init', { cwd: workDir })
 
         mockRunVerification.mockReset().mockResolvedValue(verificationOk())
@@ -196,7 +196,7 @@ describe('DependfixApp handleDuplicatePRs', () => {
     it('adds comment and duplicate label when superseded PRs exist', async () => {
         nockAlerts([esbuildAlert()])
         mockUpgradeDependency.mockImplementation(({ packageName }: { packageName: string }) => {
-            writeFileSync(join(workDir, 'upgraded.txt'), `upgraded ${packageName}\n`)
+            writeFileSync(join(workDir, 'pnpm-lock.yaml'), `lockfileVersion: "9.0"\n# upgraded ${packageName}\n`)
             return { packageName, fromVersion: '0.24.0', toVersion: '0.25.12', isMajor: false, success: true }
         })
         // 存在异指纹的旧 PR（应被 supersede）
@@ -238,7 +238,7 @@ describe('DependfixApp handleDuplicatePRs', () => {
     it('skips comment and label when no superseded PRs exist', async () => {
         nockAlerts([esbuildAlert()])
         mockUpgradeDependency.mockImplementation(({ packageName }: { packageName: string }) => {
-            writeFileSync(join(workDir, 'upgraded.txt'), `upgraded ${packageName}\n`)
+            writeFileSync(join(workDir, 'pnpm-lock.yaml'), `lockfileVersion: "9.0"\n# upgraded ${packageName}\n`)
             return { packageName, fromVersion: '0.24.0', toVersion: '0.25.12', isMajor: false, success: true }
         })
         // 无 supersedePRs
@@ -255,7 +255,7 @@ describe('DependfixApp handleDuplicatePRs', () => {
     it('continues to add label when comment fails (graceful degradation)', async () => {
         nockAlerts([esbuildAlert()])
         mockUpgradeDependency.mockImplementation(({ packageName }: { packageName: string }) => {
-            writeFileSync(join(workDir, 'upgraded.txt'), `upgraded ${packageName}\n`)
+            writeFileSync(join(workDir, 'pnpm-lock.yaml'), `lockfileVersion: "9.0"\n# upgraded ${packageName}\n`)
             return { packageName, fromVersion: '0.24.0', toVersion: '0.25.12', isMajor: false, success: true }
         })
         mockFindDependfixOpenPR.mockResolvedValueOnce([
@@ -281,7 +281,7 @@ describe('DependfixApp handleDuplicatePRs', () => {
     it('closes superseded PRs even when label fails', async () => {
         nockAlerts([esbuildAlert()])
         mockUpgradeDependency.mockImplementation(({ packageName }: { packageName: string }) => {
-            writeFileSync(join(workDir, 'upgraded.txt'), `upgraded ${packageName}\n`)
+            writeFileSync(join(workDir, 'pnpm-lock.yaml'), `lockfileVersion: "9.0"\n# upgraded ${packageName}\n`)
             return { packageName, fromVersion: '0.24.0', toVersion: '0.25.12', isMajor: false, success: true }
         })
         mockFindDependfixOpenPR.mockResolvedValueOnce([

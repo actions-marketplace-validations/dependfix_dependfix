@@ -17,6 +17,7 @@ import {
     type RunSummary,
 } from '@dependfix/core'
 import { stageAndCommit } from '../github/pr-creator'
+import { collectDeclaredPaths } from '../github/commit-scope'
 import type { ClosedAttemptIndex } from '../github/attempt-history'
 import { type AuthProvider } from '../auth'
 import {
@@ -567,6 +568,8 @@ export async function tryLockfileRepair(
  * - 无任何变更（含已暂存变更）时跳过
  * - config 校验已保证 `commit` 与 `dryRun` / `createPullRequest` 互斥，
  *   因此这里不需要再检查这两个开关
+ * - 提交集合由白名单 + fixer 声明路径决定（`stageAndCommit`）；含未声明的已跟踪改动时抛
+ *   `CommitScopeError('UNEXPECTED_CHANGES')`，仅供生成物 / 未跟踪文件时抛 `NO_CHANGES`
  */
 export function commitLocalChanges(
     ctx: Pick<AppContext, 'logger' | 'workDir' | 'allActions' | 'authProvider'>,
@@ -609,7 +612,18 @@ export function commitLocalChanges(
 
     const commitMessage = buildCommitMessage(allActions)
     const author = authProvider?.getCommitAuthor()
-    stageAndCommit(commitMessage, workDir, author)
+    // 提交集合 = 固定白名单 ∪ 声明路径；未声明改动 / 空集合由 stageAndCommit 抛
+    // CommitScopeError（调用方据此写 UNEXPECTED_CHANGES / NO_CHANGES，而不是笼统的 COMMIT_FAILED）
+    const scope = stageAndCommit(commitMessage, workDir, author, {
+        declaredPaths: collectDeclaredPaths(allActions),
+    })
+    if (scope.ignored.length > 0) {
+        logger.info(`Not committing ${scope.ignored.length} generated / undeclared path(s): ${scope.ignored.join(', ')}`)
+    }
+    if (scope.missing.length > 0) {
+        // 声明了但工作区没有对应改动（被 .gitignore 忽略 / 内容无 diff）→ PR 会少文件，必须留痕
+        logger.warn(`Declared path(s) had no changes in the worktree: ${scope.missing.join(', ')}`)
+    }
     logger.info(`Committed fix changes to current branch: ${commitMessage.split('\n')[0]}`)
 }
 
@@ -657,7 +671,7 @@ export function hasGitChanges(workDir: string): boolean {
  * → 前导 globstar 前缀（双星号加斜杠）与根路径斜杠 → 尾部内容通配（斜杠 + 双星号 / 斜杠 + 星号）→ 尾部 `/`（目录标记）。
  *
  * 与 git 语义对齐的三条边界（**安全方向优先：宁可多追加，不可漏追加**——漏追加会让报告目录
- * 未被忽略而被 `git add .` 一并提交）：
+ * 出现在工作区变更集里（污染「无变更」判定，并需要交付侧额外排除）：
  * - **行中 `#` 是字面字符**（git 仅把行首 `#` 当注释）——`dir/ # note` 在 git 中并不生效，不视为已忽略；
  * - **前导空白属于模式本身**（git 仅忽略尾随空白）——` dir/` 不视为已忽略；
  * - **以「斜杠 + 双星号 + 斜杠」结尾的形态只忽略目录内层级**，不忽略目录自身，不视为已忽略。

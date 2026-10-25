@@ -14,7 +14,8 @@ import {
     truncatedBreakdown,
     formatCiAlignmentSection,
 } from '@dependfix/core'
-import { GIT_COMMIT_HOOKS_ISOLATION_ARGS, GIT_COMMIT_SIGNING_ISOLATION_ARGS, GIT_PUSH_HOOKS_ISOLATION_ARGS, GIT_PUSH_SIGNING_ISOLATION_ARGS } from './git-signing'
+import { GIT_PUSH_HOOKS_ISOLATION_ARGS, GIT_PUSH_SIGNING_ISOLATION_ARGS } from './git-signing'
+import { commitStaged, stageScopedChanges, type StageAndCommitOptions, type StageAndCommitResult } from './commit-scope'
 import { formatAttemptMarker, type AttemptMarker } from './fix-fingerprint'
 
 // ---------------------------------------------------------------------------
@@ -203,43 +204,27 @@ export function createFixBranch(branchName: string, workDir: string): FixBranchR
 }
 
 /**
- * 暂存所有变更并提交。
- * 自动设置 git user.name / user.email（如未设置）。
- * 使用 `execFileSync` 参数数组形式（不经 shell），保证多行 commit message
- * 与 UTF-8 字符（如 →）在 Windows/Linux 双平台传递一致。
+ * 暂存修复相关文件并提交。
  *
- * commit author 隔离：显式传 `-c user.name=X -c user.email=Y` 强制 commit author 使用传入值，
- * 不受 host 全局 `user.name`（如 CaoMeiYouRen）污染——显式 `-c` 优于 local / global / system 配置。
+ * 提交集合由 [stageScopedChanges] 判定（固定白名单 ∪ fixer 声明路径，生成物剔除）：
+ * 未声明的已跟踪改动抛 `UNEXPECTED_CHANGES`，空集合抛 `NO_CHANGES`——不再通配暂存，
+ * 避免把目标仓库的生成物与用户未提交改动带进 PR。author / 签名 / hooks 三条隔离见
+ * [commitStaged] 与 ./git-signing.ts。
  *
- * 签名污染隔离：显式传 `-c commit.gpgsign=false`，使 commit 不受 host 全局 / 系统 / repo local
- * 的 `commit.gpgsign=true` 影响（否则会带上宿主个人签名，或因无可用 key 而 commit 失败）。
- * 参数取自 `GIT_COMMIT_SIGNING_ISOLATION_ARGS`（单一事实源，见 ./git-signing.ts）。
- * 仅关签名开关，不注入 `GIT_CONFIG_GLOBAL` / `GIT_CONFIG_NOSYSTEM`（会连带屏蔽 host 代理等配置）。
- *
- * hooks 隔离：显式传 `--no-verify`（`GIT_COMMIT_HOOKS_ISOLATION_ARGS`），跳过被修复仓库的
- * `pre-commit` / `commit-msg`（含 husky 的 `core.hooksPath` 重定向）。目标仓库钩子依赖 `npx` 与完整
- * `node_modules`，在隔离执行环境下通常不可用——生产实证会以 `npx: not found`（非 0 退出）中断
- * 自动 commit。自动提交不应受目标仓库本地开发钩子约束。
- *
- * @param author - 可选 commit author 信息；不传时使用 PAT 默认值（保持现有 PAT 路径行为零变化）。
- *   GitHub App 路径接入后会传入动态生成的 `{app_id}+{bot_login}[bot]` author。
- *
- * @see [C22 PAT 无感升级评估 §5.1 兼容性](../../../../docs/design/governance/c22-pat-backward-compat.md)
+ * @param author - 可选 commit author；不传时使用 PAT 默认值（GitHub App 路径传动态 author）
+ * @throws {CommitScopeError} 提交集合含未声明改动 / 非法声明路径 / 为空
+ * @see [M48.4 提交面白名单 §7](../../../../docs/design/governance/pr-delivery-closure.md#7-m484-提交面白名单与-yaml-定点编辑)
  */
-export function stageAndCommit(message: string, workDir: string, author?: { name: string, email: string }): void {
+export function stageAndCommit(
+    message: string,
+    workDir: string,
+    author?: { name: string, email: string },
+    options: StageAndCommitOptions = {},
+): StageAndCommitResult {
     ensureGitConfig(workDir, author)
-    const effectiveAuthor = author ?? PAT_DEFAULT_COMMIT_AUTHOR
-    execFileSync('git', ['add', '.'], { cwd: workDir, stdio: 'pipe' })
-    execFileSync('git', [
-        '-c', `user.name=${effectiveAuthor.name}`,
-        '-c', `user.email=${effectiveAuthor.email}`,
-        // 关闭签名：避免 host `commit.gpgsign=true` 导致的签名污染与 commit 失败（见上方 JSDoc）
-        ...GIT_COMMIT_SIGNING_ISOLATION_ARGS,
-        'commit',
-        // 跳过目标仓库 hooks（husky / lint-staged / core.hooksPath 重定向）——须位于子命令之后
-        ...GIT_COMMIT_HOOKS_ISOLATION_ARGS,
-        '-m', message,
-    ], { cwd: workDir, stdio: 'pipe' })
+    const staging = stageScopedChanges(workDir, options.declaredPaths ?? [])
+    commitStaged(message, workDir, author ?? PAT_DEFAULT_COMMIT_AUTHOR)
+    return staging
 }
 
 /**

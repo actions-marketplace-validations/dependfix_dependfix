@@ -125,8 +125,8 @@ describe('DependfixApp fix-and-pr supply chain disclosure', () => {
             scripts: { lint: 'exit 0' },
         }))
         writeFileSync(join(workDir, '.gitignore'), 'node_modules\n')
-        // 已跟踪的占位文件：升级 mock 修改它以制造 tracked 改动（hasGitChanges 只认 tracked）
-        writeFileSync(join(workDir, 'upgraded.txt'), 'v0\n')
+        // 已跟踪的白名单占位文件：升级 mock 改写 lockfile 以制造 tracked 改动（提交集合只收白名单与声明路径）
+        writeFileSync(join(workDir, 'pnpm-lock.yaml'), 'lockfileVersion: "9.0"\n')
         execSync('git add . && git commit -qm init', { cwd: workDir })
 
         mockRunVerification.mockReset().mockResolvedValue(verificationOk())
@@ -175,7 +175,7 @@ describe('DependfixApp fix-and-pr supply chain disclosure', () => {
         nockAlerts([esbuildAlert()])
         // 升级 mock：修改已跟踪文件制造 git 改动（PR 创建的 hasGitChanges 检查需要）
         mockUpgradeDependency.mockImplementation(({ packageName }: { packageName: string }) => {
-            writeFileSync(join(workDir, 'upgraded.txt'), `upgraded ${packageName}\n`)
+            writeFileSync(join(workDir, 'pnpm-lock.yaml'), `lockfileVersion: "9.0"\n# upgraded ${packageName}\n`)
             return { packageName, fromVersion: '0.24.0', toVersion: '0.25.12', isMajor: false, success: true }
         })
         // 供应链信号数据源：workspace.yaml 批准 esbuild + node_modules 真实包带 postinstall
@@ -205,7 +205,7 @@ describe('DependfixApp fix-and-pr supply chain disclosure', () => {
     it('PR body omits warning section when upgraded package is not approved', async () => {
         nockAlerts([esbuildAlert()])
         mockUpgradeDependency.mockImplementation(({ packageName }: { packageName: string }) => {
-            writeFileSync(join(workDir, 'upgraded.txt'), `upgraded ${packageName}\n`)
+            writeFileSync(join(workDir, 'pnpm-lock.yaml'), `lockfileVersion: "9.0"\n# upgraded ${packageName}\n`)
             return { packageName, fromVersion: '0.24.0', toVersion: '0.25.12', isMajor: false, success: true }
         })
         // 无 pnpm-workspace.yaml（未批准任何包）

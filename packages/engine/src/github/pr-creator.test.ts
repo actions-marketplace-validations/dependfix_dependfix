@@ -1,5 +1,5 @@
 /* eslint-disable max-lines -- 测试层补强 stageAndCommit author / 签名 / hooks 隔离路径回归 + 既有 955 行；按职责不拆分（范围见 docs/plan/archive/todo-archive-phases-m18.md §M18.4） */
-import { execSync } from 'node:child_process'
+import { execFileSync, execSync } from 'node:child_process'
 import { chmodSync, existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -23,6 +23,7 @@ import {
     stageAndCommit,
     type DependfixOpenPR,
 } from './pr-creator'
+import { CommitScopeError } from './commit-scope'
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -456,8 +457,11 @@ describe('stageAndCommit 回归（author / 签名 / hooks 隔离）', () => {
         git('init -b main', dir)
         // 第一次 init commit：注入临时 user.name/email（不会写入 repo config）
         writeFileSync(join(dir, 'README.md'), '# test\n')
+        writeFileSync(join(dir, 'package.json'), '{ "name": "fixture" }\n')
         git('add .', dir)
-        git('-c user.name=test -c user.email=test@example.com commit -m init', dir)
+        // 显式关签名：本仓库下有用例把 host 全局 `commit.gpgsign=true` + 不可用 gpg.program 注入，
+        // 夹具的初始提交不能被它带崩（否则工作区停在「已暂存未提交」，后续判定口径失真）
+        git('-c user.name=test -c user.email=test@example.com -c commit.gpgsign=false commit -m init', dir)
         return dir
     }
 
@@ -471,6 +475,7 @@ describe('stageAndCommit 回归（author / 签名 / hooks 隔离）', () => {
         git('config user.email test@example.com', dir)
         git('config user.name test', dir)
         writeFileSync(join(dir, 'README.md'), '# test\n')
+        writeFileSync(join(dir, 'package.json'), '{ "name": "fixture" }\n')
         git('add .', dir)
         git('commit -m init', dir)
         return dir
@@ -502,7 +507,7 @@ describe('stageAndCommit 回归（author / 签名 / hooks 隔离）', () => {
 
     it('PAT 路径（author 不传）+ repo 无 config → local git config 设置成 PAT_DEFAULT_COMMIT_AUTHOR', () => {
         const dir = createGitRepoWithoutGitConfig()
-        writeFileSync(join(dir, 'change.txt'), 'fixed\n')
+        writeFileSync(join(dir, 'package.json'), '{ "name": "fixed" }\n')
 
         stageAndCommit('fix: dependabot', dir) // PAT 路径
 
@@ -515,7 +520,7 @@ describe('stageAndCommit 回归（author / 签名 / hooks 隔离）', () => {
 
     it('App 路径（author 传入）+ repo 无 config → local git config 设置成传入 author', () => {
         const dir = createGitRepoWithoutGitConfig()
-        writeFileSync(join(dir, 'change.txt'), 'fixed\n')
+        writeFileSync(join(dir, 'package.json'), '{ "name": "fixed" }\n')
 
         // 模拟 docs/plan/archive/todo-archive-phases-m18.md §M18.2（集成层）调用：传入 AppAuthProvider.getCommitAuthor() 动态生成的 author
         stageAndCommit('fix: dependabot', dir, {
@@ -531,7 +536,7 @@ describe('stageAndCommit 回归（author / 签名 / hooks 隔离）', () => {
 
     it('已有 user.name / user.email + 传入 author → 不覆盖（关键回归：传入 author 不破坏既有 config）', () => {
         const dir = createGitRepoWithGitConfig()
-        writeFileSync(join(dir, 'change.txt'), 'fixed\n')
+        writeFileSync(join(dir, 'package.json'), '{ "name": "fixed" }\n')
 
         // 即使传入 App author，已有 git config 不被覆盖
         stageAndCommit('fix: dependabot', dir, {
@@ -547,7 +552,7 @@ describe('stageAndCommit 回归（author / 签名 / hooks 隔离）', () => {
 
     it('完整 stageAndCommit 端到端：App author 实际生效（git log -1 看到正确 author）', () => {
         const dir = createGitRepoWithoutGitConfig()
-        writeFileSync(join(dir, 'change.txt'), 'fixed\n')
+        writeFileSync(join(dir, 'package.json'), '{ "name": "fixed" }\n')
 
         stageAndCommit('fix: dependabot', dir, {
             name: '123456[bot]',
@@ -562,7 +567,7 @@ describe('stageAndCommit 回归（author / 签名 / hooks 隔离）', () => {
 
     it('完整 stageAndCommit 端到端：PAT 默认 author 实际生效（git log -1 看到 dependfix[bot]）', () => {
         const dir = createGitRepoWithoutGitConfig()
-        writeFileSync(join(dir, 'change.txt'), 'fixed\n')
+        writeFileSync(join(dir, 'package.json'), '{ "name": "fixed" }\n')
 
         stageAndCommit('fix: dependabot', dir) // PAT 路径
 
@@ -590,7 +595,7 @@ describe('stageAndCommit 回归（author / 签名 / hooks 隔离）', () => {
         // 模拟 host 全局有 user.name（在 local 写入等效——git commit lookup order：local 优先）
         git('config user.name host-global-user', dir)
         git('config user.email host-global@example.com', dir)
-        writeFileSync(join(dir, 'change.txt'), 'fixed\n')
+        writeFileSync(join(dir, 'package.json'), '{ "name": "fixed" }\n')
 
         stageAndCommit('fix: dependabot', dir, {
             name: '123456[bot]',
@@ -615,7 +620,7 @@ describe('stageAndCommit 回归（author / 签名 / hooks 隔离）', () => {
 
         try {
             const dir = createGitRepoWithoutGitConfig()
-            writeFileSync(join(dir, 'change.txt'), 'fixed\n')
+            writeFileSync(join(dir, 'package.json'), '{ "name": "fixed" }\n')
 
             // 验证前置状态：local config 无 user.name / user.email（用 --local 查询应返回空）
             // 关键：如果 gitConfigExists 不带 --local flag，会错误读到 host global 的 GlobalHost，
@@ -668,7 +673,7 @@ describe('stageAndCommit 回归（author / 签名 / hooks 隔离）', () => {
 
         try {
             const dir = createGitRepoWithoutGitConfig()
-            writeFileSync(join(dir, 'change.txt'), 'fixed\n')
+            writeFileSync(join(dir, 'package.json'), '{ "name": "fixed" }\n')
 
             // 修复前：此处抛 `fatal: failed to write commit object`
             stageAndCommit('fix: dependabot', dir)
@@ -704,7 +709,7 @@ describe('stageAndCommit 回归（author / 签名 / hooks 隔离）', () => {
 
         try {
             const dir = createGitRepoWithoutGitConfig()
-            writeFileSync(join(dir, 'change.txt'), 'fixed\n')
+            writeFileSync(join(dir, 'package.json'), '{ "name": "fixed" }\n')
 
             stageAndCommit('fix: dependabot', dir)
 
@@ -730,7 +735,7 @@ describe('stageAndCommit 回归（author / 签名 / hooks 隔离）', () => {
         // 写入 repo local config（非 host global）：签名开关 + 不可用的 gpg 程序
         git('config commit.gpgsign true', dir)
         git('config gpg.program /nonexistent/dependfix-no-such-gpg', dir)
-        writeFileSync(join(dir, 'change.txt'), 'fixed\n')
+        writeFileSync(join(dir, 'package.json'), '{ "name": "fixed" }\n')
 
         // 修复前：local `commit.gpgsign=true` 会触发签名 → gpg 不可用 → failed to write commit object
         stageAndCommit('fix: dependabot', dir)
@@ -740,7 +745,7 @@ describe('stageAndCommit 回归（author / 签名 / hooks 隔离）', () => {
 
     it('commit.gpgsign=false 仅作用于本次调用，不写入 repo local config', () => {
         const dir = createGitRepoWithoutGitConfig()
-        writeFileSync(join(dir, 'change.txt'), 'fixed\n')
+        writeFileSync(join(dir, 'package.json'), '{ "name": "fixed" }\n')
 
         stageAndCommit('fix: dependabot', dir)
 
@@ -777,7 +782,7 @@ describe('stageAndCommit 回归（author / 签名 / hooks 隔离）', () => {
             const hookPath = join(dir, '.git', 'hooks', 'pre-commit')
             writeFileSync(hookPath, '#!/bin/sh\ntouch .hook-ran\nexit 1\n')
             chmodSync(hookPath, 0o755)
-            writeFileSync(join(dir, 'change.txt'), 'fixed\n')
+            writeFileSync(join(dir, 'package.json'), '{ "name": "fixed" }\n')
 
             // 反例对照：同环境裸 commit 被 hook 拦截（exit 非 0 → execSync 抛错）
             git('add .', dir)
@@ -789,7 +794,7 @@ describe('stageAndCommit 回归（author / 签名 / hooks 隔离）', () => {
 
             // 清理反例副作用（标记文件），再制造新变更供正例提交
             rmSync(join(dir, '.hook-ran'), { force: true })
-            writeFileSync(join(dir, 'change.txt'), 'fixed-2\n')
+            writeFileSync(join(dir, 'package.json'), '{ "name": "fixed-2" }\n')
 
             // 被测实现：`--no-verify` 隔离后 commit 成功且 hook 未执行
             stageAndCommit('fix: dependabot', dir)
@@ -804,6 +809,98 @@ describe('stageAndCommit 回归（author / 签名 / hooks 隔离）', () => {
                 /* ignore */
             }
         }
+    }, 15_000)
+})
+
+// ---------------------------------------------------------------------------
+// stageAndCommit 提交面白名单
+// ---------------------------------------------------------------------------
+
+describe('stageAndCommit 提交面白名单', () => {
+    const tempDirs: string[] = []
+
+    function git(args: string[], cwd: string): string {
+        try {
+            return execFileSync('git', args, { cwd, stdio: 'pipe', encoding: 'utf-8' }).trim()
+        } catch {
+            return ''
+        }
+    }
+
+    /** 仓库含 README.md + package.json（均已在初始提交内） */
+    function createRepo(): string {
+        const dir = mkdtempSync(join(tmpdir(), 'dependfix-test-scope-'))
+        tempDirs.push(dir)
+        execSync('git init -q -b main', { cwd: dir, stdio: 'pipe' })
+        execSync('git config user.email test@example.com', { cwd: dir, stdio: 'pipe' })
+        execSync('git config user.name test', { cwd: dir, stdio: 'pipe' })
+        writeFileSync(join(dir, 'README.md'), '# test\n')
+        writeFileSync(join(dir, 'src.ts'), 'v1\n')
+        writeFileSync(join(dir, 'package.json'), '{ "name": "fixture" }\n')
+        execSync('git add . && git -c commit.gpgsign=false commit -q -m init', { cwd: dir, stdio: 'pipe' })
+        return dir
+    }
+
+    afterEach(() => {
+        for (const dir of tempDirs.splice(0)) {
+            try {
+                rmSync(dir, { recursive: true, force: true })
+            } catch {
+                /* ignore */
+            }
+        }
+    })
+
+    it('只提交白名单与声明路径：生成物 / 未跟踪文件不进入 commit', () => {
+        const dir = createRepo()
+        writeFileSync(join(dir, 'package.json'), '{ "name": "fixed" }\n')
+        writeFileSync(join(dir, 'src.ts'), 'v2\n')
+        writeFileSync(join(dir, '.nuxtrc'), 'compatibilityVersion=4\n')
+        writeFileSync(join(dir, 'auto-imports.d.ts'), '// generated\n')
+        writeFileSync(join(dir, 'notes.txt'), 'scratch\n')
+
+        const scope = stageAndCommit('fix: dependabot', dir, undefined, { declaredPaths: ['src.ts'] })
+
+        expect(scope.staged).toEqual(['package.json', 'src.ts'])
+        expect(scope.ignored.sort()).toEqual(['.nuxtrc', 'auto-imports.d.ts', 'notes.txt'])
+        expect(git(['show', '--name-only', '--pretty=format:', 'HEAD'], dir).split('\n').filter(Boolean).sort())
+            .toEqual(['package.json', 'src.ts'])
+    }, 15_000)
+
+    it('未声明的已跟踪改动 → CommitScopeError(UNEXPECTED_CHANGES)，且不产生提交', () => {
+        const dir = createRepo()
+        const headBefore = git(['rev-parse', 'HEAD'], dir)
+        writeFileSync(join(dir, 'README.md'), '# hacked\n')
+        writeFileSync(join(dir, 'package.json'), '{ "name": "fixed" }\n')
+
+        let thrown: unknown
+        try {
+            stageAndCommit('fix: dependabot', dir)
+        } catch (error: unknown) {
+            thrown = error
+        }
+
+        expect(thrown).toBeInstanceOf(CommitScopeError)
+        expect((thrown as CommitScopeError).category).toBe('UNEXPECTED_CHANGES')
+        expect((thrown as CommitScopeError).message).toContain('README.md')
+        expect(git(['rev-parse', 'HEAD'], dir)).toBe(headBefore)
+    }, 15_000)
+
+    it('只有生成物 / 未跟踪文件 → CommitScopeError(NO_CHANGES)，不产生空提交', () => {
+        const dir = createRepo()
+        const headBefore = git(['rev-parse', 'HEAD'], dir)
+        writeFileSync(join(dir, '.nuxtrc'), 'compatibilityVersion=4\n')
+        writeFileSync(join(dir, 'notes.txt'), 'scratch\n')
+
+        let thrown: unknown
+        try {
+            stageAndCommit('fix: dependabot', dir)
+        } catch (error: unknown) {
+            thrown = error
+        }
+
+        expect((thrown as CommitScopeError).category).toBe('NO_CHANGES')
+        expect(git(['rev-parse', 'HEAD'], dir)).toBe(headBefore)
     }, 15_000)
 })
 

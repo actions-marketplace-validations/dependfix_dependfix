@@ -540,13 +540,13 @@ describe('commitLocalChanges', () => {
         expect(logger.info).toHaveBeenCalledWith('No changes to commit — skipping local commit')
     })
 
-    it('commits tracked changes in a git repository', () => {
+    it('commits tracked whitelisted changes in a git repository', () => {
         execSync('git init -q', { cwd: dir })
         execSync('git config user.name test', { cwd: dir })
         execSync('git config user.email test@test', { cwd: dir })
-        writeFileSync(join(dir, 'tracked.txt'), 'v1\n', 'utf-8')
+        writeFileSync(join(dir, 'package.json'), '{ "name": "v1" }\n', 'utf-8')
         execSync('git add . && git commit -qm init', { cwd: dir })
-        writeFileSync(join(dir, 'tracked.txt'), 'v2\n', 'utf-8')
+        writeFileSync(join(dir, 'package.json'), '{ "name": "v2" }\n', 'utf-8')
 
         const { ctx, logger } = makeCommitCtx(dir, [deliverableAction()])
 
@@ -554,7 +554,40 @@ describe('commitLocalChanges', () => {
 
         expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('Committed fix changes to current branch'))
         // 提交落在本地当前分支（改动已入 HEAD）
-        expect(execSync('git show HEAD:tracked.txt', { cwd: dir, encoding: 'utf-8' })).toBe('v2\n')
+        expect(execSync('git show HEAD:package.json', { cwd: dir, encoding: 'utf-8' })).toBe('{ "name": "v2" }\n')
+    })
+
+    it('rejects undeclared tracked changes with UNEXPECTED_CHANGES (no commit)', () => {
+        execSync('git init -q', { cwd: dir })
+        execSync('git config user.name test', { cwd: dir })
+        execSync('git config user.email test@test', { cwd: dir })
+        writeFileSync(join(dir, 'src.ts'), 'v1\n', 'utf-8')
+        execSync('git add . && git commit -qm init', { cwd: dir })
+        // 未声明的源码改动：既不在白名单，也没有 fixer 声明
+        writeFileSync(join(dir, 'src.ts'), 'v2\n', 'utf-8')
+
+        const { ctx } = makeCommitCtx(dir, [deliverableAction()])
+
+        expect(() => commitLocalChanges(ctx)).toThrowError(/undeclared tracked change/)
+        expect(execSync('git show HEAD:src.ts', { cwd: dir, encoding: 'utf-8' })).toBe('v1\n')
+    })
+
+    it('commits a declared source path even outside the whitelist', () => {
+        execSync('git init -q', { cwd: dir })
+        execSync('git config user.name test', { cwd: dir })
+        execSync('git config user.email test@test', { cwd: dir })
+        writeFileSync(join(dir, 'src.ts'), 'v1\n', 'utf-8')
+        execSync('git add . && git commit -qm init', { cwd: dir })
+        writeFileSync(join(dir, 'src.ts'), 'v2\n', 'utf-8')
+
+        const action = deliverableAction()
+        action.changedPaths = ['src.ts']
+        const { ctx, logger } = makeCommitCtx(dir, [action])
+
+        commitLocalChanges(ctx)
+
+        expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('Committed fix changes to current branch'))
+        expect(execSync('git show HEAD:src.ts', { cwd: dir, encoding: 'utf-8' })).toBe('v2\n')
     })
 
     it('skips zero-fix runs even when side-effect files changed the worktree', () => {
