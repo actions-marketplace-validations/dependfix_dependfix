@@ -2,6 +2,7 @@ import type { AlertClass } from '../alerts'
 import {
     type RunResult,
     type FixAction,
+    type RepeatedAttemptStatus,
     aggregateSeverity,
     groupByRepository,
     formatDuration,
@@ -22,6 +23,7 @@ import { countUnfixedAlerts, formatSeverity, formatSkipReason, skippedBreakdown,
  * 1. Header（runId / 时间 / 模式）
  * 2. Summary 表
  * 2.5 Skipped & Truncated（有跳过 / 截断 / 失败残差时渲染）
+ * 2.6 Repeated Failure Attempts（有同告警尝试记录时渲染）
  * 3. AI Usage（仅 AI 实际调用时渲染）
  * 3.5. Supply Chain Warnings（有警示时才渲染）
  * 4. Alerts by Severity 表
@@ -96,6 +98,26 @@ export function generateMarkdownReport(result: RunResult): string {
         }
         if (failedResidual > 0) {
             sections.push(`| Failed / other not fixed | ${failedResidual} |`)
+        }
+        sections.push('')
+    }
+
+    // ---- 2.6 Repeated Failure Attempts（同告警尝试记录；仅记录存在时渲染）----
+    const attemptRecords = result.attemptTracking ?? []
+    if (attemptRecords.length > 0) {
+        sections.push(
+            '## Repeated Failure Attempts',
+            '',
+            '> 尝试序号 = 同键（source / package / target version / plan strategy）已关闭 PR 数 + 1；',
+            '> 第 3 次起跳过并计入 `Skipped: Repeated failure`，`--retry-failed` 可强制再试（标注「人工强制」）。',
+            '',
+            '| Repository | Package | Attempt Key | Attempt | Status |',
+            '|------------|---------|-------------|---------|--------|',
+        )
+        for (const record of attemptRecords) {
+            sections.push(
+                `| ${escapeMd(record.repository)} | \`${escapeMd(record.packageName)}\` | \`${escapeMd(record.key)}\` | ${record.attempt} | ${attemptStatusLabel(record.status)} |`,
+            )
         }
         sections.push('')
     }
@@ -400,6 +422,16 @@ function alertClassLabel(alertClass: AlertClass | undefined): string {
         case 'suggested': return 'B 建议'
         case 'report-only': return 'C 仅报告'
         default: return '—'
+    }
+}
+
+/** 同告警尝试处置标签（报告专用措辞；PR 正文只写 HTML 注释，不渲染状态标签）。 */
+function attemptStatusLabel(status: RepeatedAttemptStatus): string {
+    switch (status) {
+        case 'attempt': return 'attempt'
+        case 'forced': return 'forced (manual retry)'
+        case 'skipped': return 'skipped (attempt limit)'
+        default: return String(status)
     }
 }
 

@@ -124,6 +124,7 @@ const SKIP_REASON_LABELS: Record<SkipReason | 'other', string> = {
     'cross-major': 'Cross-major / manual review',
     'not-fixable': 'Not auto-fixable',
     'override-protected': 'Protected by policy',
+    'repeated-failure': 'Repeated failure (attempt limit)',
     other: 'Other / unclassified',
 }
 

@@ -12,6 +12,7 @@ export const SKIP_REASONS = [
     'cross-major',
     'not-fixable',
     'override-protected',
+    'repeated-failure',
 ] as const
 
 export type SkipReason = (typeof SKIP_REASONS)[number]
@@ -281,6 +282,38 @@ export interface RunResult {
      * [verification-ci-alignment.md](../../../../docs/design/governance/verification-ci-alignment.md)。
      */
     ciAlignment?: CiAlignmentRecord[]
+    /**
+     * 同告警尝试记录（按告警逐条；仅 fix-and-pr 模式且参与尝试计数时存在）。
+     *
+     * 记录「本次运行对该尝试键的处置」：正常尝试 / 达到上限跳过 / `--retry-failed` 人工强制。
+     * 尝试键与计数口径见 [pr-delivery-closure.md §6](../../../../docs/design/governance/pr-delivery-closure.md)。
+     */
+    attemptTracking?: RepeatedAttemptRecord[]
+}
+
+/**
+ * 同告警尝试记录的处置状态。
+ *
+ * - `attempt`：本次为第 1 / 2 次尝试（正常执行）
+ * - `forced`：达到上限但 `--retry-failed` 强制再试（报告标注「人工强制」）
+ * - `skipped`：达到上限跳过（`FixAction.noOp` + `alertsSkippedByReason['repeated-failure']`）
+ */
+export type RepeatedAttemptStatus = 'attempt' | 'forced' | 'skipped'
+
+/**
+ * 同告警尝试记录。
+ *
+ * 尝试键 = `source / packageName / targetVersion / planStrategy` 的摘要（16 位 hex），
+ * 命名空间隐含于仓库作用域（键本身不含 repo）；`attempt` = 同键已关闭 PR 数 + 1。
+ */
+export interface RepeatedAttemptRecord {
+    repository: string
+    packageName: string
+    /** 尝试键（16 位 hex） */
+    key: string
+    /** 本次尝试序号（同键已关闭 PR 数 + 1；上限 2 次，第 3 次起跳过） */
+    attempt: number
+    status: RepeatedAttemptStatus
 }
 
 /**

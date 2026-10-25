@@ -75,6 +75,37 @@ describe('generateMarkdownReport', () => {
         expect(md).toContain('| Failed / other not fixed | 16 |')
     })
 
+    it('renders repeated failure attempts with status labels', () => {
+        const result = {
+            ...EMPTY_RUN_RESULT,
+            attemptTracking: [
+                { repository: 'owner/repo', packageName: 'lodash', key: 'aaaaaaaaaaaaaaaa', attempt: 1, status: 'attempt' as const },
+                { repository: 'owner/repo', packageName: 'express', key: 'bbbbbbbbbbbbbbbb', attempt: 3, status: 'skipped' as const },
+                { repository: 'owner/repo', packageName: 'vite', key: 'cccccccccccccccc', attempt: 3, status: 'forced' as const },
+            ],
+        }
+        const md = generateMarkdownReport(result)
+
+        expect(md).toContain('## Repeated Failure Attempts')
+        expect(md).toContain('| owner/repo | `lodash` | `aaaaaaaaaaaaaaaa` | 1 | attempt |')
+        expect(md).toContain('| owner/repo | `express` | `bbbbbbbbbbbbbbbb` | 3 | skipped (attempt limit) |')
+        expect(md).toContain('| owner/repo | `vite` | `cccccccccccccccc` | 3 | forced (manual retry) |')
+    })
+
+    it('omits the attempts section when no records exist', () => {
+        expect(generateMarkdownReport(EMPTY_RUN_RESULT)).not.toContain('Repeated Failure Attempts')
+    })
+
+    it('json report carries attemptTracking verbatim', () => {
+        const records = [
+            { repository: 'owner/repo', packageName: 'lodash', key: 'aaaaaaaaaaaaaaaa', attempt: 3, status: 'skipped' as const },
+        ]
+        const json = JSON.parse(generateJsonReport({ ...EMPTY_RUN_RESULT, attemptTracking: records }))
+        expect(json.attemptTracking).toEqual(records)
+        // 旧结果（无该字段）序列化时不出现多余键
+        expect(JSON.parse(generateJsonReport(EMPTY_RUN_RESULT))).not.toHaveProperty('attemptTracking')
+    })
+
     it('falls back to other for old summary without grouped fields', () => {
         const result = {
             ...EMPTY_RUN_RESULT,
