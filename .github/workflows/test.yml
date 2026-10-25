@@ -98,6 +98,15 @@ jobs:
       # 自指面：本文件为 yml，不在脚本比对的两处事实源内，新增注释不参与判定。
       # 阻断强度：workflow 级阻断信号（仓库未配置 required status checks，与 visual job 同口径）。
       - run: pnpm run check:verify-chain
+      # mergify 合并门禁一致性：`.github/mergify.yml` 的每条 merge 规则必须覆盖**全部 workflow** 中
+      # `pull_request` 触发 workflow 的 PR job 并集（`check-success` 按 job 名匹配，Test 不覆盖
+      # Coverage / E2E / Visual Regression），且 dependabot / dependfix 两类 bot author 规则齐备。
+      # 任一 workflow 新增 PR job 或 mergify 条件漂移即失败。
+      # 负例标定：从任一规则删去 `check-success=Coverage` 即 exit 1（本地已验），还原后 exit 0。
+      # 自指面：本文件**就是** job 名事实源（脚本扫 `.github/workflows/*.yml` 的 pull_request job）——
+      # 新增 job 会自动进入门禁比对（`name` 优先于 job key），规则未同步即失败。
+      # 阻断强度：workflow 级阻断信号（仓库未配置 required status checks，与 visual job 同口径）。
+      - run: pnpm run check:mergify
       # docs 构建前置：VitePress 会把 markdown 中的裸 HTML 当作 Vue 模板编译（缺结束标签即失败），
       # lint-md/check-docs 均不检查标签配对——docs 构建失败必须尽早暴露，不等 typecheck/test/build 跑完
       # （教训见经验归档 §三十三：release.md 裸 <path> 导致 Test/Pages 双 workflow 在末尾构建才失败）

@@ -40,6 +40,7 @@
 | pnpm 命令 | 脚本 | 用途 |
 |---|---|---|
 | `pnpm check:verify-chain` | `check-verify-chain.mjs` | 校验本仓库自用验证链（`.github/workflows/security-auto-fix.yml` 的 `commands` 回退值）覆盖引擎默认链（`packages/engine/src/runners/verification-runner.ts`）的全部语义项（按语义项比对；额外项与缺失项须在脚本声明表中登记理由）；面差背景与整链替换语义见 [GitHub Action 工作流契约](../docs/design/governance/github-action-workflow.md)；**已接入 CI Test job（命中即阻断）** |
+| `pnpm check:mergify` | `check-mergify-conditions.mjs` | 校验 `.github/mergify.yml` 的每条 merge 规则 `check-success` 集合与 `.github/workflows/*` 中 `pull_request` 触发 workflow 的 PR job 并集**完全一致**（缺失 = 门禁漏 job，多出 = 名字漂移），并要求 dependabot / dependfix 两类 author 规则齐备；`skipped` 不等于 `success`，启用指南见 [PR 自动合并配置](../docs/guide/auto-merge.md)；**已接入 CI Test job（命中即阻断）** |
 
 ### i18n 审计
 
