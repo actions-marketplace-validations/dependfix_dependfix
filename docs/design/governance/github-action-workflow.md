@@ -54,6 +54,8 @@ branding:
 | `commands` | string | `''` | 自定义验证命令（逗号分隔，覆盖默认 `install + lint + build + typecheck + test` 链）。Nuxt 项目需先 `nuxt prepare`（lint 依赖 `.nuxt/tsconfig.json` 生成物），否则 eslint 解析失败——run 31552922137 教训。例：`pnpm install --frozen-lockfile, pnpm --filter @dependfix/platform exec nuxt prepare, pnpm lint, pnpm build, pnpm typecheck, pnpm test`。**注意**：`--commands` 是**整链替换**（逐条替换，不做合并），**默认链扩展不会自动跟随**——默认链内的 `typecheck` / `test` 需按该仓库实际验证面显式保留 |
 | `mirror-ci-scripts` | string | `false` | 把目标仓库 CI 独有的 `pnpm/npm/yarn` 脚本追加到默认链之后（最多 3 条、首失败即停；`docker` / `gh` / 任意 shell 与非单一形态只披露不执行；与 `commands` 不叠加）。需目标仓库有 `.github/workflows` 且脚本存在于根 `package.json#scripts`；开销为每仓多跑完整脚本，CI 时长敏感场景慎开 |
 | `retry-failed` | string | `false` | 忽略同告警尝试上限并强制再试（仅 `fix-and-pr`）：同一告警 / 目标版本 / 修复策略连续两次关闭后第 3 次起默认跳过（报告 `Skipped: Repeated failure`），置 `true` 时仍执行并在报告标注人工强制 |
+| `wait-pr-checks` | string | `false` | 创建 PR 后等待 check 终态（仅 `fix-and-pr`）：失败默认评论失败摘要；宽限期后无 check 记 `no_ci_detected`（不判通过）；双预算（per-PR 15 分钟 / per-run 20 分钟，且 ≤ 剩余 job 预算 70%），不改变 exit code |
+| `close-failed-pr` | string | `false` | check 失败且聚合归因 `self_caused` 时关闭 PR 并删除分支（需同时开启 `wait-pr-checks`）；`unknown` / `external_noise` / `pre_existing` 只评论 |
 | `github-token` | string | **必填** | GitHub Token（需 security-events 权限） |
 
 > **M4 接入建议（2026-08-06）**：多仓库治理参数（`owner` / `repo-*` / `max-concurrency` / `max-retries`）已接入 Action 输入。**建议为每个仓库单独配置 action**（而非跨仓库 owner 发现）：

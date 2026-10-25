@@ -115,7 +115,7 @@
 - **证据**：`pnpm -r build` 全绿；`pnpm run typecheck` 7 包 Done；`pnpm lint` 0 error / 3 条存量 warning；`pnpm test` 327 passed | 2 skipped 文件 / 4980 passed / 10 skipped；定向 `commit-scope` / `workspace-yaml` / `pr-creator` / `helpers` / dependency / `fix-and-pr-commit-scope` 全绿；文档九项 + `docs:build` 全 exit 0（check:docs links 166 / doc-size 健康 90 warning 0 / orphan 0 832 文件）；mutation **11/11** 击杀（工件 `artifacts/review-gate/2026-10-25-m48-4-mutation.md`，还原后 8 个被改文件 md5 一致）；新增/修改源文件编号标记 0 命中。
 - **边界**：依赖类 fixer 的写盘（manifest / lockfile / workspace / `.npmrc`）靠白名单覆盖，不逐路径声明；源码类写盘必须显式声明，漏声明即 `UNEXPECTED_CHANGES`。目标仓库运行前已有未提交改动时：白名单内文件（典型 `package.json`）无法与我们同文件的改动区分，会一并提交；白名单外一律拒绝。索引区已有暂存内容不在提交集合内时拒绝（用户需自行 `git restore --staged`），不擅自清理。生成物按任意层级目录 / 文件名匹配（名为 `dist` 的源码目录也会被排除，属安全方向）。YAML 定点编辑对含别名文档整体跳过（回滚依赖备份），解析失败不降级为整文件重写。
 
-### M48.5 [P1 🛠️] PR 创建后 CI 回环（CLI / Action 侧）
+### M48.5 [P1 🛠️] PR 创建后 CI 回环（CLI / Action 侧）（**已闭环** `cce39c09` + `3ef294ee` + `1b37a35e` + `acc78875` + `ff8fa60a`；文档随本批收口）
 
 - **目标**：创建 PR 后可选等待 check 终态；失败时默认评论失败摘要、可选关闭坏 PR，使红 PR 不再静默挂起。
 - **范围**：新增 `packages/engine/src/github/pr-check-watch.ts`（轮询状态机 + 退避 + per-PR / per-run 预算）；`pr-creator.ts` 接线；`app/index.ts:635` 调用点（581 的去重分支归 M48.3）；`packages/core/src/report/types.ts` 增加 `RunResult.prCheckWatch`；CLI `--wait-pr-checks` / `--close-failed-pr` + Action input；mock Octokit 测试。
@@ -128,8 +128,16 @@
   6. mutation 至少 2 处（终态判定 / 关闭条件）被击杀。
 - **不做什么**：不跨进程续等；不下沉平台 PR Check 轮询；不做 webhook；不自动合并；平台侧建 PR 后回环不在本阶段。
 - **依赖**：M48.6 分类器（先落地）；M48.3 尝试标记；Octokit checks / statuses API；设计稿 §8。
-- **交付物**：5 commits / 6-9 files（`pr-check-watch.ts` 新增、`pr-creator.ts`、`app/index.ts`、core 报告类型、CLI / Action、测试）/ 400-650 行（量级估算）。
+- **交付物**：原估算 5 commits / 6-9 files / 400-650 行。**实际**：30 文件（23 修改 + 7 新增）/ `git diff --numstat` 实测 +315 −9（跟踪）+ 2215 行（7 个新文件），合计约 2530 新增行 → 按 §1.1 拆为 **6 个 commit**：core 归因分类器（3 文件 / 294 行）/ 配置键 + 校验 + CLI + Action（7 / 178）/ 等待状态机模块（3 / 693）/ 等待状态机测试（1 / 620）/ 编排接线 + 报告契约 + app 级用例（9 / 715）/ 文档（7 / ≈32），每 commit ≤10 文件且 ≤800 新增行（源码与测试因阈值分家属，commit message 明示）。
 - **风险与缓解**：等待吃满 job 预算 → 默认关闭 + 双预算；API 配额 → 运行级缓存 + 退避；误关 PR → 仅 `self_caused` + 显式开关 + dry-run 守卫。
+- **落地**（2026-10-25）：
+  - **前置分类器（M48.6 最小切片，先落地）**：新增 `packages/core/src/report/check-attribution.ts`——`CheckAttribution` / `CheckConclusion` 类型、`classifyCheckFailure` 规则纯函数、`aggregateCheckAttribution`（一致归因才保留，混合 → `unknown`）。规则顺序：`cancelled` / `skipped` / `stale` → `cancelled`；Dependabot / updater 文本签名 → `external_noise`；镜像 / registry `unknown manifest class` / `manifest unknown` → `external_noise`；父提交同 job 红 → `pre_existing`；失败且父提交同 job 绿 → `self_caused`；其余 → `unknown`。父提交比对不按作业名白名单限制（红 / 绿两侧对称），未知一律 `unknown`。
+  - **等待状态机**：新增 `packages/engine/src/github/pr-check-watch.ts`。数据源 `checks.listForRef` + 分页 `listCommitStatusesForRef`（单源失败不阻断另一源；采集失败与「零观测」严格区分）。终态：全部完成且至少观测到一条 check → 有失败 `failed`（逐条归因后聚合）/ 有成功 `passed` / 仅 cancelled·skipped·neutral `cancelled`；宽限期 60s 且至少两轮轮询后才允许 `no_ci_detected`（绝不判 `passed`）；预算耗尽 `timeout`（报告记录绑定来源 `pr` / `run` / `job`）。**失败判定 fail-closed**：`unknown` 结论（GitHub 新增 / 未识别）与 `startup_failure`（workflow 无法启动）都按「失败但未判定」处理，绝不当作成功或取消。间隔 15s 指数退避到 60s + 轮询次数上限（防注入时钟不前进空转）；有效等待 = min(per-PR 上限, per-run 预算, 剩余 job 预算 × 70%)——job 预算基线缺省只在 `GITHUB_ACTIONS=true` 时按 25 分钟套用（`DEPENDFIX_JOB_BUDGET_MS` 可显式覆盖，本地 / 平台执行不臆造），`startedAt` 不含 Actions setup。父提交解析：head first parent → 失败回退 PR base → 再失败归因 `unknown` 并 warn 留痕。失败 check 的名称与 URL 均按不可信文本清洗（控制字符 / 换行 / 括号编码 / 仅 http(s)）。
+  - **处置**：`failed` / `timeout` 默认评论（失败 job 名 + 详情 URL + 归因 + 尝试标记 + `<!-- dependfix:pr-check -->`）；`--close-failed-pr` 仅在**聚合归因 `self_caused`** 时关闭 PR 并删分支（关闭失败/删分支失败分别记 `closeError`，不改变终态）；`cancelled` / `no_ci_detected` 不评论；dry-run 不评论 / 不关闭 / 不删分支；评论 403 记 `commentError`。所有 API / 处置失败只降级记录，不改变修复结果与 exit code。
+  - **配置与接线**：`waitPrChecks` / `closeFailedPr` / `prCheckTimeoutMs` / `prCheckRunBudgetMs`（env `DEPENDFIX_*`；CLI `--wait-pr-checks` / `--close-failed-pr`；Action `wait-pr-checks` / `close-failed-pr`）。配置校验：`waitPrChecks` 仅 `fix-and-pr`；`closeFailedPr` 必须同时开启等待；预算 60000-1800000 越界 fail-fast。`app/pr-check-watch-run.ts` 汇总预算并写入 `RunResult.prCheckWatch` / summary 计数器（`prsOpened` 在 PR 创建成功后 +1、`prsSkippedByFingerprint` 在去重命中时 +1、`prsClosedAfterFailure` 在关闭成功时 +1、`checksTimedOut` 在任意 `timeout` 时 +1；`computeSummary` 多次调用不清零），等待链自身异常也留一条 `timeout` 记录（不抛）；`createPullRequest` 回传 `headSha` 供精确轮询。
+- **边界**：只等本次运行创建的 PR（去重命中同内容 PR 时不等待，只计数 `prsSkippedByFingerprint`）；不跨进程续等、不写平台库、不做 webhook、不自动合并；轮询以 PR head SHA（缺省分支名）为 ref，后续 force-push 的提交也会计入；父提交比对取 head 的 first parent（失败回退 PR base，再失败 → `unknown`）；采集 API 失败期间不推进 `no_ci_detected`；`self_caused` 依赖父提交同 job 为绿，目标仓库对同 job 做路径过滤 / 新 job 首次运行 → `unknown`（只评论不关闭）；混合归因一律 `unknown`；平台侧 PR Check 回环与本能力不复用（后续候选）。
+- **审计**：R1 `standard` **Reject**（1B：`startup_failure` / 未识别结论被判「非失败」→ 可能 `passed` / `cancelled`，红 PR 静默；6W / 6S：预算来源未回传、job 基线无条件套用、URL 未清洗、父提交未回退 base、破坏性出口缺用例、拆批越线）→ 全量收口（fail-closed 失败判定 + `self_caused` 仅限硬失败、`budgetLimit`、`jobBudgetMs`、`sanitizeCheckUrl`、父提交两段回退、六类出口用例、mutation 补 M9/M10）→ R2 `quick` **Reject**（1B：用例未隔离 `GITHUB_ACTIONS`，CI 必红；W：per-run 预算未跨 PR 累计、poll 上限误标预算来源、catch 未计 `checksTimedOut`、422 一律静默）→ 收口（跨 PR 累计 + 耗尽短路、独立轮询上限标签、catch 计数、422 区分引用不存在 / 受保护）→ R3 `quick` **Pass**（0B；1W：交付物数字与实测不符 → 已回填；3S：404 用例 / catch 计入说明 / 枚举 JSDoc → 已订正）。实测用时：R1 发起 `09:10Z` → R2 发起约 `09:39Z` → R3 发起约 `10:06Z`、返回约 `10:14Z`；三轮（含收口修复与门禁复跑）自 `09:10Z` 至 `10:16Z` 共约 **66 分钟**，单轮返回时刻未逐次打点（**第 7 次复现**该缺陷，仅以周边命令时间戳回溯）。
+- **证据**：`pnpm -r build` 全绿；`pnpm run typecheck` 7 包 Done；`pnpm lint` 0 error / 3 条存量 warning；`pnpm test` 331 passed | 2 skipped 文件 / 5046 passed / 10 skipped；`GITHUB_ACTIONS=true` 下 `pr-check-watch-run.test.ts` 8 passed（CI 环境等价）；文档九项 + `docs:build` 全 exit 0（check:docs links 166 / doc-size 健康 90 warning 0 / orphan 0 839 文件）；mutation **10/10** 击杀（工件 `artifacts/review-gate/2026-10-25-m48-5-mutation.md`，还原后 6 个被改文件 md5 一致）；新增/修改源文件编号标记 0 命中。
 
 ### M48.6 [P1 🚀] 外部作业归因与合并门禁
 
@@ -145,6 +153,7 @@
 - **依赖**：平台 `monitor/build-signals` 数据面；`PRE_EXISTING_FAILURE` 既有口径；M48.5 的真实 CLI check 接线（本条先以夹具 + 平台现有数据验证）；设计稿 §9。
 - **交付物**：5 commits / 6-10 files（`check-attribution.ts` 新增、core 报告类型、平台视图、`.github/mergify.yml`、`auto-merge.md`、`pr-build-deploy-signals.md`、测试）/ 350-600 行（量级估算）。
 - **风险与缓解**：外部作业形态变化 → `unknown` 兜底 + 规则表注释 + 样例夹具；mergify 条件与 job 名漂移 → 单测比对 `test.yml`；误判真实回归 → 关闭仅 `self_caused`、归因不参与合并放行。
+- **落地（部分，2026-10-25）**：归因分类纯函数 `packages/core/src/report/check-attribution.ts`（`CheckAttribution` / `CheckConclusion` / `classifyCheckFailure` / `aggregateCheckAttribution`）+ 13 条规则夹具随 M48.5 前置落地（`cce39c09`）；`self_caused` 规则按用户决策补齐为「硬失败且父提交同 job 绿」（红 → `pre_existing`，超时 / 待授权 → `unknown`）。**余下**：报告渲染、平台 PR Check 视图消费同一分类（等价性用例）、`.github/mergify.yml` 四条 `check-success`、`auto-merge.md` / `pr-build-deploy-signals.md` 口径同步。
 
 **类型平衡复核**：🛠️ 5（M48.1 / M48.2 / M48.3 / M48.4 / M48.5）+ 🚀 1（M48.6）。🎨 / 🧪 独立条目缺口显式标注：本阶段由 P0/P1 外部交付证据驱动，UX / 测试能力分别由 E 阶段与各条目内嵌用例承担；不新增第 7 原子以避免越过 5-6 项上限。
 

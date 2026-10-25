@@ -225,13 +225,16 @@ created ──▶ polling ──▶ passed
 
 **终态**：所有 check `status === 'completed'` 且**已观测到至少一条 check**（创建后宽限 ≥60s 且至少两轮轮询）；宽限期后仍为 0 → `no_ci_detected`，绝不判 `passed`。
 
+**失败判定 fail-closed**：`unknown` 结论（GitHub 新增 / 未识别）与 `startup_failure`（workflow 无法启动）都按**失败但未判定**处理——绝不当作成功或取消，否则红 PR 会静默挂在「通过 / 已取消」里。
+
 ### 8.2 轮询与预算
 
 **决策 D5**：默认关闭，`--wait-pr-checks` / Action input `wait-pr-checks` 开启。
 
 - 间隔 15s 起，指数退避到 60s。
-- **per-PR 上限**默认 15 分钟（`DEPENDFIX_PR_CHECK_TIMEOUT_MS`）；**per-run 总预算**默认 20 分钟（`DEPENDFIX_PR_CHECK_RUN_BUDGET_MS`），且不超过剩余 job 预算的 70%。
+- **per-PR 上限**默认 15 分钟（`DEPENDFIX_PR_CHECK_TIMEOUT_MS`）；**per-run 总预算**默认 20 分钟（`DEPENDFIX_PR_CHECK_RUN_BUDGET_MS`），且不超过剩余 job 预算的 70%。job 预算基线缺省只在 `GITHUB_ACTIONS=true` 时按 25 分钟套用（`DEPENDFIX_JOB_BUDGET_MS` 可显式覆盖；本地 / 平台执行不臆造）。超时报告记录绑定来源（`pr` / `run` / `job`）。
 - 预算耗尽时，未完成的 PR 记 `checksTimedOut`，保留 PR，交给后续运行 / 平台 PR Check。
+- **per-run 预算跨 PR 累计**：已消耗 = 已记录 attempt 的 `durationMs` 之和；`runBudgetExhausted` 后同轮后续 PR 不再等待（直接记 `timeout`）。
 - 每个仓库最多 1 个并发等待；API 429 按退避重试并记录。
 - 与平台 PR Check 轮询互不复用：CLI 侧只等待本次创建的 PR，不写平台库。
 
@@ -244,6 +247,7 @@ created ──▶ polling ──▶ passed
 | `close` | failed 且分类 `self_caused` | 否（`--close-failed-pr` 显式开启） | 不关闭 |
 
 - `unknown` **只评论不关闭**；`external_noise` / `pre_existing` 只评论。
+- 聚合归因：仅当**所有**失败项一致为 `self_caused` 才关闭；混合归因 → `unknown`（只评论，宁可不关）。
 - 关闭时同步删除分支（`--close-failed-pr` 语义包含 cleanup），报告记 `closedByDependfix`。
 - `cancelled` 不评论；`no_ci_detected` 只报告。
 
@@ -252,6 +256,7 @@ created ──▶ polling ──▶ passed
 - 只在 PR 创建后的单次运行内等待，不做跨进程续等。
 - GitHub Actions job 总时长 25 分钟；per-run 预算必须低于该值。
 - **平台侧创建 PR 后的回环不在本阶段**（平台仍沿用 PR Check 轮询 + 告警），登记后续候选。
+- 同一 ref 的 check run 若保留被 re-run 覆盖的旧条目，仍会按「存在失败即 `failed`」处理（只评论、不关闭）；按作业名取最新一轮的收敛留待后续。
 
 ## 9. M48.6 外部作业归因与自动合并门禁
 
@@ -267,11 +272,12 @@ type CheckAttribution = 'self_caused' | 'pre_existing' | 'external_noise' | 'can
 |:--|:--|:--|
 | job 名含 `dependabot` / `updater` 且结论为 `security_update_not_possible` / advisory withdrawn | 文本 + 事件 | `external_noise` |
 | job 为镜像 / registry 推送且错误含 `unknown manifest class` / `manifest unknown` | 错误签名 | `external_noise` |
-| job 为 `Cloudflare Workers Builds` / `Release` 且父提交同 job 已红 | 父提交比对 | `pre_existing` |
-| 结论为 `cancelled` / `skipped` | 结论 | `cancelled` |
-| 其余失败 | 兜底 | `unknown` |
+| 父提交同 job 已红（任意 job；`Cloudflare Workers Builds` / `Release` 为已知实例） | 父提交比对 | `pre_existing` |
+| **硬失败**（`failure`）且父提交同 job 为绿 | 父提交比对 | `self_caused` |
+| 结论为 `cancelled` / `skipped` / `stale` | 结论 | `cancelled` |
+| 其余失败（含父提交无该 job / 未完成） | 兜底 | `unknown` |
 
-**决策 D6**：未知形态一律 `unknown`，不得默认 `self_caused` 或 `external_noise`。
+**决策 D6**：未知形态一律 `unknown`，不得默认 `self_caused` 或 `external_noise`。父提交比对**不按作业名白名单**限制（两侧对称：红 → `pre_existing`，绿 → `self_caused`）；`timed_out` / `action_required` 视为基础设施抖动，即使父提交绿也按 `unknown`（只评论不关闭）；同一 PR 多个失败项归因不一致 → 聚合 `unknown`（关闭要求一致归因）。
 
 ### 9.2 呈现与关闭
 
@@ -312,6 +318,7 @@ type CheckAttribution = 'self_caused' | 'pre_existing' | 'external_noise' | 'can
 | `waitPrChecks` | boolean | false | engine / CLI / Action |
 | `prCheckTimeoutMs` | number | 900000（per PR） | engine |
 | `prCheckRunBudgetMs` | number | 1200000（per run） | engine |
+| `jobBudgetMs` | number | 未设置（Actions 环境按 25 分钟兜底） | engine（env `DEPENDFIX_JOB_BUDGET_MS`） |
 | `closeFailedPr` | boolean | false | engine / CLI / Action |
 | `retryFailed` | boolean | false | engine / CLI / Action |
 
@@ -320,8 +327,8 @@ type CheckAttribution = 'self_caused' | 'pre_existing' | 'external_noise' | 'can
 - `FixAction.family`（M48.1）；`SKIP_REASONS` 新增 `'repeated-failure'`（M48.3）。
 - `CiAlignmentRecord.mirrored` / `mirrorSkipped`（M48.2；字段可选以兼容历史 JSON）。
 - `FixAction.commandSource?: 'default' | 'repo-config' | 'ci-mirror'`（M48.2；仅 verification 动作）。
-- core `RunResult.prCheckWatch?: { attempts: Array<{ pr: { number: number, htmlUrl: string }, state: 'passed' | 'failed' | 'cancelled' | 'no_ci_detected' | 'timeout', attribution?: CheckAttribution, closed: boolean }>, runBudgetExhausted: boolean }`（M48.5 / M48.6）；engine 的 `PullRequestResult` 只作内部返回，不承载报告字段。
-- 运行摘要：`prsOpened` / `prsSkippedByFingerprint` / `prsClosedAfterFailure` / `checksTimedOut`。
+- core `RunResult.prCheckWatch?: { attempts: Array<{ pr: { number, htmlUrl }, state: 'passed' | 'failed' | 'cancelled' | 'no_ci_detected' | 'timeout', attribution?: CheckAttribution, closed, commented, polls, durationMs, failedChecks?, reason?, commentError?, closeError? }>, runBudgetExhausted }`（M48.5 / M48.6；`failedChecks` 为 `{ name, url?, attribution }` 最多 5 条）；engine 的 `PullRequestResult` 只作内部返回（M48.5 起附带 `headSha` 供精确轮询）。
+- 运行摘要：`prsOpened` / `prsSkippedByFingerprint` / `prsClosedAfterFailure` / `checksTimedOut`（事件点累加，`computeSummary` 不重置）。
 
 ### 10.3 PR 正文标记
 
