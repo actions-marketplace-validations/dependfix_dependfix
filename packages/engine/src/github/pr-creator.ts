@@ -44,6 +44,8 @@ export interface PullRequestResult {
     number: number
     /** PR HTML URL */
     htmlUrl: string
+    /** PR head 提交 SHA（check 回环用它精确查询；响应缺省时 undefined） */
+    headSha?: string
 }
 
 export interface FixBranchResult {
@@ -359,6 +361,7 @@ export async function createPullRequest(params: CreatePullRequestParams): Promis
     return {
         number: data.number,
         htmlUrl: data.html_url,
+        headSha: data.head?.sha ?? undefined,
     }
 }
 
