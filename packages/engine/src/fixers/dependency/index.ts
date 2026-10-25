@@ -2,7 +2,6 @@ import { execSync } from 'node:child_process'
 import { copyFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { NormalizedSecurityAlert } from '@dependfix/core'
-import YAML from 'yaml'
 import {
     cleanupBackups,
     execPnpmInstall,
@@ -24,6 +23,7 @@ import { readLockfileVersion, readLockfileVersions } from './lockfile-versions'
 import { remainingVersionsBelowTarget, verifyVersionedOverridesApplied } from './override-verification'
 import { ensurePnpmOverrides, extractPrefix, findDependencyVersion, type PackageJson } from './manifest'
 import { applyManifestUpgrades, type ManifestUpgradeApplied } from './manifest-upgrades'
+import { applyWorkspaceOverrides, readOverridesSection, readWorkspaceDocument, rollbackWorkspaceOverrides } from './workspace-yaml'
 
 export { normalizeOverrideKey, normalizeOverrideSelector, upsertOverride } from './override-key'
 export { compareSemver, isNonSemverDeclaration, parseMajorVersion } from './semver'
@@ -245,11 +245,24 @@ export async function overrideTransitiveDependency(
 
     // ---- 6. 写入 overrides ----
     let oldOverride: string | undefined
+    // 实际写入的 override key：归一化可能命中既有写法（`vite@1` → `vite@^1`），回滚必须用实际 key
+    let overrideKey = packageName
     // 无 workspace.yaml 且 pnpm v10+ → package.json overrides 可能被忽略（假成功风险）
     let pkgJsonOverrideWarning: string | undefined
 
     if (usesWorkspaceYaml) {
-        oldOverride = writeWorkspaceOverride(workspaceYamlPath, packageName, toVersion)
+        const writeResult = writeWorkspaceOverride(workspaceYamlPath, packageName, toVersion)
+        if (!writeResult.ok) {
+            cleanupBackups({ pkgBackup, lockBackup, workspaceBackup })
+            return failResult(
+                packageName,
+                targetVersion,
+                fromVersion,
+                `pnpm-workspace.yaml kept unchanged: ${writeResult.error ?? 'unknown write failure'}`,
+            )
+        }
+        oldOverride = writeResult.oldValue
+        overrideKey = writeResult.key ?? packageName
     } else {
         const pnpmMajor = detectPnpmMajor(workDir)
         if (pnpmMajor !== null && pnpmMajor >= 10) {
@@ -270,6 +283,7 @@ export async function overrideTransitiveDependency(
             usesWorkspaceYaml,
             workspaceYamlPath,
             packageName,
+            overrideKey,
             oldOverride,
             pkg,
             pkgPath,
@@ -302,6 +316,7 @@ export async function overrideTransitiveDependency(
             usesWorkspaceYaml,
             workspaceYamlPath,
             packageName,
+            overrideKey,
             oldOverride,
             pkg,
             pkgPath,
@@ -418,26 +433,21 @@ export async function applyVersionedOverridesBatch(
     let pkgJsonOverrideWarning: string | undefined
 
     if (usesWorkspaceYaml) {
-        let doc: Record<string, unknown>
-        try {
-            const raw = readFileSync(workspaceYamlPath, 'utf-8')
-            doc = YAML.parse(raw) as Record<string, unknown> ?? {}
-        } catch {
-            doc = {}
-        }
-        const overrides = (doc.overrides ?? {}) as Record<string, string>
-        for (const plan of plans) {
-            for (const [key, target] of Object.entries(plan.overrides)) {
-                const { key: actualKey, oldValue } = upsertOverride(overrides, key, target)
-                // 同一批内多 key 归一化到同一 actualKey 时保留首次旧值（回滚依据）
-                if (!oldValues.has(actualKey)) {
-                    oldValues.set(actualKey, oldValue)
-                }
-                writtenKeys.add(actualKey)
+        // 定点编辑：只改目标键（保留注释 / 引号风格 / 键序）；解析失败不落盘
+        const updates = plans.flatMap((plan) => Object.entries(plan.overrides).map(([key, value]) => ({ key, value })))
+        const writeResult = applyWorkspaceOverrides(workspaceYamlPath, updates)
+        if (!writeResult.ok) {
+            cleanupBackups({ pkgBackup, lockBackup, workspaceBackup })
+            return {
+                success: false,
+                error: `pnpm-workspace.yaml kept unchanged: ${writeResult.error ?? 'unknown write failure'}`,
+                failurePhase: 'precheck',
             }
         }
-        doc.overrides = overrides
-        writeFileSync(workspaceYamlPath, YAML.stringify(doc), 'utf-8')
+        for (const [key, oldValue] of writeResult.applied) {
+            oldValues.set(key, oldValue)
+            writtenKeys.add(key)
+        }
     } else {
         const pnpmMajor = detectPnpmMajor(workDir)
         if (pnpmMajor !== null && pnpmMajor >= 10) {
@@ -477,23 +487,23 @@ export async function applyVersionedOverridesBatch(
             }
             return next
         }
-        if (usesWorkspaceYaml) {
-            try {
-                const raw = readFileSync(workspaceYamlPath, 'utf-8')
-                const doc = YAML.parse(raw) as Record<string, unknown> ?? {}
-                doc.overrides = restoreOverrides((doc.overrides ?? {}) as Record<string, string>)
-                writeFileSync(workspaceYamlPath, YAML.stringify(doc), 'utf-8')
-            } catch {
-                // 回滚失败时由下方 rollback(workspaceBackup) 兜底
-            }
-        } else {
+        // 备份还原为权威路径（字节级）；仅在备份缺失 / 复制失败时退回内存 / 定点恢复，
+        // 避免兜底路径自身出错时连带跳过还原与备份清理（留下脏写与 `.bak`）。
+        const pkgRestored = rollback(pkgPath, pkgBackup, lockfilePath, lockBackup)
+        const workspaceRestored = usesWorkspaceYaml
+            ? workspaceBackup !== null && rollback(workspaceYamlPath, workspaceBackup, lockfilePath, null)
+            : true
+        if (!pkgRestored && !usesWorkspaceYaml) {
             const pnpm = pkg.pnpm ?? {}
             pnpm.overrides = restoreOverrides(pnpm.overrides ?? {})
-            writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`, 'utf-8')
+            try {
+                writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`, 'utf-8')
+            } catch {
+                // 备份已缺失：尽最大努力，失败不再二次抛错（保持原有「回滚不中断」语义）
+            }
         }
-        rollback(pkgPath, pkgBackup, lockfilePath, lockBackup)
-        if (usesWorkspaceYaml && workspaceBackup) {
-            rollback(workspaceYamlPath, workspaceBackup, lockfilePath, null)
+        if (usesWorkspaceYaml && !workspaceRestored) {
+            rollbackWorkspaceOverrides(workspaceYamlPath, oldValues)
         }
         cleanupBackups({ pkgBackup, lockBackup, workspaceBackup })
 
@@ -582,15 +592,18 @@ export async function applyVersionedOverrides(
  * 条目取 max 合并，不丢不改写已有条目（2026-08-09 复盘：此前生成侧不感知
  * 已有条目，导致 `pkg: ^x` 与 `pkg@major: ^y` 并存分裂）。
  *
- * @returns 已有 overrides 映射（key → 版本声明）；无配置或解析失败返回 {}
+ * @returns 已有 overrides 映射（key → 版本声明）；无配置、解析失败或 `overrides` 形态非法返回 {}
  */
 export function readExistingOverrides(workDir: string): Record<string, string> {
     const workspaceYamlPath = join(workDir, 'pnpm-workspace.yaml')
     try {
         if (existsSync(workspaceYamlPath)) {
-            const raw = readFileSync(workspaceYamlPath, 'utf-8')
-            const doc = YAML.parse(raw) as Record<string, unknown> ?? {}
-            return (doc.overrides ?? {}) as Record<string, string>
+            // 与写入侧同一校验口径：非映射 / 非标量 / 别名文档一律按「无既有 overrides」处理
+            const parsed = readWorkspaceDocument(workspaceYamlPath)
+            if (!parsed.ok) {
+                return {}
+            }
+            return readOverridesSection(parsed.doc) ?? {}
         }
         const pkgPath = join(workDir, 'package.json')
         if (existsSync(pkgPath)) {

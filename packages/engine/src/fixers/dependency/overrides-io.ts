@@ -1,5 +1,4 @@
-import { copyFileSync, existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
-import YAML from 'yaml'
+import { copyFileSync, existsSync, unlinkSync, writeFileSync } from 'node:fs'
 import { resolveInstallTimeoutMs } from '../install-timeouts'
 import {
     describeProcessSignals,
@@ -10,6 +9,7 @@ import {
     type ExecError,
 } from '../process-signals'
 import { runTrackedCommand } from '../../runners/process-control'
+import { applyWorkspaceOverrides, rollbackWorkspaceOverrides } from './workspace-yaml'
 import type { PackageJson } from './manifest'
 import type { DependencyFixResult } from './index'
 
@@ -98,6 +98,8 @@ export function rollbackOverrideWrite(params: {
     usesWorkspaceYaml: boolean
     workspaceYamlPath: string
     packageName: string
+    /** 实际写入的 override key（归一化可能命中既有写法，默认取 packageName） */
+    overrideKey?: string
     oldOverride: string | undefined
     pkg: PackageJson
     pkgPath: string
@@ -110,6 +112,7 @@ export function rollbackOverrideWrite(params: {
         usesWorkspaceYaml,
         workspaceYamlPath,
         packageName,
+        overrideKey,
         oldOverride,
         pkg,
         pkgPath,
@@ -118,17 +121,26 @@ export function rollbackOverrideWrite(params: {
         lockBackup,
         workspaceBackup,
     } = params
-    rollbackOverrides({
-        usesWorkspaceYaml,
-        workspaceYamlPath,
-        packageName,
-        oldOverride,
-        pkg,
-        pkgPath,
-    })
-    rollback(pkgPath, pkgBackup, lockfilePath, lockBackup)
-    if (usesWorkspaceYaml && workspaceBackup) {
-        rollback(workspaceYamlPath, workspaceBackup, lockfilePath, null)
+    // 备份还原是权威路径（字节级）；定点回滚只在备份缺失 / 复制失败时作为兜底，
+    // 避免兜底路径自身异常跳过 `rollback` 与 `cleanupBackups`（会留下脏写与 `.bak`）。
+    const pkgRestored = rollback(pkgPath, pkgBackup, lockfilePath, lockBackup)
+    let workspaceRestored = true
+    if (usesWorkspaceYaml) {
+        workspaceRestored = workspaceBackup !== null
+            && rollback(workspaceYamlPath, workspaceBackup, lockfilePath, null)
+    }
+    if (!pkgRestored) {
+        rollbackOverrides({
+            usesWorkspaceYaml,
+            workspaceYamlPath,
+            overrideKey: overrideKey ?? packageName,
+            oldOverride,
+            pkg,
+            pkgPath,
+        })
+    } else if (usesWorkspaceYaml && !workspaceRestored) {
+        // 备份不可用：退回定点删除 / 恢复旧值（失败已由本函数吞掉，不比备份更差）
+        rollbackWorkspaceOverrides(workspaceYamlPath, new Map([[overrideKey ?? packageName, oldOverride]]))
     }
     cleanupBackups({ pkgBackup, lockBackup, workspaceBackup })
 }
@@ -186,42 +198,30 @@ export function cleanupBackups(paths: { pkgBackup: string, lockBackup: string | 
 }
 
 /**
- * 在 `pnpm-workspace.yaml` 中写入一条 override。
- *
- * 读取现有 YAML → 设置 `overrides[packageName] = version` → 原样写回。
- *
- * @returns 写入前该包的旧值（`undefined` 表示原先不存在该 override）
- */
-/**
- * 写入 pnpm-workspace.yaml 的 overrides 条目。
+ * 写入 pnpm-workspace.yaml 的 overrides 条目（定点编辑）。
  *
  * `packageName` 参数为 override key，支持两种格式：
  * - 顶层覆盖：`packageName`（如 `vite`）或版本化 key（`vite@5`）
  * - 路径级覆盖：`parent>child`（如 `@vitejs/plugin-vue>vite`）
  *
- * @returns 旧值（undefined = 该 key 原本不存在）
+ * 只改目标键：注释、引号风格与键序保持原样（见 workspace-yaml.ts）。解析失败 / overrides
+ * 不是映射 / 写入失败时**不落盘**，由调用方把原因并入修复结果留痕。
+ *
+ * @returns `key` = 实际写入的 key（归一化命中既有写法时可能不同于入参）、
+ *   `oldValue` = 写入前该 key 的旧值（undefined = 原本不存在）
  */
 export function writeWorkspaceOverride(
     workspaceYamlPath: string,
     packageName: string,
     version: string,
-): string | undefined {
-    let doc: Record<string, unknown>
-
-    try {
-        const raw = readFileSync(workspaceYamlPath, 'utf-8')
-        doc = YAML.parse(raw) as Record<string, unknown> ?? {}
-    } catch {
-        doc = {}
+): { ok: boolean, key?: string, oldValue?: string, error?: string } {
+    const result = applyWorkspaceOverrides(workspaceYamlPath, [{ key: packageName, value: version }])
+    if (!result.ok) {
+        return { ok: false, error: result.error }
     }
-
-    const overrides = (doc.overrides ?? {}) as Record<string, string>
-    const old = overrides[packageName]
-    overrides[packageName] = version
-    doc.overrides = overrides
-
-    writeFileSync(workspaceYamlPath, YAML.stringify(doc), 'utf-8')
-    return old
+    // 单条写入：归一化后实际写入的 key 至多一个
+    const entry = result.applied.entries().next().value as [string, string | undefined] | undefined
+    return { ok: true, key: entry?.[0] ?? packageName, oldValue: entry?.[1] }
 }
 
 /**
@@ -233,42 +233,22 @@ export function writeWorkspaceOverride(
 function rollbackOverrides(params: {
     usesWorkspaceYaml: boolean
     workspaceYamlPath: string
-    packageName: string
+    overrideKey: string
     oldOverride: string | undefined
     pkg: PackageJson
     pkgPath: string
 }): void {
-    const { usesWorkspaceYaml, workspaceYamlPath, packageName, oldOverride, pkg, pkgPath } = params
+    const { usesWorkspaceYaml, workspaceYamlPath, overrideKey, oldOverride, pkg, pkgPath } = params
 
     if (usesWorkspaceYaml) {
-        try {
-            const raw = readFileSync(workspaceYamlPath, 'utf-8')
-            const doc = YAML.parse(raw) as Record<string, unknown> ?? {}
-            const overrides = (doc.overrides ?? {}) as Record<string, string>
-
-            if (oldOverride === undefined) {
-                const next = Object.fromEntries(
-                    Object.entries(overrides).filter(([key]) => key !== packageName),
-                )
-                if (Object.keys(next).length === 0) {
-                    delete doc.overrides
-                } else {
-                    doc.overrides = next
-                }
-            } else {
-                overrides[packageName] = oldOverride
-            }
-
-            writeFileSync(workspaceYamlPath, YAML.stringify(doc), 'utf-8')
-        } catch {
-            // 回滚失败 → 已被 backup 机制覆盖
-        }
+        // 定点回滚（备份还原不可用时的兜底）：恢复旧值 / 删除本次新增 key
+        rollbackWorkspaceOverrides(workspaceYamlPath, new Map([[overrideKey, oldOverride]]))
     } else {
         if (pkg.pnpm?.overrides) {
             const overrides = pkg.pnpm.overrides
             if (oldOverride === undefined) {
                 const next = Object.fromEntries(
-                    Object.entries(overrides).filter(([key]) => key !== packageName),
+                    Object.entries(overrides).filter(([key]) => key !== overrideKey),
                 )
                 if (Object.keys(next).length === 0) {
                     delete pkg.pnpm.overrides
@@ -279,7 +259,7 @@ function rollbackOverrides(params: {
                     pkg.pnpm.overrides = next
                 }
             } else {
-                overrides[packageName] = oldOverride
+                overrides[overrideKey] = oldOverride
             }
         }
         writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`, 'utf-8')

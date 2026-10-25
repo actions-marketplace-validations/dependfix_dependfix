@@ -891,6 +891,56 @@ describe('applyVersionedOverridesBatch', () => {
         expect(result).toEqual({ success: false, error: 'no versioned overrides provided', failurePhase: 'precheck' })
         expect(mockRunTrackedCommand).not.toHaveBeenCalled()
     })
+
+    it('edits only the target keys in pnpm-workspace.yaml (comments / quote style / key order preserved)', async () => {
+        const original = [
+            '# workspace root',
+            'packages:',
+            '  - \'.\'',
+            '',
+            'overrides:',
+            '  # keep this comment',
+            '  \'existing-pkg\': \'^1.0.0\' # pinned',
+            '',
+            'catalog:',
+            '  react: ^18.3.1',
+            '',
+        ].join('\n')
+        writeFileSync(workspaceYamlPath, original)
+
+        const result = await applyVersionedOverridesBatch({
+            workDir: dir,
+            plans: [{ packageName: 'js-yaml', overrides: { 'js-yaml@4': '^4.3.2' } }],
+        })
+
+        expect(result.success).toBe(true)
+        expect(readFileSync(workspaceYamlPath, 'utf-8')).toBe([
+            '# workspace root',
+            'packages:',
+            '  - \'.\'',
+            '',
+            'overrides:',
+            '  # keep this comment',
+            '  \'existing-pkg\': \'^1.0.0\' # pinned',
+            '  js-yaml@4: ^4.3.2',
+            '',
+            'catalog:',
+            '  react: ^18.3.1',
+            '',
+        ].join('\n'))
+    })
+
+    it('keeps pnpm-workspace.yaml untouched when it cannot be parsed safely (duplicate keys)', async () => {
+        const broken = 'packages:\n  - .\noverrides:\n  vite: ^5\n  vite: ^6\n'
+        writeFileSync(workspaceYamlPath, broken)
+        const result = await applyVersionedOverridesBatch({
+            workDir: dir,
+            plans: [{ packageName: 'js-yaml', overrides: { 'js-yaml@4': '^4.3.2' } }],
+        })
+        expect(result).toMatchObject({ success: false, failurePhase: 'precheck' })
+        expect(readFileSync(workspaceYamlPath, 'utf-8')).toBe(broken)
+        expect(mockRunTrackedCommand).not.toHaveBeenCalled()
+    })
 })
 
 describe('ensurePnpmOverrides', () => {
