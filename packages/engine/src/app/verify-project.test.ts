@@ -50,7 +50,10 @@ describe('verifyProject', () => {
         rmSync(workDir, { recursive: true, force: true })
     })
 
-    function makeVerifyCtx(toolchainPnpmVersion?: string, customCommands?: string[]): Pick<AppContext, 'config' | 'customCommands' | 'logger' | 'workDir' | 'allErrors'> {
+    function makeVerifyCtx(
+        toolchainPnpmVersion?: string,
+        customCommands?: string[],
+    ): Pick<AppContext, 'config' | 'customCommands' | 'logger' | 'workDir' | 'allErrors'> {
         return {
             config: {
                 toolchainPnpmVersion,

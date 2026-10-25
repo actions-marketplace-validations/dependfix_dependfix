@@ -133,6 +133,17 @@ export interface RuntimeConfig {
      */
     rollbackGranularity?: RollbackGranularity
     /**
+     * 把目标仓库 CI 独有的 `pnpm/npm/yarn run` 脚本追加到验证链（`--mirror-ci-scripts` /
+     * `DEPENDFIX_MIRROR_CI_SCRIPTS`，默认 `false`）。
+     *
+     * 开启后在默认链**之后**执行（≤3 条、首失败即停），与默认链共用同一超时 / 取消面，
+     * 并同样纳入修复前基线采样（基线已红 → `preExisting`，不回滚、不改 exit code）。
+     * `docker` / `gh` / 任意 shell 与非脚本片段只记 `mirrorSkipped`，不执行。
+     * 显式自定义链（`--commands` / Action `commands` / 平台 `verifyCommands`）整链替换默认链，
+     * **不与 mirror 叠加**。
+     */
+    mirrorCiScripts?: boolean
+    /**
      * 执行宿主的构建版本回执（平台容器注入；与 `/api/health`、平台启动 `[build]` 行同源）。
      * 未提供时引擎回退自身 `package.json` 版本（CLI / MCP 本地执行场景），最终回退 `unknown`。
      */
@@ -267,6 +278,8 @@ export interface CliConfigOverrides {
     allowMajorUpgrade?: boolean
     /** 验证失败回滚粒度（unit / repo；默认 unit） */
     rollbackGranularity?: RollbackGranularity
+    /** 把目标仓库 CI 独有的包管理器脚本追加到验证链（`--mirror-ci-scripts`；默认关闭） */
+    mirrorCiScripts?: boolean
     /** Dependabot alerts 专用 token（可选，最小权限；缺省回退 githubToken） */
     alertsToken?: string
     maxAlertsPerRepository?: number
@@ -330,6 +343,7 @@ export const DEFAULT_RUNTIME_CONFIG: Omit<RuntimeConfig, 'githubToken' | 'reposi
     codeQualityEnabled: false,
     allowMajorUpgrade: false,
     rollbackGranularity: 'unit',
+    mirrorCiScripts: false,
     maxAlertsPerRepository: 20,
     maxConcurrency: 1,
     maxRetries: 3,
@@ -576,6 +590,7 @@ export function readEnvConfig(env: NodeJS.ProcessEnv = process.env): CliConfigOv
         codeScanningEnabled: normalizeBoolean(readEnv(env, 'CODE_SCANNING'), `${ENV_PREFIX}CODE_SCANNING`),
         codeQualityEnabled: normalizeBoolean(readEnv(env, 'CODE_QUALITY'), `${ENV_PREFIX}CODE_QUALITY`),
         rollbackGranularity: readRollbackGranularity(readEnv(env, 'ROLLBACK_GRANULARITY'), `${ENV_PREFIX}ROLLBACK_GRANULARITY`),
+        mirrorCiScripts: normalizeBoolean(readEnv(env, 'MIRROR_CI_SCRIPTS'), `${ENV_PREFIX}MIRROR_CI_SCRIPTS`),
         maxAlertsPerRepository: normalizeInteger(readEnv(env, 'MAX_ALERTS_PER_REPOSITORY'), `${ENV_PREFIX}MAX_ALERTS_PER_REPOSITORY`),
         maxConcurrency: normalizeInteger(readEnv(env, 'MAX_CONCURRENCY'), `${ENV_PREFIX}MAX_CONCURRENCY`),
         maxRetries: normalizeNonNegativeInteger(readEnv(env, 'MAX_RETRIES'), `${ENV_PREFIX}MAX_RETRIES`),
@@ -743,6 +758,7 @@ export function resolveRuntimeConfig(options: ResolveRuntimeConfigOptions = {}):
         codeQualityEnabled: cliOverrides.codeQualityEnabled ?? envConfig.codeQualityEnabled ?? DEFAULT_RUNTIME_CONFIG.codeQualityEnabled,
         allowMajorUpgrade: cliOverrides.allowMajorUpgrade ?? DEFAULT_RUNTIME_CONFIG.allowMajorUpgrade,
         rollbackGranularity: cliOverrides.rollbackGranularity ?? envConfig.rollbackGranularity ?? DEFAULT_RUNTIME_CONFIG.rollbackGranularity,
+        mirrorCiScripts: cliOverrides.mirrorCiScripts ?? envConfig.mirrorCiScripts ?? DEFAULT_RUNTIME_CONFIG.mirrorCiScripts,
         maxAlertsPerRepository: cliOverrides.maxAlertsPerRepository ?? envConfig.maxAlertsPerRepository ?? DEFAULT_RUNTIME_CONFIG.maxAlertsPerRepository,
         maxConcurrency: cliOverrides.maxConcurrency ?? envConfig.maxConcurrency ?? DEFAULT_RUNTIME_CONFIG.maxConcurrency,
         maxRetries: cliOverrides.maxRetries ?? envConfig.maxRetries ?? DEFAULT_RUNTIME_CONFIG.maxRetries,

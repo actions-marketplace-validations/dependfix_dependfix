@@ -51,7 +51,8 @@ export interface VerificationParams {
     commands?: string[]
     /**
      * 单命令超时（毫秒），超时中止该命令并终止其进程树。
-     * 默认 10 分钟（恶意死循环脚本超时中止，防长时间占用）。
+     * 默认 10 分钟（恶意死循环脚本超时中止，防长时间占用）；
+     * 未显式提供时读取 `DEPENDFIX_VERIFY_TIMEOUT_MS`（10s-30min，越界回退默认）。
      */
     commandTimeoutMs?: number
     /**
@@ -131,8 +132,35 @@ export const DEFAULT_VERIFY_COMMANDS = [
  * 注意：test 通常是链中最慢一步，大型测试套件超 10 分钟会被判超时 → 该命令计为失败。
  * 修复前即红的既有失败不归因本次改动（命令级基线判定，见 `sampleVerificationBaseline`），
  * 但超时本身仍按失败记录（不作独立超时豁免）。
+ *
+ * CI 镜像脚本（`--mirror-ci-scripts`）与默认链共用本超时——镜像不引入第二个计时器。
  */
-const DEFAULT_COMMAND_TIMEOUT_MS = 10 * 60 * 1000
+export const DEFAULT_COMMAND_TIMEOUT_MS = 10 * 60 * 1000
+
+/** 验证命令超时覆盖 env（运维面；默认链与 CI 镜像脚本同源）。 */
+export const VERIFY_TIMEOUT_ENV = 'DEPENDFIX_VERIFY_TIMEOUT_MS'
+/** 允许的最小单命令超时（低于 10s 无实际意义，按配置错误回退默认）。 */
+export const MIN_COMMAND_TIMEOUT_MS = 10_000
+/** 允许的最大单命令超时（30 分钟，与平台单仓执行上限同量级）。 */
+export const MAX_COMMAND_TIMEOUT_MS = 30 * 60 * 1000
+
+/**
+ * 解析单命令超时（毫秒）：合法正整数且落在 [10s, 30min] 内才采纳，否则回退默认。
+ * 与安装类超时（`fixers/install-timeouts.ts`）同族口径，但两者刻意不同源、互不覆盖。
+ */
+export function resolveCommandTimeoutMs(
+    env: NodeJS.ProcessEnv = process.env,
+    fallback: number = DEFAULT_COMMAND_TIMEOUT_MS,
+): number {
+    const raw = env[VERIFY_TIMEOUT_ENV]?.trim()
+    if (!raw || !/^\d+$/.test(raw)) {
+        return fallback
+    }
+    const value = Number(raw)
+    return Number.isInteger(value) && value >= MIN_COMMAND_TIMEOUT_MS && value <= MAX_COMMAND_TIMEOUT_MS
+        ? value
+        : fallback
+}
 
 const MAX_OUTPUT_LINES = 200
 
@@ -333,7 +361,7 @@ function buildSpawnEnv(proxyUrl?: string): NodeJS.ProcessEnv {
 function execCommand(
     command: string,
     workDir: string,
-    timeoutMs: number = DEFAULT_COMMAND_TIMEOUT_MS,
+    timeoutMs: number = resolveCommandTimeoutMs(),
     proxyUrl?: string,
 ): Promise<CommandResult> {
     return new Promise((resolve) => {

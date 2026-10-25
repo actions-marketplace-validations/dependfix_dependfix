@@ -29,6 +29,7 @@ describe('resolveRuntimeConfig', () => {
             codeQualityEnabled: false,
             allowMajorUpgrade: false,
             rollbackGranularity: 'unit',
+            mirrorCiScripts: false,
             maxAlertsPerRepository: 20,
             maxConcurrency: 1,
             maxRetries: 3,
@@ -383,6 +384,29 @@ describe('resolveRuntimeConfig', () => {
                 DEPENDFIX_ROLLBACK_GRANULARITY: 'batch',
             },
         })).toThrow('ROLLBACK_GRANULARITY must be one of: unit, repo')
+    })
+
+    it('defaults mirrorCiScripts to false and reads CLI override / env (CLI 优先)', () => {
+        const base = { GITHUB_TOKEN: 't', DEPENDFIX_REPOSITORIES: 'foo/bar' }
+
+        expect(resolveRuntimeConfig({ env: base }).mirrorCiScripts).toBe(false)
+        expect(resolveRuntimeConfig({
+            env: { ...base, DEPENDFIX_MIRROR_CI_SCRIPTS: 'true' },
+        }).mirrorCiScripts).toBe(true)
+        expect(resolveRuntimeConfig({
+            env: { ...base, DEPENDFIX_MIRROR_CI_SCRIPTS: 'true' },
+            cliOverrides: { mirrorCiScripts: false },
+        }).mirrorCiScripts).toBe(false)
+    })
+
+    it('rejects invalid DEPENDFIX_MIRROR_CI_SCRIPTS value', () => {
+        expect(() => resolveRuntimeConfig({
+            env: {
+                GITHUB_TOKEN: 't',
+                DEPENDFIX_REPOSITORIES: 'foo/bar',
+                DEPENDFIX_MIRROR_CI_SCRIPTS: 'maybe',
+            },
+        })).toThrow('Invalid boolean value')
     })
 
     it('defaults toolchainPnpmVersion to undefined (resolved from packageManager at repair time)', () => {
