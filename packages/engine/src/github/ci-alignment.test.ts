@@ -13,9 +13,11 @@ import {
     classifyCommandFragment,
     compareVerificationChains,
     fetchDefaultBranchWorkflowHealth,
+    MAX_MIRROR_COMMANDS,
     MAX_WORKFLOW_BYTES,
     MAX_WORKFLOW_FILES,
     parseWorkflowCommands,
+    planCiMirrorCommands,
     readWorkflowSources,
     type CiAlignmentLogger,
 } from './ci-alignment'
@@ -137,6 +139,30 @@ describe('parseWorkflowCommands', () => {
         }
     })
 
+    it('带 flag / corepack 钉定的语义项记为 unrecognized（不与默认链等价覆盖）', () => {
+        const result = parseWorkflowCommands('.github/workflows/ci.yml', [
+            'jobs:',
+            '  ci:',
+            '    steps:',
+            '      - run: pnpm test',
+            '      - run: pnpm --filter app run test',
+            '      - run: corepack pnpm@9.15.0 run build',
+            '      - run: npx vitest run',
+        ].join('\n'), { collectRunFragments: true })
+
+        expect(result.ok).toBe(true)
+        if (result.ok) {
+            expect(result.runFragments.map((fragment) => fragment.kind)).toEqual([
+                'recognized',
+                'unrecognized',
+                'unrecognized',
+                'unrecognized',
+            ])
+            // 语义项归类本身不变（口径比对仍按类别判「一致」）
+            expect(result.evidence.categories.sort()).toEqual(['build', 'test'])
+        }
+    })
+
     it('非法 YAML → 失败结果（不抛错）', () => {
         const result = parseWorkflowCommands('.github/workflows/ci.yml', 'jobs: [unclosed')
 
@@ -153,6 +179,65 @@ describe('parseWorkflowCommands', () => {
         expect(result.ok).toBe(false)
         if (!result.ok) {
             expect(result.reason).toContain('非 GitHub Actions workflow')
+        }
+    })
+
+    it('runFragments 保留未截断原始命令与所属 workflow（执行源与展示用 unrecognized 分离）', () => {
+        const longScript = `pnpm run coverage:${'x'.repeat(140)}`
+        const result = parseWorkflowCommands('.github/workflows/ci.yml', [
+            'jobs:',
+            '  ci:',
+            '    steps:',
+            '      - run: pnpm lint',
+            '      - run: pnpm install --frozen-lockfile',
+            '      - run: docker build -t app .',
+            '      - run: pnpm test:e2e',
+            `      - run: ${longScript}`,
+        ].join('\n'), { collectRunFragments: true })
+
+        expect(result.ok).toBe(true)
+        if (result.ok) {
+            expect(result.runFragments).toEqual([
+                { command: 'pnpm lint', kind: 'recognized', workflow: '.github/workflows/ci.yml' },
+                { command: 'pnpm install --frozen-lockfile', kind: 'recognized', workflow: '.github/workflows/ci.yml' },
+                { command: 'docker build -t app .', kind: 'unrecognized', workflow: '.github/workflows/ci.yml' },
+                { command: 'pnpm test:e2e', kind: 'unrecognized', workflow: '.github/workflows/ci.yml' },
+                { command: longScript, kind: 'unrecognized', workflow: '.github/workflows/ci.yml' },
+            ])
+            // 展示用数组仍截断且不含 docker（避免正文膨胀），两者口径刻意不同
+            expect(result.evidence.unrecognized.every((cmd) => cmd.length <= 120)).toBe(true)
+            expect(result.evidence.unrecognized).not.toContain('docker build -t app .')
+        }
+    })
+
+    it('默认不收集 runFragments（口径比对不需要执行源，避免大 workflow 内存占用）', () => {
+        const result = parseWorkflowCommands('.github/workflows/ci.yml', [
+            'jobs:',
+            '  ci:',
+            '    steps:',
+            '      - run: pnpm lint',
+        ].join('\n'))
+
+        expect(result.ok).toBe(true)
+        if (result.ok) {
+            expect(result.runFragments).toEqual([])
+            expect(result.runFragmentsTruncated).toBeUndefined()
+        }
+    })
+
+    it('runFragments 超上限 → 标记 truncated（调用方须整体降级，不得用截断结果执行）', () => {
+        const result = parseWorkflowCommands('.github/workflows/ci.yml', [
+            'jobs:',
+            '  ci:',
+            '    steps:',
+            '      - run: pnpm run a',
+            '      - run: pnpm run b',
+        ].join('\n'), { collectRunFragments: true, maxRunFragments: 1 })
+
+        expect(result.ok).toBe(true)
+        if (result.ok) {
+            expect(result.runFragments).toHaveLength(1)
+            expect(result.runFragmentsTruncated).toBe(true)
         }
     })
 })
@@ -504,5 +589,146 @@ describe('buildCiAlignmentRecord', () => {
         expect(record.defaultBranchHealth).toBeUndefined()
         expect(record.healthUnavailableReason).toContain('ETIMEDOUT')
         expect(warn).toHaveBeenCalledTimes(1)
+    })
+})
+
+describe('planCiMirrorCommands', () => {
+    let workDir: string
+
+    function writePkg(scripts: Record<string, string>): void {
+        writeFileSync(join(workDir, 'package.json'), JSON.stringify({ name: 'fixture', version: '1.0.0', scripts }, null, 2))
+    }
+
+    function writeWorkflow(name: string, steps: string[]): void {
+        mkdirSync(join(workDir, '.github', 'workflows'), { recursive: true })
+        writeFileSync(join(workDir, '.github', 'workflows', name), [
+            'jobs:',
+            '  ci:',
+            '    steps:',
+            ...steps.map((step) => `      - run: ${step}`),
+        ].join('\n'))
+    }
+
+    beforeEach(() => {
+        workDir = mkdtempSync(join(tmpdir(), 'dependfix-ci-mirror-'))
+    })
+
+    afterEach(() => {
+        rmSync(workDir, { recursive: true, force: true })
+    })
+
+    it('只镜像 CI 独有脚本：默认链语义项不重复执行，docker / gh / 任意 shell 记 unsupported-command', () => {
+        writePkg({
+            lint: 'eslint .',
+            build: 'tsc',
+            coverage: 'vitest run --coverage',
+            e2e: 'playwright test',
+        })
+        writeWorkflow('ci.yml', [
+            'pnpm install --frozen-lockfile',
+            'pnpm lint',
+            'pnpm run coverage',
+            'docker build -t app .',
+            'gh release view',
+            'bash ./scripts/check.sh',
+            'pnpm run e2e',
+        ])
+
+        const plan = planCiMirrorCommands(workDir)
+
+        expect(plan.unreadableReason).toBeUndefined()
+        expect(plan.runnable).toEqual(['pnpm run coverage', 'pnpm run e2e'])
+        expect(plan.skipped).toEqual([
+            { command: 'docker build -t app .', reason: 'unsupported-command' },
+            { command: 'gh release view', reason: 'unsupported-command' },
+            { command: 'bash ./scripts/check.sh', reason: 'unsupported-command' },
+        ])
+    })
+
+    it('scripts 中不存在的脚本不执行（script-not-found），npm / yarn 形态归一化为 run 命令', () => {
+        writePkg({ coverage: 'vitest run --coverage' })
+        writeWorkflow('ci.yml', [
+            'npm run missing',
+            'yarn coverage',
+        ])
+
+        const plan = planCiMirrorCommands(workDir)
+
+        expect(plan.runnable).toEqual(['yarn run coverage'])
+        expect(plan.skipped).toEqual([{ command: 'npm run missing', reason: 'script-not-found' }])
+    })
+
+    it('去重后最多执行 3 条，超限候选记 over-limit', () => {
+        writePkg({ a: 'echo a', b: 'echo b', c: 'echo c', d: 'echo d' })
+        writeWorkflow('a.yml', ['pnpm run a', 'pnpm run b', 'pnpm run a'])
+        writeWorkflow('b.yml', ['pnpm run c', 'pnpm run d'])
+
+        const plan = planCiMirrorCommands(workDir)
+
+        expect(plan.runnable).toEqual(['pnpm run a', 'pnpm run b', 'pnpm run c'])
+        expect(plan.runnable).toHaveLength(MAX_MIRROR_COMMANDS)
+        expect(plan.skipped).toEqual([{ command: 'pnpm run d', reason: 'over-limit' }])
+    })
+
+    it('带 filter / recursive / 额外参数的片段不猜测意图（unsupported-command）', () => {
+        writePkg({ coverage: 'vitest run --coverage', test: 'vitest' })
+        writeWorkflow('ci.yml', [
+            'pnpm --filter app run coverage',
+            'pnpm -r coverage',
+            'pnpm run coverage -- --watch',
+            'NODE_ENV=test pnpm run coverage',
+            'pnpm run coverage FOO=1',
+            'corepack pnpm@9.15.0 run coverage',
+            'pnpm --filter app run test',
+        ])
+
+        const plan = planCiMirrorCommands(workDir)
+
+        expect(plan.runnable).toEqual([])
+        expect(plan.skipped.map((item) => item.reason)).toEqual([
+            'unsupported-command',
+            'unsupported-command',
+            'unsupported-command',
+            'unsupported-command',
+            'unsupported-command',
+            'unsupported-command',
+            'unsupported-command',
+        ])
+        expect(plan.skipped.map((item) => item.command)).toContain('pnpm --filter app run test')
+    })
+
+    it('无 workflow / 非法 YAML → unreadableReason，且不产生任何可执行项', () => {
+        writePkg({ coverage: 'vitest run --coverage' })
+
+        expect(planCiMirrorCommands(workDir).unreadableReason).toContain('未找到 .github/workflows')
+
+        mkdirSync(join(workDir, '.github', 'workflows'), { recursive: true })
+        writeFileSync(join(workDir, '.github', 'workflows', 'ci.yml'), 'jobs: [unclosed')
+        const plan = planCiMirrorCommands(workDir)
+
+        expect(plan.runnable).toEqual([])
+        expect(plan.skipped).toEqual([])
+        expect(plan.unreadableReason).toContain('YAML 解析失败')
+    })
+
+    it('maximum 命令数可注入（测试 / 未来配置复用）', () => {
+        writePkg({ a: 'echo a', b: 'echo b' })
+        writeWorkflow('ci.yml', ['pnpm run a', 'pnpm run b'])
+
+        const plan = planCiMirrorCommands(workDir, { maxCommands: 1 })
+
+        expect(plan.runnable).toEqual(['pnpm run a'])
+        expect(plan.skipped).toEqual([{ command: 'pnpm run b', reason: 'over-limit' }])
+    })
+
+    it('单 workflow 片段超上限 → 整体放弃镜像（不拿截断片段做执行计划）', () => {
+        writePkg({ a: 'echo a' })
+        writeWorkflow('ci.yml', Array.from({ length: 2001 }, (_, index) => `pnpm run s${index}`))
+
+        const plan = planCiMirrorCommands(workDir)
+
+        expect(plan.runnable).toEqual([])
+        expect(plan.skipped).toEqual([])
+        expect(plan.unreadableReason).toContain('命令片段数量超出镜像解析上限')
     })
 })

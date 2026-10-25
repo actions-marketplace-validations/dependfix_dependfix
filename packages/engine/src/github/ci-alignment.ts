@@ -18,9 +18,11 @@ import {
     type CiAlignmentRecord,
     type CiAlignmentStatus,
     type CiDefaultBranchHealth,
+    type CiMirrorSkipped,
     type CiWorkflowEvidence,
     type VerifyCommandCategory,
 } from '@dependfix/core'
+import { readPackageScripts } from '../verification/validate-commands'
 
 // ---------------------------------------------------------------------------
 // 常量
@@ -36,6 +38,8 @@ export const MAX_WORKFLOW_BYTES = 512 * 1024
 export const CI_HEALTH_MAX_WORKFLOWS = 3
 /** 单次健康预检的请求超时（限流重试也被 signal 约束，避免拖住交付）。 */
 export const CI_HEALTH_TIMEOUT_MS = 5_000
+/** 单个 workflow 保留的结构化命令片段上限（仅镜像计划需要；超出即整体降级，不截断执行源）。 */
+export const MAX_RUN_FRAGMENTS = 2000
 /** 单个 workflow 保留的未识别命令条数（PR 正文预算）。 */
 const MAX_UNRECOGNIZED_PER_WORKFLOW = 5
 
@@ -177,8 +181,35 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /** workflow 解析结果（失败时给出可渲染的原因，不抛错）。 */
 export type WorkflowParseResult =
-    | { ok: true, evidence: CiWorkflowEvidence }
+    | {
+        ok: true
+        evidence: CiWorkflowEvidence
+        runFragments: CiRunFragment[]
+        /** 片段数超上限（仅在收集时可能出现）：调用方须整体降级，不得用截断后的片段做执行计划 */
+        runFragmentsTruncated?: boolean
+    }
     | { ok: false, reason: string }
+
+/** 结构化命令片段的收集选项（默认不收集：口径比对不需要执行源，避免大幅工作流占用内存）。 */
+export interface RunFragmentOptions {
+    collectRunFragments?: boolean
+    maxRunFragments?: number
+}
+
+/**
+ * 结构化命令片段（执行源，**原始命令未截断**）。
+ *
+ * 与 `CiWorkflowEvidence.unrecognized` 的分工：后者是 PR 正文展示用途（截断 120 字符、
+ * 反引号替换、每文件上限 5 条），不能作为执行源；本结构保留全部片段与所属 workflow。
+ *
+ * - `recognized`：默认链已覆盖的语义项（lint / build / typecheck / test）与 install
+ * - `unrecognized`：其余可执行片段（未知脚本、`docker` / `gh` / 任意 shell、包管理器非脚本子命令）
+ */
+export interface CiRunFragment {
+    command: string
+    kind: 'recognized' | 'unrecognized'
+    workflow: string
+}
 
 /**
  * 解析单个 workflow 文件：只读 `jobs.*.steps[].run`，产出语义项与未识别命令。
@@ -186,7 +217,13 @@ export type WorkflowParseResult =
  * 非 GitHub Actions（缺少 `jobs` 映射）与非法 YAML 均返回失败结果，
  * 由调用方降级为「未能读取 CI 配置」。
  */
-export function parseWorkflowCommands(path: string, content: string): WorkflowParseResult {
+export function parseWorkflowCommands(
+    path: string,
+    content: string,
+    options: RunFragmentOptions = {},
+): WorkflowParseResult {
+    const collectRunFragments = options.collectRunFragments === true
+    const maxRunFragments = options.maxRunFragments ?? MAX_RUN_FRAGMENTS
     let document: unknown
     try {
         document = parseYaml(content)
@@ -199,6 +236,18 @@ export function parseWorkflowCommands(path: string, content: string): WorkflowPa
 
     const categories = new Set<VerifyCommandCategory>()
     const unrecognized: string[] = []
+    const runFragments: CiRunFragment[] = []
+    let runFragmentsTruncated = false
+    const collect = (fragment: CiRunFragment): void => {
+        if (!collectRunFragments) {
+            return
+        }
+        if (runFragments.length < maxRunFragments) {
+            runFragments.push(fragment)
+        } else {
+            runFragmentsTruncated = true
+        }
+    }
     for (const job of Object.values(document.jobs)) {
         if (!isRecord(job) || !Array.isArray(job.steps)) {
             continue
@@ -211,9 +260,27 @@ export function parseWorkflowCommands(path: string, content: string): WorkflowPa
                 const classification = classifyCommandFragment(fragment)
                 if (classification.kind === 'category') {
                     categories.add(classification.category)
-                } else if (classification.kind === 'unrecognized' && unrecognized.length < MAX_UNRECOGNIZED_PER_WORKFLOW) {
-                    // 只做展示用途：折叠空白已在识别阶段完成，反引号替换防止破坏 PR 正文行内代码
-                    unrecognized.push(classification.command.slice(0, 120).replace(/`/g, '\u0027'))
+                    // 带 flag / env 前缀 / corepack 钉定的语义项与默认链命令不等价：
+                    // 记 recognized 会让 mirror 既不执行也不披露（口径假覆盖）
+                    collect({
+                        command: fragment,
+                        kind: isPlainPackageManagerScript(fragment) ? 'recognized' : 'unrecognized',
+                        workflow: path,
+                    })
+                } else if (classification.kind === 'unrecognized') {
+                    collect({ command: fragment, kind: 'unrecognized', workflow: path })
+                    if (unrecognized.length < MAX_UNRECOGNIZED_PER_WORKFLOW) {
+                        // 只做展示用途：折叠空白已在识别阶段完成，反引号替换防止破坏 PR 正文行内代码
+                        unrecognized.push(classification.command.slice(0, 120).replace(/`/g, '\u0027'))
+                    }
+                } else {
+                    // install 视为已覆盖；其余（docker / gh / 任意 shell / 非脚本子命令）不在默认链内，
+                    // 但必须进入结构化片段，供 mirror 计划逐条披露「为什么不执行」
+                    collect({
+                        command: fragment,
+                        kind: classification.kind === 'install' ? 'recognized' : 'unrecognized',
+                        workflow: path,
+                    })
                 }
             }
         }
@@ -226,6 +293,8 @@ export function parseWorkflowCommands(path: string, content: string): WorkflowPa
             categories: [...categories],
             unrecognized: [...new Set(unrecognized)],
         },
+        runFragments,
+        ...(runFragmentsTruncated ? { runFragmentsTruncated: true } : {}),
     }
 }
 
@@ -286,6 +355,184 @@ export function readWorkflowSources(workDir: string): WorkflowSourceResult {
         }
     }
     return { ok: true, sources }
+}
+
+// ---------------------------------------------------------------------------
+// CI 脚本镜像（--mirror-ci-scripts）
+// ---------------------------------------------------------------------------
+
+/** 单次运行最多镜像执行的脚本条数（执行成本受控；超限部分记 `over-limit` 披露）。 */
+export const MAX_MIRROR_COMMANDS = 3
+/** 跳过量表里单条命令的最大保留长度（执行源仍用 `CiRunFragment.command` 原值）。 */
+const MAX_MIRROR_SKIP_COMMAND_LENGTH = 200
+
+/** CI 脚本镜像计划（纯计算，不执行）。 */
+export interface CiMirrorPlan {
+    /** 可执行命令（规范化为 `<包管理器> run <script>`，按 workflow 顺序去重，≤ maxCommands） */
+    runnable: string[]
+    /** 被跳过的片段与原因（已按命令 + 原因去重） */
+    skipped: CiMirrorSkipped[]
+    /** workflow 无法读取 / 解析失败的原因（此时不做任何镜像） */
+    unreadableReason?: string
+}
+
+/**
+ * 把片段归一化为「包管理器 + 脚本名 + 是否单一形态」。
+ *
+ * 单一形态 = `pnpm|npm|yarn [run|run-script] <script>`，且**无**环境变量赋值 /
+ * corepack 版本钉定 / 任何 flag / 脚本名后的额外参数。非单一形态仍返回可解析的脚本名
+ * （供语义项归类判定「默认链是否等价覆盖」），由调用方决定披露口径。
+ */
+interface PackageManagerInvocation {
+    packageManager: string
+    script: string
+    plain: boolean
+}
+
+function parsePackageManagerInvocation(fragment: string): PackageManagerInvocation | undefined {
+    const normalized = normalizeFragment(fragment)
+    const rawTokens = normalized.split(' ')
+    const hasEnvAssignment = rawTokens.some((token) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(token))
+    const tokens = rawTokens.filter((token) => token.length > 0 && !/^[A-Za-z_][A-Za-z0-9_]*=/.test(token))
+    if (tokens.length < 2) {
+        return undefined
+    }
+    let head = tokens[0].replace(/^\.\/node_modules\/\.bin\//, '')
+    let args = tokens.slice(1)
+    let corepackPinned = false
+    if (head === 'corepack' && args[0]?.startsWith('pnpm')) {
+        // `corepack pnpm@<version>` 与裸 pnpm 不同（版本钉定改变解析 / 安装行为）→ 不归一化
+        corepackPinned = args[0] !== 'pnpm'
+        head = 'pnpm'
+        args = args.slice(1)
+    }
+    if (!PACKAGE_MANAGERS.has(head)) {
+        return undefined
+    }
+    const scriptArgs = args[0] === 'run' || args[0] === 'run-script' ? args.slice(1) : args
+    const script = scriptArgs[0]
+    if (!script) {
+        return undefined
+    }
+    const plain = !hasEnvAssignment && !corepackPinned
+        && scriptArgs.length === 1
+        && !args.some((token) => token.startsWith('-'))
+    return { packageManager: head, script, plain }
+}
+
+/** 判断片段是否为「单一形态」的包管理器脚本调用（供语义项归类判定默认链等价覆盖）。 */
+function isPlainPackageManagerScript(fragment: string): boolean {
+    return parsePackageManagerInvocation(fragment)?.plain === true
+}
+
+/**
+ * 把片段归一化为可镜像的「包管理器 + 脚本名」。
+ *
+ * 只接受单一形态（见 `parsePackageManagerInvocation`）：任何 flag
+ * （`--filter` / `-r` / `--if-present` 等）、脚本名后的额外参数、前置 env 赋值、
+ * corepack 版本钉定都**不执行**（会改变执行面或语义，不猜测用户意图），
+ * 由调用方记为 `unsupported-command` 披露。
+ */
+function parseMirrorScript(fragment: string): { packageManager: string, script: string } | undefined {
+    const invocation = parsePackageManagerInvocation(fragment)
+    if (!invocation || !invocation.plain) {
+        return undefined
+    }
+    const { packageManager, script } = invocation
+    if (!/^[A-Za-z][A-Za-z0-9:_-]*$/.test(script)) {
+        return undefined
+    }
+    if (script === 'install' || script === 'ci' || script === 'i' || PM_NON_SCRIPT_SUBCOMMANDS.has(script)) {
+        return undefined
+    }
+    return { packageManager, script }
+}
+
+/** 跳过量表命令截断（只影响披露文本，不影响执行源）。 */
+function clipSkipCommand(command: string): string {
+    return command.length <= MAX_MIRROR_SKIP_COMMAND_LENGTH
+        ? command
+        : `${command.slice(0, MAX_MIRROR_SKIP_COMMAND_LENGTH - 1)}…`
+}
+
+/**
+ * 计算 CI 脚本镜像计划：读取 workflow → 结构化片段 → 归一化 → 脚本存在性校验 → 去重 / 上限。
+ *
+ * 只消费 `kind === 'unrecognized'` 的片段（默认链已覆盖的语义项与 install 不重复执行）；
+ * 不能归一化为受支持脚本形态的片段、脚本不存在的片段分别记 `unsupported-command` /
+ * `script-not-found`，超出上限的可执行候选记 `over-limit`——全部披露，不静默丢弃。
+ *
+ * 本函数不执行任何命令；执行、超时、取消与基线归因由验证链统一承担。
+ */
+export function planCiMirrorCommands(
+    workDir: string,
+    options: { maxCommands?: number } = {},
+): CiMirrorPlan {
+    const maxCommands = options.maxCommands ?? MAX_MIRROR_COMMANDS
+    const sourceResult = readWorkflowSources(workDir)
+    if (!sourceResult.ok) {
+        return { runnable: [], skipped: [], unreadableReason: sourceResult.reason }
+    }
+
+    const fragments: CiRunFragment[] = []
+    for (const source of sourceResult.sources) {
+        const parsed = parseWorkflowCommands(source.path, source.content, { collectRunFragments: true })
+        if (!parsed.ok) {
+            // 与口径比对同口径：任一文件不可解析 ⇒ 整体降级，不拿半个 CI 配置执行脚本
+            return { runnable: [], skipped: [], unreadableReason: parsed.reason }
+        }
+        if (parsed.runFragmentsTruncated) {
+            // 不静默截断：片段超上限时整体放弃镜像（宁可少跑，不可漏判「哪些脚本已被考虑」）
+            return {
+                runnable: [],
+                skipped: [],
+                unreadableReason: `workflow 命令片段数量超出镜像解析上限（${MAX_RUN_FRAGMENTS}，${source.path}）`,
+            }
+        }
+        fragments.push(...parsed.runFragments)
+    }
+
+    const scripts = readPackageScripts(workDir) ?? {}
+    const runnable: string[] = []
+    const skipped: CiMirrorSkipped[] = []
+    const seenCommands = new Set<string>()
+    const seenSkips = new Set<string>()
+    const addSkip = (command: string, reason: CiMirrorSkipped['reason']): void => {
+        const clipped = clipSkipCommand(command)
+        const key = `${reason}\u0000${clipped}`
+        if (seenSkips.has(key)) {
+            return
+        }
+        seenSkips.add(key)
+        skipped.push({ command: clipped, reason })
+    }
+
+    for (const fragment of fragments) {
+        if (fragment.kind !== 'unrecognized') {
+            continue
+        }
+        const target = parseMirrorScript(fragment.command)
+        if (!target) {
+            addSkip(fragment.command, 'unsupported-command')
+            continue
+        }
+        if (!Object.hasOwn(scripts, target.script) || !scripts[target.script]) {
+            addSkip(fragment.command, 'script-not-found')
+            continue
+        }
+        const command = `${target.packageManager} run ${target.script}`
+        if (seenCommands.has(command)) {
+            continue
+        }
+        seenCommands.add(command)
+        if (runnable.length >= maxCommands) {
+            addSkip(command, 'over-limit')
+            continue
+        }
+        runnable.push(command)
+    }
+
+    return { runnable, skipped }
 }
 
 // ---------------------------------------------------------------------------
@@ -445,9 +692,19 @@ export interface CiAlignmentInput {
     healthTimeoutMs?: number
     /** 跳过默认分支健康预检（复用上一轮结果时使用） */
     skipHealth?: boolean
+    /**
+     * CI 脚本镜像记录（`--mirror-ci-scripts` 开启时提供）。
+     * `mirrored` 只含实际执行的命令；`skipped` 为计划期跳过项。两者均为「披露」，不参与比对判定。
+     */
+    mirror?: { mirrored: string[], skipped: CiMirrorSkipped[] }
 }
 
-function emptyRecord(repository: string, commands: string[], defaultBranch?: string): CiAlignmentRecord {
+function emptyRecord(
+    repository: string,
+    commands: string[],
+    defaultBranch?: string,
+    mirror?: { mirrored: string[], skipped: CiMirrorSkipped[] },
+): CiAlignmentRecord {
     return {
         repository,
         commands: [...commands],
@@ -457,6 +714,7 @@ function emptyRecord(repository: string, commands: string[], defaultBranch?: str
         missingInExecution: [],
         workflows: [],
         ...(defaultBranch && defaultBranch !== 'unknown' ? { defaultBranch } : {}),
+        ...(mirror ? { mirrored: [...mirror.mirrored], mirrorSkipped: [...mirror.skipped] } : {}),
     }
 }
 
@@ -467,7 +725,7 @@ function emptyRecord(repository: string, commands: string[], defaultBranch?: str
  * `healthUnavailableReason`，调用方据此记录但不得阻断修复与交付。
  */
 export async function buildCiAlignmentRecord(input: CiAlignmentInput): Promise<CiAlignmentRecord> {
-    const base = emptyRecord(input.repository, input.commands, input.defaultBranch)
+    const base = emptyRecord(input.repository, input.commands, input.defaultBranch, input.mirror)
 
     const sourceResult = readWorkflowSources(input.workDir)
     if (!sourceResult.ok) {
