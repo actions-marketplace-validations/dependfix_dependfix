@@ -657,7 +657,14 @@
             "skipped": "已跳过"
         },
         "focusConfigured": "关注集生效",
-        "signalIgnored": "未关注"
+        "signalIgnored": "未关注",
+        "signalAttribution": {
+            "selfCaused": "本次改动导致",
+            "preExisting": "既有失败",
+            "externalNoise": "外部噪音",
+            "cancelled": "已取消 / 跳过",
+            "unknown": "未判定"
+        }
     },
     "envEvents": {
         "title": "环境事件",

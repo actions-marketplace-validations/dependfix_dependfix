@@ -657,7 +657,14 @@
             "skipped": "Skipped"
         },
         "focusConfigured": "Focus set active",
-        "signalIgnored": "Not focused"
+        "signalIgnored": "Not focused",
+        "signalAttribution": {
+            "selfCaused": "Caused by this change",
+            "preExisting": "Pre-existing failure",
+            "externalNoise": "External noise",
+            "cancelled": "Cancelled / skipped",
+            "unknown": "Undetermined"
+        }
     },
     "envEvents": {
         "title": "Env Events",

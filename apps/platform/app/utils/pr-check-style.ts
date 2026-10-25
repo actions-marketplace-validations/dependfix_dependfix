@@ -30,3 +30,55 @@ export const conclusionTagTone = (conclusion: PRCheckConclusion): ComponentTone 
     }
     return 'primary'
 }
+
+/** 归因标签的 i18n key 集合（switch 返回字面量键，避免拼接；键存在性由单测对照两份 locale 校验）。 */
+export type CheckAttributionI18nKey =
+    | 'prChecks.signalAttribution.selfCaused'
+    | 'prChecks.signalAttribution.preExisting'
+    | 'prChecks.signalAttribution.externalNoise'
+    | 'prChecks.signalAttribution.cancelled'
+    | 'prChecks.signalAttribution.unknown'
+
+/** check 失败归因 → i18n 文案键（未知取值回退 `unknown`，与分类兜底同口径）。 */
+export const checkAttributionI18nKey = (attribution: string | undefined): CheckAttributionI18nKey => {
+    switch (attribution) {
+        case 'self_caused':
+            return 'prChecks.signalAttribution.selfCaused'
+        case 'pre_existing':
+            return 'prChecks.signalAttribution.preExisting'
+        case 'external_noise':
+            return 'prChecks.signalAttribution.externalNoise'
+        case 'cancelled':
+            return 'prChecks.signalAttribution.cancelled'
+        default:
+            return 'prChecks.signalAttribution.unknown'
+    }
+}
+
+/**
+ * 是否展示归因标签：仅「有归因且非成功 / 非进行中」的信号展示。
+ *
+ * 成功 / 进行中信号不产出归因（服务端守卫），这里再兜一层历史 `signalsJson` 与未来字段变化；
+ * `skipped`（cancelled）仍展示——它是解释「为什么没跑」的有效信息。
+ */
+export const shouldShowAttribution = (signal: { attribution?: string, state: string }): boolean =>
+    Boolean(signal.attribution) && signal.state !== 'success' && signal.state !== 'pending'
+
+/**
+ * check 失败归因 → caomei Tag tone。
+ *
+ * 视觉策略：`self_caused`（本次改动导致）最危险 → danger；`pre_existing` / `unknown` 需人工确认 →
+ * warning；`external_noise` / `cancelled` 属解释性信息 → neutral。
+ * 归因只做解释、不改变告警与合并放行（见 pr-build-deploy-signals.md §3.9）。
+ */
+export const checkAttributionTone = (attribution: string | undefined): ComponentTone => {
+    switch (attribution) {
+        case 'self_caused':
+            return 'danger'
+        case 'pre_existing':
+        case 'unknown':
+            return 'warning'
+        default:
+            return 'neutral'
+    }
+}

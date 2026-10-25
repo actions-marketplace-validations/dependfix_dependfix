@@ -195,6 +195,8 @@ const prCheckSignalSchema = z.object({
     logUrl: z.string().max(500).nullable().optional(),
     /** 摘要（可选；上限与生产 `SIGNAL_SUMMARY_MAX_LENGTH` 对齐） */
     summary: z.string().max(300).nullable().optional(),
+    /** 失败归因（可选；供视觉基线构造带标签的信号） */
+    attribution: z.enum(['self_caused', 'pre_existing', 'external_noise', 'cancelled', 'unknown']).optional(),
 })
 
 const prCheckFailureSourceSchema = z.object({

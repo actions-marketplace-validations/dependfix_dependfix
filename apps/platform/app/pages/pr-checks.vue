@@ -16,7 +16,7 @@
 import { computed, reactive, ref } from 'vue'
 import type { DataTableColumn, DataTableSortMeta } from 'caomei-ui'
 import type { PRCheckConclusion } from '#server/entities/pr-check'
-import { conclusionTagTone } from '~/utils/pr-check-style'
+import { checkAttributionI18nKey, checkAttributionTone, conclusionTagTone, shouldShowAttribution } from '~/utils/pr-check-style'
 
 definePageMeta({
     middleware: 'auth',
@@ -33,6 +33,8 @@ interface PRCheckSignalView {
     targetUrl: string | null
     logUrl: string | null
     summary: string | null
+    /** 失败归因（历史行无此字段）：与 CLI 报告同一纯函数，平台侧只可能出现 external_noise / cancelled / unknown */
+    attribution?: string
     observedAt: string
     /** 是否命中仓库关注集（未配置时恒 true；false = 未关注，不参与聚合 / 告警） */
     focused: boolean
@@ -519,6 +521,12 @@ const handleAck = async (row: PRCheckView) => {
                                     tone="neutral"
                                 >
                                     {{ t('prChecks.signalIgnored') }}
+                                </CaomeiTag>
+                                <CaomeiTag
+                                    v-if="shouldShowAttribution(signal)"
+                                    :tone="checkAttributionTone(signal.attribution)"
+                                >
+                                    {{ t(checkAttributionI18nKey(signal.attribution)) }}
                                 </CaomeiTag>
                                 <span class="pr-checks__signal-provider">{{ signal.provider }}</span>
                                 <span class="pr-checks__signal-name">{{ signal.name }}</span>
