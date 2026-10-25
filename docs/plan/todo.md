@@ -8,17 +8,127 @@
 
 | 内容类型 | 位置 |
 |:--|:--|
-| 当前阶段任务 | **无**——M48「对外 PR 交付闭环」6 原子条目已于 2026-10-25 闭环并归档（归档块见 [todo-archive.md §M48](todo-archive.md#m48-对外-pr-交付闭环-2026-10-24-用户决策-de-2026-10-25-归档)） |
-| 下一阶段（已授权，未规划） | **E：通知可信度收口**（4 项，2026-10-24 用户决策 D+E）；启动前按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 评估候选池后由用户决策 |
+| 当前阶段任务 | **M49：0.6.0 发版清障**（2026-10-25 用户决策；六原子见下） |
+| 下一阶段（已授权，未规划） | **1.0 发布门槛收口**（E → F1 → F2 → G；台账见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)） |
 | 已完成阶段归档 | [todo-archive.md](todo-archive.md)（主窗口 + [archive/](archive/) 分片；M0-M48 全部已归档） |
-| 里程碑与阶段交付 | [roadmap.md](roadmap.md)（M0-M48 已归档） |
+| 里程碑与阶段交付 | [roadmap.md](roadmap.md)（M0-M48 已归档；M49 进行中） |
 | 未排期 / 延期 / 远期 / 长期主线 / 已知边界 | [backlog.md](backlog.md) |
 | 历史归档索引 | [archive/index.md](archive/index.md) |
 
 ---
 
-> **本阶段无活跃待办**：M48 已于 2026-10-25 闭环并归档（首父链 41 commits；六原子全部通过 Review Gate）。
->
-> **下一阶段启动前**须按 [阶段归档检查 + 沉淀工作流](../standards/ai-collaboration.md) 完成候选评估与用户决策；E 阶段 4 项已获授权但未规划，启动时按 [规划规范 §1.1](../standards/planning.md#11-硬性约束) 评估是否补足至 5-6 项。
->
-> **插队容量治理**：累计 ≥ 3 批或插队工作量 ≥ 原计划 50% 时，按 [规划规范 §3.1.1 插队后的阶段容量再平衡](../standards/planning.md#_3-1-1-插队后的阶段容量再平衡-hard-requirement-2026-10-19) 评估移出低优先级原子，不得压缩验收 / 跳过 Review Gate / 缩短审计。
+## M49：0.6.0 发版清障（2026-10-25 用户决策）
+
+承接 M48 归档后的发版窗口。2026-10-25 发布评估：0.5.0（2026-09-18）后累计 805 commits（132 feat / 85 fix / 2 类 breaking〔3 commits：Node 基线、安装链受管异步化及其消费方适配〕），`release:plan` 推导全包 minor → 目标 **0.6.0**；但仓库存在 4 类「带着发不体面」的问题：自产 code scanning 告警 2 条、依赖审计门禁仍为信号级且周回归连续 4 周红、critical / high 依赖漏洞未清零（含 1 条长期豁免）、用户可见文档 4 类 / 6 行漂移（其中设计索引含 3 行陈旧）。本阶段以「清障 → 发布 → 发布后验证」闭环为目标。
+
+**授权与归属**：M49 为用户 2026-10-25 决策的独立阶段（非插队）；M49.1 / M49.2a / M49.2b 属 [规划规范 §3.1](../standards/planning.md#_3-1-新需求默认走-评估-→-backlog-原则-hard-requirement) 例外清单第 1 / 2 类（安全漏洞），M49.3 / M49.4 / M49.5 属清单外**经用户明确授权**（Security 门禁治理 / 发版文档 / 发版），均纳入本阶段条目编号。
+
+**§3.4 交叉核验**：M49 范围经 todo-archive 表格扫描（关键词 `code scanning` / `polynomial-redos` / `审计门禁` / `ai-api-key` / `MCP tool` 仅命中 M48 归档与既有残余候选，未见同范围闭环）+ `git log --oneline -- <路径>`（`pr-check-watch.ts` / `fix-fingerprint.ts` / `test.yml` 最近均为 M48.x 引入，未做安全收敛）+ 代码 anchor（code scanning 2 条开放 / `test.yml:46` 仍 `|| true` / `pnpm-workspace.yaml audit.ignore` 2 条 / `quick-start.md:189` 输入名过期）→ **0 项重复评估**。
+
+**类型平衡**：🛡️ 4 + 📚 1 + 🚀 1（🎨 / 🧪 缺口显式标注：发版窗口不引入 UX 新面，🎨 由后续 E 阶段承担；测试随各条目内嵌）。
+
+**阶段基线工作量（§3.1.1 分母）**：6 条目「交付物」区间和为 **10-16 commits / 28-41 文件 / 1400-2430 行**（区间和口径；M48 实测倍率提示实际可能上浮 2-4 倍，D 阶段按实际 diff 复测）。
+
+**6 原子条目**：
+
+- **M49.1** [P0 🛡️] 自产 code-scanning 告警清零（`js/incomplete-sanitization` + `js/polynomial-redos`）
+- **M49.2a** [P0 🛡️] 依赖漏洞清零 A：critical / high（直接依赖 / overrides）
+- **M49.2b** [P0 🛡️] 依赖漏洞清零 B：platform 链 moderate 收口
+- **M49.3** [P0 🛡️] Security 门禁转正（prod 阻断 + 全量信号；周回归转绿）
+- **M49.4** [P0 📚] 发版面文档漂移收口（AI 输入名 / M5 遗留 / MCP tool 数 / 设计索引 3 行）
+- **M49.5** [P0 🚀] 0.6.0 版本提升、发布与发布后验证
+
+**建议顺序**：M49.1 → M49.2a → M49.2b → M49.4 → M49.3 → M49.5。M49.1 与 M49.2a 可并行评估；M49.3 的 3 个 clean run 须在翻转前由 2a / 2b / 4 的推送累积；M49.5 最后执行。
+
+### M49.1 [P0 🛡️] 自产 code-scanning 告警清零
+
+- **目标**：关闭仓库 2 条自产 code scanning 告警，且不改变既有清洗 / 解析语义。
+- **范围**：`packages/engine/src/github/pr-check-watch.ts`（`sanitizeCheckUrl` / `sanitizeCheckName` 的转义补全）、`packages/engine/src/github/fix-fingerprint.ts`（marker 正则的 ReDoS 收敛：原子化 / 长度上限 / 线性扫描）；定向测试 + mutation。
+- **验收标准**：
+  1. `js/incomplete-sanitization`（`pr-check-watch.ts:463`）：清洗逻辑对反斜杠 / 引号 / 控制字符给出完整转义，补「含 `\\` 与括号」用例。
+  2. `js/polynomial-redos`（`fix-fingerprint.ts:107`）：构造恶意 marker 输入（含大量制表符 / 重复属性）在 100KB 级仍线性（单次 < 50ms）；既有 marker 解析黄金夹具逐字不变。
+  3. mutation ≥ 2（转义分支 / 长度上限）被击杀；engine 定向测试全绿。
+  4. 用户推送后 code scanning 复扫 0 条（记录 analysis id 与查询时点；本批不自动 push）。
+- **不做什么**：不改 marker 格式与归因规则；不改 `sanitizeCheckName` 的展示语义（仅补转义）。
+- **依赖**：code scanning 复扫需 push；本批不自动 push。
+- **交付物**：2-3 commits / 4-6 files / 200-350 行。
+- **风险与缓解**：正则改写改变容错 → 黄金夹具 + 恶意样本双向用例；复扫需等 CI 完成 → 记录 analysis id 并在发布前查询。
+
+### M49.2a [P0 🛡️] 依赖漏洞清零 A：critical / high（直接依赖 / overrides）
+
+- **目标**：Dependabot 开放 critical / high（**未被 §5.7 豁免**）清零；`pnpm audit`（全量依赖）critical / high 归零。
+- **范围**：所有 critical / high 路径（含 platform 链的 `vite` / `launch-editor` / `undici` high；`handlebars` → 4.7.10、`body-parser` 等）；`pnpm-workspace.yaml` overrides 与直接依赖升级；`audit.ignore` 两条（node-forge / braces）上游复核；lockfile 最小 diff。
+- **验收标准**：
+  1. `gh api repos/<owner>/<repo>/dependabot/alerts?state=open` 的 critical / high = 0（§5.7 豁免条目单列并登记 GHSA + 路径 + 复核条件）。
+  2. `pnpm audit --audit-level=moderate --registry=https://registry.npmjs.org` 的 critical / high = 0。
+  3. `git diff -U0 pnpm-lock.yaml` 逐 hunk 复核，只含目标依赖；`pnpm install --frozen-lockfile` 通过。
+  4. 全量测试 + typecheck + build 通过（升级涉及运行时依赖时按需加 e2e）。
+   > 复核命令：`gh api repos/<owner>/<repo>/dependabot/alerts?state=open --jq '[.[]|select(.security_advisory.severity=="critical" or .security_advisory.severity=="high")|select(.security_vulnerability.first_patched_version.identifier!=null)]|length'` → 0；豁免条目另列。
+- **不做什么**：不使用 `--ignore` / `--ignore-unfixable`；不为清零强行跨大版本（跨大版本须单列评估并留回滚路径）；不动 platform 链的 **moderate** 项（归 2b）。
+- **依赖**：上游修复版本已发布（handlebars 4.7.10 已发布；其余以 audit 结果为准）。
+- **交付物**：2-3 commits / 4-6 files / 300-500 行（含 lockfile）。
+- **风险与缓解**：升级引发行为变更 → 分批升级 + 定向测试；无修复版本 → 按 §5.7 豁免并记录。
+
+### M49.2b [P0 🛡️] 依赖漏洞清零 B：platform 链 moderate 收口
+
+- **目标**：platform 运行时链（nuxt / vite / nodemailer / undici / launch-editor 等）的 moderate 漏洞收敛；发布物（含 Docker 镜像）的剩余风险可解释。
+- **范围**：`apps/platform` 相关依赖与 overrides；必要时 `pnpm-workspace.yaml` overrides；lockfile；platform 全量测试 + e2e + 视觉基线。
+- **验收标准**：
+  1. `pnpm audit --prod --audit-level=moderate --registry=https://registry.npmjs.org` 的 **moderate 由基线 15 降至 ≤ N**（N 在 2b 的 P 阶段锁定并写入条目），剩余项逐条说明（无修复版本 / 仅 dev / 可接受 三分类）。
+  2. Dependabot 开放 moderate = 0 或逐条登记理由（`gh api` 查询记录）。
+  3. 涉及 nuxt / vite 升级时：platform 全量测试 + e2e + 视觉通过（必要时 update 后 no-update 连跑两遍）。
+  4. `git diff -U0 pnpm-lock.yaml` 只含目标依赖；`--frozen-lockfile` 通过。
+- **不做什么**：不处理 critical / high（归 2a）；不做 major 升级（nuxt / vite 的 major 须单独立项）；不改平台 UI 行为。
+- **依赖**：M49.2a 完成（避免同一 lockfile 冲突）。
+- **交付物**：2-3 commits / 4-8 files / 400-700 行（含 lockfile 与测试适配）。
+- **风险与缓解**：nuxt / vite 升级牵动构建与 UI → 每依赖一批，跑 e2e / 视觉；不可控项按 §5.7 评估。
+
+### M49.3 [P0 🛡️] Security 门禁转正（prod 阻断 + 全量信号；周回归转绿）
+
+- **目标**：让风险依赖无法进入 master；周回归恢复绿色。
+- **范围**：`.github/workflows/test.yml`（新增 / 改造审计步骤）、`docs/standards/security.md` §5.6 / §5.8（转正记录或判据修订）、`pnpm-workspace.yaml audit.ignore`、`.github/skills/code-reviewer/references/code-quality-checklist.md`（转正证据检查点）。
+- **验收标准**：
+  1. **阻断面**：`pnpm audit --prod --audit-level=moderate --ignore-registry-errors` 无 `|| true`；registry 不可达时 exit 0（模拟验证）。
+  2. **信号面**：全量依赖审计步骤保留（可作为信号），周回归 `security:audit-deps` 使用阻断命令并通过。
+  3. **判据证据**：按 §5.6 记录转正日期 + 3 个 `master` **push** run id（`--event push`）。若 `audit.ignore` 使 clean 字面串不可达：按 §5.7 末句「修订 clean 判据」通道**同批**修订 §5.6（阻断面 / 信号面定义），并同步 §5.8 指针与检查点矩阵；不得以「记录依据」替代 run id。
+  4. Weekly Regression 一次通过（`security:audit-deps` 不再 blocker）。
+- **不做什么**：不以 `--ignore` 放宽；不把 dev 依赖审计信号移除；不做「只在文档里声明阻断」而无 CI 步骤。
+- **依赖**：M49.2a / 2b 清零；3 次 push（用户推送确认）。
+- **交付物**：2-3 commits / 4-6 files / 150-250 行（含规范与检查点）。
+- **风险与缓解**：上游突发新漏洞导致门禁红 → 按 §5.7 评估豁免；判据修订需保留修订后的 3 个 run id，避免「改口径即转正」。
+
+### M49.4 [P0 📚] 发版面文档漂移收口
+
+- **目标**：用户可见文档与实现一致，避免 0.6.0 发布带着错误指引。
+- **范围**（6 处，逐条验收）：
+  1. `docs/guide/quick-start.md:189-190`：AI 输入名与 `action.yml` 对齐（`ai-api-key` / `ai-base-url` / `ai-provider` / `ai-model` / `ai-api-url` / `ai-trigger`）。
+  2. `docs/guide/configuration.md:191`：移除「计划中（M5）」遗留（AI 配置已落地，见同文档 §平台环境变量）。
+  3. `docs/guide/release.md:18`：MCP tool 数「7 个」→「8 个」。
+  4. `docs/design/governance/index.md`：MCP Server 设计「🔶 未开始」→ 已落地（`@dependfix/mcp` 已发布）。
+  5. `docs/design/governance/index.md`：定时扫描与批量处理「🔶 设计中」→ 已落地（真实环境验证见 T704）。
+  6. `docs/design/governance/index.md`：执行器设计与沙箱评估「🔶 设计中（2026-08-08）」→ 已落地（M38）。
+- **验收标准**：
+  1. 上述 6 处与 `action.yml` / `packages/mcp/src/index.ts` / 现状一致（对照记录进 audit 证据）。
+  2. 若 `packages/mcp/README.md` 的 tool 清单与实现不一致，同批对齐（不新增「如有」口径）。
+  3. `check:docs` / `lint:md` / `docs:build` / `i18n:check:anchor` 全通过。
+- **不做什么**：不做 en-US 全量平价（F2）；不改实现。
+- **依赖**：无。
+- **交付物**：1-2 commits / 5-7 files / 100-180 行。
+- **风险与缓解**：文档断言再次漂移 → 对照表进 audit 证据；后续可加 action 输入一致性机检（登记候选）。
+
+### M49.5 [P0 🚀] 0.6.0 版本提升、发布与发布后验证
+
+- **目标**：发布 0.6.0 并验证发布物可用、可安装、可回滚。
+- **范围**：`release:plan` 复核（未标注 breaking 的人工修正）→ `release:version --dry-run` 预览 → `release:version` → `pnpm changelog` → 提交 →（用户）push 到 master → Release workflow `workflow_dispatch` → 发布后核验（npm 5 包 + platform tag + Docker tag + GitHub Release + `npx` / 全局安装冒烟）。
+- **验收标准**：
+  1. 5 个 npm 包发布成功（`dependfix` / `core` / `engine` / `mcp` / `skills`），platform tag 创建。
+  2. `npx dependfix --version` 与全局安装均为 0.6.0；`dependfix report-only --help` 正常。
+  3. Docker `platform-<x.y.z>` tag 存在且可启动（health 200）。
+  4. 五份 CHANGELOG 含当前版本段；GitHub Release notes 正确。
+  5. 发布后 master CI 连续 3 次绿（作为 1.0 G4 窗口起点）。
+- **不做什么**：不启用 `schedule` / `push` 自动发布（1.0 后）；不打 `@v1`（G 批次）；不在本批引入新功能。
+- **依赖**：M49.1-M49.4 完成；用户推送 + 手动 dispatch 授权。
+- **交付物**：1-2 commits（版本 + changelog）/ 7-8 files / 250-450 行 + 发布执行记录。
+- **风险与缓解**：OIDC / changelog 校验失败 → 按 release.md 修复后重试；发布后发现缺陷 → 0.6.1 补丁并记录。
+
+> **追加临时待办（不占阶段条目编号，2026-10-25 用户授权）**：1.0 发布门槛（G1-G8、P0 23 / P1 8 / 1.0 后 15+8、真实环境矩阵、批次 R/E/F1/F2/G）见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)。本区块只作指针，不占 M49 条目编号；批次表以台账 §5 为唯一事实源。

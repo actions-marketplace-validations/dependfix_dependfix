@@ -60,6 +60,7 @@
 
 ### 候选评估中（待评估 / 本阶段延后项）
 
+> **1.0 门槛与分档**：P0 23 / P1 8 / 1.0 后 15 的分档、门槛判定与批次计划见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)；本区候选在未上收前保持候选状态，上收后按批次从本表移除。
 > **E 阶段候选（2026-10-24 用户决策 D+E）**：`critical` 必选不可关闭 / 通知严重级别术语与阈值命名 / 周报投递重试与窗口锁 / `/settings` 与通知页 dark 视觉 4 项已获授权作为 M48 归档后的下一阶段，当前保持候选状态（不含阶段编号）；M48 已归档，待启动 P 阶段。
 
 - **平台 PR Check 创建后回环**（M48.5 边界）—— 平台建 PR 后仍只有轮询 + 告警，不复用 CLI 的等待状态机 / 评论 / 关闭能力；触发：再次出现「PR 红了无人收」的用户反馈，或平台已具备 check 采集面时评估复用。
@@ -402,9 +403,9 @@
 
 | 内容类型 | 位置 |
 |:--|:--|
-| 当前阶段活跃任务 | **无**（M48 已于 2026-10-25 闭环归档；详见 [todo-archive.md §M48](todo-archive.md#m48-对外-pr-交付闭环-2026-10-24-用户决策-de-2026-10-25-归档)）；插队容量治理见 [planning.md §3.1.1](../standards/planning.md#_3-1-1-插队后的阶段容量再平衡-hard-requirement-2026-10-19) |
-| 下一阶段（已授权，待规划） | **E：通知可信度收口**（4 项，见 §候选评估中 E 阶段候选说明） |
+| 当前阶段活跃任务 | **M49：0.6.0 发版清障**（2026-10-25 用户决策；见 [todo.md §M49](todo.md#m49-0-6-0-发版清障-2026-10-25-用户决策)）；插队容量治理见 [planning.md §3.1.1](../standards/planning.md#_3-1-1-插队后的阶段容量再平衡-hard-requirement-2026-10-19) |
+| 下一阶段（已授权，待规划） | **1.0 发布门槛收口**（E → F1 → F2 → G；台账见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)） |
 | 已完成阶段归档 | [todo-archive.md](todo-archive.md)（主窗口 + [archive/](archive/) 分片） |
-| 里程碑与阶段交付 | [roadmap.md](roadmap.md)（M0-M48 已归档） |
+| 里程碑与阶段交付 | [roadmap.md](roadmap.md)（M0-M48 已归档；M49 进行中） |
 | 长期主线 / 候选 / 待人工验收 / 已知边界 | 本文档（按四象限结构） |
 | 历史归档索引 | [archive/index.md](archive/index.md) |
