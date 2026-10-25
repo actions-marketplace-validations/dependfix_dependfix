@@ -1,7 +1,7 @@
 # 执行器设计与沙箱评估
 
 > 状态：🔶 设计先行（T607，2026-08-08）——契约与威胁建模落盘，供 T603 实现 `ContainerExecutor`；独立沙箱容器实现留 M7。
-> 背景决策见 [todo-archive.md §M6 规划决策](../../plan/archive/todo-archive-phases-m6-m7-t711.md#m6-最小平台-mvp已归档)（Q1 执行深度 A/B 双模式、Q4 沙箱=A、Q5 Action 触发=B）。
+> 背景决策见 [M6 规划决策](../../plan/archive/todo-archive-phases-m6-m7-t711.md#m6-最小平台-mvp已归档)（Q1 执行深度 A/B 双模式、Q4 沙箱=A、Q5 Action 触发=B）。
 > **安全评估（2026-08-14）**：评估结论、治理决议与不可简化的安全基线见 [沙箱与恶意依赖防护治理](./sandbox-security-governance.md)；本文档 §2.2 的 M6 缓解——USER 降权已修复（C38，2026-08-14）、外联日志已实现（C40/T805，2026-08-14），登记 [backlog C38/C40](../../plan/backlog.md)。
 > **A 模式 push + PR 闭环（2026-08-20，C53 实施）**：A 模式 fix / fix-and-pr 完成后新增推送修复分支到远程 + 创建 PR 两条链路，结束了 M6 阶段"修复结果仅在本地临时目录"问题；新的状态机 dispatched 语义（PR 失败但分支已推）、runUrl 兜底为 branch URL、workDir 保留 24h 供诊断 由分片 [executor-sandbox-implementation.md §8](./executor-sandbox-implementation.md) 记录。
 
@@ -155,7 +155,7 @@ GitHub `dispatches` API 成功返回 204 即触发受理，但不返回 run id�
 
 ### 5.1 使用方式
 
-1. 目标仓库添加依赖：在其 `.github/workflows/security-auto-fix.yml` 中 `uses: dependfix/dependfix@v1`（复用根 action.yml，M2 已落地），`on: workflow_dispatch` 声明。
+1. 目标仓库添加依赖：在其 `.github/workflows/security-auto-fix.yml` 中 `uses: dependfix/dependfix@v0.5.0`（复用根 action.yml，M2 已落地），`on: workflow_dispatch` 声明。
 2. 平台仓库配置：`actionWorkflowFile` 填入该文件路径，凭据选择具备 `actions: write` 的 Credential。
 3. 用户触发：平台 Web UI 点击扫描（执行后端选择 GitHub Action）→ 平台触发 dispatch → **用户跳转目标仓库 Actions 页面查看执行**。
 
@@ -183,7 +183,7 @@ GitHub `dispatches` API 成功返回 204 即触发受理，但不返回 run id�
 
 ## 6. 相关文档
 
-- [todo-archive.md §M6 规划决策](../../plan/archive/todo-archive-phases-m6-m7-t711.md)：Q1/Q4/Q5 决策依据
+- [M6 规划决策](../../plan/archive/todo-archive-phases-m6-m7-t711.md)：Q1/Q4/Q5 决策依据
 - [backlog.md C25 Action 触发结果回填](../../plan/backlog.md)：结果回填实现记录
 - [backlog.md C26 独立沙箱容器执行实现](../../plan/backlog.md)：独立沙箱容器 backlog 登记 + 2026-08-19 决策
 - [todo-archive-phases-m10-c53-c59c61.md §M10 C26 实施规划](../../plan/archive/todo-archive-phases-m10-c53-c59c61.md#m10-独立沙箱容器-c26-实施规划已归档)：T1001-T1004 子任务拆解与验收要点（2026-08-20 收口归档）

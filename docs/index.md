@@ -19,7 +19,7 @@ features:
       details: report-only / fix / fix-and-pr / cleanup-branches 四类命令，npx 零依赖上手，支持 owner / topic 多仓库治理。
       link: /guide/quick-start
     - title: GitHub Action 集成
-      details: "通过 uses: dependfix/dependfix@v1 一行接入 CI，支持定时、手动、PR 触发，可自定义验证命令。"
+      details: "通过 uses: dependfix/dependfix@v0.5.0 一行接入 CI，支持定时、手动、PR 触发，可自定义验证命令。"
       link: /guide/quick-start
     - title: AI 研判 breaking change
       details: 跨大版本升级时自动采集 Changelog，多 provider 研判（DeepSeek / OpenAI），输出结构化 patch 与安全门建议。
@@ -46,6 +46,6 @@ features:
       details: 查看进行中的开发任务、验收指标与依赖；待办积压与归档历史。
       link: /plan/todo
     - title: 项目规范
-      details: AI 协作、开发、测试、文档、安全、Git、规划、API 等 10 项规范的索引入口。
+      details: AI 协作、开发、测试、文档、安全、Git、规划、API、平台、i18n 等 13 项规范的索引入口。
       link: /standards/index
 ---

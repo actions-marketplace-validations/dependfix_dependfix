@@ -26,6 +26,7 @@
 | 需求澄清 | requirement-analyst |
 | 代码审查 | code-reviewer |
 | 上下文扫描 | context-analyzer |
+| 全流程编排 | full-stack-master |
 | 提交代码 | conventional-committer |
 | 文档同步 | documentation-specialist |
 | 质量检查 | quality-guardian |
@@ -35,16 +36,18 @@
 
 ## 4. PDTFC+ 工作流
 
-1. **Plan**: 先核对事项是否属于 `todo.md` 当前范围。
-2. **Do / Audit**: 先出受影响文件清单和修改范围，实现后必须通过 code-reviewer 审查。
-3. **Validate / Test**: 检查 lint、typecheck、测试证据，不接受"已验证"的口头结论。
-4. **Finish**: 确认 `todo.md`、相关文档是否同步更新。
+1. **Plan**: 先核对事项是否属于 `todo.md` 当前范围；新需求默认走「评估 → backlog」，不自动升级为阶段条目。
+2. **Do**: 先出受影响文件清单和修改范围；实现后跑定向验证并记录证据。
+3. **Audit**: 加载项目内 `code-reviewer` skill，由 Code Auditor 独立审查 diff 与证据；未放行不得进入 V/T/F。
+4. **Validate**: 检查 lint、typecheck、测试证据，不接受"已验证"的口头结论。
+5. **Test**: 按改动影响补定向测试；命中全量条件时执行全量。
+6. **Finish**: 通过 `conventional-committer` 提交；同步 `todo.md`、设计文档与文档治理记录（见 [文档治理执行规范](../design/governance/doc-governance.md)）。
 
 ## 5. 给开发者的建议
 
 - **清晰定义意图**: 需求模糊时，让 AI 先进行需求采访。
 - **信任但核实**: 架构选择由你把控，审查 Do 阶段产物后再进入 Commit。
-- **搜索优先**: 修复失败超过 1 次或遇到不熟悉技术时，先搜索外部信息再继续。
+- **搜索优先**: 同一方案连续失败 ≥ 2 次或遇到不熟悉技术时，先搜索一手信息再继续。
 - **单一主责**: 决策、写入和 Review 结论保持单一主责，避免多人同时改同一份文件。
 
 ### 5.1 能力怀疑时优先实测
@@ -66,5 +69,6 @@
 ## 6. 相关文档
 
 - [AI 资产治理规范](../standards/ai-governance.md)
+- [文档治理执行规范](../design/governance/doc-governance.md)
 - [外部 Skills 准入清单](../standards/external-skills-intake.md)
 - [开发规范](../standards/development.md)

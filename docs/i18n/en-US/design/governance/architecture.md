@@ -49,7 +49,7 @@ The dependency direction is top-down (UI / entry → engine → core), and lower
 ### Entry layer
 
 - **CLI** (`packages/cli`): commander-based CLI, four modes (`report-only` / `fix` / `fix-and-pr` / `cleanup-branches`), flags via Commander
-- **GitHub Action** (root `action.yml`, composite): wraps CLI, exposes `uses: dependfix/dependfix@v1` to GitHub Actions
+- **GitHub Action** (root `action.yml`, composite): wraps CLI, exposes `uses: dependfix/dependfix@v0.5.0` to GitHub Actions
 - **MCP Server** (`packages/mcp`): exposes scan / fix tools to AI agents (Claude Code / Copilot / Cursor) via Model Context Protocol
 - **Skill** (`packages/skills`): Markdown + YAML frontmatter, lets AI agents converse and drive fixes
 
@@ -166,7 +166,7 @@ Four execution modes form a progressive chain (each mode is a refinement of the 
 
 apps/platform as the management platform entry point takes the end-to-end AI breaking-change assessment integration responsibility. Engine layer (`packages/engine/src/ai/`) closed in M5 (commit `3475e6e`); CLI / MCP / GitHub Action all support `--ai` flags; M26 phase completes the integration in apps/platform (click "Scan" to enable AI assessment + observe usage and assessment results).
 
-Full design draft: [platform-ai-integration.md](./platform-ai-integration.md); stage slice: see [todo-archive.md §M26](https://github.com/dependfix/dependfix/blob/master/docs/plan/todo-archive.md#m26-平台-ai-研判应用层--批量导入-resource-owner-化--文档站-i18n--license-收口--经验沉淀m261m262m263m264am264bm264cm265-全部已闭环--2026-09-10-归档) + [archive/todo-archive-phases-m26.md §M26.1](https://github.com/dependfix/dependfix/blob/master/docs/plan/archive/todo-archive-phases-m26.md#m261-p1--能力--ux-m252b-应用层10-commits--1130-行--standard-depth-audit) (M26 phase closed on 2026-09-10).
+Full design draft: [platform-ai-integration.md](./platform-ai-integration.md); stage slice: see [todo-archive.md §M26](../../../../plan/archive/todo-archive-phases-m26.md) + [archive/todo-archive-phases-m26.md §M26.1](https://github.com/dependfix/dependfix/blob/master/docs/plan/archive/todo-archive-phases-m26.md#m261-p1--能力--ux-m252b-应用层10-commits--1130-行--standard-depth-audit) (M26 phase closed on 2026-09-10).
 
 ### Data model extension (M25.2a commit `1c65582`)
 

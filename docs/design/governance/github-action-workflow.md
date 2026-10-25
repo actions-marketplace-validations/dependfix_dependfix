@@ -2,7 +2,7 @@
 
 > 对应任务: [T201 创建 Composite Action](../../plan/todo.md)
 >
-> **选型结论**: 使用 GitHub Composite Action（`action.yml`），通过 `uses: dependfix/dependfix@v1` 被其他仓库引用。Composite Action 可组合多个 workflow steps 为单一可复用单元，无需 Docker 或 JavaScript 封装。
+> **选型结论**: 使用 GitHub Composite Action（`action.yml`），通过 `uses: dependfix/dependfix@v0.5.0` 被其他仓库引用。Composite Action 可组合多个 workflow steps 为单一可复用单元，无需 Docker 或 JavaScript 封装。
 
 ---
 
@@ -89,7 +89,7 @@ jobs:
   scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: dependfix/dependfix@v1
+      - uses: dependfix/dependfix@v0.5.0
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
@@ -173,7 +173,7 @@ permissions:
 | Token 暴露 | 通过 `inputs.github-token` / `inputs.dependabot-alerts-token` 传入，仅在 `env` 中使用（alerts token 不经命令行，避免进程列表泄露） |
 | 输出脱敏 | `sanitizeOutput()` 过滤敏感信息 |
 | 权限最小化 | 消费者按需配置 permissions；Dependabot alerts 用最小权限专用 token（G2 双 token 设计） |
-| Action 来源 | 固定版本标签（`@v1`），避免跟踪 `@master` |
+| Action 来源 | 固定版本标签（当前 `@v0.5.0`；1.0 后切换 `@v1` 滚动 tag），避免跟踪 `@master` |
 | Prompt 防护 | 见 T206（M2 后续） |
 
 ---
