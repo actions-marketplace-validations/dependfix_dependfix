@@ -138,7 +138,7 @@ for 组 in groups:
 | 组级完整验证时间成本：G × (install+lint+build+typecheck+test)，momei 14 组场景可能超 action timeout | 组级默认 lint 快速验证；最终门禁完整验证；`--commands` 可配置 |
 | dependabot.yml groups 是"PR 合并节奏分组"非"验证分组"，语义有偏差 | 作为最高自动层使用；@types 归并规则在其后应用；拆组兜底吸收误分组损失 |
 | pattern 裸 `*` 全匹配误分组 | 解析时忽略裸 `*` |
-| 组内"必须锁步"的包（如 typescript + typescript-eslint 已知不兼容）拆组无解 | 引入 ignore / 版本上限机制（衔接 G3 遗留"大版本锁定"，参考 momei `ignore` + 评估文档模式）——本设计登记，M3+ 实施；**2026-10-24 M48.1 承接**：精选家族锁步（vitest / typescript-eslint / jest / react），只覆盖直接依赖，不扩成通用依赖图 |
+| 组内"必须锁步"的包（如 typescript + typescript-eslint 已知不兼容）拆组无解 | 引入 ignore / 版本上限机制（衔接 G3 遗留"大版本锁定"，参考 momei `ignore` + 评估文档模式）——本设计登记，M3+ 实施；**2026-10-24 M48.1 承接，2026-10-25 已落地**：精选家族锁步（vitest / typescript-eslint / jest / react），只覆盖直接依赖，不扩成通用依赖图 |
 | 启发式分组噪声（同前缀不一定相关） | 前缀启发式组大小上限 ≤5；scope 组不设限（`@scope/*` 强相关） |
 | 组内部分升级失败 | 失败包直接跳过（不参与组验证），组验证针对成功包 |
 | @types 废弃检测限于孤儿信号 | 孤儿检测 + 报告建议；registry deprecated 查询为可选增强 |
