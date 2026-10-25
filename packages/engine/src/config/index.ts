@@ -152,6 +152,16 @@ export interface RuntimeConfig {
      * [pr-delivery-closure.md §6](../../../../docs/design/governance/pr-delivery-closure.md)。
      */
     retryFailed?: boolean
+    /** PR 创建后等待 check 终态（`--wait-pr-checks` / `DEPENDFIX_WAIT_PR_CHECKS`，默认 false；仅 fix-and-pr，口径见 [§8](../../../../docs/design/governance/pr-delivery-closure.md)） */
+    waitPrChecks?: boolean
+    /** check 失败且归因 self_caused 时关闭 PR 并删分支（`--close-failed-pr`，默认 false；需同时等待，其余归因只评论） */
+    closeFailedPr?: boolean
+    /** 单个 PR 的 check 等待上限（毫秒；默认 900000，60000-1800000） */
+    prCheckTimeoutMs?: number
+    /** 运行内 check 等待总预算（毫秒；默认 1200000，60000-1800000，且 ≤ 剩余 job 预算 70%） */
+    prCheckRunBudgetMs?: number
+    /** job 总预算基线（毫秒；`DEPENDFIX_JOB_BUDGET_MS`）。缺省仅在 `GITHUB_ACTIONS=true` 按 25 分钟套用 */
+    jobBudgetMs?: number
     /**
      * 执行宿主的构建版本回执（平台容器注入；与 `/api/health`、平台启动 `[build]` 行同源）。
      * 未提供时引擎回退自身 `package.json` 版本（CLI / MCP 本地执行场景），最终回退 `unknown`。
@@ -291,6 +301,16 @@ export interface CliConfigOverrides {
     mirrorCiScripts?: boolean
     /** 忽略同告警尝试上限并强制再试（`--retry-failed`；默认关闭，仅 fix-and-pr 生效） */
     retryFailed?: boolean
+    /** 等待本次 PR 的 check 终态（`--wait-pr-checks`；默认关闭，仅 fix-and-pr 生效） */
+    waitPrChecks?: boolean
+    /** check 失败且归因 self_caused 时关闭 PR（`--close-failed-pr`；默认关闭，需同时等待） */
+    closeFailedPr?: boolean
+    /** 单 PR check 等待上限（毫秒） */
+    prCheckTimeoutMs?: number
+    /** 运行级 check 等待总预算（毫秒） */
+    prCheckRunBudgetMs?: number
+    /** job 总预算基线（毫秒；缺省按 Actions 25 分钟兜底） */
+    jobBudgetMs?: number
     /** Dependabot alerts 专用 token（可选，最小权限；缺省回退 githubToken） */
     alertsToken?: string
     maxAlertsPerRepository?: number
@@ -356,6 +376,10 @@ export const DEFAULT_RUNTIME_CONFIG: Omit<RuntimeConfig, 'githubToken' | 'reposi
     rollbackGranularity: 'unit',
     mirrorCiScripts: false,
     retryFailed: false,
+    waitPrChecks: false,
+    closeFailedPr: false,
+    prCheckTimeoutMs: 900_000,
+    prCheckRunBudgetMs: 1_200_000,
     maxAlertsPerRepository: 20,
     maxConcurrency: 1,
     maxRetries: 3,
@@ -604,6 +628,11 @@ export function readEnvConfig(env: NodeJS.ProcessEnv = process.env): CliConfigOv
         rollbackGranularity: readRollbackGranularity(readEnv(env, 'ROLLBACK_GRANULARITY'), `${ENV_PREFIX}ROLLBACK_GRANULARITY`),
         mirrorCiScripts: normalizeBoolean(readEnv(env, 'MIRROR_CI_SCRIPTS'), `${ENV_PREFIX}MIRROR_CI_SCRIPTS`),
         retryFailed: normalizeBoolean(readEnv(env, 'RETRY_FAILED'), `${ENV_PREFIX}RETRY_FAILED`),
+        waitPrChecks: normalizeBoolean(readEnv(env, 'WAIT_PR_CHECKS'), `${ENV_PREFIX}WAIT_PR_CHECKS`),
+        closeFailedPr: normalizeBoolean(readEnv(env, 'CLOSE_FAILED_PR'), `${ENV_PREFIX}CLOSE_FAILED_PR`),
+        prCheckTimeoutMs: normalizeInteger(readEnv(env, 'PR_CHECK_TIMEOUT_MS'), `${ENV_PREFIX}PR_CHECK_TIMEOUT_MS`),
+        prCheckRunBudgetMs: normalizeInteger(readEnv(env, 'PR_CHECK_RUN_BUDGET_MS'), `${ENV_PREFIX}PR_CHECK_RUN_BUDGET_MS`),
+        jobBudgetMs: normalizeInteger(readEnv(env, 'JOB_BUDGET_MS'), `${ENV_PREFIX}JOB_BUDGET_MS`),
         maxAlertsPerRepository: normalizeInteger(readEnv(env, 'MAX_ALERTS_PER_REPOSITORY'), `${ENV_PREFIX}MAX_ALERTS_PER_REPOSITORY`),
         maxConcurrency: normalizeInteger(readEnv(env, 'MAX_CONCURRENCY'), `${ENV_PREFIX}MAX_CONCURRENCY`),
         maxRetries: normalizeNonNegativeInteger(readEnv(env, 'MAX_RETRIES'), `${ENV_PREFIX}MAX_RETRIES`),
@@ -773,6 +802,11 @@ export function resolveRuntimeConfig(options: ResolveRuntimeConfigOptions = {}):
         rollbackGranularity: cliOverrides.rollbackGranularity ?? envConfig.rollbackGranularity ?? DEFAULT_RUNTIME_CONFIG.rollbackGranularity,
         mirrorCiScripts: cliOverrides.mirrorCiScripts ?? envConfig.mirrorCiScripts ?? DEFAULT_RUNTIME_CONFIG.mirrorCiScripts,
         retryFailed: cliOverrides.retryFailed ?? envConfig.retryFailed ?? DEFAULT_RUNTIME_CONFIG.retryFailed,
+        waitPrChecks: cliOverrides.waitPrChecks ?? envConfig.waitPrChecks ?? DEFAULT_RUNTIME_CONFIG.waitPrChecks,
+        closeFailedPr: cliOverrides.closeFailedPr ?? envConfig.closeFailedPr ?? DEFAULT_RUNTIME_CONFIG.closeFailedPr,
+        prCheckTimeoutMs: cliOverrides.prCheckTimeoutMs ?? envConfig.prCheckTimeoutMs ?? DEFAULT_RUNTIME_CONFIG.prCheckTimeoutMs,
+        prCheckRunBudgetMs: cliOverrides.prCheckRunBudgetMs ?? envConfig.prCheckRunBudgetMs ?? DEFAULT_RUNTIME_CONFIG.prCheckRunBudgetMs,
+        jobBudgetMs: cliOverrides.jobBudgetMs ?? envConfig.jobBudgetMs,
         maxAlertsPerRepository: cliOverrides.maxAlertsPerRepository ?? envConfig.maxAlertsPerRepository ?? DEFAULT_RUNTIME_CONFIG.maxAlertsPerRepository,
         maxConcurrency: cliOverrides.maxConcurrency ?? envConfig.maxConcurrency ?? DEFAULT_RUNTIME_CONFIG.maxConcurrency,
         maxRetries: cliOverrides.maxRetries ?? envConfig.maxRetries ?? DEFAULT_RUNTIME_CONFIG.maxRetries,

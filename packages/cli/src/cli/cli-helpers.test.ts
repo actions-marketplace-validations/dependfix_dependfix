@@ -168,6 +168,15 @@ describe('parseCliArgs', () => {
         expect(parseCliArgs([]).configOverrides.retryFailed).toBeUndefined()
     })
 
+    it('解析 wait-pr-checks / close-failed-pr（三态）', () => {
+        expect(parseCliArgs(['--wait-pr-checks']).configOverrides.waitPrChecks).toBe(true)
+        expect(parseCliArgs(['--no-wait-pr-checks']).configOverrides.waitPrChecks).toBe(false)
+        expect(parseCliArgs([]).configOverrides.waitPrChecks).toBeUndefined()
+        expect(parseCliArgs(['--close-failed-pr']).configOverrides.closeFailedPr).toBe(true)
+        expect(parseCliArgs(['--no-close-failed-pr']).configOverrides.closeFailedPr).toBe(false)
+        expect(parseCliArgs([]).configOverrides.closeFailedPr).toBeUndefined()
+    })
+
     it('解析 history', () => {
         const result = parseCliArgs(['--history', 'owner/repo'])
         expect(result.configOverrides.history).toBe('owner/repo')

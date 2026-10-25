@@ -124,6 +124,14 @@ inputs:
     description: "忽略同告警尝试上限并强制再试（默认 false；仅 fix-and-pr 生效——同一告警 / 目标版本 / 修复策略连续两次关闭后第 3 次起默认跳过。用于人工确认要再试一次的场景）"
     required: false
     default: "false"
+  wait-pr-checks:
+    description: "创建 PR 后等待 check 终态（默认 false；仅 fix-and-pr。失败时默认评论失败摘要，受 per-PR 15 分钟 / per-run 20 分钟双预算约束，不改变 exit code；宽限期后仍无 check 记 no_ci_detected，绝不判通过）"
+    required: false
+    default: "false"
+  close-failed-pr:
+    description: "check 失败且归因 self_caused 时关闭 PR 并删除分支（默认 false；需同时开启 wait-pr-checks。unknown / external_noise / pre_existing 只评论不关闭）"
+    required: false
+    default: "false"
 
 outputs:
   report-artifact:
@@ -187,6 +195,8 @@ runs:
         COMMANDS="${{ inputs.commands }}"
         MIRROR_CI_SCRIPTS="${{ inputs.mirror-ci-scripts }}"
         RETRY_FAILED="${{ inputs.retry-failed }}"
+        WAIT_PR_CHECKS="${{ inputs.wait-pr-checks }}"
+        CLOSE_FAILED_PR="${{ inputs.close-failed-pr }}"
         if [ -z "$REPOS" ] && [ -z "$OWNER" ]; then
           REPOS="${{ github.repository }}"
         fi
@@ -212,6 +222,8 @@ runs:
         if [ -n "$COMMANDS" ]; then args+=("--commands" "$COMMANDS"); fi
         if [ "$MIRROR_CI_SCRIPTS" = 'true' ]; then args+=("--mirror-ci-scripts"); fi
         if [ "$RETRY_FAILED" = 'true' ]; then args+=("--retry-failed"); fi
+        if [ "$WAIT_PR_CHECKS" = 'true' ]; then args+=("--wait-pr-checks"); fi
+        if [ "$CLOSE_FAILED_PR" = 'true' ]; then args+=("--close-failed-pr"); fi
         args+=("--verbose")
         node "${{ github.action_path }}/packages/cli/dist/bin.mjs" "${args[@]}"
       shell: bash

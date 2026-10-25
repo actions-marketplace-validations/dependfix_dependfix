@@ -31,6 +31,10 @@ describe('resolveRuntimeConfig', () => {
             rollbackGranularity: 'unit',
             mirrorCiScripts: false,
             retryFailed: false,
+            waitPrChecks: false,
+            closeFailedPr: false,
+            prCheckTimeoutMs: 900000,
+            prCheckRunBudgetMs: 1200000,
             maxAlertsPerRepository: 20,
             maxConcurrency: 1,
             maxRetries: 3,
@@ -411,6 +415,71 @@ describe('resolveRuntimeConfig', () => {
             env: { ...base, DEPENDFIX_RETRY_FAILED: 'true' },
             cliOverrides: { retryFailed: false },
         }).retryFailed).toBe(false)
+    })
+
+    it('PR check 回环：默认关闭，读取 env / CLI（CLI 优先）与预算', () => {
+        const base = { GITHUB_TOKEN: 't', DEPENDFIX_REPOSITORIES: 'foo/bar' }
+
+        const defaults = resolveRuntimeConfig({ env: base })
+        expect(defaults.waitPrChecks).toBe(false)
+        expect(defaults.closeFailedPr).toBe(false)
+        expect(defaults.prCheckTimeoutMs).toBe(900_000)
+        expect(defaults.prCheckRunBudgetMs).toBe(1_200_000)
+
+        const fromEnv = resolveRuntimeConfig({
+            env: {
+                ...base,
+                DEPENDFIX_MODE: 'fix-and-pr',
+                DEPENDFIX_WAIT_PR_CHECKS: 'true',
+                DEPENDFIX_CLOSE_FAILED_PR: 'true',
+                DEPENDFIX_PR_CHECK_TIMEOUT_MS: '600000',
+                DEPENDFIX_PR_CHECK_RUN_BUDGET_MS: '900000',
+            },
+        })
+        expect(fromEnv.waitPrChecks).toBe(true)
+        expect(fromEnv.closeFailedPr).toBe(true)
+        expect(fromEnv.prCheckTimeoutMs).toBe(600_000)
+        expect(fromEnv.prCheckRunBudgetMs).toBe(900_000)
+
+        const cliWins = resolveRuntimeConfig({
+            env: { ...base, DEPENDFIX_MODE: 'fix-and-pr', DEPENDFIX_WAIT_PR_CHECKS: 'false' },
+            cliOverrides: { waitPrChecks: true },
+        })
+        expect(cliWins.waitPrChecks).toBe(true)
+    })
+
+    it('jobBudgetMs 缺省 undefined（仅 Actions 兜底），env 可覆盖且越界 fail-fast', () => {
+        const base = { GITHUB_TOKEN: 't', DEPENDFIX_REPOSITORIES: 'foo/bar' }
+        expect(resolveRuntimeConfig({ env: base }).jobBudgetMs).toBeUndefined()
+        expect(resolveRuntimeConfig({
+            env: { ...base, DEPENDFIX_JOB_BUDGET_MS: '1800000' },
+        }).jobBudgetMs).toBe(1_800_000)
+        expect(() => resolveRuntimeConfig({
+            env: { ...base, DEPENDFIX_JOB_BUDGET_MS: '59999' },
+        })).toThrow(/jobBudgetMs must be an integer between 60000 and 7200000/)
+    })
+
+    it('closeFailedPr 未开启等待 → CONFIG_VALIDATION_ERROR（不静默失活）', () => {
+        expect(() => resolveRuntimeConfig({
+            env: { GITHUB_TOKEN: 't', DEPENDFIX_REPOSITORIES: 'foo/bar', DEPENDFIX_MODE: 'fix-and-pr' },
+            cliOverrides: { closeFailedPr: true },
+        })).toThrow(/closeFailedPr requires waitPrChecks/)
+    })
+
+    it('waitPrChecks 在非 fix-and-pr 模式 → CONFIG_VALIDATION_ERROR', () => {
+        expect(() => resolveRuntimeConfig({
+            env: { GITHUB_TOKEN: 't', DEPENDFIX_REPOSITORIES: 'foo/bar' },
+            cliOverrides: { waitPrChecks: true },
+        })).toThrow(/waitPrChecks is only supported in fix-and-pr/)
+    })
+
+    it('等待预算越界 → CONFIG_VALIDATION_ERROR', () => {
+        for (const value of [59_999, 1_800_001]) {
+            expect(() => resolveRuntimeConfig({
+                env: { GITHUB_TOKEN: 't', DEPENDFIX_REPOSITORIES: 'foo/bar', DEPENDFIX_MODE: 'fix-and-pr' },
+                cliOverrides: { waitPrChecks: true, prCheckTimeoutMs: value },
+            })).toThrow(/prCheckTimeoutMs must be an integer between 60000 and 1800000/)
+        }
     })
 
     it('rejects invalid DEPENDFIX_RETRY_FAILED value', () => {

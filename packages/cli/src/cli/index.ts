@@ -180,6 +180,16 @@ export const argsDef = {
         description: '忽略同告警尝试上限并强制再试（仅 fix-and-pr；第 3 次起默认跳过并在报告标注「人工强制」）',
         negativeDescription: '遵守同告警尝试上限（默认）',
     },
+    'wait-pr-checks': {
+        type: 'boolean' as const,
+        description: '创建 PR 后等待 check 终态（仅 fix-and-pr；失败时默认评论失败摘要，受 per-PR / per-run 双预算约束，不改变 exit code）',
+        negativeDescription: '不等待 PR check（默认）',
+    },
+    'close-failed-pr': {
+        type: 'boolean' as const,
+        description: 'check 失败且归因 self_caused 时关闭 PR 并删除分支（需同时开启 --wait-pr-checks；unknown / external_noise / pre_existing 只评论）',
+        negativeDescription: '不关闭失败 PR（默认）',
+    },
     verbose: {
         type: 'boolean' as const,
         description: '输出详细日志',
@@ -472,6 +482,14 @@ function parsedArgsToCliOverrides(parsed: ParsedArgs<typeof argsDef>): CliConfig
     // retry-failed (three-state: true / false / undefined)
     if (parsed['retry-failed'] !== undefined) {
         overrides.retryFailed = parsed['retry-failed']
+    }
+
+    // wait-pr-checks / close-failed-pr (three-state)
+    if (parsed['wait-pr-checks'] !== undefined) {
+        overrides.waitPrChecks = parsed['wait-pr-checks']
+    }
+    if (parsed['close-failed-pr'] !== undefined) {
+        overrides.closeFailedPr = parsed['close-failed-pr']
     }
 
     // upgrade-groups

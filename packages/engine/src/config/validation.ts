@@ -121,6 +121,38 @@ export function validateRuntimeConfig(config: RuntimeConfig): RuntimeConfig {
         throw new AppError('CONFIG_VALIDATION_ERROR', 'commit cannot be enabled together with createPullRequest. Use fix-and-pr mode instead.')
     }
 
+    // PR check 回环只在创建 PR 之后成立（fix-and-pr）；其余模式无 PR 载体
+    if (config.waitPrChecks && config.mode !== 'fix-and-pr') {
+        throw new AppError('CONFIG_VALIDATION_ERROR', 'waitPrChecks is only supported in fix-and-pr mode.')
+    }
+
+    // 关闭只在等待过程中发生：未开启等待时 closeFailedPr 无载体，属无效配置而非静默忽略
+    if (config.closeFailedPr && !config.waitPrChecks) {
+        throw new AppError(
+            'CONFIG_VALIDATION_ERROR',
+            'closeFailedPr requires waitPrChecks (PRs are only closed while watching check results). Add --wait-pr-checks or drop --close-failed-pr.',
+        )
+    }
+
+    // 等待预算：60s-30min（低于 60s 无法覆盖常见 CI 启动，高于 30min 超出 Action job 上限）
+    for (const [key, value] of [
+        ['prCheckTimeoutMs', config.prCheckTimeoutMs],
+        ['prCheckRunBudgetMs', config.prCheckRunBudgetMs],
+        ['jobBudgetMs', config.jobBudgetMs],
+    ] as const) {
+        if (value === undefined) {
+            continue
+        }
+        // job 预算允许到 2 小时（部分自托管 runner / 平台执行预算更长）
+        const upperBound = key === 'jobBudgetMs' ? 7_200_000 : 1_800_000
+        if (!Number.isInteger(value) || value < 60_000 || value > upperBound) {
+            throw new AppError(
+                'CONFIG_VALIDATION_ERROR',
+                `${key} must be an integer between 60000 and ${upperBound} (got ${value}).`,
+            )
+        }
+    }
+
     // 回滚粒度：只允许 unit / repo（程序化配置也要 fail-fast）
     if (config.rollbackGranularity !== undefined && config.rollbackGranularity !== 'unit' && config.rollbackGranularity !== 'repo') {
         throw new AppError(
