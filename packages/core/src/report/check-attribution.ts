@@ -24,6 +24,15 @@
 /** check 失败的归因分类。 */
 export type CheckAttribution = 'self_caused' | 'pre_existing' | 'external_noise' | 'cancelled' | 'unknown'
 
+/** 归因枚举的固定展示顺序（报告 / UI 分组稳定，不随输入顺序漂移）。 */
+export const CHECK_ATTRIBUTIONS = [
+    'self_caused',
+    'pre_existing',
+    'external_noise',
+    'cancelled',
+    'unknown',
+] as const
+
 /**
  * 归一化后的 check 结论。
  *
@@ -142,4 +151,32 @@ export function aggregateCheckAttribution(
         return [...unique][0]
     }
     return 'unknown'
+}
+
+/** 按归因分组的结果（`items` 保持输入顺序）。 */
+export interface CheckAttributionGroup<T> {
+    attribution: CheckAttribution
+    items: T[]
+}
+
+/**
+ * 按归因分组（报告「check 归因」小节使用；平台按信号逐条展示，不消费本分组）。
+ *
+ * 输出顺序固定为 [CHECK_ATTRIBUTIONS]；空分组省略，保证同一输入的渲染结果稳定可断言。
+ */
+export function groupCheckAttributions<T extends { attribution: CheckAttribution }>(
+    items: readonly T[],
+): CheckAttributionGroup<T>[] {
+    const groups = new Map<CheckAttribution, T[]>()
+    for (const item of items) {
+        const existing = groups.get(item.attribution)
+        if (existing) {
+            existing.push(item)
+        } else {
+            groups.set(item.attribution, [item])
+        }
+    }
+    return CHECK_ATTRIBUTIONS
+        .filter((attribution) => groups.has(attribution))
+        .map((attribution) => ({ attribution, items: groups.get(attribution) ?? [] }))
 }

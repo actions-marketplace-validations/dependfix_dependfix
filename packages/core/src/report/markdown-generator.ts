@@ -12,6 +12,7 @@ import {
 } from './types'
 import { collectCodeScanningSuggestions } from './suggestions'
 import { collectCodeQualityFindings } from './code-quality-suggestions'
+import { groupCheckAttributions } from './check-attribution'
 import { describeCiAlignment } from './ci-alignment'
 import { collectFamilySummaries } from './family'
 import { countUnfixedAlerts, formatSeverity, formatSkipReason, skippedBreakdown, truncatedBreakdown } from './summary-counters'
@@ -352,6 +353,43 @@ export function generateMarkdownReport(result: RunResult): string {
         sections.push('')
     }
 
+    // ---- 5.8 Check Attribution（PR check 回环归因；全部通过时不渲染，避免空表噪音）----
+    const watchAttempts = result.prCheckWatch?.attempts ?? []
+    const failedChecks = watchAttempts.flatMap((attempt) => attempt.failedChecks ?? [])
+    const hasNonPassedAttempt = watchAttempts.some((attempt) => attempt.state !== 'passed')
+    if (failedChecks.length > 0 || hasNonPassedAttempt) {
+        const groups = groupCheckAttributions(failedChecks)
+        const counts = groups
+            .map((group) => `\`${group.attribution}\` ${group.items.length}`)
+            .join(' · ')
+        sections.push(
+            '## Check Attribution',
+            '',
+            '> PR check 回环的失败项按同一归因纯函数分组：归因只解释失败来源，**不豁免** mergify 的 `check-success` 门禁；仅 `self_caused` 可能在显式 `--close-failed-pr` 下关闭 PR。',
+            '',
+        )
+        if (counts) {
+            sections.push(`归因计数：${counts}`, '')
+        }
+        sections.push(
+            '| PR | State | Attribution | Failed Jobs |',
+            '|----|-------|-------------|-------------|',
+        )
+        for (const attempt of watchAttempts) {
+            const jobs = attempt.failedChecks && attempt.failedChecks.length > 0
+                ? attempt.failedChecks
+                    .map((check) => `\`${escapeCodeName(check.name)}\` (${check.attribution})`)
+                    .join('<br>')
+                : '—'
+            const attribution = attempt.attribution ? `\`${attempt.attribution}\`` : '—'
+            sections.push(`| #${attempt.pr.number} | \`${attempt.state}\` | ${attribution} | ${jobs} |`)
+        }
+        if (result.prCheckWatch?.runBudgetExhausted) {
+            sections.push('', '> 本次运行的 check 等待总预算已耗尽：其余 PR 未等待，交给后续运行 / 平台 PR Check。')
+        }
+        sections.push('')
+    }
+
     // ---- 6. Fix Actions ----
     sections.push('## Fix Actions', '')
     if (actions.length > 0) {
@@ -473,4 +511,9 @@ function actionDetails(action: FixAction, error?: string): string {
 /** 转义 Markdown 表格中的 `\` 与 `|`（先转义反斜杠避免已有转义双重处理）与换行（错误消息常含多行，折叠为空格） */
 function escapeMd(text: string): string {
     return text.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ')
+}
+
+/** 行内代码片段转义：在 `escapeMd` 基础上剥离反引号（名称来自目标仓库，反引号会提前闭合代码段）。 */
+function escapeCodeName(text: string): string {
+    return escapeMd(text).replace(/`/g, '')
 }

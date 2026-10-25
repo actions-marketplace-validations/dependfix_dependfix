@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { EMPTY_RUN_RESULT, makeAction, makeAlert, makeError } from './report.test-helpers'
-import { generateJsonReport, generateMarkdownReport, type FixAction, type RepositoryResult } from './index'
+import {
+    generateJsonReport,
+    generateMarkdownReport,
+    type FixAction,
+    type PrCheckWatchReport,
+    type RepositoryResult,
+} from './index'
 
 describe('generateMarkdownReport', () => {
     it('renders header with runId and mode', () => {
@@ -25,6 +31,69 @@ describe('generateMarkdownReport', () => {
         const md = generateMarkdownReport(result)
         expect(md).toContain('### Local workspace')
         expect(md).not.toContain('### local')
+    })
+
+    it('renders Check Attribution section from prCheckWatch attempts', () => {
+        const prCheckWatch: PrCheckWatchReport = {
+            attempts: [
+                {
+                    pr: { number: 7, htmlUrl: 'https://github.com/foo/bar/pull/7' },
+                    state: 'failed',
+                    attribution: 'self_caused',
+                    closed: false,
+                    commented: true,
+                    polls: 2,
+                    durationMs: 1500,
+                    failedChecks: [
+                        { name: 'Test', url: 'https://ci.example/test', attribution: 'self_caused' },
+                        { name: 'Coverage | unit', attribution: 'self_caused' },
+                        { name: 'A`b', attribution: 'unknown' },
+                    ],
+                },
+                {
+                    pr: { number: 8, htmlUrl: 'https://github.com/foo/bar/pull/8' },
+                    state: 'timeout',
+                    closed: false,
+                    commented: true,
+                    polls: 3,
+                    durationMs: 900_000,
+                },
+            ],
+            runBudgetExhausted: true,
+        }
+        const md = generateMarkdownReport({ ...EMPTY_RUN_RESULT, prCheckWatch })
+
+        expect(md).toContain('## Check Attribution')
+        expect(md).toContain('归因计数：`self_caused` 2')
+        expect(md).toContain('| #7 | `failed` | `self_caused` |')
+        expect(md).toContain('`Test` (self_caused)')
+        // 作业名中的 `|` 必须转义、反引号必须替换，不能破坏表格 / 代码段
+        expect(md).toContain('`Coverage \\| unit` (self_caused)')
+        expect(md).toContain('`Ab` (unknown)')
+        expect(md).toContain('| #8 | `timeout` | — | — |')
+        expect(md).toContain('check 等待总预算已耗尽')
+    })
+
+    it('omits Check Attribution section when no watch attempts', () => {
+        expect(generateMarkdownReport(EMPTY_RUN_RESULT)).not.toContain('Check Attribution')
+    })
+
+    it('omits Check Attribution section when every attempt passed', () => {
+        const md = generateMarkdownReport({
+            ...EMPTY_RUN_RESULT,
+            prCheckWatch: {
+                attempts: [{
+                    pr: { number: 7, htmlUrl: 'https://github.com/foo/bar/pull/7' },
+                    state: 'passed',
+                    closed: false,
+                    commented: false,
+                    polls: 1,
+                    durationMs: 10,
+                }],
+                runBudgetExhausted: false,
+            },
+        })
+        expect(md).not.toContain('Check Attribution')
     })
 
     it('renders alert source in header (github-dependabot default)', () => {

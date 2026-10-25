@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
     aggregateCheckAttribution,
+    CHECK_ATTRIBUTIONS,
     classifyCheckFailure,
+    groupCheckAttributions,
     isCancelledConclusion,
     isFailedConclusion,
 } from './check-attribution'
@@ -144,5 +146,25 @@ describe('结论判定', () => {
         expect(isCancelledConclusion('skipped')).toBe(true)
         expect(isCancelledConclusion('stale')).toBe(true)
         expect(isCancelledConclusion('failure')).toBe(false)
+    })
+})
+
+describe('groupCheckAttributions', () => {
+    it('按固定枚举顺序分组（不随输入顺序漂移），空组省略', () => {
+        const groups = groupCheckAttributions([
+            { name: 'Test', attribution: 'unknown' as const },
+            { name: 'Coverage', attribution: 'self_caused' as const },
+            { name: 'E2E', attribution: 'self_caused' as const },
+        ])
+
+        expect(groups.map((group) => group.attribution)).toEqual(['self_caused', 'unknown'])
+        expect(groups[0]?.items.map((item) => item.name)).toEqual(['Coverage', 'E2E'])
+        expect(groups[1]?.items.map((item) => item.name)).toEqual(['Test'])
+        // 输出顺序与固定枚举一致（self_caused 在 unknown 之前）
+        expect(CHECK_ATTRIBUTIONS.indexOf('self_caused')).toBeLessThan(CHECK_ATTRIBUTIONS.indexOf('unknown'))
+    })
+
+    it('空输入 → 空数组', () => {
+        expect(groupCheckAttributions([])).toEqual([])
     })
 })
