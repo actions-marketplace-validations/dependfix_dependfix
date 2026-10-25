@@ -2,7 +2,7 @@
 
 > Full design first draft for **apps/platform management platform integration of AI breaking-change assessment capability**. Engine layer (`packages/engine/src/ai/`) closed in M5 (T502); CLI / MCP / GitHub Action three user paths all support `--ai` flags; this design focuses on **apps/platform (Nuxt management platform) as execution entry, end-to-end AI assessment link**.
 >
-> **Status**: Closed on 2026-09-10. Originally mounted to [backlog](https://github.com/dependfix/dependfix/blob/master/docs/plan/backlog.md), M26 phase entered stage and is now fully closed (see [todo-archive.md §M26](https://github.com/dependfix/dependfix/blob/master/docs/plan/todo-archive.md#m26-平台-ai-研判应用层--批量导入-resource-owner-化--文档站-i18n--license-收口--经验沉淀m261m262m263m264am264bm264cm265-全部已闭环--2026-09-10-归档) + [archive/todo-archive-phases-m26.md §M26.1](https://github.com/dependfix/dependfix/blob/master/docs/plan/archive/todo-archive-phases-m26.md#m261-p1--能力--ux-m252b-应用层10-commits--1130-行--standard-depth-audit)).
+> **Status**: Closed on 2026-09-10. Originally mounted to [backlog](https://github.com/dependfix/dependfix/blob/master/docs/plan/backlog.md), M26 phase entered stage and is now fully closed (see [todo-archive.md §M26](../../../../plan/archive/todo-archive-phases-m26.md) + [archive/todo-archive-phases-m26.md §M26.1](https://github.com/dependfix/dependfix/blob/master/docs/plan/archive/todo-archive-phases-m26.md#m261-p1--能力--ux-m252b-应用层10-commits--1130-行--standard-depth-audit)).
 
 ## 1. Background & goals
 
@@ -383,5 +383,5 @@ When any of the following is triggered, adopt from backlog to todo.md §current 
 
 - **Design first draft created**: 2026-09-08
 - **Trigger**: User research "How to supplement AI assessment in apps/platform"
-- **Related stage**: Implemented and archived (M25.2a base layer + M26.1 application layer; see [todo-archive.md §M26](https://github.com/dependfix/dependfix/blob/master/docs/plan/todo-archive.md#m26-平台-ai-研判应用层--批量导入-resource-owner-化--文档站-i18n--license-收口--经验沉淀m261m262m263m264am264bm264cm265-全部已闭环--2026-09-10-归档)).
+- **Related stage**: Implemented and archived (M25.2a base layer + M26.1 application layer; see [todo-archive.md §M26](../../../../plan/archive/todo-archive-phases-m26.md)).
 - **Audit basis**: This document is the design basis for P0 landing, no A-stage audit taken (consistent with design docs governance convention)

@@ -97,5 +97,5 @@
 
 - **设计先行稿创建时间**：2026-09-08
 - **触发**：用户调研"如何在 apps/platform 中补充 AI 研判"
-- **关联阶段**：M25.2a 基础层 + M26.1 应用层 已实施并归档（见 [todo-archive.md §M26](../../plan/todo-archive.md#m26-平台-ai-研判应用层--批量导入-resource-owner-化--文档站-i18n--license-收口--经验沉淀m261m262m263m264am264bm264cm265-全部已闭环--2026-09-10-归档)）
+- **关联阶段**：M25.2a 基础层 + M26.1 应用层 已实施并归档（见 [M26](../../plan/archive/todo-archive-phases-m26.md)）
 - **审计依据**：本文档作为 P0 落地的设计依据，未走 A 阶段 audit（与 design docs 治理惯例一致）

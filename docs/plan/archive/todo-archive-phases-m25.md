@@ -1,6 +1,6 @@
 # M25 阶段归档：PrimeUI License 治理 + 平台 AI 研判集成 + lint baseline 治理 + M24 follow-up 工具化
 
-> **2026-09-08 M25 归档批次迁出**：本分片包含 M25 阶段 4 原子条目（M25.1 + M25.2a + M25.3 + M25.4）17 commits / ~1821 行净增的完整实施记录 + 关键经验 + 待迁移经验。主窗口 [todo-archive.md §M25](../todo-archive.md#m25-primeui-license-治理--平台-ai-研判集成--lint-baseline-治理--m24-follow-up-工具化m251m252am253m254-全部已闭环--2026-09-08-归档) 仅保留导航指针 + 关键 commit 实证。
+> **2026-09-08 M25 归档批次迁出**：本分片包含 M25 阶段 4 原子条目（M25.1 + M25.2a + M25.3 + M25.4）17 commits / ~1821 行净增的完整实施记录 + 关键经验 + 待迁移经验。分片索引：本分片 仅保留导航指针 + 关键 commit 实证。
 
 ## 阶段摘要
 

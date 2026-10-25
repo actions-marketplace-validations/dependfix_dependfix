@@ -6,7 +6,7 @@
 >
 > **实施结果（2026-10-01 回填；不改动下文历史正文）**：
 >
-> - **方案已按 §4.1 落地**：`apps/platform/package.json` 的 `@primeuix/themes` 由 `^3.0.0` 改为 `^2.0.3`（commit `35e4935`），并同步 lock 与 [平台规范 §3.7](../../standards/platform.md) 的版本号 / 协议 / 降级记录（commit `4c51d19`）→ M25.1 已闭环归档（[todo-archive.md §M25](../../plan/todo-archive.md#m25-primeui-license-治理--平台-ai-研判集成--lint-baseline-治理--m24-follow-up-工具化m251m252am253m254-全部已闭环--2026-09-08-归档)）。
+> - **方案已按 §4.1 落地**：`apps/platform/package.json` 的 `@primeuix/themes` 由 `^3.0.0` 改为 `^2.0.3`（commit `35e4935`），并同步 lock 与 [平台规范 §3.7](../../standards/platform.md) 的版本号 / 协议 / 降级记录（commit `4c51d19`）→ M25.1 已闭环归档（[M25](../../plan/archive/todo-archive-phases-m25.md)）。
 > - **后续演进改变了本方案前提**：M31 完成 PrimeVue 4 → caomei-ui 的组件库迁移，M31.5（commit `406fd1f`）卸载全部 5 个 PrimeVue 依赖并收敛配置 → **PrimeVue / `@primeuix` / `primeicons` 全链已由 caomei-ui 替代**（当前 `apps/platform/package.json` 与 lock 中已无相关依赖），本文档作为「降级方案」的载体随之退役。
 > - 迁移背景、分批计划与实证见 [apps/platform UI 组件库迁移评估（PrimeVue → caomei-ui）](./caomei-ui-migration.md)。
 

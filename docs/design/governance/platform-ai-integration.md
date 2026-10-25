@@ -2,7 +2,7 @@
 
 > 本文档为 **apps/platform 管理平台集成 AI breaking change 研判能力**的专项设计先行稿。引擎层（`packages/engine/src/ai/`）的 AI 研判能力已在 T502 / M5 闭环（commit 3475e6e），CLI / MCP / GitHub Action 三条用户路径全部支持；本设计聚焦于 **apps/platform（Nuxt 管理平台）作为执行入口时，AI 研判的端到端联通**。
 >
-> **状态**：✅ 已闭环（2026-09-10）。原挂载于 [backlog.md 短期/一次性候选任务](../../plan/backlog.md) 候选，M26 阶段进入实施并闭环（见 [todo-archive.md §M26](../../plan/todo-archive.md#m26-平台-ai-研判应用层--批量导入-resource-owner-化--文档站-i18n--license-收口--经验沉淀m261m262m263m264am264bm264cm265-全部已闭环--2026-09-10-归档) + [archive/todo-archive-phases-m26.md §M26.1](../../plan/archive/todo-archive-phases-m26.md#m261-p1--能力--ux-m252b-应用层10-commits--1130-行--standard-depth-audit)）。
+> **状态**：✅ 已闭环（2026-09-10）。原挂载于 [backlog.md 短期/一次性候选任务](../../plan/backlog.md) 候选，M26 阶段进入实施并闭环（见 [M26](../../plan/archive/todo-archive-phases-m26.md) + [archive/todo-archive-phases-m26.md §M26.1](../../plan/archive/todo-archive-phases-m26.md#m261-p1--能力--ux-m252b-应用层10-commits--1130-行--standard-depth-audit)）。
 
 ## 1. 背景与目标
 

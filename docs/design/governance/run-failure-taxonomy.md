@@ -249,5 +249,5 @@
 
 - [executor-sandbox.md §7.8 降级状态机契约](./executor-sandbox-implementation.md)
 - [platform.md](../../standards/platform.md)
-- [todo-archive.md §M45.4](../../plan/todo-archive.md)（受约束重试入口落地条目）
-- [todo-archive.md §M37](../../plan/archive/todo-archive-phases-m37.md#m37-运行可观测性与体验记忆m371m376-全部已闭环--2026-10-08-归档)（M37.1 已闭环归档）
+- [M45.4](../../plan/todo-archive.md)（受约束重试入口落地条目）
+- [M37](../../plan/archive/todo-archive-phases-m37.md#m37-运行可观测性与体验记忆m371m376-全部已闭环--2026-10-08-归档)（M37.1 已闭环归档）

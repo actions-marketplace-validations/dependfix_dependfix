@@ -10,7 +10,7 @@
 |:--|:--|
 | 当前阶段任务 | **M49：0.6.0 发版清障**（2026-10-25 用户决策；六原子见下） |
 | 下一阶段（已授权，未规划） | **1.0 发布门槛收口**（E → F1 → F2 → G；台账见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)） |
-| 已完成阶段归档 | [todo-archive.md](todo-archive.md)（主窗口 + [archive/](archive/) 分片；M0-M48 全部已归档） |
+| 已完成阶段归档 | [todo-archive.md](todo-archive.md)（阶段索引 + [archive/](archive/) 分片；M0-M48 全部已归档） |
 | 里程碑与阶段交付 | [roadmap.md](roadmap.md)（M0-M48 已归档；M49 进行中） |
 | 未排期 / 延期 / 远期 / 长期主线 / 已知边界 | [backlog.md](backlog.md) |
 | 历史归档索引 | [archive/index.md](archive/index.md) |

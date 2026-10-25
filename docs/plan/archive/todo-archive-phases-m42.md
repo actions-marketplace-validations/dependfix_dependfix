@@ -42,4 +42,4 @@
 >
 > **ahead commits 实证**：归档批次开始前 `git rev-list HEAD ^origin/master --count` 实测 = **12**（`git rev-list origin/master ^HEAD --count` = 0 双向核验；M42.1 / M42.2 及其前的阶段启动共 6 commits 已由用户推送，`origin/master` 顶端 = `e6f3857`），本归档 + 蒸馏批次 commits 另计，均待用户推送确认。
 >
-> **关联**：[roadmap.md §M42](../roadmap.md#m42-修复交付正确性-平台能力与体验补强-2026-10-10-用户决策方案-a-b-混合-2026-10-11-已闭环-归档) + [archive/index.md](index.md) + [sandbox-security-governance.md](../../design/governance/sandbox-security-governance.md)（治理决议登记）+ [security.md](../../standards/security.md)（§5.3.1 网络外联审计）+ [backlog.md](../backlog.md)（M42 衍生候选）
+> **关联**：[roadmap.md §M42](roadmap-phases-m39-m48.md#m42-修复交付正确性-平台能力与体验补强-2026-10-10-用户决策方案-a-b-混合-2026-10-11-已闭环-归档) + [archive/index.md](index.md) + [sandbox-security-governance.md](../../design/governance/sandbox-security-governance.md)（治理决议登记）+ [security.md](../../standards/security.md)（§5.3.1 网络外联审计）+ [backlog.md](../backlog.md)（M42 衍生候选）

@@ -96,7 +96,7 @@ const DEFAULT_LOCALE: ServerLocale = 'zh-CN'
  * getHeader/getCookie 访问 event.node.req.headers 时会抛 TypeError；此处降级到默认 zh-CN，
  * 不影响单测断言 statusCode（locale 仅影响 message 字段）。
  *
- * @see [todo-archive.md §M16.3 audit suggest backlog S2](../../docs/plan/todo-archive.md#m16-平台可用性深化m161--m162--m163--m164--m165-全部已闭环--2026-08-28-归档) — 与 [localeDetector.ts:15]({@link ../i18n/localeDetector.ts}) `tryQueryLocale` 对齐
+ * @see [todo-archive.md §M16.3 audit suggest backlog S2](../../../../docs/plan/archive/todo-archive-phases-m16-m17.md#m16-平台可用性深化m161--m162--m163--m164--m165-全部已闭环--2026-08-28-归档) — 与 [localeDetector.ts:15]({@link ../i18n/localeDetector.ts}) `tryQueryLocale` 对齐
  */
 export function detectServerLocale(event: H3Event): ServerLocale {
     // 防御：单测 mock event 可能不含 node.req（guard.test.ts 走最小 H3Event shape）

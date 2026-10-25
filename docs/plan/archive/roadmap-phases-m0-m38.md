@@ -189,13 +189,13 @@ per-alert 模型 + reconcile + API 简化 + UI 调整 + backfill 脚本。5 子�
 
 承接 M23 闭环后 backlog 候选池，方案 B 能力突破优先。5 原子条目独立闭环（M24.1 PR Check MVP / M24.2 M22.7+M22.8 残留根因 / M24.3 cron-preview / M24.4 M18.x+Code Scanning / M24.5 C36 i18n）。
 
-> 详细任务见 [todo-archive.md §M24](../todo-archive.md#m24-pr-check-mvp--治理债--测试补强--用户体验m241m242m243m244m245-全部已闭环--2026-09-03-归档) + [archive/todo-archive-phases-m24.md 完整实施记录](./todo-archive-phases-m24.md)
+> 详细任务见 [M24 分片](todo-archive-phases-m24.md) + [archive/todo-archive-phases-m24.md 完整实施记录](./todo-archive-phases-m24.md)
 
 ## M25: PrimeUI License 治理 + 平台 AI 研判集成 + lint baseline 治理 + M24 follow-up 工具化（已完成 2026-09-08 归档）
 
 方案 A 治理优先 + 能力扩展 + 测试补强。4 原子条目独立闭环（M25.1 PrimeUI 主题库 License 治理 / M25.2a 平台 AI 研判集成基础层 / M25.3 apps/platform baseline 16 lint errors 清理 / M25.4 M24 follow-up 工具化）。17 commits / ~1821 行净增；ahead=17 全部推送完成。
 
-> 详细任务见 [todo-archive.md §M25](../todo-archive.md#m25-primeui-license-治理--平台-ai-研判集成--lint-baseline-治理--m24-follow-up-工具化m251m252am253m254-全部已闭环--2026-09-08-归档) + [archive/todo-archive-phases-m25.md 完整实施记录](./todo-archive-phases-m25.md)
+> 详细任务见 [M25 分片](todo-archive-phases-m25.md) + [archive/todo-archive-phases-m25.md 完整实施记录](./todo-archive-phases-m25.md)
 
 ## M26: 平台 AI 研判应用层 + 批量导入 Resource owner 化 + 文档站 i18n + License 收口 + 经验沉淀（2026-09-08 用户决策方案 A + M26.4 拆分 + M26.4c e2e 适配 / 2026-09-10 已闭环 + 归档）
 
@@ -221,7 +221,7 @@ per-alert 模型 + reconcile + API 简化 + UI 调整 + backfill 脚本。5 子�
 
 **总投入**：**23 atomic commits 实施 + 13 配套 commits（re-audit 修复 + docs 收口 + 治理补丁 + CI Coverage 修复）= 36 commits**（ahead=0 全部已推送 origin/master）
 
-> 详细任务见 [todo-archive.md §M26](../todo-archive.md#m26-平台-ai-研判应用层--批量导入-resource-owner-化--文档站-i18n--license-收口--经验沉淀m261m262m263m264am264bm264cm265-全部已闭环--2026-09-10-归档) + [archive/todo-archive-phases-m26.md](./todo-archive-phases-m26.md)（完整实施记录 7 原子条目 × 23 commits + 配套 13 commits = 36 commits / ~3240 行净增）
+> 详细任务见 [M26 分片](todo-archive-phases-m26.md) + [archive/todo-archive-phases-m26.md](./todo-archive-phases-m26.md)（完整实施记录 7 原子条目 × 23 commits + 配套 13 commits = 36 commits / ~3240 行净增）
 
 ## M27: 用户体验 + 治理优先（2026-09-10 用户决策修订方案 B-1 + 2026-09-10 M27.1 重复评估修正 / 2026-09-10 已闭环 + 归档）
 
@@ -244,7 +244,7 @@ per-alert 模型 + reconcile + API 简化 + UI 调整 + backfill 脚本。5 子�
 
 **ahead commits 实证**：`git rev-list HEAD ^origin/master --count` = **0**（M27 全部 11 commits 已 ahead=0 推送 origin/master；2026-09-10 实测；session 元数据 ahead=17 stale 已 2026-09-11 同步修正）
 
-> 详细任务见 [todo-archive.md §M27](../todo-archive.md#m27-用户体验--治理优先m271m272-w1m273-w2m274-w4m275-全部已闭环--2026-09-10-归档)（指针段 + 关键 commit 实证模式，与 M26 段同源策略；完整实施记录通过 `git log` 关键 commit 链查）
+> 详细任务见 [todo-archive.md §M27](todo-archive-phases-m27.md#m27-用户体验--治理优先m271m272-w1m273-w2m274-w4m275-全部已闭环--2026-09-10-归档)（指针段 + 关键 commit 实证模式，与 M26 段同源策略；完整实施记录通过 `git log` 关键 commit 链查）
 
 ---
 

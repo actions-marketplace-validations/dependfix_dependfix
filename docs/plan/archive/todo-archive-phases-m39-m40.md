@@ -16,7 +16,7 @@
 >
 > **commit 数量实证**：`git log master --first-parent --oneline origin/master..HEAD` 去重统计 = **20 commits**（阶段启动 1 + M40.6 5 + M40.5 2 + M40.2 2 + M40.3 4 + M40.4 3 + M40.1 3；每个 commit 仅归属一条目，无重复计数）。
 >
-> **关键决策**（2026-10-10 用户裁定 + 各原子 D 阶段定稿，完整记录见 [roadmap.md §M40](../roadmap.md#m40-运行时可靠性与可观测性深化2026-10-10-用户决策方案-a--2026-10-10-已闭环--归档)）：① M40.1 构建 arg 注入 + 公开无鉴权健康端点 + 不接发布门禁；② M40.2 写 `{ ...result.summary, alertsFixed: 0 }`；③ M40.3 env-only + 保留锁联动；④ M40.4 shell 看护循环 + 指数退避 + 连续重启上限 5 次 + 稳定窗口 60s 归零 + 不影响主进程；⑤ M40.5 回退路径补 `logsJson`；⑥ M40.6 双示例文件 + 修代码兼容 `NUXT_PUBLIC_BETTER_AUTH_URL`。
+> **关键决策**（2026-10-10 用户裁定 + 各原子 D 阶段定稿，完整记录见 [roadmap.md §M40](roadmap-phases-m39-m48.md#m40-运行时可靠性与可观测性深化2026-10-10-用户决策方案-a--2026-10-10-已闭环--归档)）：① M40.1 构建 arg 注入 + 公开无鉴权健康端点 + 不接发布门禁；② M40.2 写 `{ ...result.summary, alertsFixed: 0 }`；③ M40.3 env-only + 保留锁联动；④ M40.4 shell 看护循环 + 指数退避 + 连续重启上限 5 次 + 稳定窗口 60s 归零 + 不影响主进程；⑤ M40.5 回退路径补 `logsJson`；⑥ M40.6 双示例文件 + 修代码兼容 `NUXT_PUBLIC_BETTER_AUTH_URL`。
 >
 > **类型平衡复核**：🚀 能力扩展 1（M40.1）/ 🎨 用户体验 1（M40.2）/ 🛠️ 技术债 1（M40.3）/ 🛡️ 可靠性 1（M40.4）/ 🐛 缺陷修复 1（M40.5）/ 📚 文档治理 1（M40.6）；🎨 独立条目 1 项低于 [规划规范 §1.1 类型平衡建议](../../standards/planning.md#11-硬性约束) 建议值 2，缺口显式标注。
 >
@@ -24,7 +24,7 @@
 >
 > **ahead commits 实证**：归档时 `git rev-list HEAD ^origin/master --count` 实测 = **20**（`git rev-list origin/master ^HEAD --count` = 0 双向核验），全部为本阶段 commits，待用户推送确认。
 >
-> **关联**：[roadmap.md §M40](../roadmap.md#m40-运行时可靠性与可观测性深化2026-10-10-用户决策方案-a--2026-10-10-已闭环--归档) + [archive/index.md](./index.md) + [platform.md §10.5 / §10.6 / §10.7 / §11](../../standards/platform.md) + [configuration.md](../../guide/configuration.md) + [backlog.md](../backlog.md)（M40 衍生候选）
+> **关联**：[roadmap.md §M40](roadmap-phases-m39-m48.md#m40-运行时可靠性与可观测性深化2026-10-10-用户决策方案-a--2026-10-10-已闭环--归档) + [archive/index.md](./index.md) + [platform.md §10.5 / §10.6 / §10.7 / §11](../../standards/platform.md) + [configuration.md](../../guide/configuration.md) + [backlog.md](../backlog.md)（M40 衍生候选）
 
 ## M39: 平台视图体验与可观测补强（M39.1~M39.6 全部已闭环 / 2026-10-10 归档）
 
@@ -41,7 +41,7 @@
 >
 > **commit 数量实证**：`git log master --first-parent --oneline origin/master..HEAD` 去重统计 = **23 commits**（阶段启动 1 + M39.3 3 + M39.1 3 + M39.2 4 + M39.5 4 + M39.4 4 + M39.6 4；每个 commit 仅归属一条目，无重复计数）。阶段前的 `e5c59b8`（引擎口径插队修复）+ `da148f8`（候选登记）已随 M38 归档末推送 `origin/master`，不计入本阶段。
 >
-> **关键决策**（2026-10-09 用户决策方案 A + 各原子 D 阶段裁定，完整记录见 [roadmap.md §M39](../roadmap.md#m39-平台视图体验与可观测补强2026-10-09-用户决策方案-a--2026-10-10-已闭环--归档)）：6 原子 D 阶段定稿——① M39.1 byRepo 客户端分页 + CaomeiTabs 分区（筛选仅作用于聚合结果，UI 显式标注窗口边界）；② M39.2 视口比例 `clamp` 日志区 + 设计钩子 `--caomei-dialog-width`（inline `:style` 恒胜 `:breakpoints`，既有 breakpoints 为死代码）；③ M39.3「一个包一组」组排序键；④ M39.4 服务端端点导出（单 run txt / 批量合并单 txt / 运行数 100 + 字节 5 MiB 硬上限 413）；⑤ M39.5 env-only 总开关 + 只读状态端点 `monitor-status`（避免构建期烘焙的公开配置漂移）；⑥ M39.6 环境事件 / 运行失败分类边界 + `docker_daemon_down` 移除 + 通知类型白名单。
+> **关键决策**（2026-10-09 用户决策方案 A + 各原子 D 阶段裁定，完整记录见 [roadmap.md §M39](roadmap-phases-m39-m48.md#m39-平台视图体验与可观测补强2026-10-09-用户决策方案-a--2026-10-10-已闭环--归档)）：6 原子 D 阶段定稿——① M39.1 byRepo 客户端分页 + CaomeiTabs 分区（筛选仅作用于聚合结果，UI 显式标注窗口边界）；② M39.2 视口比例 `clamp` 日志区 + 设计钩子 `--caomei-dialog-width`（inline `:style` 恒胜 `:breakpoints`，既有 breakpoints 为死代码）；③ M39.3「一个包一组」组排序键；④ M39.4 服务端端点导出（单 run txt / 批量合并单 txt / 运行数 100 + 字节 5 MiB 硬上限 413）；⑤ M39.5 env-only 总开关 + 只读状态端点 `monitor-status`（避免构建期烘焙的公开配置漂移）；⑥ M39.6 环境事件 / 运行失败分类边界 + `docker_daemon_down` 移除 + 通知类型白名单。
 >
 > **类型平衡复核**：🎨 用户体验 3（M39.1 / M39.2 / M39.3）/ 🚀 能力扩展 2（M39.4 / M39.5）/ 🛡️ 可观测与治理 1（M39.6）；🧪 无独立条目（测试随各条目内嵌与 M39.3 视觉基线重建），缺口显式标注，接近 [规划规范 §1.1 类型平衡建议](../../standards/planning.md#11-硬性约束)。
 >
@@ -49,4 +49,4 @@
 >
 > **ahead commits 实证**：归档时 `git rev-list HEAD ^origin/master --count` 实测 = **23**（`git rev-list origin/master ^HEAD --count` = 0 双向核验），全部为本阶段 commits，待用户推送确认。
 >
-> **关联**：[roadmap.md §M39](../roadmap.md#m39-平台视图体验与可观测补强2026-10-09-用户决策方案-a--2026-10-10-已闭环--归档) + [archive/index.md](./index.md) + [platform.md §7 / §11](../../standards/platform.md) + [backlog.md](../backlog.md)（M39 衍生候选）
+> **关联**：[roadmap.md §M39](roadmap-phases-m39-m48.md#m39-平台视图体验与可观测补强2026-10-09-用户决策方案-a--2026-10-10-已闭环--归档) + [archive/index.md](./index.md) + [platform.md §7 / §11](../../standards/platform.md) + [backlog.md](../backlog.md)（M39 衍生候选）
