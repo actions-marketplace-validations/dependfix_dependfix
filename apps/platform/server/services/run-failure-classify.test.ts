@@ -50,6 +50,8 @@ const EXPECTED_MAPPINGS: Record<string, { stage: RunFailureStage, kind: RunFailu
     network_violation: { stage: 'verify', kind: 'deterministic' },
     // deliver
     COMMIT_FAILED: { stage: 'deliver', kind: 'deterministic' },
+    UNEXPECTED_CHANGES: { stage: 'deliver', kind: 'deterministic' },
+    NO_CHANGES: { stage: 'deliver', kind: 'deterministic' },
     push_failed: { stage: 'deliver', kind: 'unknown' },
     PR_CREATION_FAILED: { stage: 'deliver', kind: 'deterministic' },
     pr_creation_failed: { stage: 'deliver', kind: 'deterministic' },

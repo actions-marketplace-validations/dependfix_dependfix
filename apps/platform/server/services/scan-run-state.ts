@@ -44,8 +44,8 @@ export interface ScanRunStateDecision {
 /**
  * 引擎在「已拿到 result、但交付阶段失败」时记录的 category 集合。
  *
- * 触发场景：引擎 `fix` / `fix-and-pr` 内部流程走到交付阶段后失败（git commit 失败、PR 创建失败、
- * 验证门禁回滚、catch-all FATAL）。这些错误**不应**让状态机误判为 `completed`——否则 UI 会显示
+ * 触发场景：引擎 `fix` / `fix-and-pr` 内部流程走到交付阶段后失败（git commit 失败、提交集合不合法、
+ * PR 创建失败、验证门禁回滚、catch-all FATAL）。这些错误**不应**让状态机误判为 `completed`——否则 UI 会显示
  * "已完成 + 已修复 N"，但远程实际没有分支/PR 落地，与 [C53 状态机契约](../../../../docs/design/governance/executor-sandbox-implementation.md) 的
  * "副作用已落库" 语义直接冲突。
  *
@@ -61,6 +61,8 @@ export interface ScanRunStateDecision {
  */
 const ENGINE_DELIVERY_FAILED_CATEGORIES: ReadonlySet<string> = new Set([
     'COMMIT_FAILED',
+    'UNEXPECTED_CHANGES',
+    'NO_CHANGES',
     'PR_CREATION_FAILED',
     'VERIFICATION_FAILED',
     'ROLLBACK_FAILED',
@@ -153,8 +155,8 @@ export const resolveScanRunState = (
     if (error?.code === 'pr_creation_failed') {
         return { status: 'dispatched', errorJson: error ?? null }
     }
-    // 引擎交付阶段失败：result 存在但 errors 含 COMMIT_FAILED / PR_CREATION_FAILED /
-    // VERIFICATION_FAILED / ROLLBACK_FAILED / FATAL 之一 → 远程实际未完整落地，标记 failed
+    // 引擎交付阶段失败：result 存在但 errors 含 COMMIT_FAILED / UNEXPECTED_CHANGES / NO_CHANGES /
+    // PR_CREATION_FAILED / VERIFICATION_FAILED / ROLLBACK_FAILED / FATAL 之一 → 远程实际未完整落地，标记 failed
     // （关键修复：原行为 result 存在即 completed，会让"已修复 8 但无 PR"误报）
     const engineDeliveryErr = hasEngineDeliveryFailure(result)
     if (engineDeliveryErr) {
