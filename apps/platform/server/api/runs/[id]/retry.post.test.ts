@@ -137,6 +137,17 @@ describe('POST /api/runs/[id]/retry', () => {
         expect(response).toMatchObject({ id: 'retry-run-1', retriedFromRunId: 'source-run' })
     })
 
+    it('normalizes legacy sandbox source to container (entry disabled)', async () => {
+        const run = await makeRun({ executorKind: 'sandbox' })
+        await call(run.id)
+
+        expect(triggerMock.triggerScanForRepository).toHaveBeenCalledWith(
+            repositoryId,
+            { mode: 'fix', severityThreshold: 'high', executorKind: 'container' },
+            { retriedFromRunId: run.id, triggeredByUserId: 'u1' },
+        )
+    })
+
     it('passes through the de-dup merge notice (merged → 提示且不跳转)', async () => {
         const run = await makeRun()
         triggerMock.triggerScanForRepository.mockResolvedValue({

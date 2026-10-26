@@ -5,7 +5,6 @@ import { applyFailureClassification } from './run-failure-classify'
 import { withRepoLock } from './repo-lock'
 import { decryptToken, getEncryptionKey } from './credential.service'
 import { ContainerExecutor } from './executor/container-executor'
-import { SandboxExecutor } from './executor/sandbox-executor'
 import { ActionTriggerExecutor } from './executor/action-trigger-executor'
 import { ActionResultFetcher } from './executor/action-result-fetcher'
 import type { ExecutorResourceUsage, ScanExecutorContext } from './executor/types'
@@ -14,7 +13,7 @@ import { notifyRunTerminal } from './notification/run-notification.service'
 import type { NotificationEvent } from './notification/channel'
 import { reconcileAlerts } from './scan-reconcile'
 import { resolveAiConfig } from './ai-config-resolver'
-import { Repository, parseSandboxLimits, parseVerifyCommands } from '#server/entities/repository'
+import { Repository, parseVerifyCommands } from '#server/entities/repository'
 import { Credential } from '#server/entities/credential'
 import { ScanRun } from '#server/entities/scan-run'
 import { Organization } from '#server/entities/organization'
@@ -28,7 +27,8 @@ import { resolveRunBuildStamp } from '#server/utils/run-build-info'
  *
  * 流程：
  * 1. 读取 Repository + 关联 Credential（解密仅执行时内存）
- * 2. 按 executorKind 选择执行器（container 默认 / github-action 需配置 actionWorkflowFile）
+ * 2. 按 executorKind 选择执行器（container 默认 / github-action 需配置 actionWorkflowFile；
+ *    sandbox 入口临时关闭 → 强制 container + degraded）
  * 3. 执行 → 结果落库 ScanRun + ScanResult（原子写：失败不写半截结果）
  * 4. 回填 Repository.lastScanAt
  *
@@ -355,49 +355,18 @@ const runScanInternal = async (
                     }
                 }
             }
-        } else if (executorKind === 'sandbox') {
-            // sandbox 路由：先探测 RuntimeAdapter 可用性（docker daemon 可用性）。
-            // **降级信号契约**（todo.md §M11 T1005-C，2026-08-20）：
-            // - 启动时不可用（isAvailable() false）→ 自动降级回 ContainerExecutor + degradedReason 记录 → degraded 状态
-            //   （业务结果完整，UI info 提示，不静默降级）
-            // - 运行时偶发故障（execute() 抛 errno）→ 不静默降级，sandbox_unavailable 错误码 → failed 状态
-            //   （环境中途变化，UI warn 告警，避免掩盖真实错误）
-            // 详见 executor-sandbox-implementation.md §7.8
-            const sandbox = new SandboxExecutor({
-                workRoot: process.env.RUN_WORK_ROOT ?? 'data/runs',
-                // todo.md §M11 T1005-B：仓库级 sandboxLimits 透传（可选；undefined 时走平台 SANDBOX_DEFAULTS）。
-                // 限额优先级：仓库级 > 沙箱级 > SANDBOX_DEFAULTS（见 sandbox-executor.ts:107 注释）。
-                sandboxLimits: parseSandboxLimits(repository.sandboxLimits),
-            })
-            if (await sandbox.isAvailable()) {
-                // 启动可用 → 走 sandbox（可能 B 场景：execute 抛 errno → sandbox_unavailable）
-                const execResult = await sandbox.execute(ctx)
-                result = execResult.result
-                error = execResult.error
-                exitCode = execResult.exitCode
-                resource = execResult.resource
-            } else {
-                // A 场景：启动时不可用 → 记录降级原因 + 走 ContainerExecutor
-                degradedReason = {
-                    code: 'sandbox_unavailable',
-                    message: `沙箱执行器启动时不可用（无 rootless daemon / user namespace 受限），已自动降级到平台容器（${repository.owner}/${repository.name}）`,
-                }
-                console.warn(`[sandbox] Repository ${repository.owner}/${repository.name} executorKind='sandbox' but daemon unavailable; falling back to container`)
-                const executor = new ContainerExecutor({
-                    workRoot: process.env.RUN_WORK_ROOT ?? 'data/runs',
-                })
-                // 降级目标（container）同样先探测环境可用性：二者皆不可用 → container_unavailable
-                // 环境事件（与 container 路由同口径，避免以 orchestration_failed 掩盖环境根因）
-                const execResult = await runContainerExecutor(executor, ctx)
-                result = execResult.result
-                error = execResult.error
-                exitCode = execResult.exitCode
-                resource = execResult.resource
-                runUrl = execResult.runUrl
-                // 降级回退同样走 ContainerExecutor + MemoryLogger，落 logsJson 让 degraded run 可查执行日志（与主路由同口径）
-                logsJson = execResult.logsJson
-            }
         } else {
+            if (executorKind === 'sandbox') {
+                // 2026-10-27 起 sandbox 入口临时关闭（用户裁定方案 A）：
+                // `SandboxExecutor.buildCmd` 仍为最小占位（回显 RunResult，不启动引擎），
+                // 直接调用会在 rootless Docker 可用时返回 0 告警假成功。这里强制降级到
+                // ContainerExecutor，并记录 degradedReason；真实引擎执行闭环后删除本分支、
+                // 恢复 sandbox 路由（docs/plan/backlog.md P1）。
+                degradedReason = {
+                    code: 'sandbox_entry_disabled',
+                    message: `独立沙箱容器暂不可用（真实执行尚未闭环），已自动降级到平台容器（${repository.owner}/${repository.name}）`,
+                }
+            }
             const executor = new ContainerExecutor({
                 workRoot: process.env.RUN_WORK_ROOT ?? 'data/runs',
             })
@@ -430,11 +399,13 @@ const runScanInternal = async (
         savedRun.exitCode = outcome.exitCode
         savedRun.environmentalFailureCount = outcome.environmentalFailureCount
         // 资源 / OOM 归因：不可采集一律 NULL + 原因，不伪造 0 / false。
-        const resourceSnapshot = resource ?? unavailableResourceUsage(
-            executorKind === 'container'
-                ? 'container executor did not return resource usage'
-                : `executor does not collect resource usage: ${executorKind}`,
-        )
+        let resourceNote = `executor does not collect resource usage: ${executorKind}`
+        if (executorKind === 'container') {
+            resourceNote = 'container executor did not return resource usage'
+        } else if (executorKind === 'sandbox') {
+            resourceNote = 'container fallback (sandbox entry disabled) did not return resource usage'
+        }
+        const resourceSnapshot = resource ?? unavailableResourceUsage(resourceNote)
         if (!resourceSnapshot.sigkillDetected) {
             resourceSnapshot.sigkillDetected = detectSigkill([
                 ...(result?.errors ?? []).map((item) => item.message),
@@ -609,7 +580,7 @@ async function runContainerExecutor(
  * 环境事件审计：执行器 / 执行环境异常时落 AuditEvent + fire-and-forget 通知。
  *
  * 触发场景（与「运行失败分类」边界见 audit-event.ts 类型注释）：
- * - A 场景（sandbox 启动降级）→ sandbox_degraded / warn
+ * - A 场景（sandbox 入口关闭 / 启动降级）→ sandbox_degraded / warn（入口关闭期间只落库、不通知）
  * - B 场景（sandbox 运行时失败）→ sandbox_unavailable / error
  * - C 场景（container 执行器环境不可用）→ container_unavailable / error
  *
@@ -631,11 +602,16 @@ async function recordEnvAuditEvent(
     let severity: 'info' | 'warn' | 'error' | 'critical' = 'warn'
     let payload: Record<string, unknown> = {}
 
-    if (decision.status === 'degraded' && degradedReason?.code === 'sandbox_unavailable') {
-        // A 场景：sandbox 启动时不可用，已自动降级 ContainerExecutor（业务完整）
+    if (decision.status === 'degraded' && (degradedReason?.code === 'sandbox_unavailable' || degradedReason?.code === 'sandbox_entry_disabled')) {
+        // sandbox 入口临时关闭 / 启动时不可用，已自动降级 ContainerExecutor（业务完整）
         eventType = 'sandbox_degraded'
         severity = 'warn'
-        payload = { degradedReason, fallback: 'container' }
+        payload = {
+            degradedReason,
+            fallback: 'container',
+            // 入口关闭期间的预期配置状态不通知；payload 显式标记，便于 /env-events 筛选区分
+            notificationSuppressed: degradedReason?.code === 'sandbox_entry_disabled',
+        }
     } else if (decision.status === 'failed' && error?.code === 'container_unavailable') {
         // C 场景：container 执行器环境不可用（工作根不可写 / 磁盘满 / 只读 FS）——默认部署下的环境健康信号
         eventType = 'container_unavailable'
@@ -673,6 +649,12 @@ async function recordEnvAuditEvent(
         }))
 
         // 触发通知（fire-and-forget，不 await，避免阻塞扫描主流程）
+        // sandbox_entry_disabled 是入口关闭期间的预期配置状态：只落库、不通知，
+        // 避免存量仓库每次扫描都占用共享通知配额、稀释 container_unavailable 等真实环境事故信号。
+        // 注意仅对 sandbox_degraded 事件生效；降级目标 container 不可用时仍按 container_unavailable 通知。
+        if (eventType === 'sandbox_degraded' && degradedReason?.code === 'sandbox_entry_disabled') {
+            return
+        }
         const notificationEvent: NotificationEvent = {
             id: audit.id,
             type: eventType,

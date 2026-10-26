@@ -51,6 +51,11 @@ const repoSchema = z.object({
     name: z.string().min(1).max(100),
     platform: z.enum(['github']).default('github'),
     /**
+     * 执行器类型（默认 container）。生产仓库 schema 已拒绝 sandbox（2026-10-27 入口临时关闭）；
+     * 本字段仅供 e2e 注入**存量** sandbox 仓库，验证 UI 迁移提示与编排层强制降级路径。
+     */
+    executorKind: z.enum(['container', 'github-action', 'sandbox']).default('container'),
+    /**
      * 仓库标签（可选）。视觉回归基线需要确定性的标签列渲染，否则该列只能落空态；
      * 写入口径与 POST /api/repos 一致（JSON 字符串存储；空数组 / 缺省写 null）。
      * 注意：按 owner/name 复用既有仓库时**不更新**该字段（幂等语义），标签仅在该仓库首次创建时生效。
@@ -82,6 +87,7 @@ const scanRunSchema = z.object({
     }).optional(),
     mode: z.enum(['report-only', 'fix', 'fix-and-pr']).default('report-only'),
     severityThreshold: z.enum(['low', 'medium', 'high', 'critical']).default('high'),
+    // 生产仓库 schema 已拒绝 sandbox（2026-10-27 入口临时关闭）；本 fixture 保留 sandbox 以模拟存量仓库降级路径。
     executorKind: z.enum(['container', 'github-action', 'sandbox']).default('container'),
     /** 复用 ScanRunStatus 实体枚举（单点声明；避免 schema 与 entity 不同步） */
     status: z.enum(SCAN_RUN_STATUSES).default('completed'),
@@ -291,6 +297,7 @@ export default defineEventHandler(async (event) => {
                 owner: r.owner,
                 name: r.name,
                 platform: r.platform,
+                executorKind: r.executorKind,
                 tags: r.tags?.length ? JSON.stringify(r.tags) : null,
             }))
             repoResults.push({
