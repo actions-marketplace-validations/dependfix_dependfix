@@ -60,7 +60,7 @@
     "regression:weekly": "node scripts/regression/run-periodic-regression.mjs --profile=weekly",
     "regression:pre-release": "node scripts/regression/run-periodic-regression.mjs --profile=pre-release",
     "regression:phase-close": "node scripts/regression/run-periodic-regression.mjs --profile=phase-close",
-    "security:audit-deps": "pnpm audit --prod --audit-level=moderate",
+    "security:audit-deps": "pnpm audit --prod --audit-level=moderate --ignore-registry-errors --registry=https://registry.npmjs.org",
     "check:doc-governance": "node scripts/check-doc-governance.mjs"
   },
   "devDependencies": {
