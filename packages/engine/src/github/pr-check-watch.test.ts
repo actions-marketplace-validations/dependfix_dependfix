@@ -191,6 +191,7 @@ describe('sanitizeCheckUrl', () => {
     it('只接受 http(s)，剥离控制字符 / 空白并编码括号', () => {
         expect(sanitizeCheckUrl('https://ci.example/a')).toBe('https://ci.example/a')
         expect(sanitizeCheckUrl('https://ci.example/a(b)c')).toBe('https://ci.example/a%28b%29c')
+        expect(sanitizeCheckUrl('https://ci.example/a|b')).toBe('https://ci.example/a%7Cb')
         expect(sanitizeCheckUrl('https://ci.example/a\nb')).toBe('https://ci.example/ab')
         expect(sanitizeCheckUrl('javascript:alert(1)')).toBeUndefined()
         expect(sanitizeCheckUrl(`https://ci.example/${'a'.repeat(600)}`)).toBeUndefined()
@@ -596,6 +597,18 @@ describe('buildCheckFailureComment', () => {
         expect(body).toContain('self_caused')
         expect(body).toContain('<!-- dependfix:attempt key=0123456789abcdef n=2 failed=? -->')
         expect(body).toContain('<!-- dependfix:pr-check -->')
+    })
+
+    it('作业名中的反斜杠与竖线按序转义（输入 `a\\|b` 不破坏表格）', () => {
+        const body = buildCheckFailureComment({
+            prNumber: 7,
+            state: 'failed',
+            attribution: 'self_caused',
+            failedChecks: [{ name: 'a\\|b', attribution: 'self_caused' }],
+        })
+        // 输入 `a\|b` → 反斜杠先转义 + 竖线转义 = `a\\\|b`（渲染回字面 `a\|b`）
+        expect(body).toContain('| a\\\\\\|b |')
+        expect(body).not.toContain('| a\\\\|b |')
     })
 
     it('unknown 评论标注未判定且声明不关闭', () => {

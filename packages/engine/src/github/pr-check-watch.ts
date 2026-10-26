@@ -22,6 +22,7 @@ import {
 } from '@dependfix/core'
 import { closePullRequest, commentOnPullRequest, deleteRemoteBranch } from './pr-creator'
 import { formatAttemptMarker, type AttemptMarker } from './fix-fingerprint'
+import { escapeTableCell } from './markdown-table'
 
 // ---------------------------------------------------------------------------
 // 常量
@@ -193,7 +194,7 @@ export function normalizeCommitStatusConclusion(state: string | null | undefined
 /**
  * 清洗来自目标仓库的 check / status URL（不可信文本）。
  *
- * 只接受 `http(s)`；剥离控制字符与空白（防换行截断），并把括号百分号编码（防 Markdown 链接结构被劫持）。
+ * 只接受 `http(s)`；剥离控制字符与空白（防换行截断），并把括号与竖线百分号编码（防 Markdown 链接结构与表格单元格被劫持）。
  */
 export function sanitizeCheckUrl(value: string | null | undefined): string | undefined {
     if (!value) {
@@ -208,6 +209,7 @@ export function sanitizeCheckUrl(value: string | null | undefined): string | und
         .replace(/[\u0000-\u001f\u007f\s]+/g, '')
         .replace(/\(/g, '%28')
         .replace(/\)/g, '%29')
+        .replace(/\|/g, '%7C')
     // 超长 URL 不截断（截断后不可点）：直接视为无效
     return cleaned.length > 500 ? undefined : cleaned
 }
@@ -460,7 +462,7 @@ export function buildCheckFailureComment(params: {
         if (params.failedChecks && params.failedChecks.length > 0) {
             lines.push('| Job | 归因 | 详情 |', '|:--|:--|:--|')
             for (const check of params.failedChecks) {
-                const name = sanitizeCheckName(check.name).replace(/\|/g, '\\|')
+                const name = escapeTableCell(sanitizeCheckName(check.name))
                 const url = sanitizeCheckUrl(check.url)
                 const detail = url ? `[查看](${url})` : '—'
                 lines.push(`| ${name} | ${ATTRIBUTION_LABEL[check.attribution]} | ${detail} |`)

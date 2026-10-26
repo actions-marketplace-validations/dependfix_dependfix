@@ -17,6 +17,7 @@ import {
 import { GIT_PUSH_HOOKS_ISOLATION_ARGS, GIT_PUSH_SIGNING_ISOLATION_ARGS } from './git-signing'
 import { commitStaged, stageScopedChanges, type StageAndCommitOptions, type StageAndCommitResult } from './commit-scope'
 import { formatAttemptMarker, type AttemptMarker } from './fix-fingerprint'
+import { escapeTableCell } from './markdown-table'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -467,11 +468,6 @@ function isPackageUpgradeAction(action: FixAction): boolean {
         && typeof action.target === 'string'
         && !/^PR #\d+/.test(action.target)
         && !action.noOp
-}
-
-/** 转义 Markdown 表格单元格：`\` 先转义再转义 `|`（避免已有转义双重处理），换行折叠为空格（错误消息常含多行） */
-function escapeTableCell(value: string): string {
-    return value.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ')
 }
 
 /**
