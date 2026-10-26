@@ -61,14 +61,15 @@
 - **范围**：所有 critical / high 路径（含 platform 链的 `vite` / `launch-editor` / `undici` high；`handlebars` → 4.7.10、`body-parser` 等）；`pnpm-workspace.yaml` overrides 与直接依赖升级；`audit.ignore` 两条（node-forge / braces）上游复核；lockfile 最小 diff。
 - **验收标准**：
   1. `gh api repos/<owner>/<repo>/dependabot/alerts?state=open` 的 critical / high = 0（§5.7 豁免条目单列并登记 GHSA + 路径 + 复核条件）。
-  2. `pnpm audit --audit-level=moderate --registry=https://registry.npmjs.org` 的 critical / high = 0。
+  2. `pnpm audit --audit-level=moderate --registry=https://registry.npmjs.org` 的**非 §5.7 豁免** critical / high = 0（moderate 剩余项留待 M49.2b）。
   3. `git diff -U0 pnpm-lock.yaml` 逐 hunk 复核，只含目标依赖；`pnpm install --frozen-lockfile` 通过。
   4. 全量测试 + typecheck + build 通过（升级涉及运行时依赖时按需加 e2e）。
-   > 复核命令：`gh api repos/<owner>/<repo>/dependabot/alerts?state=open --jq '[.[]|select(.security_advisory.severity=="critical" or .security_advisory.severity=="high")|select(.security_vulnerability.first_patched_version.identifier!=null)]|length'` → 0；豁免条目另列。
+   > 复核命令：`gh api repos/<owner>/<repo>/dependabot/alerts?state=open --jq '[.[]|select(.security_advisory.severity=="critical" or .security_advisory.severity=="high")|select(.security_advisory.ghsa_id!="GHSA-86w9-cpqp-85rv")]|length'` → 0；node-forge 豁免条目单列（GHSA + 路径 + 复核条件见 §5.7）。
 - **不做什么**：不使用 `--ignore` / `--ignore-unfixable`；不为清零强行跨大版本（跨大版本须单列评估并留回滚路径）；不动 platform 链的 **moderate** 项（归 2b）。
 - **依赖**：上游修复版本已发布（handlebars 4.7.10 已发布；其余以 audit 结果为准）。
 - **交付物**：2-3 commits / 4-6 files / 300-500 行（含 lockfile）。
 - **风险与缓解**：升级引发行为变更 → 分批升级 + 定向测试；无修复版本 → 按 §5.7 豁免并记录。
+- **D 阶段（2026-10-26）**：overrides 升级 `handlebars ^4.7.10` / `body-parser ^2.4.0` / `undici ^8.12.2`（锁到 8.12.3）/ `launch-editor ^2.14.2` / `vitepress>vite ^6.4.4`（锁到 6.4.5）/ `qs ^6.16.1`（满足 body-parser 2.4.0 声明范围）；删除无消费者的 `vite@5` 死覆盖；braces 豁免因 advisory 于 2026-10-23 撤回而移除，node-forge 保持豁免（最新版仍 1.4.0）；`pnpm audit` 非豁免 critical / high = 0（基线 2 critical + 5 high；node-forge 为唯一 ignored high）；lockfile 仅目标包、`qs` 与 body-parser 传递依赖 `on-finished` 变动；`--frozen-lockfile` 通过；AC 1 待推送后 `gh api` 复核（node-forge 单列）。
 
 ### M49.2b [P0 🛡️] 依赖漏洞清零 B：platform 链 moderate 收口
 
