@@ -41,7 +41,10 @@ export const FAILURE_SIGNATURE_INPUT_LIMIT = 2048
 
 const ATTEMPT_KEY_PATTERN = /^[0-9a-f]{16}$/
 const FAILURE_SIGNATURE_PATTERN = /^[0-9a-f]{8,32}$/
-const MARKER_PATTERN = /<!--\s*dependfix:attempt\s+([^>]*?)-->/g
+const MARKER_COMMENT_START = '<!--'
+const MARKER_KIND = 'dependfix:attempt'
+const MARKER_COMMENT_END = '-->'
+const MARKER_WHITESPACE = /\s/
 
 /**
  * 计算同告警尝试键。
@@ -104,8 +107,7 @@ export function parseAttemptMarkers(body: string | null | undefined): AttemptMar
         return []
     }
     const markers: AttemptMarker[] = []
-    for (const match of body.matchAll(MARKER_PATTERN)) {
-        const attributes = parseMarkerAttributes(match[1] ?? '')
+    for (const attributes of iterateMarkerAttributes(body)) {
         const key = attributes.get('key') ?? ''
         const rawN = attributes.get('n') ?? ''
         // 只接受十进制整数：`1e3` / `0x10` / 负数 / 超上界一律丢弃（避免后续 CI 回环展示面被伪造值穿透）
@@ -158,6 +160,60 @@ export function collectAttemptMarkers(
         }
     }
     return [...byKey.entries()].map(([key, n]) => ({ key, n }))
+}
+
+/**
+ * 逐个产出尝试标记的属性区（`dependfix:attempt` 之后、`-->` 之前的文本）。
+ *
+ * 用单遍扫描替代正则 `<!--\s*dependfix:attempt\s+([^>]*?)-->`：该正则在属性区
+ * 不含 `-->` 时，`\s+` 与 `[^>]*?` 的切分组合会随输入长度平方级回退
+ * （CodeQL js/polynomial-redos：`<!--dependfix:attempt` + 大量制表符）。
+ * 扫描与原正则语义逐字等价：kind 前允许空白、kind 后至少一个空白、
+ * 属性区不跨 `>`（`-->` 的 `>` 必须是属性区之后的第一个 `>`）。
+ */
+function* iterateMarkerAttributes(body: string): Generator<Map<string, string>, void, void> {
+    let cursor = 0
+    // 已定位的 `>` 位置：随 cursor 单调推进，避免每个候选起点重复扫到串尾
+    let nextGt = -1
+    while (cursor < body.length) {
+        const start = body.indexOf(MARKER_COMMENT_START, cursor)
+        if (start === -1) {
+            return
+        }
+        const kindStart = skipMarkerWhitespace(body, start + MARKER_COMMENT_START.length)
+        if (!body.startsWith(MARKER_KIND, kindStart)) {
+            cursor = start + MARKER_COMMENT_START.length
+            continue
+        }
+        const attributesStart = skipMarkerWhitespace(body, kindStart + MARKER_KIND.length)
+        if (attributesStart === kindStart + MARKER_KIND.length) {
+            // kind 后没有空白：原正则的 `\s+` 不匹配，继续找下一个 `<!--`
+            cursor = attributesStart
+            continue
+        }
+        if (nextGt < attributesStart) {
+            nextGt = body.indexOf('>', attributesStart)
+            if (nextGt === -1) {
+                return
+            }
+        }
+        const attributesEnd = nextGt - (MARKER_COMMENT_END.length - 1)
+        if (attributesEnd >= attributesStart && body.startsWith(MARKER_COMMENT_END, attributesEnd)) {
+            yield parseMarkerAttributes(body.slice(attributesStart, attributesEnd))
+            cursor = nextGt + 1
+            nextGt = -1
+            continue
+        }
+        cursor = start + MARKER_COMMENT_START.length
+    }
+}
+
+function skipMarkerWhitespace(body: string, from: number): number {
+    let index = from
+    while (index < body.length && MARKER_WHITESPACE.test(body.charAt(index))) {
+        index += 1
+    }
+    return index
 }
 
 function parseMarkerAttributes(input: string): Map<string, string> {

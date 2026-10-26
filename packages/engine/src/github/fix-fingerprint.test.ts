@@ -117,6 +117,68 @@ describe('formatAttemptMarker / parseAttemptMarkers', () => {
         const key = computeAttemptKey(BASE_INPUT)
         expect(parseAttemptMarkers(`<!-- dependfix:attempt key=${key} n=2 n=3 -->`)).toEqual([{ key, n: 3 }])
     })
+
+    it('kind 前后的空白容错与原正则一致（换行 / 制表符）', () => {
+        const key = computeAttemptKey(BASE_INPUT)
+        const body = `<!--\n\tdependfix:attempt \t key=${key} n=2 -->`
+        expect(parseAttemptMarkers(body)).toEqual([{ key, n: 2 }])
+    })
+
+    it('kind 后缺空白不算标记（`\\s+` 语义）', () => {
+        const key = computeAttemptKey(BASE_INPUT)
+        expect(parseAttemptMarkers(`<!-- dependfix:attemptkey=${key} n=1 -->`)).toEqual([])
+    })
+
+    it('属性区不跨 `>`：含 `>` 的标记整体丢弃，后续标记仍解析', () => {
+        const key = computeAttemptKey(BASE_INPUT)
+        const body = [
+            `<!-- dependfix:attempt key=${key} n=1 a>b -->`,
+            `<!-- dependfix:attempt key=${key} n=2 -->`,
+        ].join('\n')
+        expect(parseAttemptMarkers(body)).toEqual([{ key, n: 2 }])
+    })
+
+    it('无关 HTML 注释后仍能重同步到合法标记', () => {
+        const key = computeAttemptKey(BASE_INPUT)
+        const body = [
+            '<!-- dependfix:pr-check -->',
+            '<!-- other comment -->',
+            `<!-- dependfix:attempt key=${key} n=1 -->`,
+        ].join('\n')
+        expect(parseAttemptMarkers(body)).toEqual([{ key, n: 1 }])
+    })
+
+    it('属性区起点即 `>` 时丢弃该条（不产生空属性标记）', () => {
+        const key = computeAttemptKey(BASE_INPUT)
+        const body = [
+            `<!-- dependfix:attempt >${key} n=1 -->`,
+            `<!-- dependfix:attempt key=${key} n=2 -->`,
+        ].join('\n')
+        expect(parseAttemptMarkers(body)).toEqual([{ key, n: 2 }])
+    })
+})
+
+describe('parseAttemptMarkers 恶意输入（线性扫描）', () => {
+    it('大量制表符 / 未闭合标记在 100KB 级仍线性（单次 < 50ms）', () => {
+        // CodeQL js/polynomial-redos 的原始见证：kind 后接大量制表符、正文无 `-->`
+        const bodies = [
+            `<!--dependfix:attempt${'\t'.repeat(100_000)}`,
+            `<!--dependfix:attempt\t${'\t\t'.repeat(50_000)}`,
+            '<!--dependfix:attempt key=aaaaaaaaaaaaaaaa n=1 '.repeat(2_500),
+        ]
+        for (const body of bodies) {
+            expect(body.length).toBeGreaterThanOrEqual(100_000)
+            const startedAt = performance.now()
+            expect(parseAttemptMarkers(body)).toEqual([])
+            expect(performance.now() - startedAt).toBeLessThan(50)
+        }
+    })
+
+    it('重复合法标记全部解析（扫描不跳条）', () => {
+        const key = computeAttemptKey(BASE_INPUT)
+        const body = `<!-- dependfix:attempt key=${key} n=1 -->\n`.repeat(1_000)
+        expect(parseAttemptMarkers(body)).toHaveLength(1_000)
+    })
 })
 
 describe('collectAttemptMarkers', () => {
