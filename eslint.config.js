@@ -98,9 +98,11 @@ const strictRules = {
     '@typescript-eslint/no-unnecessary-type-conversion': [1],
 }
 
-// Nuxt 平台（apps/platform）：使用平台自己的 tsconfig.json（extends .nuxt/tsconfig.json 并显式 include server/**/*）。
-// 不能直接用 .nuxt/tsconfig.json：其 include 只有 `../server` + `../server/*`（不递归），
-// 深层目录（如 server/services/executor/）不在项目中会触发 "file was not found in any project"。
+// Nuxt 平台（apps/platform）：使用平台自己的 tsconfig.json（extends .nuxt/tsconfig.json，
+// 显式 include 各目录并覆盖 exclude）。
+// 不能直接用 .nuxt/tsconfig.json：Nuxt 4.6 起该文件拆分为 app / server / shared / node 多份配置，
+// exclude 含 `../server/**/*`；平台 tsconfig 需覆盖 exclude 才能把 server 深层目录纳入 type-checked lint
+// （否则报 "file was not found in any project"）。
 const nuxtTsconfig = './apps/platform/tsconfig.json'
 
 export default defineConfig([
