@@ -79,6 +79,10 @@ describe('GET /api/repos/[id]', () => {
         await expectError(callId('PUT', `/api/repos/${id}`, { executorKind: 'nope' }, { id }), 400)
     })
 
+    it('rejects sandbox executor (entry temporarily disabled)', async () => {
+        await expectError(callId('PUT', `/api/repos/${id}`, { executorKind: 'sandbox' }, { id }), 400)
+    })
+
     it('persists sandboxLimits JSON via PUT', async () => {
         // 仓库级 sandboxLimits 序列化 + 更新语义（undefined=不修改 / null 或 object=更新）
         const result = await callId('PUT', `/api/repos/${id}`, { sandboxLimits: { memoryMb: 4096, cpu: 2.0 } }, { id }) as { updated: boolean }

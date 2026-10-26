@@ -20,6 +20,12 @@ const hasControlChar = (value: string): boolean => {
     return false
 }
 
+/**
+ * 2026-10-27 起 sandbox 执行入口临时关闭：`SandboxExecutor.buildCmd` 仍为最小占位，
+ * 真实引擎执行未闭环；新写入 / 扫描显式指定 sandbox 一律拒绝，存量仓库由编排层强制降级到 container。
+ */
+export const SANDBOX_EXECUTOR_DISABLED_MESSAGE = '独立沙箱容器暂不可用（真实执行尚未闭环），请选择平台容器或 GitHub Action'
+
 /** 仓库创建基础校验（Zod）。owner/name 为必填，其余有默认或可选。 */
 export const repositoryBase = z.object({
     owner: z.string().trim().min(1, 'owner 不能为空').max(100).regex(/^[A-Za-z0-9_.-]+$/, 'owner 含非法字符'),
@@ -87,6 +93,13 @@ export const repositoryBase = z.object({
  * owner/name 为必填，其余有默认或可选。
  */
 export const repositorySchema = repositoryBase.superRefine((data, ctx) => {
+    if (data.executorKind === 'sandbox') {
+        ctx.addIssue({
+            code: 'custom',
+            path: ['executorKind'],
+            message: SANDBOX_EXECUTOR_DISABLED_MESSAGE,
+        })
+    }
     if (data.executorKind === 'github-action' && !data.actionWorkflowFile?.trim()) {
         ctx.addIssue({
             code: 'custom',
@@ -101,6 +114,13 @@ export const repositorySchema = repositoryBase.superRefine((data, ctx) => {
  * 注意：Zod v4 不允许对含 refinement 的 schema 调用 .partial()，故先 partial 再挂 superRefine。
  */
 export const repositoryUpdateSchema = repositoryBase.partial().superRefine((data, ctx) => {
+    if (data.executorKind === 'sandbox') {
+        ctx.addIssue({
+            code: 'custom',
+            path: ['executorKind'],
+            message: SANDBOX_EXECUTOR_DISABLED_MESSAGE,
+        })
+    }
     if (data.executorKind === 'github-action' && !data.actionWorkflowFile?.trim()) {
         ctx.addIssue({
             code: 'custom',

@@ -46,6 +46,10 @@ describe('POST /api/repos/batch', () => {
         await expectError(call({}), 400)
     })
 
+    it('rejects sandbox executor with 400 (entry disabled)', async () => {
+        await expectError(call({ repos: [{ ...repoItem('demo', 'sandbox'), executorKind: 'sandbox' }] }), 400)
+    })
+
     it('imports new repositories and skips duplicates', async () => {
         await reposIndexHandler(makeEvent('POST', '/api/repos', repoItem('demo', 'existing')))
 
