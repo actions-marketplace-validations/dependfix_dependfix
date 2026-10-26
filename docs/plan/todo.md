@@ -53,7 +53,7 @@
 - **依赖**：code scanning 复扫需 push；本批不自动 push。
 - **交付物**：2-3 commits / 4-6 files / 200-350 行。
 - **风险与缓解**：正则改写改变容错 → 黄金夹具 + 恶意样本双向用例；复扫需等 CI 完成 → 记录 analysis id 并在发布前查询。
-- **D 阶段（2026-10-26）**：代码与测试已落地（6 文件 / 约 150 新增行；mutation 5/5；engine 1787 passed / 根全量 5127 passed）；AC 1-3 满足，AC 4 待用户推送后复扫（修复前基线 `artifacts/m49.1/code-scanning-baseline.txt`：`#29` / `#28`，最近 analysis `2023390019` @ `7701cc1a`）。
+- **D 阶段（2026-10-26）**：代码与测试已落地（6 文件 / 约 150 新增行；mutation 5/5；engine 1787 passed / 根全量 5127 passed）；AC 1-3 满足；**AC 4 已闭环**：推送后 analysis `2026499469`（`108e38f3`，2026-10-26T10:30:53Z）复扫 `#28` / `#29` 均 `fixed`，open 0 条（修复前基线 `artifacts/m49.1/code-scanning-baseline.txt`）。
 
 ### M49.2a [P0 🛡️] 依赖漏洞清零 A：critical / high（直接依赖 / overrides）
 
