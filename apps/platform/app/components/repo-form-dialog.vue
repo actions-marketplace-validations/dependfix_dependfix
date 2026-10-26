@@ -73,6 +73,15 @@ const emptyForm = (): RepoForm => ({
 
 const form = ref<RepoForm>(emptyForm())
 const saving = ref(false)
+/** 编辑存量 sandbox 仓库时为 true：表单已自动改为 container，并提示保存后迁移 */
+const sandboxMigrated = ref(false)
+
+/** 执行方式选项：sandbox 入口 2026-10-27 起临时关闭（真实执行未闭环），保留 disabled 项显示存量值 */
+const executorOptions = computed(() => [
+    { label: t('repos.platformContainer'), value: 'container' },
+    { label: t('repos.githubAction'), value: 'github-action' },
+    { label: t('repos.sandboxContainerUnavailable'), value: 'sandbox', disabled: true },
+])
 
 /** 关注集来源类型选项（显式键逐一列出：与 pr-checks.vue 同口径，避免动态 i18n 键绕过缺词门禁） */
 const focusKindOptions = computed(() => [
@@ -100,6 +109,8 @@ watch(() => props.visible, (open) => {
         return
     }
     const repo = props.repo
+    const wasSandbox = repo?.executorKind === 'sandbox'
+    sandboxMigrated.value = wasSandbox
     form.value = repo
         ? {
                 owner: repo.owner,
@@ -108,7 +119,8 @@ watch(() => props.visible, (open) => {
                 packageManager: repo.packageManager as RepoForm['packageManager'],
                 credentialId: repo.credentialId,
                 actionWorkflowFile: repo.actionWorkflowFile ?? '',
-                executorKind: repo.executorKind as RepoForm['executorKind'],
+                // 存量 sandbox 仓库：入口已关闭，打开即迁移为 container（保存后生效；扫描侧另有强制降级兜底）
+                executorKind: wasSandbox ? 'container' : repo.executorKind as RepoForm['executorKind'],
                 note: repo.note ?? '',
                 tags: [...(repo.tags ?? [])],
                 verifyCommands: (repo.verifyCommands ?? []).join('\n'),
@@ -229,14 +241,11 @@ const submit = async () => {
                     <CaomeiSelect
                         id="executorKind"
                         v-model="form.executorKind"
-                        :options="[
-                            {label: t('repos.platformContainer'), value: 'container'},
-                            {label: t('repos.githubAction'), value: 'github-action'},
-                            {label: t('repos.sandboxContainer'), value: 'sandbox'}
-                        ]"
+                        :options="executorOptions"
                         option-label="label"
                         option-value="value"
                     />
+                    <small v-if="sandboxMigrated" class="text-muted">{{ t('repos.sandboxMigratedNotice') }}</small>
                 </div>
             </div>
             <div
