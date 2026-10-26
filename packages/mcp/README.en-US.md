@@ -16,12 +16,13 @@ pnpm add @dependfix/mcp
 | Tool | Function | Inputs |
 |:-----||:---------|:-------|
 | `fetch_alerts` | Fetch Dependabot security alerts for specified repo (optionally parallel Code Scanning, read-only) | `repo`, `severity?`, `code_scanning?` |
-| `discover_repos` | Auto-discover repos by owner / org (read-only) | `owner[]`, `topics?`, `include?`, `exclude?`, `probe_dependabot?` |
+| `discover_repos` | Auto-discover repos by owner / org (read-only) | `owner[]`, `topics?`, `include?`, `exclude?`, `probe_dependabot?`, `max_repos?` |
 | `run_scan` | Run dependfix scan and fix on target repo | `repo`, `mode?`, `severity?`, `code_scanning?`, `max_alerts?`, `max_concurrency?`, `dry_run?`, `allow_major_upgrade?`, `ai_enabled?`, `ai_provider?`, `ai_model?`, `ai_trigger?` |
 | `fix_dependency` | Fix single dependency or lockfile (override / direct / lockfile) | `workDir`, `fix_type?`, `packageName?`, `targetVersion?` |
 | `cleanup_branches` | Clean up merged/closed dependfix branches (non-interactive) | `repo`, `dry_run?` |
 | `history` | Query history run summary for specified repo (read-only) | `repo` |
 | `get_last_report` | Read most recent JSON report (read-only) | — |
+| `pnpm_audit` | Local pnpm audit fallback data source (reuses the `GITHUB_TOKEN` check; audit failures return a hard error) | `workDir`, `repository` |
 
 Parameter semantics align with CLI (severity is threshold semantics: `high` keeps critical + high; `dry_run` defaults inferred from mode; AI params only pass through switch and model, apiKey read from env var).
 
@@ -47,7 +48,7 @@ Environment variables:
 
 | Variable | Description |
 |:---------|:------------|
-| `GITHUB_TOKEN` | GitHub access credential (required for fetching alerts / running scans / branch cleanup) |
+| `GITHUB_TOKEN` | GitHub access credential (required for fetching alerts / running scans / branch cleanup / `pnpm_audit`) |
 | `DEPENDFIX_MCP_REPORT_DIR` | JSON report output dir (default `./dependfix-reports`) |
 | `DEPENDFIX_AI_API_KEY` | AI assessment API Key (required when `run_scan` `ai_enabled` enabled; only via env var, never via tool params) |
 
