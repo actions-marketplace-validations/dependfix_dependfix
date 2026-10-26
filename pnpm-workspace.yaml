@@ -26,17 +26,19 @@ overrides:
   brace-expansion@5: ^5.0.12
   fast-uri@3: ^3.1.8
   js-yaml@4: ^4.3.2
-  vite@5: ^5.4.21
-  vitepress>vite: ^6.4.3
+  vitepress>vite: ^6.4.4
+  launch-editor: ^2.14.2
   js-yaml@3: ^3.15.1
   "@octokit/auth-app": 8.3.0
   moment: ^2.31.0
-  qs: ^6.16.0
+  qs: ^6.16.1
   svgo: ^4.1.0
   "@vitest/mocker": ^4.1.11
   hono: ^4.13.5
   vitest: ^4.1.11
-  undici: ^8.10.2
+  undici: ^8.12.2
+  body-parser: ^2.4.0
+  handlebars: ^4.7.10
   devalue: ^5.9.3
 
 # 依赖审计豁免：advisory 声明的 patched 版本尚未发布，overrides / pnpm update 无法修复。
@@ -46,6 +48,3 @@ audit:
     # node-forge <= 1.4.0（RSA PKCS#1 v1.5 签名校验）；
     # 路径 apps/platform > nuxt > @nuxt/cli / nitropack > listhen
     - GHSA-86w9-cpqp-85rv
-    # braces <= 3.0.3（嵌套模式栈耗尽 DoS）；
-    # 路径 apps/platform > nuxt / @nuxtjs/i18n > … > fast-glob > micromatch
-    - GHSA-vfj7-8cjw-p6xm
