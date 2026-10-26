@@ -15,7 +15,7 @@
 | [Session Wisdom 蒸馏机制](./session-wisdom-distillation.md) | AI 治理（知识沉淀） | ✅ 已落地（2026-08-06） |
 | [经验归档](./experience-archive.md) | 经验备份（持续追加，准入标准见文件头；§1-§66 按内容逻辑分片为 6 个分片文件，章节编号全局唯一） | ✅ 持续追加 |
 | [Skill 分发治理](./skill-distribution.md) | 专项治理（M5.5 Skill 编排） | ✅ 已落地（2026-08-07） |
-| [执行器设计与沙箱评估](./executor-sandbox.md) | 专项设计（T607 设计先行） | ✅ 设计已落地（M10 隔离基础设施 + M38 执行进程隔离；沙箱内真实引擎执行为占位） |
+| [执行器设计与沙箱评估](./executor-sandbox.md) | 专项设计（T607 设计先行） | ✅ 设计已落地（M10 隔离基础设施 + M38 执行进程隔离；沙箱内真实引擎执行为占位；平台入口已临时关闭 2026-10-27） |
 | [沙箱与恶意依赖防护治理](./sandbox-security-governance.md) | 专项治理（2026-08-14 安全评估） | ✅ 已落盘（2026-08-14） |
 | [MCP Server 设计](./mcp-server.md) | 专项设计（M6） | ✅ 已落地（`@dependfix/mcp` 0.2.0 已发布，8 个 tool） |
 | [平台认证与用户体系设计](./platform-auth-users.md) | 专项设计（M7.1 T701/T707 设计先行） | ✅ 已落地（2026-08-09，Review Gate Pass） |

@@ -209,17 +209,17 @@ jobs:
 - **PR 合入前人工检查**：跨线升级（PR body 带 ⚠️ Major 标记）以及新增/升级包带 lifecycle scripts 且被仓库批准时（供应链信号披露落地后见报告警示区），合入前应人工确认。
 - **平台部署**：默认拉取已发布镜像（`docker compose pull && docker compose up -d`；仅在需要本地打包时叠加 `docker-compose.build.yml` 覆盖文件构建，见 `apps/platform/docker-compose.yml` 顶部说明）。容器执行进程已**非 root 降权**（默认 `dependfix` 用户 uid 100 / gid 101；可用 `PUID`/`PGID` 对齐宿主机用户以控制数据卷 / `$HOME` 归属，解析为 0 时 fail-closed 拒绝启动，entrypoint 自动修复所有权）；部署时勿挂载 `docker.sock`、勿授予特权；`AUTH_SECRET` / `NUXT_ENCRYPTION_KEY` 使用强随机值。**首次启动自动建表**（compose 默认 `DATABASE_MIGRATIONS_RUN=true`）；完整步骤（环境变量 / 数据卷与权限 / 数据库初始化 / 升级 / 备份恢复 / 故障排查）见 [Docker 部署](./deployment.md)。
 
-#### 启用 rootless sandbox 执行（推荐用于多租户/owner 模式）
+#### sandbox 执行（实验性，当前暂不可用）
 
-> **✅ 状态：M11 T1005 路由接线已就位（2026-08-20）**——`Repository.executorKind` 已接受 `container` / `github-action` / `sandbox` 三值；scan-orchestrator 已接入 sandbox 路由与降级状态机契约（[executor-sandbox.md §7.8 降级状态机契约](../design/governance/executor-sandbox-implementation.md)）。平台 Web UI 仓库表单已暴露 sandbox 选项（仓库管理 → 添加/编辑 → 执行方式下拉），管理员可直接在 UI 选择；或经 API 显式指定。
+> **⛔ 当前入口已临时关闭（2026-10-27）**：UI 已禁用 sandbox 选项、API 拒绝新写入；存量 `executorKind=sandbox` 仓库扫描会强制降级到 `container` 并标记 `degraded`（`sandbox_entry_disabled`）。原因：`buildCmd` 仍为最小占位（不启动 dependfix 引擎），真实引擎执行未闭环（[backlog P1](../plan/backlog.md#候选评估中-待评估-本阶段延后项)）。生产修复请使用 `container` 或 `github-action`。
 >
-> **⚠️ 当前限制（2026-10-26）**：sandbox 内 `buildCmd` 仍为最小占位命令（仅验证容器启动 / bind-mount / 用户态 / cgroup 限额，不启动 dependfix 引擎），选择 sandbox 的扫描会返回 0 告警的占位结果；生产修复请使用 `container` 或 `github-action`。真实引擎执行缺口见 [backlog §候选评估中](../plan/backlog.md#候选评估中-待评估-本阶段延后项)。
+> **历史状态**：M11 T1005 路由接线已就位（2026-08-20）；平台 Web UI 曾暴露 sandbox 选项（仓库管理 → 添加/编辑 → 执行方式下拉）。以下为真实执行闭环后的设计适用范围。
 >
-> **适用范围**：owner/org 多仓库扫描、`--allow-major-upgrade` 跨线升级、对不可信仓库 owner 模式修复——这些场景下恶意依赖脚本在容器内执行的风险显著高于单可信仓库场景，sandbox 执行把执行隔离在独立 rootless 容器内（与平台容器解耦），详见 [executor-sandbox.md §7](../design/governance/executor-sandbox-implementation.md#7-sandbox-执行器设计)。
+> **适用范围（真实执行闭环后）**：owner/org 多仓库扫描、`--allow-major-upgrade` 跨线升级、对不可信仓库 owner 模式修复——这些场景下恶意依赖脚本在容器内执行的风险显著高于单可信仓库场景，sandbox 执行把执行隔离在独立 rootless 容器内（与平台容器解耦），详见 [executor-sandbox.md §7](../design/governance/executor-sandbox-implementation.md#7-sandbox-执行器设计)。
 >
 > **不启用**：单可信仓库 + 本地开发场景下默认 `ContainerExecutor` 即可，无 rootless daemon 启动成本。
 
-**前置条件**：
+**恢复后的前置条件 / 运维预配置**（入口关闭期间不会产生 sandbox 扫描，以下步骤可暂缓）：
 
 - Linux 内核（cgroup v2 推荐 ≥ 5.8；旧内核降级为 Node V8 软限制）
 - 已安装 Docker（≥ 20.10）
@@ -227,7 +227,7 @@ jobs:
 - `/etc/subuid` 与 `/etc/subgid` 中当前用户有 ≥ 65,536 个从属 UID/GID（`grep ^$(whoami): /etc/subuid` 应返回非空）
 - 系统已启用 user namespace（多数发行版默认开启；WSL2 / 容器内运行需额外配置）
 
-**启动 rootless Docker daemon**（参考 [Docker 官方 rootless 文档](https://docs.docker.com/engine/security/rootless/)）：
+**恢复后启动 rootless Docker daemon**（参考 [Docker 官方 rootless 文档](https://docs.docker.com/engine/security/rootless/)）：
 
 ```bash
 # 1. 安装 rootless 工具（Ubuntu/Debian 需 docker-ce-rootless-extras；20.10+ 通常已自带）
@@ -251,32 +251,33 @@ docker --context rootless info --format '{{.SecurityOptions}}'
 # 输出含 `rootless` 字样 → 真正连到 rootless daemon
 ```
 
-**在 dependfix 启用 sandbox 执行**：
+**入口关闭期间不可启用**（以下配置仅在真实执行闭环、入口恢复后适用；当前 UI 已禁用，API 写入 `executorKind=sandbox` 返回 400）：
 
 ```bash
-# 仓库级覆盖：仅对指定仓库启用 sandbox
-curl -X PUT /api/repos/{id} \
-  -H 'Content-Type: application/json' \
-  -d '{"executorKind": "sandbox"}'
+# 恢复后：仓库级覆盖（当前执行会 400）
+# curl -X PUT /api/repos/{id} \
+#   -H 'Content-Type: application/json' \
+#   -d '{"executorKind": "sandbox"}'
 
-# 出站白名单：默认已含官方 registry + 常见镜像站 + GitHub API/资产域 + rolldown.rs
+# 恢复后：出站白名单——默认已含官方 registry + 常见镜像站 + GitHub API/资产域 + rolldown.rs
 # （权威默认清单与判定口径见 安全规范 §5.3.1：docs/standards/security.md）；并自动从 workDir 的
 # pnpm 配置面发现生效 registry host（pnpm config list --json，仅读本地不联网、异常时回退预置清单）。
 # 以下仅用于「预置清单未覆盖」的场景——例如企业私服自带独立 CDN 域（tarball 302 到非预置域）。
 # 生效进程：平台 Node 进程内的拦截代理判定（packages/engine/src/runners/network-audit.ts）；
 # sandbox 容器走 Docker bridge 直出网（本 env 不透传给 sandbox 容器内部）
-export DEPENDFIX_ALLOWED_DOMAINS="registry.internal.example.com,artifacts.example.com"
+# export DEPENDFIX_ALLOWED_DOMAINS="registry.internal.example.com,artifacts.example.com"
 
-# 自定义运行时（默认 runc；如部署了 Sysbox 可切换）——模块级读取，须在平台启动前设置
-export SANDBOX_RUNTIME=sysbox-runc
+# 恢复后：自定义运行时（默认 runc；如部署了 Sysbox 可切换）——模块级读取，须在平台启动前设置
+# export SANDBOX_RUNTIME=sysbox-runc
 ```
 
-**降级行为**（依据 [executor-sandbox.md §7.8 降级状态机契约](../design/governance/executor-sandbox-implementation.md)）：
+**当前降级行为（入口关闭期间）**：
 
-- **启动时不可用**（开发机无 Docker / 未启用 rootless / user namespace 受限）→ `sandbox.isAvailable()` 返回 false → 自动降级回 `ContainerExecutor` + `degradedReason` 记录 → **run 标 `degraded`**（业务结果完整，UI info 蓝色提示「未启用 rootless，已自动使用平台容器」）
-- **运行时失败**（daemon 中途挂掉）→ `sandbox.execute()` 抛 errno → **不静默降级**（避免掩盖环境中途变化）→ **run 标 `failed`**（`error.code = 'sandbox_unavailable'`，UI warn 黄色告警「沙箱执行器运行时不可用，环境配置可能已变化，请联系管理员」）
+- 存量 `executorKind=sandbox` 仓库扫描 → 强制 `ContainerExecutor` + `degradedReason.code=sandbox_entry_disabled` → **run 标 `degraded`**（业务结果完整，UI 提示「独立沙箱容器暂不可用，已自动使用平台容器」）。
+- 若平台容器也不可用 → **run 标 `failed`**（`container_unavailable`）。
+- 旧 §7.8 的 `sandbox_unavailable` A/B 场景在入口关闭期间不再发生；真实执行闭环、入口恢复后按 §7.8 契约执行。
 
-A/B 场景差异化见 [executor-sandbox.md §7.8.1](../design/governance/executor-sandbox-implementation.md)；治理登记见 [sandbox-security-governance.md §5 G5](../design/governance/sandbox-security-governance.md#5-治理决议与登记) + [§7.1 验收段](../design/governance/sandbox-security-governance.md)。
+A/B 场景差异化见 [executor-sandbox.md §7.8.1](../design/governance/executor-sandbox-implementation.md)（恢复后适用）；治理登记见 [sandbox-security-governance.md §5 G5](../design/governance/sandbox-security-governance.md#5-治理决议与登记) + [§7.1 验收段](../design/governance/sandbox-security-governance.md)。
 
 **反模式（绝对禁止）**：
 

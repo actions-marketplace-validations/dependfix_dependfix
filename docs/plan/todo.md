@@ -139,4 +139,24 @@
 - **交付物**：1-2 commits（版本 + changelog）/ 7-8 files / 250-450 行 + 发布执行记录。
 - **风险与缓解**：OIDC / changelog 校验失败 → 按 release.md 修复后重试；发布后发现缺陷 → 0.6.1 补丁并记录。
 
+### 追加临时待办：sandbox 入口临时关闭（2026-10-27 用户授权，不占阶段条目编号）
+
+- **背景**：M49.4 A 阶段实测 `SandboxExecutor.buildCmd` 仍为最小占位（回显 `RunResult`，不启动引擎）；UI 仍暴露 sandbox 选项，rootless Docker 可用时选择 sandbox 会返回 0 告警的假成功。用户 2026-10-27 裁定方案 A：0.6.0 前做最小入口收口，真实执行留 backlog P1。
+- **范围**：
+  1. UI：仓库表单 sandbox 选项禁用；存量 sandbox 仓库编辑时自动改为 container 并提示；列表 / 过滤标签标注「暂不可用」。
+  2. API：仓库创建 / 更新 / 批量导入 / 扫描请求显式 `sandbox` 一律 400；e2e fixture 保留以模拟存量。
+  3. 路由：存量 `executorKind=sandbox` 扫描强制 ContainerExecutor，`degradedReason.code=sandbox_entry_disabled`，run 状态 degraded；容器不可用则 failed `container_unavailable`。
+  4. 文档：quick-start 标题改「实验性 / 当前暂不可用」；executor-sandbox / platform §3.8 / index / backlog 同步；backlog P1 保留真实执行。
+- **验收标准**：
+  1. 新增 / 更新 / 批量导入 / 扫描请求带 `sandbox` 均 400，错误信息明确；UI 不能选 sandbox，存量编辑自动迁移并提示。
+  2. 存量 sandbox 仓库扫描走 container：成功 → degraded + `sandbox_entry_disabled`；容器不可用 → failed + `container_unavailable`；不再出现 0 告警假成功。
+  3. 定向测试（schema / API / orchestrator）+ lint / typecheck / i18n 缺词 + 文档门禁通过；UI 浏览器验证 disabled 选项与迁移提示。
+- **不做什么**：不实现真实 sandbox 执行（保留 P1）；不删除 `SandboxExecutor` 类 / 现有沙箱测试；不改 container / github-action 正常路径。
+- **依赖**：M49.4 审计发现；用户 2026-10-27 明确授权。
+- **交付物**：4 commits / 29 files / +335 / -259 + UI 验证记录。
+- **风险与缓解**：UI 迁移误改其它字段 → 表单全量提交 + e2e 请求体断言；API 直连仍可写 sandbox → schema 拒绝 + e2e fixture 双门控；存量 sandbox 每次降级噪声 → 只落库不通知；`repositoryUpdateSchema.partial()` 默认值缺陷 → 登记 backlog P1（UI 全量提交暂不触发）；quick-start 恢复后操作误导 → 入口关闭块改注释命令 + 当前降级口径。
+- **剩余未完成条目 / 剩余验证与交付预算**：本临时待办闭环后 M49 仅剩 M49.5（发布）；本批 4 commits / 29 files / +335−259；验证预算已覆盖平台全量 + 新 e2e + 文档门禁，A 阶段 R2 后提交。
+- **P 阶段（2026-10-27）**：确认 UI/API/路由三处入口；`repo-form-dialog.vue` 当前 3 选项且无 disabled；`repositorySchema` / `repositoryUpdateSchema` / `scanRequestSchema` / `batchImportSchema` 接受 sandbox；`scan-orchestrator` 在 `isAvailable()` 时走 SandboxExecutor 占位。定方案：UI disabled + 存量编辑迁移提示；API 显式 sandbox 拒绝；路由强制 container + degraded `sandbox_entry_disabled`；e2e fixture 保留存量模拟。审计预期 deep（安全 / 可用性 + 数据写入 + UI）。
+- **D 阶段（2026-10-27）**：UI 表单 sandbox 项 disabled、存量仓库打开即迁移为 container 并提示，列表 / 过滤标签标注「暂不可用」；仓库创建 / 更新 / 批量导入 / 扫描请求显式 sandbox 一律 400（共享 `SANDBOX_EXECUTOR_DISABLED_MESSAGE`）；编排层对存量 sandbox 强制 ContainerExecutor + degraded `sandbox_entry_disabled`（容器不可用 → failed `container_unavailable`），环境审计仍落 `sandbox_degraded` 但**只落库不通知**（避免噪声）；retry 对存量 sandbox run 归一为 container（避免 409）；e2e fixture 增加 `executorKind` 以注入存量仓库（仅测试端点）。文档同步 quick-start（入口关闭块改注释命令 + 当前降级口径）/ deployment zh+en / executor-sandbox / implementation §7.1/§7.4/§7.8.3 / index / platform §3.8 / backlog P1；`repositoryUpdateSchema.partial()` 默认值缺陷登记 backlog P1。验证：定向 6 文件 134 passed + retry 新增用例；platform 全量 165 files / 2168 passed / 9 skipped；新增 e2e 用例通过（disabled 选项 + 迁移提示 + PUT 请求体 `executorKind=container` + API 持久化）；`lint` 0 error / 3 存量 warning；`typecheck` 通过；platform build 通过；`lint:md` / `check:docs` / `check:readme-i18n` / `i18n:check:anchor` / `docs:check:i18n` / `docs:build` / `check:verify-chain` 全通过；`i18n:audit:missing` 0。实际 29 文件 / +335 / -259。A 阶段并发 deep：后端 **Pass**（W01/W02 已修、W03 登记 backlog、W04/W05 计数与提交粒度已修）；UI/文档 **Reject**（RG-B01 quick-start 仍含可执行 sandbox 命令 + 旧降级口径）→ 已修；R2 standard **Pass**（0B/0W；W06 测试标题 + S07-S11 已修）。残余：真实 sandbox 执行仍留 P1；`sandboxLimits` 字段保留供存量 / API 读取；e2e fixture 的 sandbox 仅测试模拟。
+
 > **追加临时待办（不占阶段条目编号，2026-10-25 用户授权）**：1.0 发布门槛（G1-G8、P0 23 / P1 8 / 1.0 后 15+8、真实环境矩阵、批次 R/E/F1/F2/G）见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)。本区块只作指针，不占 M49 条目编号；批次表以台账 §5 为唯一事实源。

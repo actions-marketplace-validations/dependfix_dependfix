@@ -9,10 +9,12 @@
 
 ### 7.1 抽象边界（不强绑定 Docker rootless）
 
+> **2026-10-27 入口关闭**：当前 scan-orchestrator 不再路由 `SandboxExecutor`，存量 `executorKind=sandbox` 强制 `ContainerExecutor` + `degradedReason.code=sandbox_entry_disabled`。以下抽象与路由图为**恢复后的目标形态**。
+
 `SandboxExecutor` 通过 §3 接口契约实现，**不与具体 OCI runtime 强绑定**——Runtime 形态作为配置项（`SANDBOX_RUNTIME` / Repository 字段）注入，避免今后切 Sysbox（`--runtime=sysbox-runc`）、Kata（`--runtime=kata-runtime`）等需要重写业务代码：
 
 ```text
-Repository.executorKind = 'sandbox'              → SandboxExecutor 路由
+（恢复后）Repository.executorKind = 'sandbox'    → SandboxExecutor 路由
                   ↓
       scan-orchestrator 解析 → SandboxExecutor.execute(ctx)
                   ↓
@@ -79,9 +81,10 @@ export interface SandboxHandle {
 |:--|:--|:--|
 | `Repository.executorKind` = `undefined`  | `ContainerExecutor` | M6 默认，单机/无 rootless 场景仍可用 |
 | `Repository.executorKind` = `'container'` | `ContainerExecutor` | 显式声明，与 M6 一致 |
-| `Repository.executorKind` = `'sandbox'` + SandboxRuntimeAdapter 可用 | `SandboxExecutor` | M10 目标 |
-| `Repository.executorKind` = `'sandbox'` + adapter **启动时**不可用（`isAvailable()` 返回 false） | `ContainerExecutor` 降级执行 → **`degraded` 状态** | **A 场景**（配置层降级）：业务结果完整，UI info 提示「未启用 rootless，已自动使用平台容器」 |
-| `Repository.executorKind` = `'sandbox'` + adapter **启动可用**但 `execute()` 抛 errno（ENOENT/ENOTCONN/EACCES/ECONNREFUSED） | 不静默降级 → `error.code = 'sandbox_unavailable'` → **`failed` 状态** | **B 场景**（环境中途变化）：业务未完成，UI warn 告警「沙箱运行时不可用，环境配置可能已变化」 |
+| `Repository.executorKind` = `'sandbox'`（2026-10-27 起入口关闭） | `ContainerExecutor` 强制降级 → **`degraded`** | 当前行为：`degradedReason.code=sandbox_entry_disabled`；恢复后按下方 A/B |
+| `Repository.executorKind` = `'sandbox'` + SandboxRuntimeAdapter 可用（**恢复后**） | `SandboxExecutor` | M10 目标 |
+| `Repository.executorKind` = `'sandbox'` + adapter **启动时**不可用（`isAvailable()` 返回 false，**恢复后**） | `ContainerExecutor` 降级执行 → **`degraded` 状态** | **A 场景**（配置层降级）：业务结果完整，UI info 提示「未启用 rootless，已自动使用平台容器」 |
+| `Repository.executorKind` = `'sandbox'` + adapter **启动可用**但 `execute()` 抛 errno（ENOENT/ENOTCONN/EACCES/ECONNREFUSED，**恢复后**） | 不静默降级 → `error.code = 'sandbox_unavailable'` → **`failed` 状态** | **B 场景**（环境中途变化）：业务未完成，UI warn 告警「沙箱运行时不可用，环境配置可能已变化」 |
 | `Repository.executorKind` = `'github-action'` | `ActionTriggerExecutor` | M6 已有 |
 
 CLI 启动时（`@dependfix/cli` entrypoint）探测 SandboxRuntimeAdapter 可用性；不可用时输出 `[sandbox]` warn 提示管理员启动 rootless daemon，但**不阻断**运行（旧路径仍可用）。
@@ -123,6 +126,8 @@ CLI 启动时（`@dependfix/cli` entrypoint）探测 SandboxRuntimeAdapter 可�
 
 ### 7.8 降级状态机契约（degraded vs failed）
 
+> **2026-10-27 入口临时关闭**：scan-orchestrator 不再路由 `SandboxExecutor`；存量 `executorKind=sandbox` 强制 `ContainerExecutor` + `degradedReason.code=sandbox_entry_disabled`（UI 禁用 / API 拒绝新写入）。以下 A/B 契约保留，供真实执行闭环后恢复。
+>
 > **状态**：🔶 M11 阶段登记（2026-08-20），T1005-C 实施中。**背景**：sandbox 路由在「启动时不可用」与「运行时不可用」两种场景下的语义边界——前者是**配置偏离**（业务完整），后者是**真实异常**（业务未完成）。统一归为 `failed` 会丢失降级路径的成功信息，统一归为 `degraded` 会掩盖运行时异常，故引入独立状态分流。
 
 #### 7.8.1 两种降级场景的语义边界
@@ -176,6 +181,8 @@ if (error && !result) {
 ```
 
 #### 7.8.3 orchestrator 降级信号传递
+
+> **当前实现（2026-10-27 起）**：入口关闭，sandbox 分支无条件走 `ContainerExecutor` + `degradedReason.code='sandbox_entry_disabled'`；以下代码为**恢复后目标形态**。
 
 `scan-orchestrator.service.ts` 在 sandbox 路由块维护 `degradedReason` 内部变量：
 
