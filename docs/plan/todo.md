@@ -45,14 +45,15 @@
 - **目标**：关闭仓库 2 条自产 code scanning 告警，且不改变既有清洗 / 解析语义。
 - **范围**：`packages/engine/src/github/pr-check-watch.ts`（`sanitizeCheckUrl` / `sanitizeCheckName` 的转义补全）、`packages/engine/src/github/fix-fingerprint.ts`（marker 正则的 ReDoS 收敛：原子化 / 长度上限 / 线性扫描）；定向测试 + mutation。
 - **验收标准**：
-  1. `js/incomplete-sanitization`（`pr-check-watch.ts:463`）：清洗逻辑对反斜杠 / 引号 / 控制字符给出完整转义，补「含 `\\` 与括号」用例。
+  1. `js/incomplete-sanitization`（`pr-check-watch.ts:463`）：表格单元格转义补齐反斜杠（先 `\` 后 `|`，控制字符沿用 `sanitizeCheckName` 剥离）；失败评论 URL 的竖线按 `%7C` 编码防拆列；补「含 `\` 与竖线」用例。
   2. `js/polynomial-redos`（`fix-fingerprint.ts:107`）：构造恶意 marker 输入（含大量制表符 / 重复属性）在 100KB 级仍线性（单次 < 50ms）；既有 marker 解析黄金夹具逐字不变。
-  3. mutation ≥ 2（转义分支 / 长度上限）被击杀；engine 定向测试全绿。
+  3. mutation ≥ 2（转义顺序 / 空白容错 / 属性区边界 / 回退正则 / URL 竖线编码）被击杀（实测 5/5）；engine 定向测试全绿。
   4. 用户推送后 code scanning 复扫 0 条（记录 analysis id 与查询时点；本批不自动 push）。
 - **不做什么**：不改 marker 格式与归因规则；不改 `sanitizeCheckName` 的展示语义（仅补转义）。
 - **依赖**：code scanning 复扫需 push；本批不自动 push。
 - **交付物**：2-3 commits / 4-6 files / 200-350 行。
 - **风险与缓解**：正则改写改变容错 → 黄金夹具 + 恶意样本双向用例；复扫需等 CI 完成 → 记录 analysis id 并在发布前查询。
+- **D 阶段（2026-10-26）**：代码与测试已落地（6 文件 / 约 150 新增行；mutation 5/5；engine 1787 passed / 根全量 5127 passed）；AC 1-3 满足，AC 4 待用户推送后复扫（修复前基线 `artifacts/m49.1/code-scanning-baseline.txt`：`#29` / `#28`，最近 analysis `2023390019` @ `7701cc1a`）。
 
 ### M49.2a [P0 🛡️] 依赖漏洞清零 A：critical / high（直接依赖 / overrides）
 
