@@ -383,11 +383,11 @@
 - **持续观察项**：① 再次出现时须捕获完整失败明细后定位（首要假设：vitest worker 并发 / 资源竞争；其次：既有时序敏感用例）；② 长期不复现则维持观察。
 - **触发条件**：再次出现同形失败（本地或 CI）。
 
-### 平台 e2e「扫描偏好」用例偶发等待超时（持续观察）
+### 平台 e2e 偶发等待超时（scan-config / repos-crud，持续观察）
 
-- **背景**：2026-10-26 M49.2a 依赖升级后连续两次运行 `pnpm --filter @dependfix/platform test:e2e`，`scan-config.e2e.test.ts` 的「扫描偏好：记住上次选择（重开 + 刷新生效）」均为 1 flaky（等待仓库行可见超时，重试通过）；两次运行其余 204 例全绿。
-- **持续观察项**：超时点在 `openScanConfig` 的 `.caomei-data-table__row` 可见性（15s）；首要假设为 SSR hydration / 行渲染时序，其次为上一轮 e2e 数据库残留导致列表排序漂移。再次出现时保留 `test-results/` 的 error-context 与截图后定位。
-- **触发条件**：运行 `apps/platform` e2e（`test:e2e`）时再次命中同一用例。
+- **背景**：2026-10-26 M49.2a 依赖升级后连续两次运行 `pnpm --filter @dependfix/platform test:e2e`，`scan-config.e2e.test.ts` 的「扫描偏好：记住上次选择（重开 + 刷新生效）」均为 1 flaky（等待仓库行可见超时，重试通过）。M49.2b 升级 nuxt 4.6.2 后：第一轮除 scan-config 外新增 1 例 `repos-crud.e2e.test.ts`「删除仓库：列表移除」flaky（重试通过）；第二轮仅 scan-config flaky，其余 204 例全绿。
+- **持续观察项**：① scan-config 超时点在 `openScanConfig` 的 `.caomei-data-table__row` 可见性（15s）；② repos-crud 为删除后列表刷新时序。首要假设均为 SSR hydration / 行渲染时序，其次为上一轮 e2e 数据库残留导致列表排序漂移；再次出现时保留 `test-results/` 的 error-context 与截图后定位。
+- **触发条件**：运行 `apps/platform` e2e（`test:e2e`）时再次命中上述用例。
 
 ### 依赖审计豁免复核（node-forge，持续观察）
 
