@@ -92,9 +92,10 @@
 | GHSA | 包 / 受影响范围 | 依赖路径 | 复核条件（满足即移除） |
 |:--|:--|:--|:--|
 | GHSA-86w9-cpqp-85rv | node-forge ≤ 1.4.0 | `apps/platform > nuxt > @nuxt/cli / nitropack > listhen > node-forge` | node-forge 发布 > 1.4.0 |
-| GHSA-vfj7-8cjw-p6xm | braces ≤ 3.0.3 | `apps/platform > nuxt / @nuxtjs/i18n > … > fast-glob > micromatch > braces` | braces 发布 > 3.0.3 |
 
-- **复核节奏**：条目同步登记于 [backlog.md 已知边界](../plan/backlog.md)（持续观察）；每周回归或依赖升级时复查上游是否已发布修复版本，发布后立即移除豁免并复跑 `pnpm audit`。
+> 原 `GHSA-vfj7-8cjw-p6xm`（braces ≤ 3.0.3）条目因 advisory 于 2026-10-23 撤回而移除（复核记录见 [backlog.md](../plan/backlog.md)）。
+
+- **复核节奏**：条目同步登记于 [backlog.md 已知边界](../plan/backlog.md)（持续观察）；每周回归或依赖升级时复查上游是否已发布修复版本，发布后立即移除豁免并复跑 `pnpm audit`。advisory 被**撤回**或受影响范围不再匹配（`withdrawn_at` / range 变更）时，同样移除对应条目并记录依据——撤回表示该漏洞不再有效，不能以「无修复版本」为由继续挂账。
 - **审计必查项**：新增 `audit.ignore` 条目必须同时给出 GHSA + 依赖路径 + 复核条件；禁止把 `--ignore` / `--ignore-unfixable` 写入任何 CI workflow 或 npm script；上游发布修复版本后必须移除对应豁免条目，不得长期挂账。
 
 ### 5.8 仓库自身安全门禁与 Security Auto Fix 停用（2026-10-25 用户决策）
