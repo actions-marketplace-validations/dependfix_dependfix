@@ -52,7 +52,7 @@ Agent-First 的完整项目级定义以 `AGENTS.md` 为准：Agent 是默认任�
 
 ### 1.5 风险分级 vs blocker 区分（依赖审计 vs 依赖风险）
 
-- 依赖审计门禁缺失（如 `pnpm audit` 未进 CI）≠ 依赖本身有漏洞——**两个独立维度**分开处理：**依赖风险**（单一包版本钉定 + lockfile + integrity 校验通过 → 不构成 blocker，纳入 backlog 跟进）；**审计门禁缺失**（纳入 backlog 候选；阻断语义的转正条件见 [security.md §5.6](./security.md#56-依赖审计阻断语义信号级--阻断的转正条件2026-09-30-用户决策方案-c)）。
+- 依赖审计门禁缺失（如 `pnpm audit` 未进 CI）≠ 依赖本身有漏洞——**两个独立维度**分开处理：**依赖风险**（单一包版本钉定 + lockfile + integrity 校验通过 → 不构成 blocker，纳入 backlog 跟进）；**审计门禁缺失**（纳入 backlog 候选；阻断语义与转正记录见 [security.md §5.6](./security.md#56-依赖审计阻断语义信号级--阻断的转正条件2026-09-30-用户决策方案-c)）。
 - typecheck + lint + e2e 全过已足够验证本次改动对依赖本身的兼容性；CI 依赖审计门禁是流程问题，不阻塞当前 PR。
 
 ## 2. PDTFC+ 工作流

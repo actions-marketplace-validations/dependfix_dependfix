@@ -54,7 +54,7 @@
 
 ### 候选评估中（待评估 / 本阶段延后项）
 
-> **候选池概览（2026-10-26 实测）**：46 项；已标注 P0 0 / P1 2 / P2 11 / P3 2，未标注 31。优先级分档与批次计划以 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md) 为准（P0 23 / P1 8 / 1.0 后 15）；未标注候选在评估时补齐 P 标签，不默认升级。
+> **候选池概览（2026-10-26 实测）**：47 项；已标注 P0 0 / P1 2 / P2 12 / P3 2，未标注 31。优先级分档与批次计划以 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md) 为准（P0 23 / P1 8 / 1.0 后 15）；未标注候选在评估时补齐 P 标签，不默认升级。
 > **1.0 门槛与分档**：P0 23 / P1 8 / 1.0 后 15 的分档、门槛判定与批次计划见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)；本区候选在未上收前保持候选状态，上收后按批次从本表移除。
 > **E 阶段候选（2026-10-24 用户决策 D+E）**：`critical` 必选不可关闭 / 通知严重级别术语与阈值命名 / 周报投递重试与窗口锁 / `/settings` 与通知页 dark 视觉 4 项已获授权作为 M48 归档后的下一阶段，当前保持候选状态（不含阶段编号）；M48 已归档，待启动 P 阶段。
 
@@ -68,6 +68,7 @@
 - **`dependfix-remediator` REFERENCES 的 MCP 状态与入参映射过期**（M49.4 边界）—— `skills/` 与 `packages/skills/` 两份同文 `REFERENCES.md` 仍写「当前 MCP Server 未发布」，能力映射表入参名（`owner` / `severityThreshold` / `includeCodeScanning`）与当前 MCP schema（`repo` / `severity` / `code_scanning`）不一致；4 tool 检测子集为刻意最小集，保留。触发：F2 技能文档批次，或下次修改 MCP schema 时。
 - **`SandboxExecutor` 真实引擎执行仍为占位（P1 🛡️，启用 sandbox 前必须闭环）**—— `apps/platform/server/services/executor/sandbox-executor.ts` 的 `buildCmd` 仅回显最小 `RunResult`（exitCode 0 / 0 告警），不启动 dependfix 引擎；M10 T1001 已落隔离基础设施、M38 已落执行进程隔离。影响：选择 `executorKind=sandbox` 的扫描为假成功。待办：实现 sandbox 内自包含 CLI 入口 + git clone / pnpm install / 引擎执行 / 结果回传，补真实容器 e2e；闭环前 quick-start 已加限制提示。触发：启用 sandbox 前必须完成。
 - **`pnpm_audit` 的 token-free 回退意图与实现不一致（P2 🛡️）**—— `pnpm-audit.tool.ts` 注释与产品意图是「无 GitHub token 或 403 场景」的本地回退，但实现保留 `requireToken()`，缺失 `GITHUB_TOKEN` 时直接返回 `ok:false`；当前 README / tool description 已按实际行为修正。待评估：移除 `requireToken()`（或改为可选 token），补无 token 用例，恢复真正回退。触发：无 token 环境需要 pnpm-audit 回退时。
+- **周回归审计在 registry 故障时假绿（M49.3 边界，P2 🛡️）**—— 阻断命令按 AC1 在 registry 故障时 exit 0；`security:audit-deps` 在周回归仅按 exit code 判过，若 registry 故障且日志无审计结果行，run 会 success 但未实际审计。当前 §5.6 / 检查点已要求「证据 run 须含审计结果行」；待评估：为 `security:audit-deps` 增加输出断言（无结果行则非零）或落盘校验。触发：出现 registry 故障窗口或周回归连续 success 但日志无审计结果时。
 
 - **运行面漏洞检测：镜像基底 / 运行时二进制 / OS 包（待研究）** —— 背景（2026-10-22）：Node 24.18.1 基础镜像在 2026 年 10 月 21 日安全公告（CVE-2026-111497 Brotli 越界写、105483 / 106069 TLS 主机名校验绕过等）后仍只能靠**外部人工巡检**发现——Dependabot 未配置 docker 生态、基底此前为 digest 裸写（本轮已改为 tag + digest，但仍为手工钉定、无漂移与漏洞追踪）、`pnpm audit` 只覆盖 npm 依赖、GitHub 侧告警源为 Dependabot / Code Scanning / Code Quality findings（最后一类为代码静态分析），本地回退仅 `pnpm-audit`（同属 npm 依赖）；运行面与 OS 包无任何告警源。本批新增的 `check-node-version.mjs` 是**静态下限闸门**：只有人工抬升基线后才会拦截，**不能发现基线之后新披露的 CVE**。
   - **待研究问题**：① dependfix 自身的运行面（Docker 基底 / Node 二进制 / apk 包 / CI 运行时）能否自动检测并按严重级别分级？② 同一能力能否产品化，成为 dependfix 对**被管理仓库**的新告警源——扫描目标仓 Dockerfile / `.nvmrc` / `engines.node` 与已知运行时漏洞比对，复用现有验证链与 PR 创建提修复 PR？
@@ -399,6 +400,7 @@
 - **复核条件**：node-forge 发布 > 1.4.0 后，移除 `pnpm-workspace.yaml` 对应条目并复跑 `pnpm audit --prod --audit-level=moderate --registry=https://registry.npmjs.org`。
 - **复核记录（2026-10-17）**：周回归 `38929908272` 新增 3 critical / 5 high（`simple-git` ×2 / `@simple-git/argv-parser` / `shell-quote` / `seroval`，均经 `apps/platform > nuxt > @nuxt/devtools|@nuxt/vite-builder`）——patched 版本均已发布，按「升级优先」用锁文件提升闭合（`@nuxt/devtools` 3.4.3 / `seroval` 1.6.9 / `shell-quote` 1.12.0），**未新增豁免条目**；本清单两条仍按上述复核条件保持活跃。
 - **复核记录（2026-10-26，M49.2a）**：braces 条目对应 advisory `GHSA-vfj7-8cjw-p6xm` 已于 2026-10-23 **撤回**（`withdrawn_at`），advisory 撤回后该路径不再有有效漏洞 → 移除 `audit.ignore` 条目与 §5.7 行；node-forge 最新版仍为 1.4.0（`npm view node-forge version`），继续豁免。
+- **转正记录（2026-10-27，M49.3）**：prod 审计已转阻断（`--ignore-registry-errors --registry=https://registry.npmjs.org`）；`audit.ignore` 保留 node-forge（latest 1.4.0，仍无修复版本），§5.6 clean 判据改为阻断步骤 exit 0 且日志含审计结果行（ignored 不参与阻断）。
 - **触发条件**：每周回归 / 依赖升级 / 上游发布修复版本时复查。
 - **可选增强**：以调度任务自动比对 `npm view node-forge version` 探测上游修复发布，避免豁免长期挂账（暂未实现）。
 

@@ -19,11 +19,11 @@
 
 ## M49：0.6.0 发版清障（2026-10-25 用户决策）
 
-承接 M48 归档后的发版窗口。2026-10-25 发布评估：0.5.0（2026-09-18）后累计 805 commits（132 feat / 85 fix / 2 类 breaking〔3 commits：Node 基线、安装链受管异步化及其消费方适配〕），`release:plan` 推导全包 minor → 目标 **0.6.0**；但仓库存在 4 类「带着发不体面」的问题：自产 code scanning 告警 2 条、依赖审计门禁仍为信号级且周回归连续 4 周红、critical / high 依赖漏洞未清零（含 1 条长期豁免）、用户可见文档 4 类 / 6 行漂移（其中设计索引含 3 行陈旧）。本阶段以「清障 → 发布 → 发布后验证」闭环为目标。
+承接 M48 归档后的发版窗口。2026-10-25 发布评估：0.5.0（2026-09-18）后累计 805 commits（132 feat / 85 fix / 2 类 breaking〔3 commits：Node 基线、安装链受管异步化及其消费方适配〕），`release:plan` 推导全包 minor → 目标 **0.6.0**；但仓库存在 4 类「带着发不体面」的问题：自产 code scanning 告警 2 条、依赖审计门禁（M49.3 前）仍为信号级且周回归连续 4 周红、critical / high 依赖漏洞未清零（含 1 条长期豁免）、用户可见文档 4 类 / 6 行漂移（其中设计索引含 3 行陈旧）。本阶段以「清障 → 发布 → 发布后验证」闭环为目标。
 
 **授权与归属**：M49 为用户 2026-10-25 决策的独立阶段（非插队）；M49.1 / M49.2a / M49.2b 属 [规划规范 §3.1](../standards/planning.md#_3-1-新需求默认走-评估-→-backlog-原则-hard-requirement) 例外清单第 1 / 2 类（安全漏洞），M49.3 / M49.4 / M49.5 属清单外**经用户明确授权**（Security 门禁治理 / 发版文档 / 发版），均纳入本阶段条目编号。
 
-**§3.4 交叉核验**：M49 范围经 todo-archive 表格扫描（关键词 `code scanning` / `polynomial-redos` / `审计门禁` / `ai-api-key` / `MCP tool` 仅命中 M48 归档与既有残余候选，未见同范围闭环）+ `git log --oneline -- <路径>`（`pr-check-watch.ts` / `fix-fingerprint.ts` / `test.yml` 最近均为 M48.x 引入，未做安全收敛）+ 代码 anchor（code scanning 2 条开放 / `test.yml:46` 仍 `|| true` / `pnpm-workspace.yaml audit.ignore` 2 条 / `quick-start.md:189` 输入名过期）→ **0 项重复评估**。
+**§3.4 交叉核验**：M49 范围经 todo-archive 表格扫描（关键词 `code scanning` / `polynomial-redos` / `审计门禁` / `ai-api-key` / `MCP tool` 仅命中 M48 归档与既有残余候选，未见同范围闭环）+ `git log --oneline -- <路径>`（`pr-check-watch.ts` / `fix-fingerprint.ts` / `test.yml` 最近均为 M48.x 引入，未做安全收敛）+ 代码 anchor（code scanning 2 条开放 / `test.yml:46` 仍 `|| true`（M49.3 前；2026-10-27 已转正） / `pnpm-workspace.yaml audit.ignore` 2 条 / `quick-start.md:189` 输入名过期）→ **0 项重复评估**。
 
 **类型平衡**：🛡️ 4 + 📚 1 + 🚀 1（🎨 / 🧪 缺口显式标注：发版窗口不引入 UX 新面，🎨 由后续 E 阶段承担；测试随各条目内嵌）。
 
@@ -38,7 +38,7 @@
 - **M49.4** [P0 📚] 发版面文档漂移收口（AI 输入名 / M5 遗留 / MCP tool 数 / 设计索引 3 行）
 - **M49.5** [P0 🚀] 0.6.0 版本提升、发布与发布后验证
 
-**建议顺序**：M49.1 → M49.2a → M49.2b → M49.4 → M49.3 → M49.5。M49.1 与 M49.2a 可并行评估；M49.3 的 3 个 clean run 须在翻转前由 2a / 2b / 4 的推送累积；M49.5 最后执行。
+**建议顺序**：M49.1 → M49.2a → M49.2b → M49.4 → M49.3 → M49.5。M49.1 与 M49.2a 可并行评估；M49.3 改为**先翻转、后取证**——翻转后连续 3 次 `master` push 的 prod 阻断步骤 `conclusion=success` 且日志含审计结果行，回填为转正证据；回填前不闭环，任一 run 失败则回退 `|| true` 或按 §5.7 评估；M49.5 最后执行。
 
 ### M49.1 [P0 🛡️] 自产 code-scanning 告警清零
 
@@ -92,7 +92,7 @@
 - **目标**：让风险依赖无法进入 master；周回归恢复绿色。
 - **范围**：`.github/workflows/test.yml`（新增 / 改造审计步骤）、`docs/standards/security.md` §5.6 / §5.8（转正记录或判据修订）、`pnpm-workspace.yaml audit.ignore`、`.github/skills/code-reviewer/references/code-quality-checklist.md`（转正证据检查点）。
 - **验收标准**：
-  1. **阻断面**：`pnpm audit --prod --audit-level=moderate --ignore-registry-errors` 无 `|| true`；registry 不可达时 exit 0（模拟验证）。
+  1. **阻断面**：`pnpm audit --prod --audit-level=moderate --ignore-registry-errors --registry=https://registry.npmjs.org` 无 `|| true`；registry 不可达时 exit 0（模拟验证）。
   2. **信号面**：全量依赖审计步骤保留（可作为信号），周回归 `security:audit-deps` 使用阻断命令并通过。
   3. **判据证据**：按 §5.6 记录转正日期 + 3 个 `master` **push** run id（`--event push`）。若 `audit.ignore` 使 clean 字面串不可达：按 §5.7 末句「修订 clean 判据」通道**同批**修订 §5.6（阻断面 / 信号面定义），并同步 §5.8 指针与检查点矩阵；不得以「记录依据」替代 run id。
   4. Weekly Regression 一次通过（`security:audit-deps` 不再 blocker）。
@@ -100,6 +100,8 @@
 - **依赖**：M49.2a / 2b 清零；3 次 push（用户推送确认）。
 - **交付物**：2-3 commits / 4-6 files / 150-250 行（含规范与检查点）。
 - **风险与缓解**：上游突发新漏洞导致门禁红 → 按 §5.7 评估豁免；判据修订需保留修订后的 3 个 run id，避免「改口径即转正」。
+- **P 阶段（2026-10-27）**：`test.yml` 仅全量信号（`|| true`），无 prod 阻断步骤；`security:audit-deps` 无 `--registry`，本地默认 registry（npmmirror）无 audit endpoint → exit 1；`audit.ignore` 保留 node-forge（latest 1.4.0，无 >1.4.0 修复版本）；clean 字面串 `No known vulnerabilities found` 因 ignore 不可达。实证：`--ignore-registry-errors` 下 registry 不可达 exit 0、无 flag exit 1；临时 `lodash@4.17.20` 项目在 flag 下仍 exit 1（漏洞判定未被放宽）；显式 `--registry=https://registry.npmjs.org` 是必要的，否则镜像无 audit endpoint 时阻断步骤会被 `--ignore-registry-errors` 静默放行。结论：按 §5.7 末句修订 clean 判据，阻断步骤显式 `--registry` + `--ignore-registry-errors`，全量信号保留。
+- **D 阶段（2026-10-27）**：`test.yml` 拆分全量信号 + prod 阻断（阻断无 `|| true`）；`security:audit-deps` 同步阻断命令；`security.md §5.6` 改写为转正后判据（阻断 exit 0、ignored 不参与阻断、统计命令改为查步骤 conclusion），§5.7 / §5.8 / §5.2 指针同步；`pnpm-workspace.yaml` audit.ignore 注释记录转正后仍保留；检查点矩阵新增 §5.6 行；readiness G1 改 ◐ 并登记阻断已上线、run id 待回填；backlog 记录转正。验证：YAML 解析通过；`check:verify-chain` 通过；registry 故障 + flag exit 0 / 无 flag exit 1；临时 `lodash@4.17.20` + flag exit 1；`pnpm run security:audit-deps` 在 registry 故障下按设计 exit 0（真实 clean 审计待 CI）；`lint:md` / `check:docs` / `docs:build` / `i18n:check:anchor` / `lint` / `typecheck` 通过。审计 R1 deep Reject（RG-B01：三处「翻转前 3 次 clean」时序声明与「先翻转」互斥）→ 全收口：三处改「先翻转、后取证」、§5.6 明确原条件未达成 → 按 §5.7 修订通道转正、判据补「日志含审计结果行」防 registry 假绿、checklist ③/⑤ 与 G1 ④ 同步、backlog 登记假绿加固候选；R2 quick Pass（0B/0W；RG-W04/W05/W06 + S04 已修）。残余：3 次 `master` push Test run id 与 1 次 Weekly Regression run 待推送后回填；回填前 M49.3 不闭环。
 
 ### M49.4 [P0 📚] 发版面文档漂移收口
 

@@ -18,7 +18,7 @@
 
 | 门槛 | 达标条件（可判定） | 证据物 | 当前读数（最近更新 2026-10-26） | 批次 |
 |:--|:--|:--|:--|:--|
-| **G1 安全清零** | ① 发布物（5 npm 包 + platform 镜像）无**未被 §5.7 豁免的** critical / high 生产漏洞；② code scanning 0 条未处置告警；③ 存在 **prod 阻断步骤**（`pnpm audit --prod --audit-level=moderate`，无 `|| true`；配套`--ignore-registry-errors`，见 security.md §5.6）+ 全量依赖信号步骤；周回归使用同一 prod 阻断命令；④ 周回归最近 3 次`security:audit-deps` 均通过（记录 run id） | 全工作区 `pnpm audit --prod --registry=https://registry.npmjs.org` + 按发布包审计记录；code scanning API（analysis id）；`test.yml` 步骤；周回归 run | ❌ 全工作区 23 条（4 high / 15 moderate / 4 low，1 ignored；`2026-10-25` 实测，含 dev；10-23 周回归 prod 口径为 11 条〔2 high / 8 moderate / 1 low，1 ignored〕）；Dependabot 31 条（2 critical / 5 high，其中 node-forge 属 §5.7 豁免）；code scanning 2 条；审计步骤仍 `|| true`；周回归连续 4 周红。**M49.2a/2b 后（`2026-10-26`）**：全量 audit 0 条 advisory（0 critical / 0 moderate / 0 low；另 1 high ignored = node-forge），prod audit 0 条；Dependabot critical / high 6 条可修复项已关闭 + node-forge 豁免；medium / low 已清零（`2026-10-26T12:41Z` 关闭），开放项仅 node-forge high；code scanning 已复扫 0 条（analysis `2026499469`） | M49 + F2 |
+| **G1 安全清零** | ① 发布物（5 npm 包 + platform 镜像）无**未被 §5.7 豁免的** critical / high 生产漏洞；② code scanning 0 条未处置告警；③ 存在 **prod 阻断步骤**（`pnpm audit --prod --audit-level=moderate --ignore-registry-errors --registry=https://registry.npmjs.org`，无 `|| true`，见 security.md §5.6）+ 全量依赖信号步骤；周回归使用同一 prod 阻断命令；④ 周回归最近 3 次`security:audit-deps` 均通过且日志含审计结果行（记录 run id；M49.3 只要求 1 次，3 次为 1.0 G1 口径） | 全工作区 `pnpm audit --prod --registry=https://registry.npmjs.org` + 按发布包审计记录；code scanning API（analysis id）；`test.yml` 步骤；周回归 run | ◐ 全工作区 23 条（4 high / 15 moderate / 4 low，1 ignored；`2026-10-25` 实测，含 dev；10-23 周回归 prod 口径为 11 条〔2 high / 8 moderate / 1 low，1 ignored〕）；Dependabot 31 条（2 critical / 5 high，其中 node-forge 属 §5.7 豁免）；code scanning 2 条；（M49.3 前）审计步骤仍 `|| true`；周回归连续 4 周红。**M49.2a/2b 后（`2026-10-26`）**：全量 audit 0 条 advisory（0 critical / 0 moderate / 0 low；另 1 high ignored = node-forge），prod audit 0 条；Dependabot critical / high 6 条可修复项已关闭 + node-forge 豁免；medium / low 已清零（`2026-10-26T12:41Z` 关闭），开放项仅 node-forge high；code scanning 已复扫 0 条（analysis `2026499469`）。**M49.3 后（2026-10-27）**：prod 阻断步骤已上线（无`|| true`，含`--registry` + `--ignore-registry-errors`），全量信号保留；3 次`master` push run id（翻转后，日志含审计结果行）与周回归 run 待推送后回填 | M49 + F2 |
 | **G2 契约冻结** | CLI 参数与模式、Action inputs、报告 JSON schema、配置键、平台 DB schema 五类冻结清单成文；弃用策略与 0.x→1.0 迁移指南成文 | `docs/guide/release.md` 新增「1.0 契约冻结清单」章节 + 迁移指南章节 | ❌ 尚无清单与迁移指南 | G |
 | **G3 真实环境 E2E** | G3.0–G3.8 九条独立路径各留 1 条证据 + G3.9 AI 横切另计（2 家 × 5 场景） | run id / 截图 / 日志 / 报告产物 | ❌ 全部仅有 mock / 单元证据 | G（依赖外部资源） |
 | **G4 CI 稳定性** | `master` 连续 20 次 push 绿或连续 2 周无红；flake 率 < 2%；无 P0 事故 30 天 | `gh run list --limit 100` 统计（分子 = 非绿 run 数，分母 = 窗口内 run 数） | ◐ 近 40 次 34 绿（3 失败 / 3 取消）；失败含 dependabot 分支 2 次与 master「Dependabot Updates」1 次，取消为 Docker 被后续 push 取代 | G（观察窗口） |
@@ -95,15 +95,15 @@
 | **F2** | 文档与验证 | §3.1 F2 六项 + G5 复测 | F1 |
 | **G** | 1.0 发布 | G2 冻结与迁移指南、G3 矩阵证据、G4 窗口、G7 运维实测、`@v1`、发布自动化启用、发布说明 | F1/F2 + 外部资源 |
 
-**M49 内部顺序**：M49.1 → M49.2a → M49.2b → M49.4 → M49.3 → M49.5（M49.3 的 3 个 clean run 取 `--event push`，须在翻转前由 M49.2a / 2b / M49.4 的推送累积；M49.3 的观察可与 M49.5 准备并行，但翻转必须在 3 次 clean 之后）。
+**M49 内部顺序**：M49.1 → M49.2a → M49.2b → M49.4 → M49.3 → M49.5（M49.3 改为**先翻转、后取证**：原「翻转前累积 3 次 clean」口径因 node-forge 豁免使字面串不可达而未达成，按 §5.7 末句「修订 clean 判据」通道转正；翻转后连续 3 次 `master` push 的 prod 阻断步骤 `conclusion=success` 且日志含审计结果行，回填为证据；回填前不闭环，任一 run 失败则回退 `|| true` 或按 §5.7 评估）。
 
 **估算口径**：按项计数（23 P0 + 8 P1 + 5 验证组 + 5 发布工程项），不按日历；日历取决于外部资源到位时间与 E/F 批次容量。
 
 ## 6. 安全策略（2026-10-25 用户决策）
 
 - **Security Auto Fix 定时任务保持停用**（2026-10-17 起 `disabled_manually`）：dependfix 自身已由 dependfix 创建修复 PR，避免与人工 / 平台 PR 冲突；本仓库不再依赖该 Action 做自修。
-- **依赖安全由「Security 门禁」承担**：Dependabot alerts 作发现面 → 依赖审计作**阻断面**（`pnpm audit --prod --audit-level=moderate`，周回归使用同一命令）→ 全量依赖审计仅作 `test.yml` 信号步骤（不进周回归）→ code scanning 覆盖代码质量告警。
-- **本轮动作（M49）**：清零未被 §5.7 豁免的 critical / high → 移除可解除的 `audit.ignore` → 按 [security.md §5.6](../../standards/security.md#_5-6-依赖审计阻断语义-信号级-→-阻断的转正条件-2026-09-30-用户决策方案-c) 转正。若豁免条目使 clean 字面串不可达，则按 §5.7 末句的「修订 clean 判据」通道**同批修订 §5.6**（阻断面 = prod 审计 ≥moderate；信号面 = 全量依赖审计），并记录修订后判据的 3 个 `master` push run id。
+- **依赖安全由「Security 门禁」承担**：Dependabot alerts 作发现面 → 依赖审计作**阻断面**（`pnpm audit --prod --audit-level=moderate --ignore-registry-errors --registry=https://registry.npmjs.org`，周回归使用同一命令）→ 全量依赖审计仅作 `test.yml` 信号步骤（不进周回归）→ code scanning 覆盖代码质量告警。
+- **本轮动作（M49）**：清零未被 §5.7 豁免的 critical / high → 移除可解除的 `audit.ignore` → 已按 [security.md §5.6](../../standards/security.md#_5-6-依赖审计阻断语义-信号级-→-阻断的转正条件-2026-09-30-用户决策方案-c) 转正（2026-10-27）。`audit.ignore` 使 clean 字面串不可达，故按 §5.7 末句的「修订 clean 判据」通道**同批修订 §5.6**（阻断面 = prod 审计 ≥moderate；信号面 = 全量依赖审计；判据 = 阻断步骤 exit 0 且日志含审计结果行），3 个 `master` push run id 待回填。
 - **不得**用 `--ignore` / `--ignore-unfixable` 放宽门禁；无可用修复版本的豁免按 [§5.7](../../standards/security.md#_5-7-无可用修复版本漏洞的审计豁免-audit-ignore-2026-10-05) 逐条登记 GHSA + 路径 + 复核条件。
 
 ## 7. 发布工程清单（G2 / G7）

@@ -67,7 +67,7 @@
 
 ## M49: 0.6.0 发版清障（2026-10-25 用户决策 / 进行中）
 
-2026-10-25 发布评估：0.5.0（2026-09-18）后累计 805 commits（132 feat / 85 fix / 2 类 breaking〔3 commits〕），`release:plan` 推导全包 minor → 目标 **0.6.0**；但存在 4 类「带着发不体面」的问题：2 条自产 code scanning 告警（`js/incomplete-sanitization` / `js/polynomial-redos`）、依赖审计门禁仍为信号级（`|| true`）且周回归连续 4 周红、critical / high 依赖漏洞未清零、4 处用户可见文档漂移。本阶段目标 = **清障 → 发布 0.6.0 → 发布后验证**。
+2026-10-25 发布评估：0.5.0（2026-09-18）后累计 805 commits（132 feat / 85 fix / 2 类 breaking〔3 commits〕），`release:plan` 推导全包 minor → 目标 **0.6.0**；但存在 4 类「带着发不体面」的问题：2 条自产 code scanning 告警（`js/incomplete-sanitization` / `js/polynomial-redos`）、依赖审计门禁（M49.3 前）仍为信号级（`|| true`）且周回归连续 4 周红、critical / high 依赖漏洞未清零、4 处用户可见文档漂移。本阶段目标 = **清障 → 发布 0.6.0 → 发布后验证**。
 
 **授权与归属**：M49 为用户 2026-10-25 决策的独立阶段（非插队）；M49.1 / 2a / 2b 属 [规划规范 §3.1](../standards/planning.md#_3-1-新需求默认走-评估-→-backlog-原则-hard-requirement) 例外清单第 1 / 2 类，M49.3 / 4 / 5 属清单外经用户明确授权。**§3.4 交叉核验 0 项重复评估**（todo-archive 扫描 + `git log -- <路径>` + 代码 anchor：2 条 code scanning / `test.yml:46` `|| true` / `audit.ignore` 2 条 / `quick-start.md:189` 过期输入名）。
 
@@ -82,7 +82,7 @@
 
 **阶段基线工作量（§3.1.1 分母）**：6 条目区间和 **10-16 commits / 28-41 文件 / 1400-2430 行**（区间和口径；M48 实测倍率提示实际可能上浮 2-4 倍）。
 
-**建议顺序**：M49.1 → M49.2a → M49.2b → M49.4 → M49.3 → M49.5。M49.3 的 3 个 clean run 须在翻转前由 2a / 2b / 4 的推送累积；M49.5 最后执行。
+**建议顺序**：M49.1 → M49.2a → M49.2b → M49.4 → M49.3 → M49.5。M49.3 改为**先翻转、后取证**——翻转后连续 3 次 `master` push 的 prod 阻断步骤 `conclusion=success` 且日志含审计结果行，回填为转正证据；回填前不闭环，任一 run 失败则回退 `|| true` 或按 §5.7 评估；M49.5 最后执行。
 
 **范围边界（不做什么）**：不启用自动发布（1.0 后）；不打 `@v1`（G 批次）；不做 en-US 全量平价（F2）；不为清零强行跨大版本依赖升级。
 
