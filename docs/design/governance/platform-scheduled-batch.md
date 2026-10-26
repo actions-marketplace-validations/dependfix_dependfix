@@ -1,6 +1,6 @@
 # 定时扫描与批量处理设计
 
-> 状态：🔶 设计先行（T704，2026-08-10）——契约与数据模型落盘，供实现阶段参考。
+> 状态：✅ 已落地（T704 实现 + M21.5 async 定时触发 / Schedule CRUD e2e 补强）；真实环境验收跟踪见 [backlog T704](../../plan/backlog.md#t704-async-定时触发)。
 > 依赖：T702 任务队列与并发控制（已交付，BullMQ + Redis + 渐进式降级）。
 > 相关文档：[架构设计 §扫描调度策略](./architecture-platform.md)、[安全设计 §批量处理](./security.md)、[执行器设计与沙箱评估](./executor-sandbox.md)、[T702 待人工验收（真实环境）记录](../../plan/backlog.md#t702-http-层状态流转)
 
@@ -238,7 +238,7 @@ await queue.upsertJobScheduler(
 await queue.removeJobScheduler(`schedule-${schedule.id}`)
 ```
 
-**ScanQueue 封装扩展**：T702 的 `ScanQueue` 接口当前仅暴露 `add/close`，T704-2 实现时需扩展 `upsertJobScheduler` / `removeJobScheduler` 透传（BullMQ Queue 原生方法），保持封装一致性。
+**ScanQueue 封装扩展**：T702 的 `ScanQueue` 已扩展 `upsertJobScheduler` / `removeJobScheduler` 透传（BullMQ Queue 原生方法），由 `scheduler.service.ts` 实际调用，保持封装一致性。
 
 **Worker 处理**：Worker processor 收到 `scheduled-scan` job 时：
 1. 读取 Schedule 实体 → 解析 selectorKind + selectorJson → 查询目标仓库列表

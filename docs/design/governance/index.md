@@ -15,11 +15,11 @@
 | [Session Wisdom 蒸馏机制](./session-wisdom-distillation.md) | AI 治理（知识沉淀） | ✅ 已落地（2026-08-06） |
 | [经验归档](./experience-archive.md) | 经验备份（持续追加，准入标准见文件头；§1-§66 按内容逻辑分片为 6 个分片文件，章节编号全局唯一） | ✅ 持续追加 |
 | [Skill 分发治理](./skill-distribution.md) | 专项治理（M5.5 Skill 编排） | ✅ 已落地（2026-08-07） |
-| [执行器设计与沙箱评估](./executor-sandbox.md) | 专项设计（T607 设计先行） | 🔶 设计中（2026-08-08） |
+| [执行器设计与沙箱评估](./executor-sandbox.md) | 专项设计（T607 设计先行） | ✅ 设计已落地（M10 隔离基础设施 + M38 执行进程隔离；沙箱内真实引擎执行为占位） |
 | [沙箱与恶意依赖防护治理](./sandbox-security-governance.md) | 专项治理（2026-08-14 安全评估） | ✅ 已落盘（2026-08-14） |
-| [MCP Server 设计](./mcp-server.md) | 未来规划（M6） | 🔶 未开始 |
+| [MCP Server 设计](./mcp-server.md) | 专项设计（M6） | ✅ 已落地（`@dependfix/mcp` 0.2.0 已发布，8 个 tool） |
 | [平台认证与用户体系设计](./platform-auth-users.md) | 专项设计（M7.1 T701/T707 设计先行） | ✅ 已落地（2026-08-09，Review Gate Pass） |
-| [定时扫描与批量处理设计](./platform-scheduled-batch.md) | 专项设计（M7.2 T704 设计先行） | 🔶 设计中（2026-08-10） |
+| [定时扫描与批量处理设计](./platform-scheduled-batch.md) | 专项设计（M7.2 T704 设计先行） | ✅ 已落地（T704 实现 + M21.5 async/e2e；真实环境验收见 backlog T704） |
 | [平台 AI 研判集成设计](./platform-ai-integration.md) | 专项设计（apps/platform AI 研判端到端联通） | ✅ 已落地（M25.2a 基础层 + M26.1 应用层，见 [M26](../../plan/archive/todo-archive-phases-m26.md)） |
 | [文档站 + 包 README 多语言实施设计](./docs-and-readme-i18n.md) | 专项设计（en-US 接入，参照 momei） | ✅ 已实施（M26.3 文档站 + 包 README en-US P0，见 [M26](../../plan/archive/todo-archive-phases-m26.md)） |
 | [apps/platform PrimeUI 主题库降级设计](./primeui-themes-v2-downgrade.md) | 专项设计（@primeuix/themes 3.x → 2.x MIT 降级） | ✅ 已实施（M25.1 完成 3.x → 2.x MIT 降级；M31.5 全链卸载 PrimeVue 后本方案载体退役，主题能力见 [caomei-ui 迁移评估](./caomei-ui-migration.md)） |

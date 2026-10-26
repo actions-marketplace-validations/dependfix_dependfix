@@ -119,6 +119,8 @@
 - **依赖**：无。
 - **交付物**：1-2 commits / 5-7 files / 100-180 行。
 - **风险与缓解**：文档断言再次漂移 → 对照表进 audit 证据；后续可加 action 输入一致性机检（登记候选）。
+- **P 阶段（2026-10-26）**：按 6 处基线逐项对照 `action.yml` / `packages/mcp/src/index.ts` / 设计文档现状。额外发现（归入 AC 2 口径）：`packages/mcp/README.md` / `README.en-US.md` 缺 `pnpm_audit` 与 `discover_repos.max_repos`；`mcp-server.md` 仍写 4 个 tool；`packages/mcp/src/index.ts` 注释写 7 个。同批对齐，避免发布物 tool 清单与实现不一致。执行器状态按实际实现标注（M38 为执行模型隔离、沙箱隔离基础设施为 M10 T1001；A 阶段实测 `buildCmd` 仍为占位，状态收窄为「设计已落地 / 真实引擎执行占位」）。
+- **D 阶段（2026-10-26）**：6 处按事实源对齐；MCP tool 清单补齐为 8 个（新增 `pnpm_audit`）并同步 `discover_repos.max_repos`；`mcp-server.md` 由 4 个 tool 更新为 8 个、补 `pnpm_audit` 与已落地状态（0.2.0）；`index.md` 的 MCP / 定时扫描状态改为已落地，执行器/沙箱改为「设计已落地（M10 隔离基础设施 + M38 执行进程隔离），沙箱内真实引擎执行为占位」；`executor-sandbox.md` / `platform-scheduled-batch.md` 状态头与正文同步（M6/M7 表保留规划期快照并加注）；`quick-start` 增加 sandbox 占位限制提示；`github-action-workflow.md` 增加 T201 设计时点快照说明。A 阶段 Reject → 修复：`pnpm_audit` README / tool description 按实际 `requireToken()` 行为改为「复用 GITHUB_TOKEN 检查」；`mcp-server.md` 交付版本改为 0.2.0 / 0.5.0；`platform-scheduled-batch.md` 的 ScanQueue 历史时态订正。验证：`check:docs` / `check:readme-i18n` / `i18n:check:anchor` / `docs:check:i18n` / `lint:md:check` / `docs:build` 全通过；`packages/mcp` 单测 47 passed；`pnpm lint` 0 error（4 存量 warning）；`pnpm run typecheck` 通过。审计 R1 Reject（2B：`pnpm_audit` token 声明与实现冲突、sandbox 状态过度）→ 全收口 → R2 quick Pass（0B/0W；1 warning + 5 suggest 已修）。残余（已登记 backlog）：① SandboxExecutor 真实引擎执行占位（P1，启用 sandbox 前必须闭环）；② pnpm_audit token-free 回退意图与实现不一致（P2）；③ dependfix-remediator REFERENCES 的 MCP 状态/入参映射过期。
 
 ### M49.5 [P0 🚀] 0.6.0 版本提升、发布与发布后验证
 

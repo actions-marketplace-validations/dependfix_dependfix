@@ -2,6 +2,8 @@
 
 > 对应任务: [T201 创建 Composite Action](../../plan/todo.md)
 >
+> **输入清单为 T201 设计时点快照**：当前 Action 输入以 [action.yml](../../../action.yml) 为准；AI 入参详见 [quick-start.md §Action 输入参数](../../guide/quick-start.md#action-输入参数)。
+>
 > **选型结论**: 使用 GitHub Composite Action（`action.yml`），通过 `uses: dependfix/dependfix@v0.5.0` 被其他仓库引用。Composite Action 可组合多个 workflow steps 为单一可复用单元，无需 Docker 或 JavaScript 封装。
 
 ---

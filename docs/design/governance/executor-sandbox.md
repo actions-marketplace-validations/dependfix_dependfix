@@ -1,6 +1,6 @@
 # 执行器设计与沙箱评估
 
-> 状态：🔶 设计先行（T607，2026-08-08）——契约与威胁建模落盘，供 T603 实现 `ContainerExecutor`；独立沙箱容器实现留 M7。
+> 状态：✅ 设计已落地（T603 `ContainerExecutor` + M10 T1001 沙箱隔离基础设施 + M38 执行进程隔离）。⚠️ 沙箱内真实引擎执行仍为占位（`buildCmd` 回显最小 `RunResult`，见 [implementation §7.2](./executor-sandbox-implementation.md#_7-2-镜像策略)），启用前须闭环，缺口见 [backlog §候选评估中](../../plan/backlog.md#候选评估中-待评估-本阶段延后项)。
 > 背景决策见 [M6 规划决策](../../plan/archive/todo-archive-phases-m6-m7-t711.md#m6-最小平台-mvp已归档)（Q1 执行深度 A/B 双模式、Q4 沙箱=A、Q5 Action 触发=B）。
 > **安全评估（2026-08-14）**：评估结论、治理决议与不可简化的安全基线见 [沙箱与恶意依赖防护治理](./sandbox-security-governance.md)；本文档 §2.2 的 M6 缓解——USER 降权已修复（C38，2026-08-14）、外联日志已实现（C40/T805，2026-08-14），登记 [backlog C38/C40](../../plan/backlog.md)。
 > **A 模式 push + PR 闭环（2026-08-20，C53 实施）**：A 模式 fix / fix-and-pr 完成后新增推送修复分支到远程 + 创建 PR 两条链路，结束了 M6 阶段"修复结果仅在本地临时目录"问题；新的状态机 dispatched 语义（PR 失败但分支已推）、runUrl 兜底为 branch URL、workDir 保留 24h 供诊断 由分片 [executor-sandbox-implementation.md §8](./executor-sandbox-implementation.md) 记录。
@@ -15,9 +15,11 @@
 | 执行后端 | 隔离级别 | 工具链来源 | M6 状态 | M7 状态 |
 |:--|:--|:--|:--|:--|
 | 平台容器内子进程（`ContainerExecutor`） | 进程级（容器即沙箱） | 平台镜像内置 git/node/pnpm | ✅ 实现（T603） | 保留 |
-| 独立沙箱容器（`SandboxExecutor`） | 容器级（每任务/每仓库容器） | 同一镜像或精简镜像 | 🔶 设计（本文档） | 实现（backlog C26） |
+| 独立沙箱容器（`SandboxExecutor`） | 容器级（每任务/每仓库容器） | 同一镜像或精简镜像 | 🔶 设计（本文档） | 实现（M10 T1001；C26 已收口） |
 | GitHub Action（`ActionTriggerExecutor`） | GitHub 托管环境 | 目标仓库自带（action.yml 引用） | ✅ 触发实现（T607）+ 结果回填（C25） | 保留 |
 | 本地临时目录（`LocalExecutor`） | 无隔离（开发调试用） | 宿主工具链 | —（仅开发） | — |
+
+> 上表 M6 / M7 列为规划期快照；`SandboxExecutor` 的隔离基础设施已于 M10 T1001 落地，但沙箱内真实引擎执行仍为占位（`buildCmd` 回显最小 `RunResult`，见 [implementation §7.2](./executor-sandbox-implementation.md#_7-2-镜像策略)），启用前须闭环。
 
 ---
 
@@ -184,9 +186,7 @@ GitHub `dispatches` API 成功返回 204 即触发受理，但不返回 run id�
 ## 6. 相关文档
 
 - [M6 规划决策](../../plan/archive/todo-archive-phases-m6-m7-t711.md)：Q1/Q4/Q5 决策依据
-- [backlog.md C25 Action 触发结果回填](../../plan/backlog.md)：结果回填实现记录
-- [backlog.md C26 独立沙箱容器执行实现](../../plan/backlog.md)：独立沙箱容器 backlog 登记 + 2026-08-19 决策
-- [todo-archive-phases-m10-c53-c59c61.md §M10 C26 实施规划](../../plan/archive/todo-archive-phases-m10-c53-c59c61.md#m10-独立沙箱容器-c26-实施规划已归档)：T1001-T1004 子任务拆解与验收要点（2026-08-20 收口归档）
+- [todo-archive-phases-m10-c53-c59c61.md §M10 C26 实施规划](../../plan/archive/todo-archive-phases-m10-c53-c59c61.md#m10-独立沙箱容器-c26-实施规划已归档)：T1001-T1004 子任务拆解与验收要点（2026-08-20 收口归档；C25/C26 历史登记已随归档迁出 backlog）
 - [sandbox-security-governance.md §5 治理决议 G5](./sandbox-security-governance.md#5-治理决议与登记)：并发共享容器交叉污染登记
 - [架构设计](./architecture.md)：平台分层与 Executor 定位
 - [安全设计](./security.md)：凭据加密存储与最小化
