@@ -186,8 +186,13 @@ jobs:
 | `github-token` | 是 | — | GitHub Token（commit/push/PR 等操作；Dependabot alerts 读取不可用，见下行） |
 | `dependabot-alerts-token` | 否 | `''` | Dependabot alerts 专用最小权限 token（fine-grained PAT，仅 `Dependabot alerts: read`；缺省回退 `github-token`。GITHUB_TOKEN 恒 403） |
 | `code-scanning` | 否 | `false` | 同时拉取 Code Scanning alerts（与 Dependabot 并行源，默认关闭；需 token 具备 `security-events: read`，GITHUB_TOKEN 默认具备） |
-| `ai-api-token` | 否 | `''` | AI API Token（M5 联调） |
-| `ai-api-base-url` | 否 | `''` | AI API Base URL（M5 联调） |
+| `ai` | 否 | `false` | 开启 AI breaking change 研判（需配置 `ai-api-key`；dry-run 不触发、不产生费用） |
+| `ai-api-key` | 否 | `''` | AI API Key（在 workflow 中引用 `secrets.DEEPSEEK_API_KEY` 等 GitHub Secrets 传入；经环境变量传递自动打码） |
+| `ai-provider` | 否 | `openai-compatible` | AI 提供商：`openai-compatible`（默认，DeepSeek 等）/ `anthropic` |
+| `ai-model` | 否 | `deepseek-v4-flash` | AI 模型名 |
+| `ai-base-url` | 否 | `https://api.deepseek.com` | OpenAI 兼容端点（与默认模型配套） |
+| `ai-api-url` | 否 | `''` | Anthropic 兼容端点（缺省用官方端点；自托管/网关可指定） |
+| `ai-trigger` | 否 | `both` | AI 触发范围：`both` / `failure` / `major` |
 
 > **⚠️ M4 建议：为每个仓库单独配置 action（2026-08-06）**：多仓库治理参数虽已接入 Action，但推荐单仓库独立 action：
 > - **权限最小化**：单仓库 action 用 `GITHUB_TOKEN` + 该仓库最小权限的 `dependabot-alerts-token` 即可；owner 发现需要跨仓库读取权限的 PAT，泄露影响面更大。
@@ -207,6 +212,8 @@ jobs:
 #### 启用 rootless sandbox 执行（推荐用于多租户/owner 模式）
 
 > **✅ 状态：M11 T1005 路由接线已就位（2026-08-20）**——`Repository.executorKind` 已接受 `container` / `github-action` / `sandbox` 三值；scan-orchestrator 已接入 sandbox 路由与降级状态机契约（[executor-sandbox.md §7.8 降级状态机契约](../design/governance/executor-sandbox-implementation.md)）。平台 Web UI 仓库表单已暴露 sandbox 选项（仓库管理 → 添加/编辑 → 执行方式下拉），管理员可直接在 UI 选择；或经 API 显式指定。
+>
+> **⚠️ 当前限制（2026-10-26）**：sandbox 内 `buildCmd` 仍为最小占位命令（仅验证容器启动 / bind-mount / 用户态 / cgroup 限额，不启动 dependfix 引擎），选择 sandbox 的扫描会返回 0 告警的占位结果；生产修复请使用 `container` 或 `github-action`。真实引擎执行缺口见 [backlog §候选评估中](../plan/backlog.md#候选评估中-待评估-本阶段延后项)。
 >
 > **适用范围**：owner/org 多仓库扫描、`--allow-major-upgrade` 跨线升级、对不可信仓库 owner 模式修复——这些场景下恶意依赖脚本在容器内执行的风险显著高于单可信仓库场景，sandbox 执行把执行隔离在独立 rootless 容器内（与平台容器解耦），详见 [executor-sandbox.md §7](../design/governance/executor-sandbox-implementation.md#7-sandbox-执行器设计)。
 >

@@ -188,7 +188,7 @@ curl -X POST -H "Authorization: Bearer $GITHUB_TOKEN" \
 - 过滤时机：策略在发现阶段、dependabot.yml 探测**之前**应用——被排除仓库不触达 contents API（探测请求数量受控）。
 - glob 语法：`*` 匹配任意非 `/` 字符序列（不跨仓库分隔符），`?` 匹配单个非 `/` 字符，其余字符按字面量；匹配对象为完整 `owner/repo`（大小写敏感）。
 
-> **计划中（M5）**：AI 研判相关配置（`AI_API_TOKEN`、`AI_API_BASE_URL`、`AI_MODEL`）将在 M5 与 AI 引擎联调时落地。
+> **AI 研判配置已落地**：Action 侧使用 `ai` / `ai-api-key` / `ai-provider` / `ai-model` / `ai-base-url` / `ai-api-url` / `ai-trigger` 输入；平台侧按组织级 AI 配置注入 `DEPENDFIX_AI_*`（见下文「平台配置（apps/platform）」）。
 
 ## 配置文件示例
 
