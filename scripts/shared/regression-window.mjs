@@ -8,7 +8,7 @@
  * 参考: momei 项目的 scripts/shared/regression-window.mjs 实现
  */
 
-import { readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 const REGRESSION_WINDOW_RELATIVE_PATH = path.join('artifacts', 'regression', 'current.md')
@@ -108,7 +108,17 @@ export function upsertRegressionWindowContent(content, entry) {
 export async function upsertRegressionWindowEntry(entry, options = {}) {
     const projectRoot = options.projectRoot ?? process.cwd()
     const regressionWindowPath = options.regressionWindowPath ?? resolveRegressionWindowPath(projectRoot)
-    const currentContent = await readFile(regressionWindowPath, 'utf8')
+    // CI 首跑 / 清理 artifacts 后目录与文件均不存在：自动初始化，避免 ENOENT 阻断整轮回归。
+    await mkdir(path.dirname(regressionWindowPath), { recursive: true })
+    let currentContent
+    try {
+        currentContent = await readFile(regressionWindowPath, 'utf8')
+    } catch (error) {
+        if (error?.code !== 'ENOENT') {
+            throw error
+        }
+        currentContent = '# 周期性回归日志窗口\n'
+    }
     const nextContent = upsertRegressionWindowContent(currentContent, entry)
 
     await writeFile(regressionWindowPath, nextContent, 'utf8')

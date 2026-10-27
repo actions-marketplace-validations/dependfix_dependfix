@@ -1,6 +1,10 @@
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
     upsertRegressionWindowContent,
+    upsertRegressionWindowEntry,
     toPosixRelativePath,
     resolveRegressionWindowPath,
 } from './regression-window.mjs'
@@ -148,5 +152,21 @@ describe('resolveRegressionWindowPath', () => {
     it('默认使用 cwd', () => {
         const result = resolveRegressionWindowPath()
         expect(result).toContain('current.md')
+    })
+})
+
+describe('upsertRegressionWindowEntry', () => {
+    it('目录与文件缺失时自动创建并写入记录', async () => {
+        const projectRoot = await mkdtemp(path.join(tmpdir(), 'dependfix-regression-window-'))
+        try {
+            const entry = { id: 'auto-1', title: '2026-10-27 自动初始化', body: 'body' }
+            const { regressionWindowPath } = await upsertRegressionWindowEntry(entry, { projectRoot })
+            expect(regressionWindowPath).toBe(resolveRegressionWindowPath(projectRoot))
+            const content = await readFile(regressionWindowPath, 'utf8')
+            expect(content).toContain('<!-- regression-window:start:auto-1 -->')
+            expect(content).toContain('2026-10-27 自动初始化')
+        } finally {
+            await rm(projectRoot, { recursive: true, force: true })
+        }
     })
 })

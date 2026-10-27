@@ -54,7 +54,7 @@
 
 ### 候选评估中（待评估 / 本阶段延后项）
 
-> **候选池概览（2026-10-26 实测）**：48 项；已标注 P0 0 / P1 3 / P2 12 / P3 2，未标注 31。优先级分档与批次计划以 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md) 为准（P0 23 / P1 8 / 1.0 后 15）；未标注候选在评估时补齐 P 标签，不默认升级。
+> **候选池概览（2026-10-26 实测）**：49 项；已标注 P0 0 / P1 3 / P2 13 / P3 2，未标注 31。优先级分档与批次计划以 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md) 为准（P0 23 / P1 8 / 1.0 后 15）；未标注候选在评估时补齐 P 标签，不默认升级。
 > **1.0 门槛与分档**：P0 23 / P1 8 / 1.0 后 15 的分档、门槛判定与批次计划见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)；本区候选在未上收前保持候选状态，上收后按批次从本表移除。
 > **E 阶段候选（2026-10-24 用户决策 D+E）**：`critical` 必选不可关闭 / 通知严重级别术语与阈值命名 / 周报投递重试与窗口锁 / `/settings` 与通知页 dark 视觉 4 项已获授权作为 M48 归档后的下一阶段，当前保持候选状态（不含阶段编号）；M48 已归档，待启动 P 阶段。
 
@@ -70,6 +70,7 @@
 - **`pnpm_audit` 的 token-free 回退意图与实现不一致（P2 🛡️）**—— `pnpm-audit.tool.ts` 注释与产品意图是「无 GitHub token 或 403 场景」的本地回退，但实现保留 `requireToken()`，缺失 `GITHUB_TOKEN` 时直接返回 `ok:false`；当前 README / tool description 已按实际行为修正。待评估：移除 `requireToken()`（或改为可选 token），补无 token 用例，恢复真正回退。触发：无 token 环境需要 pnpm-audit 回退时。
 - **周回归审计在 registry 故障时假绿（M49.3 边界，P2 🛡️）**—— 阻断命令按 AC1 在 registry 故障时 exit 0；`security:audit-deps` 在周回归仅按 exit code 判过，若 registry 故障且日志无审计结果行，run 会 success 但未实际审计。当前 §5.6 / 检查点已要求「证据 run 须含审计结果行」；待评估：为 `security:audit-deps` 增加输出断言（无结果行则非零）或落盘校验。触发：出现 registry 故障窗口或周回归连续 success 但日志无审计结果时。
 - **`repositoryUpdateSchema.partial()` 注入默认值导致 PUT 静默重置字段（P1 🛡️，2026-10-27 审计发现）**—— Zod 4.6.7 实测 `repositoryUpdateSchema.parse({ note: 'x' })` 会注入 `platform: 'github'` / `defaultBranch: 'main'` / `packageManager: 'pnpm'` / `executorKind: 'container'`；任何只改 note / tags 的 PUT 会把 `github-action` 仓库静默重置为 container（defaultBranch / packageManager 同理）。影响：数据完整性与执行器误重置。待修复：update 专用无默认字段 schema，或 API 层按原始 body 键应用；补「PUT 省略 executorKind 不改动存量 github-action」用例。当前 UI 提交全量字段，暂不触发；API 直连调用方需注意。触发：API 直连部分更新导致字段被重置，或 update 语义修复批次。
+- **回归窗口 new-entry 插入点嵌套进上一条受管块（P2 🛡️，2026-10-27 审计发现）**—— `upsertRegressionWindowContent` 以第一条 `## YYYY-MM-DD` 标题为插入点，但该标题被上一条 `<!-- regression-window:start:id -->` 包裹；本地累积 / 重跑最旧 id 时新块嵌套进旧块标记区间（a→b→a 三次 upsert 后仅剩 1 块）。CI 每次全新 checkout 仅写 1 条不受影响；历史 `docs/reports/regression/current.md` 已呈嵌套（`0b0ff93b` 前）。待修复：锚点改为第一条记录 start 标记之前（无标记回退 `##`），补「不同 id 顺序 upsert 生成同级块 + 最旧 id 重跑不丢后续块」单测。触发：本地连续回归或修复窗口结构时。
 
 - **运行面漏洞检测：镜像基底 / 运行时二进制 / OS 包（待研究）** —— 背景（2026-10-22）：Node 24.18.1 基础镜像在 2026 年 10 月 21 日安全公告（CVE-2026-111497 Brotli 越界写、105483 / 106069 TLS 主机名校验绕过等）后仍只能靠**外部人工巡检**发现——Dependabot 未配置 docker 生态、基底此前为 digest 裸写（本轮已改为 tag + digest，但仍为手工钉定、无漂移与漏洞追踪）、`pnpm audit` 只覆盖 npm 依赖、GitHub 侧告警源为 Dependabot / Code Scanning / Code Quality findings（最后一类为代码静态分析），本地回退仅 `pnpm-audit`（同属 npm 依赖）；运行面与 OS 包无任何告警源。本批新增的 `check-node-version.mjs` 是**静态下限闸门**：只有人工抬升基线后才会拦截，**不能发现基线之后新披露的 CVE**。
   - **待研究问题**：① dependfix 自身的运行面（Docker 基底 / Node 二进制 / apk 包 / CI 运行时）能否自动检测并按严重级别分级？② 同一能力能否产品化，成为 dependfix 对**被管理仓库**的新告警源——扫描目标仓 Dockerfile / `.nvmrc` / `engines.node` 与已知运行时漏洞比对，复用现有验证链与 PR 创建提修复 PR？

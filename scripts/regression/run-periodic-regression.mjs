@@ -582,7 +582,18 @@ export async function runPeriodicRegression(options = {}) {
         artifactJsonPath: path.join(artifactDirectory, `${artifactBaseName}.json`),
         artifactMarkdownPath: path.join(artifactDirectory, `${artifactBaseName}.md`),
     }
-    const logContent = await readFile(regressionLogPath, 'utf8')
+    const logContent = await (async () => {
+        // CI 首跑 / 清理 artifacts 后 current.md 不存在：初始化空窗口，避免 ENOENT 阻断整轮回归。
+        await mkdir(path.dirname(regressionLogPath), { recursive: true })
+        try {
+            return await readFile(regressionLogPath, 'utf8')
+        } catch (error) {
+            if (error?.code !== 'ENOENT') {
+                throw error
+            }
+            return '# 周期性回归日志窗口\n'
+        }
+    })()
     const logHealth = assessRegressionLogWindow(logContent)
     const results = []
 
