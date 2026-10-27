@@ -8,7 +8,7 @@
 
 | 内容类型 | 位置 |
 |:--|:--|
-| 当前阶段任务 | **M49：0.6.0 发版清障**（2026-10-25 用户决策；六原子见下） |
+| 当前阶段任务 | **M49：0.6.0 发版清障**（2026-10-25 用户决策；六原子 + 2 项追加临时待办（不占编号）见下） |
 | 下一阶段（已授权，未规划） | **1.0 发布门槛收口**（E → F1 → F2 → G；台账见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)） |
 | 已完成阶段归档 | [todo-archive.md](todo-archive.md)（阶段索引 + [archive/](archive/) 分片；M0-M48 全部已归档） |
 | 里程碑与阶段交付 | [roadmap.md](roadmap.md)（M0-M48 已归档；M49 进行中） |
@@ -37,6 +37,8 @@
 - **M49.3** [P0 🛡️] Security 门禁转正（prod 阻断 + 全量信号；周回归转绿）
 - **M49.4** [P0 📚] 发版面文档漂移收口（AI 输入名 / M5 遗留 / MCP tool 数 / 设计索引 3 行）
 - **M49.5** [P0 🚀] 0.6.0 版本提升、发布与发布后验证
+
+**阶段期间追加临时待办（不占编号）**：sandbox 入口临时关闭（2026-10-27）；平台本地日志通道统一（2026-10-27，建议 M49.5 发布后执行）。
 
 **建议顺序**：M49.1 → M49.2a → M49.2b → M49.4 → M49.3 → M49.5。M49.1 与 M49.2a 可并行评估；M49.3 改为**先翻转、后取证**——翻转后连续 3 次 `master` push 的 prod 阻断步骤 `conclusion=success` 且日志含审计结果行，回填为转正证据；回填前不闭环，任一 run 失败则回退 `|| true` 或按 §5.7 评估；M49.5 最后执行。
 
@@ -161,4 +163,25 @@
 - **P 阶段（2026-10-27）**：确认 UI/API/路由三处入口；`repo-form-dialog.vue` 当前 3 选项且无 disabled；`repositorySchema` / `repositoryUpdateSchema` / `scanRequestSchema` / `batchImportSchema` 接受 sandbox；`scan-orchestrator` 在 `isAvailable()` 时走 SandboxExecutor 占位。定方案：UI disabled + 存量编辑迁移提示；API 显式 sandbox 拒绝；路由强制 container + degraded `sandbox_entry_disabled`；e2e fixture 保留存量模拟。审计预期 deep（安全 / 可用性 + 数据写入 + UI）。
 - **D 阶段（2026-10-27）**：UI 表单 sandbox 项 disabled、存量仓库打开即迁移为 container 并提示，列表 / 过滤标签标注「暂不可用」；仓库创建 / 更新 / 批量导入 / 扫描请求显式 sandbox 一律 400（共享 `SANDBOX_EXECUTOR_DISABLED_MESSAGE`）；编排层对存量 sandbox 强制 ContainerExecutor + degraded `sandbox_entry_disabled`（容器不可用 → failed `container_unavailable`），环境审计仍落 `sandbox_degraded` 但**只落库不通知**（避免噪声）；retry 对存量 sandbox run 归一为 container（避免 409）；e2e fixture 增加 `executorKind` 以注入存量仓库（仅测试端点）。文档同步 quick-start（入口关闭块改注释命令 + 当前降级口径）/ deployment zh+en / executor-sandbox / implementation §7.1/§7.4/§7.8.3 / index / platform §3.8 / backlog P1；`repositoryUpdateSchema.partial()` 默认值缺陷登记 backlog P1。验证：定向 6 文件 134 passed + retry 新增用例；platform 全量 165 files / 2168 passed / 9 skipped；新增 e2e 用例通过（disabled 选项 + 迁移提示 + PUT 请求体 `executorKind=container` + API 持久化）；`lint` 0 error / 3 存量 warning；`typecheck` 通过；platform build 通过；`lint:md` / `check:docs` / `check:readme-i18n` / `i18n:check:anchor` / `docs:check:i18n` / `docs:build` / `check:verify-chain` 全通过；`i18n:audit:missing` 0。实际 29 文件 / +335 / -259。A 阶段并发 deep：后端 **Pass**（W01/W02 已修、W03 登记 backlog、W04/W05 计数与提交粒度已修）；UI/文档 **Reject**（RG-B01 quick-start 仍含可执行 sandbox 命令 + 旧降级口径）→ 已修；R2 standard **Pass**（0B/0W；W06 测试标题 + S07-S11 已修）。残余：真实 sandbox 执行仍留 P1；`sandboxLimits` 字段保留供存量 / API 读取；e2e fixture 的 sandbox 仅测试模拟。
 
-> **追加临时待办（不占阶段条目编号，2026-10-25 用户授权）**：1.0 发布门槛（G1-G8、P0 23 / P1 8 / 1.0 后 15+8、真实环境矩阵、批次 R/E/F1/F2/G）见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)。本区块只作指针，不占 M49 条目编号；批次表以台账 §5 为唯一事实源。
+### 追加临时待办：平台本地日志通道统一（2026-10-27 用户授权，不占阶段条目编号）
+
+- **背景**：用户 2026-10-27 决策——Sentry 走官方 SaaS；本地日志通道统一优先（本地文件可查）；除本地日志优化外的可观测性条目延后到 1.0 后。评估见 [第三方可观测性评估](../research/2026-10-27-third-party-observability-evaluation.md)。
+- **目标**：把进程级日志从散落 `console.*` 收敛到统一 logger，输出到本地可查文件（`LOG_DIR` 默认 `data/logs`，容器内 `/app/data/logs`；按日轮转 + 错误文件），容器重建后仍可从数据卷检索。
+- **范围**：
+  1. `apps/platform/server/utils/logger.ts`：补齐 `exceptionHandlers` / `rejectionHandlers`，确认文件轮转 / 错误文件 / 生产压缩 / 31 天保留。
+  2. 进程边界接入：Nitro 插件、队列 worker、执行器、通知四处；未迁移的 `console.*` 仍走 stdout，逐批迁移。
+  3. 配置与入口：`LOG_DIR` / `LOG_LEVEL` / `LOGFILES`；自定义 `DATA_DIR` 时导出 `DATA_DIR` 或显式 `LOG_DIR=${DATA_DIR}/logs`，确保日志落数据卷。
+  4. 文档：`docs/guide/deployment.md` / 环境变量文档补日志文件位置、轮转、排障命令。
+  5. 脱敏与单测：日志消息 / context 复用 `sanitizeDeep`；补文件目录、不可写回退、异常钩子、`DATA_DIR` 派生用例。
+- **验收标准**：
+  1. 容器内 `/app/data/logs/YYYY-MM-DD.log` 与 `YYYY-MM-DD.errors.log` 可按日期查询；数据卷重建容器后文件仍在；自定义 `DATA_DIR` 时 `LOG_DIR` 跟随数据卷。
+  2. `LOG_DIR` / `LOG_LEVEL` / `LOGFILES` 有文档与单测；不可写目录回退 / warn 不阻断启动。
+  3. 至少 4 个进程边界使用统一 logger；`MemoryLogger` 运行日志不重复落文件；`docker logs` 仍可用。
+  4. 敏感字段脱敏用例通过；`pnpm lint` / `pnpm typecheck` / platform 单测 / build 通过；文档门禁通过。
+- **不做什么**：不接入 Axiom；不一次性迁移全部 161 处 `console.*`；不改变运行结果模型与运行详情下载；不引入外部日志服务。
+- **依赖**：无；日志量 / 文件权限需在容器内验证；用户 2026-10-27 明确授权追加。
+- **交付物**：4-6 commits / 12-18 files / 500-800 行（含文档与单测）。
+- **风险与缓解**：重复输出 → 明确进程级 / 运行级分工；日志量 → 按日轮转 + 31 天保留 + 级别过滤；文件权限 → 数据卷写探针；`DATA_DIR` 未派生 → 入口显式 `LOG_DIR`；敏感数据 → `sanitizeDeep`。
+- **执行顺序 / 容量（§3.1.1）**：建议 M49.5 发布后、阶段归档前执行，不阻断 0.6.0 发布。剩余未完成 = M49.3（待推送取证）+ M49.5（发布）+ 本项；累计插队 2 批（<3 批阈值）；工作量 sandbox 594 行 + 本项 500-800 行 = 1094-1394 行，基线 1400-2430 行（下限 45% / 上限 99.6%，上限口径命中 50% 阈值）；剩余原子均为 P0 发版阻断、无可移出项 → 本项排在发布后；若窗口不足，M49 归档前移入 backlog 作为 1.0 前独立批次（恢复条件：M49.5 完成；最晚决策点：M49 归档前）。本项不占编号，不改变六原子与类型平衡；验证预算覆盖 platform 单测 / typecheck / lint / build + 文档门禁。
+
+> **下一阶段指针（不占阶段条目编号，2026-10-25 用户授权）**：1.0 发布门槛（G1-G8、P0 23 / P1 8 / 1.0 后 15+8、真实环境矩阵、批次 R/E/F1/F2/G）见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)。本区块只作指针，不占 M49 条目编号；批次表以台账 §5 为唯一事实源。
