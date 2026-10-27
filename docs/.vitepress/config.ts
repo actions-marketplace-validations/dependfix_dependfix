@@ -103,6 +103,7 @@ const zhSidebar = {
                 { text: '竞品分析（2026-07）', link: '/research/2026-07-26-competitive-research' },
                 { text: '发布工具对比（2026-08）', link: '/research/2026-08-02-release-tools-comparison' },
                 { text: 'momei 平台参考（2026-08）', link: '/research/2026-08-07-momei-platform-reference' },
+                { text: '第三方可观测性评估（2026-10）', link: '/research/2026-10-27-third-party-observability-evaluation' },
                 { text: 'better-auth cookie 路径审计', link: '/research/better-auth-set-cookie-path-audit' },
                 { text: 'Code Scanning B 类样本', link: '/research/code-scanning-b-class-samples' },
             ],
