@@ -7,14 +7,18 @@ import {
     classifyDependabotAlert,
     evaluateAlerts,
     exemptionKey,
+    exemptionMatches,
     fetchAllPages,
     formatLines,
     loadExemptions,
+    main,
     mapRuleSeverity,
     normalizeSeverity,
     parseCli,
     parseNextLink,
     parseRepoSlug,
+    permissionHint,
+    printUsage,
     resolveRepoSlug,
     resolveToken,
     resolveTokens,
@@ -23,6 +27,16 @@ import {
 } from './check-release-security-alerts.mjs'
 
 const REPO_ROOT = join(import.meta.dirname, '..')
+
+/** 构造 fetch 响应桩（ok / status / json / headers / text）。 */
+const stubResponse = ({ ok = true, status = 200, statusText = '', body = [], link = null, text } = {}) => ({
+    ok,
+    status,
+    statusText,
+    json: async () => body,
+    headers: { get: (name) => (name.toLowerCase() === 'link' ? link : null) },
+    ...(text === undefined ? {} : { text }),
+})
 
 const validExemptionText = JSON.stringify({
     exemptions: [
@@ -142,6 +156,12 @@ describe('豁免台账校验', () => {
         expect(joined).toContain('重复')
     })
 
+    it('severity 非 high 的条目报错（moderate / low 无需登记）', () => {
+        const base = JSON.parse(validExemptionText).exemptions[0]
+        const { errors } = loadExemptions(JSON.stringify({ exemptions: [{ ...base, severity: 'moderate' }] }))
+        expect(errors.join('\n')).toContain('severity 仅允许 high')
+    })
+
     it('非对象条目跳过并报错', () => {
         expect(loadExemptions('{"exemptions":[null]}').errors).toContain('exemptions[0] 必须是对象')
     })
@@ -184,6 +204,12 @@ describe('告警判定', () => {
         expect(passed.failures).toEqual([])
         expect(passed.summary.exempted).toBe(1)
         expect(passed.warnings).toEqual([])
+    })
+
+    it('来源 / 编号不一致时不命中', () => {
+        const entry = JSON.parse(validExemptionText).exemptions[0]
+        expect(exemptionMatches({ source: 'code-scanning', id: entry.id, state: 'open' }, entry)).toBe(false)
+        expect(exemptionMatches({ source: 'dependabot', id: 'GHSA-other', state: 'open' }, entry)).toBe(false)
     })
 
     it('Code Scanning high 按 rule id + 实例路径命中豁免', () => {
@@ -287,6 +313,13 @@ describe('输出组装', () => {
         expect(lines).toContain('被 dismiss 但未在豁免台账登记')
     })
 
+    it('annotate 覆盖未登记 high 与未知级别', () => {
+        const unexempted = evaluateAlerts({ dependabot: [dependabotAlert('high')] })
+        expect(formatLines({ repo: 'o/r', result: unexempted, annotate: true }).join('\n')).toContain('::error::')
+        const unknown = evaluateAlerts({ dependabot: [{ ...dependabotAlert('high'), security_advisory: { severity: undefined } }] })
+        expect(formatLines({ repo: 'o/r', result: unknown, annotate: true }).join('\n')).toContain('无法判定告警级别')
+    })
+
     it('stale 豁免输出 warning 注解', () => {
         const result = evaluateAlerts({ exemptions: [JSON.parse(validExemptionText).exemptions[0]] })
         const lines = formatLines({ repo: 'o/r', result, annotate: true })
@@ -330,6 +363,38 @@ describe('分页与 API 错误', () => {
         await expect(
             fetchAllPages('https://api.test/p1', { token: 't', fetchImpl: async () => selfLink, sleep: async () => {} }),
         ).rejects.toThrow('分页超过上限')
+    })
+
+    it('网络异常重试耗尽后抛错（含 readErrorBody 兜底）', async () => {
+        const sleeps = []
+        const fetchImpl = vi.fn(async () => {
+            throw new Error('socket hang up')
+        })
+        await expect(fetchAllPages('https://api.test/x', { token: 't', fetchImpl, sleep: (ms) => sleeps.push(ms) }))
+            .rejects.toThrow('socket hang up')
+        expect(fetchImpl).toHaveBeenCalledTimes(3)
+        expect(sleeps).toEqual([200, 400])
+
+        const textThrows = vi.fn(async () => stubResponse({
+            ok: false,
+            status: 500,
+            statusText: 'boom',
+            text: () => {
+                throw new Error('no body')
+            },
+        }))
+        await expect(fetchAllPages('https://api.test/y', { token: 't', fetchImpl: textThrows, sleep: () => {} }))
+            .rejects.toThrow(/HTTP 500/)
+    })
+
+    it('默认 sleep 生效（5xx 退避后成功）', async () => {
+        let calls = 0
+        const fetchImpl = vi.fn(async () => {
+            calls += 1
+            return calls === 1 ? stubResponse({ ok: false, status: 503 }) : stubResponse({ body: [] })
+        })
+        await expect(fetchAllPages('https://api.test/z', { token: 't', fetchImpl })).resolves.toEqual([])
+        expect(calls).toBe(2)
     })
 
     it('parseNextLink 只认 rel=next', () => {
@@ -380,11 +445,86 @@ describe('CLI 参数解析', () => {
         expect(parseCli(['-h'])).toMatchObject({ help: true })
     })
 
+    it('跳过 `--` 分隔符', () => {
+        expect(parseCli(['--', '--repo=o/r'])).toEqual({ repo: 'o/r', exemptions: null, help: false })
+    })
+
     it('未知参数 / 缺值 / 空值 → UsageError（退出码 2 语义）', () => {
         expect(() => parseCli(['--repo'])).toThrow(UsageError)
         expect(() => parseCli(['other/repo'])).toThrow(UsageError)
         expect(() => parseCli(['--repo='])).toThrow(UsageError)
         expect(() => parseCli(['--unknown=1'])).toThrow(UsageError)
+    })
+})
+
+describe('permissionHint', () => {
+    it('按 401/403 与 404 给出可操作提示，其余为空', () => {
+        expect(permissionHint('HTTP 403 Forbidden')).toContain('GITHUB_TOKEN 恒 403')
+        expect(permissionHint('HTTP 401 unauthorized')).toContain('security_events')
+        expect(permissionHint('HTTP 404 Not Found')).toContain('未启用此告警源')
+        expect(permissionHint('其它错误')).toBe('')
+    })
+})
+
+describe('main / printUsage', () => {
+    it('--help 打印用法并返回 0', async () => {
+        const log = vi.fn()
+        expect(await main({ argv: ['--help'], log, error: vi.fn() })).toBe(0)
+        expect(log.mock.calls[0]?.[0]).toContain('用法：')
+    })
+
+    it('参数错误返回 2 并输出用法', async () => {
+        const error = vi.fn()
+        const log = vi.fn()
+        expect(await main({ argv: ['--repo'], log, error })).toBe(2)
+        expect(error).toHaveBeenCalledWith(expect.stringContaining('参数错误'))
+        expect(log).toHaveBeenCalled()
+    })
+
+    it('通过 runCheck 注入返回其退出码并逐行输出', async () => {
+        const log = vi.fn()
+        const runCheckImpl = vi.fn(async () => ({ exitCode: 0, lines: ['line-a', 'line-b'] }))
+        expect(await main({ argv: ['--repo=o/r'], env: {}, tokens: { dependabot: 'a', codeScanning: 'b' }, runCheckImpl, log, error: vi.fn() })).toBe(0)
+        expect(runCheckImpl).toHaveBeenCalledWith(expect.objectContaining({ repo: 'o/r', exemptionsPath: EXEMPTIONS_REL }))
+        expect(log.mock.calls.map(([line]) => line)).toEqual(['line-a', 'line-b'])
+    })
+
+    it('runCheck 抛错时向上抛出（由入口守卫转 exitCode 1）', async () => {
+        const runCheckImpl = async () => {
+            throw new Error('boom')
+        }
+        await expect(main({ argv: ['--repo=o/r'], env: {}, runCheckImpl, log: vi.fn(), error: vi.fn() }))
+            .rejects.toThrow('boom')
+    })
+
+    it('printUsage 可注入日志通道，缺省走 console.log', () => {
+        const log = vi.fn()
+        printUsage(log)
+        expect(log).toHaveBeenCalledTimes(1)
+        expect(log.mock.calls[0]?.[0]).toContain('退出码：0 通过')
+
+        const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined)
+        try {
+            printUsage()
+            expect(consoleSpy).toHaveBeenCalledTimes(1)
+        } finally {
+            consoleSpy.mockRestore()
+        }
+    })
+
+    it('main 缺省 log / error 走 console', async () => {
+        const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined)
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+        try {
+            expect(await main({ argv: ['--help'] })).toBe(0)
+            expect(consoleSpy).toHaveBeenCalled()
+
+            expect(await main({ argv: ['--repo'] })).toBe(2)
+            expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('参数错误'))
+        } finally {
+            consoleSpy.mockRestore()
+            errorSpy.mockRestore()
+        }
     })
 })
 

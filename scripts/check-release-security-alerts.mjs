@@ -436,7 +436,7 @@ export function resolveToken(env = process.env) {
     return resolveTokens(env).dependabot
 }
 
-function permissionHint(tokenError) {
+export function permissionHint(tokenError) {
     if (/HTTP (401|403)/.test(tokenError)) {
         return '（Dependabot alerts 需 classic security_events 或 fine-grained Dependabot alerts: read，GITHUB_TOKEN 恒 403；Code Scanning 需 security-events: read / fine-grained Code scanning alerts: read）'
     }
@@ -552,8 +552,8 @@ export function parseCli(argv = []) {
     return options
 }
 
-function printUsage() {
-    console.log(`用法：node scripts/check-release-security-alerts.mjs [--repo=owner/repo] [--exemptions=path]
+export function printUsage(log = (line) => console.log(line)) {
+    log(`用法：node scripts/check-release-security-alerts.mjs [--repo=owner/repo] [--exemptions=path]
 
 环境变量：
   GITHUB_REPOSITORY          GitHub Actions 自动注入的 owner/repo（本地可用 --repo 替代）
@@ -566,42 +566,52 @@ function printUsage() {
 退出码：0 通过 / 1 门禁失败或配置、API 错误 / 2 参数错误`)
 }
 
-async function main() {
+/** CLI 主流程（依赖可注入，便于单测；退出码语义：0 通过 / 1 门禁失败 / 2 参数错误）。 */
+export async function main({
+    argv = getCliArgs(),
+    env = process.env,
+    tokens = resolveTokens(env),
+    runCheckImpl = runCheck,
+    log = (line) => console.log(line),
+    error = (line) => console.error(line),
+} = {}) {
     let options
     try {
-        options = parseCli(getCliArgs())
-    } catch (error) {
-        if (error instanceof UsageError) {
-            console.error(`[release-security] 参数错误：${error.message}`)
-            printUsage()
+        options = parseCli(argv)
+    } catch (failure) {
+        if (failure instanceof UsageError) {
+            error(`[release-security] 参数错误：${failure.message}`)
+            printUsage(log)
             return 2
         }
-        throw error
+        /* v8 ignore next -- 防御性重抛：parseCli 当前只抛 UsageError（保留以防未来新增错误类型） */
+        throw failure
     }
     if (options.help) {
-        printUsage()
+        printUsage(log)
         return 0
     }
-    const tokens = resolveTokens()
-    const result = await runCheck({
-        repo: resolveRepoSlug({ argValue: options.repo }),
+    const result = await runCheckImpl({
+        repo: resolveRepoSlug({ argValue: options.repo, env }),
         dependabotToken: tokens.dependabot,
         codeScanningToken: tokens.codeScanning,
         exemptionsPath: options.exemptions || EXEMPTIONS_REL,
     })
     for (const line of result.lines) {
-        console.log(line)
+        log(line)
     }
     return result.exitCode
 }
 
+/* v8 ignore start -- CLI 入口守卫：进程级副作用不可在单测内触发（与其它脚本同惯例） */
 if (isDirectExecution(import.meta.url)) {
     main()
         .then((code) => {
             process.exitCode = code
         })
-        .catch((error) => {
-            console.error(`[release-security] FAIL：${error instanceof Error ? error.message : String(error)}`)
+        .catch((failure) => {
+            console.error(`[release-security] FAIL：${failure instanceof Error ? failure.message : String(failure)}`)
             process.exitCode = 1
         })
 }
+/* v8 ignore stop */
