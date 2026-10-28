@@ -37,6 +37,7 @@
 | [队列僵尸任务终结与去重键释放设计](./queue-stale-recovery.md) | 专项设计（宿主机重启后 pending/running 收敛 + BullMQ 去重键释放 + 触发自愈 + worker 慢重试） | ✅ 已落地（2026-10-18，Review Gate R2 Pass） |
 | [平台通知与邮件推送设计](./platform-notification.md) | 专项设计（事件分层 + 组织 / 个人配置 + 收件人分流 + 合并降噪；issue #190） | ✅ 已落地（2026-10-22 M46 归档；B1-B4 闭环，B5 已随 M47.5 进入规划） |
 | [验证链与目标仓库 CI 口径对齐设计](./verification-ci-alignment.md) | 专项设计（M47.1：workflow 命令口径解析 / 差异披露 / 默认分支健康预检） | ✅ 已落地（2026-10-23，M47.1；Review Gate R2 Pass） |
+| [平台本地日志通道统一设计](./platform-logging.md) | 专项设计（进程级日志统一 + 本地文件轮转 + 致命错误落盘） | ✅ 已实施（2026-10-28，M49 追加临时待办；Review Gate R3 Pass） |
 | [1.0 发布门槛与就绪度台账](./release-1.0-readiness.md) | 发布治理（G1-G8 门槛 / P0-P1 分档 / 真实环境矩阵 / 批次计划） | 🔶 进行中（2026-10-25 立项；目标 1.0.0） |
 | [对外 PR 交付闭环设计](./pr-delivery-closure.md) | 专项设计（M48：家族锁步 / CI 独有脚本 / 失败指纹 / 提交面 / PR 回环 / 归因） | ✅ 已落地（2026-10-25，M48.1-M48.6 六原子闭环；Review Gate 逐条 Pass） |
 

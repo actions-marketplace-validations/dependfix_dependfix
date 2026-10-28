@@ -125,7 +125,7 @@ The management platform (`apps/platform`) is configured via env vars injected by
 - **Full deployment steps**: see [Docker deployment](./deployment.md).
 
 > ⚠️ **Injection model (important)**: the default `docker-compose.yml` has **no `env_file`** — it forwards only a whitelist of variables via `${...}` interpolation into the container (**compose name → container name**):
-> `PORT` · `PUID`/`PGID` · `AUTH_SECRET`→`NUXT_AUTH_SECRET` · `DATABASE_PATH` · `DATABASE_MIGRATIONS_RUN` · `NUXT_ENCRYPTION_KEY` · `REGISTRATION_DISABLED`→`NUXT_REGISTRATION_DISABLED` · `NUXT_PUBLIC_BETTER_AUTH_URL` · `NUXT_REDIS_URL` (hard-coded) · `QUEUE_ENABLED`/`QUEUE_JOB_RETRIES`/`QUEUE_BACKOFF_MS`→`NUXT_*` · `QUEUE_WORKER`→`DEPENDFIX_QUEUE_WORKER` · `IN_PROCESS_WORKER`→`NUXT_IN_PROCESS_WORKER` · `PNPM_CONFIG_STORE_DIR` · `DEPENDFIX_IMAGE`/`DEPENDFIX_BUILD_IMAGE`.
+> `PORT` · `PUID`/`PGID` · `AUTH_SECRET`→`NUXT_AUTH_SECRET` · `DATABASE_PATH` · `DATABASE_MIGRATIONS_RUN` · `NUXT_ENCRYPTION_KEY` · `REGISTRATION_DISABLED`→`NUXT_REGISTRATION_DISABLED` · `NUXT_PUBLIC_BETTER_AUTH_URL` · `NUXT_REDIS_URL` (hard-coded) · `QUEUE_ENABLED`/`QUEUE_JOB_RETRIES`/`QUEUE_BACKOFF_MS`→`NUXT_*` · `QUEUE_WORKER`→`DEPENDFIX_QUEUE_WORKER` · `IN_PROCESS_WORKER`→`NUXT_IN_PROCESS_WORKER` · `PNPM_CONFIG_STORE_DIR` · `LOG_DIR`/`LOG_LEVEL`/`LOGFILES` · `DEPENDFIX_IMAGE`/`DEPENDFIX_BUILD_IMAGE`.
 > Variables **outside** the whitelist below (email / OAuth / OIDC / `AUTH_MODE` / `DATABASE_TYPE|URL|SSL|SYNCHRONIZE` / `BACKUP_*` / `RUN_WORK_ROOT` / `SANDBOX_*` / `DEPENDFIX_AI_*` / `ACTION_STATUS_MONITOR_ENABLED` / notification, etc.) are **not injected by default** — add them to the compose `environment:` (Nuxt runtimeConfig vars need the `NUXT_` prefix) or via `docker run -e`.
 >
 > ⚠️ **Nuxt runtime override prefix**: the platform is a Nuxt app; `runtimeConfig` runtime overrides **only honor the `NUXT_` prefix** — compose var `AUTH_SECRET` → container `NUXT_AUTH_SECRET`; `REGISTRATION_DISABLED` → `NUXT_REGISTRATION_DISABLED`. Build-time-baked env (e.g. `AUTH_MODE`) needs the `NUXT_` prefix at runtime, otherwise it silently falls back to the default. Server vars read directly via `process.env` (`DATABASE_*` / `CLONE_*` / `DEPENDFIX_*`, etc.) are injected under their original names.
@@ -221,6 +221,16 @@ The management platform (`apps/platform`) is configured via env vars injected by
 | `DEPENDFIX_ENV_ALERT_RECIPIENTS` | — | org admin/org_admin emails | Environment alert email recipients (comma-separated, overrides default) |
 | `DEPENDFIX_WEEKLY_DIGEST_HOUR` | — | `9` | Weekly digest trigger hour (0-23, server timezone; invalid values fall back to 9); requires both organization and personal switches on |
 | `DEPENDFIX_LOCALE` | — | `zh-CN` | Notification email language (`zh-CN` / `en-US`) |
+
+### Logging
+
+| Variable | Required | Default | Description |
+|:---|:---:|:---|:---|
+| `LOG_DIR` | — | `/app/data/logs` (entrypoint derives `$DATA_DIR/logs`) | Process-level log directory (daily rotation, 31-day retention; errors go to `YYYY-MM-DD.errors.log`). Follows the data volume when `DATA_DIR` is customized; use an absolute path for custom values |
+| `LOG_LEVEL` | — | `info` | Log level: `error` / `warn` / `info` / `http` / `verbose` / `debug` / `silly`; filters console and files alike; invalid values fall back to `info` with a warning |
+| `LOGFILES` | — | `true` | Whether to write files (`true/false` · `1/0` · `yes/no` · `on/off`); `false` keeps stdout / stderr only (`docker logs` still works), invalid values fall back to the default with a warning. An unwritable directory falls back to console with a warning |
+
+> Channel split: process-level logs (startup / queue / executor / notification) go through the unified logger into files; per-run engine output stays in `ScanRun.logsJson` via `MemoryLogger` (visible on the console, never duplicated into the log files). Troubleshooting commands and retention are in [Docker deployment → Log files](./deployment.md#log-files).
 
 ### Docker / deployment
 

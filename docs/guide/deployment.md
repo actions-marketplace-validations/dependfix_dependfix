@@ -149,6 +149,37 @@ docker compose exec -u 100:101 platform rm -rf /app/data/pnpm-store
 - **备份注意**：卷级备份（下方「备份与恢复」的 tar 示例）会连同 store 一起打包；只需数据库时给 tar 加 `--exclude=./pnpm-store`。
 - **提交卫生**：安装产物不会进入交付提交——`fix` / `fix-and-pr`（且非 dry-run）运行开始时，引擎把 `.pnpm-store/` 与 `node_modules/` 写入目标仓库的 `.git/info/exclude`（幂等，不修改目标仓库的 `.gitignore`），交付提交本身按白名单与 fixer 声明路径收集（安装产物不在集合内，见 [pr-delivery-closure §7](../design/governance/pr-delivery-closure.md#7-m484-提交面白名单与-yaml-定点编辑)），排除条目另外保证它们不污染「无变更」判定；写入失败会 warn 但继续运行。
 
+## 日志文件
+
+平台**进程级日志**（启动行、队列模式、执行器 clone / 失败、通知投递）统一写数据卷，容器重建后仍可按日期检索；单次 run 的引擎日志仍存 `ScanRun.logsJson`（运行详情可下载），**不重复写文件**。
+
+| 项 | 默认 | 说明 |
+|:---|:---|:---|
+| 目录 | `/app/data/logs` | 入口默认 `LOG_DIR=$DATA_DIR/logs` 并导出；自定义 `DATA_DIR` 自动跟随 |
+| 主日志 | `YYYY-MM-DD.log` | 级别由 `LOG_LEVEL` 控制（默认 `info`），按日轮转、单文件 20 MB 上限 |
+| 错误日志 | `YYYY-MM-DD.errors.log` | 仅 `error` 级（含致命错误），单独留档便于告警 |
+| 保留 | 31 天 | 生产构建额外压缩历史文件（`*.gz`） |
+| 控制台 | 始终输出 | `docker logs` 行为不变（受同一 `LOG_LEVEL` 过滤；`error` 走 stderr）；文件通道是额外可查面 |
+
+排障命令：
+
+```bash
+# 今天的主日志 / 错误日志
+docker compose exec -u 100:101 platform sh -c 'tail -n 200 /app/data/logs/$(date +%F).log'
+docker compose exec -u 100:101 platform sh -c 'tail -n 100 /app/data/logs/$(date +%F).errors.log'
+# 按关键字回溯（当天 / 未压缩；生产 31 天窗口内历史为 .gz）
+docker compose exec -u 100:101 platform sh -c 'grep -h "stale-cleanup" /app/data/logs/*.log | tail -n 50'
+docker compose exec -u 100:101 platform sh -c 'zcat /app/data/logs/*.log.gz 2>/dev/null | grep "stale-cleanup" | tail -n 50'
+# 宿主机直接看（命名卷名 = <compose 项目名>_dependfix-data，默认项目名为 platform）
+docker run --rm -v platform_dependfix-data:/data alpine ls -la /data/logs
+```
+
+- **进程角色**：容器默认双进程（HTTP + 队列 worker）共享同一日志目录，启动行带 `role=server|worker`（`[logger] files=/app/data/logs level=info role=worker`）；轮转记账文件按角色隔离（`.server-*.json` / `.worker-*.json`），避免两进程共写同一份 audit JSON。
+- **自定义目录**：`LOG_DIR=/srv/logs`（建议绝对路径；相对路径按平台进程 cwd `/app` 解析）。入口以运行身份创建目录，不对自定义路径 `chown`——挂载点需预先授权给 `PUID:PGID`。
+- **不可写即回退**：目录创建或写探针失败（只读挂载 / 权限不足）时，日志模块 warn 后**只保留控制台输出**，不阻断启动。`LOG_DIR` 不要指向 `/proc` / `/sys`（伪文件系统上递归建目录会阻塞，模块会直接禁用文件通道并 warn）。
+- **致命错误**：未捕获异常 / 未处理的 Promise 拒绝会同步写入 `YYYY-MM-DD.errors.log`（`[fatal] …` 行）后退出进程，容器按重启策略恢复；HTTP 与 worker 都装了该钩子。
+- **关闭文件日志**：`LOGFILES=false`（仅 `docker logs`）。入口仍会预建空日志目录（不写入内容）；日志量偏大时优先 `LOG_LEVEL=warn`，而不是关闭文件通道——注意启动行本身是 `info`，调到 `warn` 后控制台与文件都看不到启动行。
+
 ## 数据库初始化
 
 ### 自动（默认，推荐）

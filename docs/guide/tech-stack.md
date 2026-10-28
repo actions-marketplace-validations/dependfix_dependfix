@@ -75,10 +75,10 @@
 |------|------|
 | zod | 数据校验 |
 | lodash-es | 工具函数 |
-| winston | 结构化日志（已声明，尚未接线） |
+| winston / winston-daily-rotate-file | 进程级结构化日志（控制台 + 本地文件按日轮转；见 [平台日志通道设计](../design/governance/platform-logging.md)） |
 | nodemailer | 邮件发送 |
 
-> 本表只列当前实际使用（`apps/platform/package.json` / `nuxt.config.ts` / 源码 import 可追溯）的依赖；曾列入但在 `apps/platform`（`package.json` / `nuxt.config.ts` / 源码）无引用的条目已移除——Sentry 错误监控已从 T705 拆出为独立候选（官方 SaaS，1.0 后排期；见 [backlog](../plan/backlog.md) 与 [第三方可观测性评估](../research/2026-10-27-third-party-observability-evaluation.md)），当前仍未采用；表中 winston 行对应的平台 logger 已实现但尚未接线，**本地日志通道统一已作为 M49 追加临时待办**（同评估文档）。PWA / VueUse / dayjs / class-validator / dompurify 等未采用（页面渲染依赖 Vue 模板默认转义，无 `v-html` 使用面）。
+> 本表只列当前实际使用（`apps/platform/package.json` / `nuxt.config.ts` / 源码 import 可追溯）的依赖；曾列入但在 `apps/platform`（`package.json` / `nuxt.config.ts` / 源码）无引用的条目已移除——Sentry 错误监控已从 T705 拆出为独立候选（官方 SaaS，1.0 后排期；见 [backlog](../plan/backlog.md) 与 [第三方可观测性评估](../research/2026-10-27-third-party-observability-evaluation.md)），当前仍未采用；表中 winston 行对应的平台 logger 已完成接线（进程级日志通道，见 [平台日志通道设计](../design/governance/platform-logging.md)）；Axiom 远程聚合仍为 1.0 后候选（同评估文档）。PWA / VueUse / dayjs / class-validator / dompurify 等未采用（页面渲染依赖 Vue 模板默认转义，无 `v-html` 使用面）。
 
 ## 库（packages/*）
 

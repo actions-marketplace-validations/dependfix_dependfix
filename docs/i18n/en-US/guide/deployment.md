@@ -149,6 +149,37 @@ docker compose exec -u 100:101 platform rm -rf /app/data/pnpm-store
 - **Backups**: a volume-level backup (the tar example under "Backup and restore") packages the store too; add `--exclude=./pnpm-store` when you only need the database.
 - **Commit hygiene**: install artifacts never reach delivery commits — at the start of a `fix` / `fix-and-pr` run (not dry-run) the engine writes `.pnpm-store/` and `node_modules/` into the target repository's `.git/info/exclude` (idempotent, never touching the repository's `.gitignore`), delivery commits themselves only collect the whitelist plus fixer-declared paths (install artifacts are never in that set — see [pr-delivery-closure §7](../../../design/governance/pr-delivery-closure.md#7-m484-提交面白名单与-yaml-定点编辑)), and the exclude entries additionally keep them from disturbing the "no changes" check; a failed write logs a warning and the run continues.
 
+## Log files
+
+Platform **process-level logs** (startup line, queue mode, executor clone / failures, notification delivery) are written into the data volume and remain searchable by date across container rebuilds; per-run engine logs stay in `ScanRun.logsJson` (downloadable from run details) and are **not duplicated** into the files.
+
+| Item | Default | Description |
+|:---|:---|:---|
+| Directory | `/app/data/logs` | Entrypoint defaults `LOG_DIR=$DATA_DIR/logs` and exports it; follows a custom `DATA_DIR` |
+| Main log | `YYYY-MM-DD.log` | Level controlled by `LOG_LEVEL` (default `info`), rotated daily, 20 MB per file |
+| Error log | `YYYY-MM-DD.errors.log` | `error` level only (including fatal errors), kept separately for alerting |
+| Retention | 31 days | Production builds also compress archived files (`*.gz`) |
+| Console | Always on | `docker logs` behavior is unchanged (same `LOG_LEVEL` filter; `error` goes to stderr); files are an additional surface |
+
+Troubleshooting:
+
+```bash
+# Today's main / error log
+docker compose exec -u 100:101 platform sh -c 'tail -n 200 /app/data/logs/$(date +%F).log'
+docker compose exec -u 100:101 platform sh -c 'tail -n 100 /app/data/logs/$(date +%F).errors.log'
+# Search by keyword (today / uncompressed; production keeps 31 days of history as .gz)
+docker compose exec -u 100:101 platform sh -c 'grep -h "stale-cleanup" /app/data/logs/*.log | tail -n 50'
+docker compose exec -u 100:101 platform sh -c 'zcat /app/data/logs/*.log.gz 2>/dev/null | grep "stale-cleanup" | tail -n 50'
+# Inspect from the host (named volume = <compose project>_dependfix-data, default project is platform)
+docker run --rm -v platform_dependfix-data:/data alpine ls -la /data/logs
+```
+
+- **Process roles**: the container runs HTTP + queue worker by default and both share the log directory; startup lines carry `role=server|worker` (`[logger] files=/app/data/logs level=info role=worker`). Rotation bookkeeping files are per role (`.server-*.json` / `.worker-*.json`) so two processes never share one audit JSON.
+- **Custom directory**: `LOG_DIR=/srv/logs` (absolute path recommended; relative paths resolve against the platform process cwd `/app`). The entrypoint creates the directory as the run identity and does not `chown` custom paths — pre-authorize the mount for `PUID:PGID`.
+- **Unwritable falls back**: if directory creation or the write probe fails (read-only mount / insufficient permissions), the logger warns and keeps **console output only**; startup is not blocked. Do not point `LOG_DIR` at `/proc` / `/sys` (recursive mkdir blocks on pseudo filesystems; the logger disables file logging with a warning instead).
+- **Fatal errors**: uncaught exceptions / unhandled rejections are written synchronously to `YYYY-MM-DD.errors.log` (a `[fatal] …` line) before the process exits and the container restarts per policy; both HTTP and worker install the hook.
+- **Disable file logging**: `LOGFILES=false` (console only). The entrypoint still pre-creates an empty log directory (nothing is written). When volume is a concern, prefer `LOG_LEVEL=warn` over disabling the file channel — note the startup line is `info`, so `warn` hides it from both console and files.
+
 ## Database initialization
 
 ### Automatic (default, recommended)

@@ -256,7 +256,7 @@ export DEPENDFIX_RETRY_FAILED=false
 - **完整部署步骤**：见 [Docker 部署](./deployment.md)。
 
 > ⚠️ **注入方式（关键）**：默认 `docker-compose.yml` **无 `env_file`**，仅把一组白名单变量经 `${...}` 插值转发进容器（**compose 名 → 容器名**）：
-> `PORT` · `PUID`/`PGID` · `AUTH_SECRET`→`NUXT_AUTH_SECRET` · `DATABASE_PATH` · `DATABASE_MIGRATIONS_RUN` · `NUXT_ENCRYPTION_KEY` · `REGISTRATION_DISABLED`→`NUXT_REGISTRATION_DISABLED` · `NUXT_PUBLIC_BETTER_AUTH_URL` · `NUXT_REDIS_URL`（硬编码） · `QUEUE_ENABLED`/`QUEUE_JOB_RETRIES`/`QUEUE_BACKOFF_MS`→`NUXT_*` · `QUEUE_WORKER`→`DEPENDFIX_QUEUE_WORKER` · `IN_PROCESS_WORKER`→`NUXT_IN_PROCESS_WORKER` · `PNPM_CONFIG_STORE_DIR` · `DEPENDFIX_IMAGE`/`DEPENDFIX_BUILD_IMAGE`。
+> `PORT` · `PUID`/`PGID` · `AUTH_SECRET`→`NUXT_AUTH_SECRET` · `DATABASE_PATH` · `DATABASE_MIGRATIONS_RUN` · `NUXT_ENCRYPTION_KEY` · `REGISTRATION_DISABLED`→`NUXT_REGISTRATION_DISABLED` · `NUXT_PUBLIC_BETTER_AUTH_URL` · `NUXT_REDIS_URL`（硬编码） · `QUEUE_ENABLED`/`QUEUE_JOB_RETRIES`/`QUEUE_BACKOFF_MS`→`NUXT_*` · `QUEUE_WORKER`→`DEPENDFIX_QUEUE_WORKER` · `IN_PROCESS_WORKER`→`NUXT_IN_PROCESS_WORKER` · `PNPM_CONFIG_STORE_DIR` · `LOG_DIR`/`LOG_LEVEL`/`LOGFILES` · `DEPENDFIX_IMAGE`/`DEPENDFIX_BUILD_IMAGE`。
 > 下方表中**白名单之外**的变量（邮件 / OAuth / OIDC / `AUTH_MODE` / `DATABASE_TYPE|URL|SSL|SYNCHRONIZE` / `BACKUP_*` / `RUN_WORK_ROOT` / `SANDBOX_*` / `DEPENDFIX_AI_*` / `ACTION_STATUS_MONITOR_ENABLED` / 通知类等）**默认不会进容器**，需自行追加到 compose 的 `environment:`（Nuxt runtimeConfig 变量须用 `NUXT_` 前缀）或用 `docker run -e` 注入。
 >
 > ⚠️ **Nuxt 运行时覆盖前缀**：平台是 Nuxt 应用，`runtimeConfig` 运行时覆盖**只认 `NUXT_` 前缀**——compose 变量 `AUTH_SECRET` → 容器 `NUXT_AUTH_SECRET`；`REGISTRATION_DISABLED` → `NUXT_REGISTRATION_DISABLED`。构建期烘焙的 env（如 `AUTH_MODE`）运行期须用 `NUXT_` 前缀覆盖，否则静默回退默认值。直读 `process.env` 的服务端变量（`DATABASE_*` / `CLONE_*` / `DEPENDFIX_*` 等）按原名注入。
@@ -353,6 +353,16 @@ export DEPENDFIX_RETRY_FAILED=false
 | `DEPENDFIX_ENV_ALERT_RECIPIENTS` | — | 组织内 admin/org_admin 邮箱 | 环境告警邮件收件人（逗号分隔，覆盖默认） |
 | `DEPENDFIX_WEEKLY_DIGEST_HOUR` | — | `9` | 周汇总触发小时（0-23，服务器时区；非法值回退 9）；组织与个人同时开启后生效 |
 | `DEPENDFIX_LOCALE` | — | `zh-CN` | 通知邮件语言（`zh-CN` / `en-US`） |
+
+### 日志
+
+| 变量 | 必填 | 默认值 | 说明 |
+|:---|:---:|:---|:---|
+| `LOG_DIR` | — | `/app/data/logs`（入口派生 `$DATA_DIR/logs`） | 进程级日志目录（按日轮转 + 31 天保留；错误另落 `YYYY-MM-DD.errors.log`）。自定义 `DATA_DIR` 时跟随数据卷；自定义路径建议用绝对路径 |
+| `LOG_LEVEL` | — | `info` | 日志级别：`error` / `warn` / `info` / `http` / `verbose` / `debug` / `silly`；控制台与文件同级过滤；非法值回退 `info` 并输出 warn |
+| `LOGFILES` | — | `true` | 是否写文件（`true/false` · `1/0` · `yes/no` · `on/off`）；`false` 时仅保留 stdout / stderr（`docker logs` 仍可用），非法值回退默认并 warn。目录不可写时自动回退控制台并 warn |
+
+> 通道分工：进程级日志（启动 / 队列 / 执行器 / 通知）走统一 logger 落文件；单次 run 的引擎输出仍由 `MemoryLogger` 收集到 `ScanRun.logsJson`（控制台可见，不重复写日志文件）。排障命令与保留策略见 [Docker 部署 → 日志文件](./deployment.md#日志文件)。
 
 ### Docker / 部署
 
