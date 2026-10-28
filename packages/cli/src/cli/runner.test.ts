@@ -48,6 +48,14 @@ describe('runCli', () => {
     })
 })
 
+describe('dependfixCommand 版本', () => {
+    it('版本取自 package.json（发布后 --version 与 npm 版本一致）', () => {
+        const pkg = require('../../package.json') as { version: string }
+        expect(cmd.meta.version).toBe(pkg.version)
+        expect(cmd.meta.version).not.toBe('0.1.0')
+    })
+})
+
 describe('dependfixCommand', () => {
     beforeEach(() => {
         vi.clearAllMocks()
