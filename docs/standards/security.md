@@ -101,13 +101,36 @@
 - **复核节奏**：条目同步登记于 [backlog.md 已知边界](../plan/backlog.md)（持续观察）；每周回归或依赖升级时复查上游是否已发布修复版本，发布后立即移除豁免并复跑 `pnpm audit`。advisory 被**撤回**或受影响范围不再匹配（`withdrawn_at` / range 变更）时，同样移除对应条目并记录依据——撤回表示该漏洞不再有效，不能以「无修复版本」为由继续挂账。
 - **审计必查项**：新增 `audit.ignore` 条目必须同时给出 GHSA + 依赖路径 + 复核条件；禁止把 `--ignore` / `--ignore-unfixable` 写入任何 CI workflow 或 npm script；上游发布修复版本后必须移除对应豁免条目，不得长期挂账。
 - **判据修订授权（2026-10-27）**：若 `audit.ignore` 使 clean 字面串不可达，可按本节同批修订 §5.6 判据并记录理由与证据时序；本仓库已于 2026-10-27 据此转正（原观察期计数挂起 → 翻转后连续 3 次 push run id 回填）。
+- **与发布门禁的关系（2026-10-29）**：本节 `audit.ignore` 只豁免 CI audit 阻断，**不构成发布豁免**——属 critical 的条目不得据此发布，属 high 的条目须同时登记 [§5.9 台账](#_5-9-发布前安全告警门禁-dependabot-alerts-code-scanning-2026-10-29-用户决策)（`.github/release-security-exemptions.json`）。
 
 ### 5.8 仓库自身安全门禁与 Security Auto Fix 停用（2026-10-25 用户决策）
 
 - **Security Auto Fix 定时任务保持停用**：本仓库的 `.github/workflows/security-auto-fix.yml` 自 2026-10-17 起 `disabled_manually`。理由：dependfix 自身（及平台）已会创建修复 PR，定时 Action 再建同类 PR 会与人工 / 平台 PR 冲突；**本仓库不再依赖该 Action 做自修**。
-- **替代为 Security 门禁**：Dependabot alerts 作发现面 → 依赖审计作**阻断面**（命令与判据见 [§5.6](#_5-6-依赖审计阻断语义-信号级-→-阻断的转正条件-2026-09-30-用户决策方案-c)，周回归使用同一命令）→ 全量依赖审计仅作 `test.yml` 的信号步骤（不进周回归）→ code scanning 覆盖代码质量告警。1.0 门槛另要求「未被 §5.7 豁免的 critical / high 为 0」。
+- **替代为 Security 门禁**：Dependabot alerts 作发现面 → 依赖审计作**阻断面**（命令与判据见 [§5.6](#_5-6-依赖审计阻断语义-信号级-→-阻断的转正条件-2026-09-30-用户决策方案-c)，周回归使用同一命令）→ 全量依赖审计仅作 `test.yml` 的信号步骤（不进周回归）→ code scanning 覆盖代码质量告警。1.0 门槛另要求「未被 §5.7 豁免的 critical / high 为 0」；**每次发布的放行口径见 [§5.9](#_5-9-发布前安全告警门禁-dependabot-alerts-code-scanning-2026-10-29-用户决策)**（critical 一律不得豁免）。
 - **门禁强度不得回退**：禁止用 `--ignore` / `--ignore-unfixable` 放宽；无修复版本的豁免按 [§5.7](#_5-7-无可用修复版本漏洞的审计豁免-audit-ignore-2026-10-05) 逐条登记；转正判据见 [§5.6](#_5-6-依赖审计阻断语义-信号级-→-阻断的转正条件-2026-09-30-用户决策方案-c)（2026-10-27 已转正；阻断步骤 exit 0 且日志含审计结果行 + 3 个 `master` push run id）。
-- **1.0 门槛**：依赖审计必须为阻断级、**未被 §5.7 豁免的** critical / high 为 0，详见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md#_2-门槛与判定-g1-g8)。
+- **1.0 门槛**：依赖审计必须为阻断级、**未被 §5.7 豁免的** critical / high 为 0（critical 一律不得豁免；本条不因 [§5.9](#_5-9-发布前安全告警门禁-dependabot-alerts-code-scanning-2026-10-29-用户决策) 的「修复难度大」类豁免放宽），详见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md#_2-门槛与判定-g1-g8)。
+
+### 5.9 发布前安全告警门禁（Dependabot alerts + Code Scanning，2026-10-29 用户决策）
+
+每次发布前必须核对本仓库的安全告警（`state=open` + `state=dismissed`），按严重级别决定是否放行；门禁已在 `release.yml` 中自动执行（`pnpm run check:release-security`），失败即中止发布。本节是**发布级门禁**，与 [§5.6](#_5-6-依赖审计阻断语义-信号级-→-阻断的转正条件-2026-09-30-用户决策方案-c) / [§5.7](#_5-7-无可用修复版本漏洞的审计豁免-audit-ignore-2026-10-05) 的 **CI 命令级阻断**互补：`pnpm audit` 绿灯不等于可发布（devDeps / 传递依赖 / 代码质量告警可能未被 audit 覆盖）；反之 `audit.ignore` 也不构成发布豁免。
+
+- **执行面**：`release.yml` 在质量门与 changelog 校验之后、`release:publish` 之前运行 `Check release security alerts` 步骤（阻断判定）；另在 `Auto version` 之前运行 `Pre-check release security alerts` 只读预检，避免定时发布先提升版本再被拦下。本地可在版本提升前跑同一命令做**早期核对**（提前暴露问题，不替代 CI）。判定实现见 `scripts/check-release-security-alerts.mjs`。
+- **分级口径**：
+
+| 级别 | 发布门禁 | 处置要求 |
+|:--|:--|:--|
+| critical | 阻断 | 必须修复后才可发布，**禁止任何形式豁免**（「无修复版本」「仅 devDeps」「影响面小」均不成立）——上游无修复版本时须移除 / 替换该依赖或下线受影响能力，不得挂账发布 |
+| high | 原则上阻断 | open 告警仅「上游无可用修复版本」（`no-fix`）或「修复需破坏性升级 / 跨模块改造，无法在本发布窗口完成」（`hard-fix`）两类情形可豁免；dismissed 告警仅可按误报（`false-positive`）登记。豁免须登记台账并持续追踪，尽快安排修复 |
+| moderate / low | 不阻断 | 可暂缓，随后续版本修复，不要求逐条登记（GitHub 原值 `medium` 归一为 moderate） |
+
+- **Code Scanning 参照同一口径**：按 `security_severity_level` 判定（原值 `medium` → moderate）；缺失时按 `rule.severity` 映射——`error` → high、`warning` → moderate、`note` / `none` → low。
+- **dismiss 不能替代修复**：critical 告警一旦被 dismiss 即阻断发布（须修复后重新扫描；Dependabot 告警可重新打开后升级依赖消除，Code Scanning 可通过修正扫描规则消除误报）。high 被 dismiss 仅可按 `false-positive` 登记，且 Code Scanning 必须按实例 `location` 登记——同一 rule 的其他实例不会被连带放行。`auto_dismissed` 表示告警已自动关闭（不再适用），不参与阻断。
+- **豁免台账（high 的唯一登记落点，机器可读）**：[`.github/release-security-exemptions.json`](../../.github/release-security-exemptions.json)。每条必须具备 9 个字段——`source`（`dependabot` / `code-scanning`）、`id`（GHSA / rule id）、`severity`（仅 `high`；critical 与 moderate / low 不得登记）、`category`（`no-fix` / `hard-fix` 仅对 open 告警生效；`false-positive` 仅对 dismissed 告警生效，且 `reason` 须写明原 dismiss 原因）、`target`（包与受影响范围）、`path`（依赖路径）、`reason`（豁免依据）、`review`（复核条件：上游发版 / 截止版本）、`tracking`（追踪落点）。**Code Scanning 条目另需 `location`（实例文件路径），缺失即台账非法**。条目须同步 [backlog.md 已知边界](../plan/backlog.md)；当前在册条目见该 JSON（node-forge，无修复版本，与 §5.7 同源）。
+- **fail-closed**：token 缺失、API 401/403/404、请求超时（10s）与 429/5xx 重试耗尽（总尝试 3 次）、响应非数组、告警级别无法判定 → 一律判失败，不得视为「无告警」（404 通常表示该仓库未启用对应告警源）。**token 按来源分离**：Dependabot 用 `GH_PAT`（classic `security_events` 或 fine-grained `Dependabot alerts: read`；`GITHUB_TOKEN` 恒 403，见 [github-action-workflow.md §7](../design/governance/github-action-workflow.md)）；Code Scanning 在 Actions 中优先用 `GITHUB_TOKEN`（受 workflow `security-events: read` 控制），本地回退 `GH_PAT` / `GH_TOKEN`。
+- **检查命令**：`pnpm run check:release-security`（等价于 `node scripts/check-release-security-alerts.mjs`；仓库 slug 取 `GITHUB_REPOSITORY` 或 `--repo`，本地可用 `GH_PAT` / `GH_TOKEN` 提供 token）。stale 台账（无匹配 high 告警）输出 warning 但放行，复核时按 `review` 条件移除。
+- **记录落点**：CI 步骤日志（run id）为放行证据；豁免与复核依据落在台账 JSON + backlog 已知边界，不要求写入发布 commit body。
+- **自动化状态**：已在 `release.yml` 接线（2026-10-29），实现设计见 [发布前安全告警门禁设计](../design/governance/release-security-gate.md)。修改判定口径 / 台账结构 / workflow 步骤时须同步本节与 [review 检查点矩阵](../../.github/skills/code-reviewer/references/code-quality-checklist.md)，并保持「critical 禁止豁免」不可放宽。
+- **审计必查项**：critical 是否被豁免（出现即 Reject）；台账条目 9 字段（Code Scanning 含 `location`）是否齐全、`category` 与告警状态是否绑定、是否双向追踪；是否以 dismiss / `audit.ignore` / `--ignore` 绕过 critical；`release.yml` 步骤是否仍在 `release:publish` 之前且 fail-closed（token 缺失不得跳过）。
 
 ## 6. 终端命令与自动化安全 (CLI & Automation)
 

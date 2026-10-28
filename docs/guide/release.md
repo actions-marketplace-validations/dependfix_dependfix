@@ -50,9 +50,18 @@
 | 后续版本 `0.1.1+`（0.x 阶段） | **`workflow_dispatch` 手动触发** | **OIDC Trusted Publishing**（无 `NPM_TOKEN`） | `pnpm release:publish`（CI） |
 | `1.0.0+`（正式版，规划） | 手动 + `schedule` 定时自动发布（可选 `push`） | OIDC Trusted Publishing | `pnpm release:publish`（CI） |
 
-> **0.x 阶段仅手动发布**：`release.yml` 未启用 `on.push` / `on.schedule` 自动触发（每次推送触发 release 不符合 0.x 预览期的发布节奏）。定时自动发布配置已按 momei 模式内嵌（每周六 UTC+0 12:00 = UTC+8 20:00），1.0.0 正式版发布后取消 `schedule` 注释即可启用，自动发布逻辑（版本提升 + 日志生成 + 提交推送）无需额外配置。
+> **0.x 阶段仅手动发布**：`release.yml` 未启用 `on.push` / `on.schedule` 自动触发（每次推送触发 release 不符合 0.x 预览期的发布节奏）。定时自动发布配置已按 momei 模式内嵌（每周六 UTC+0 12:00 = UTC+8 20:00），1.0.0 正式版发布后取消 `schedule` 注释即可启用；发布前安全告警门禁已在 `release.yml` 内强制执行（见「发布前安全检查」），定时发布同样受约束。自动发布逻辑（版本提升 + 日志生成 + 提交推送）无需额外配置。
 >
 > 发布底层始终是 **`pnpm publish`**（`release:publish` 内部调用它），它会自动把 `workspace:*` 依赖替换为实际版本号，保证发布产物可被消费者正常安装。**不要改用裸 `npm publish`**：npm 不会替换 `workspace:*`，会把字面量发布到 registry。
+
+## 发布前安全检查（安全告警门禁）
+
+每次发布（首次手动发布、`release:version` + `workflow_dispatch`、定时发布）都必须通过安全告警门禁。规则权威声明见 [安全规范 §5.9](../standards/security.md#_5-9-发布前安全告警门禁-dependabot-alerts-code-scanning-2026-10-29-用户决策)：
+
+- **CI 强制**：`release.yml` 在 `Auto version` 之前做只读预检、在 `release:publish` 之前做阻断判定（均为 `pnpm run check:release-security`）；critical 一律阻断（含 dismissed，禁止豁免），high 只有登记在 [`.github/release-security-exemptions.json`](../../.github/release-security-exemptions.json) 台账才放行（dismissed 同样需要），moderate / low 不阻断。token 缺失 / API 401·403·404 / 超时 / 级别无法判定均 fail-closed，不会当作「无告警」。
+- **本地早期核对**（可选，提前暴露问题）：`GH_PAT=<token> pnpm run check:release-security`，仓库 slug 自动取 `GITHUB_REPOSITORY` 或 `origin` remote。
+- **前置 secret**：Dependabot alerts 无法用 `GITHUB_TOKEN` 读取（恒 403），仓库需配置 `GH_PAT`（fine-grained 仅 `Dependabot alerts: read`，classic 需 `security_events`）；Code Scanning 用 workflow 的 `GITHUB_TOKEN` + `security-events: read` 权限，不要求 PAT 具备该权限。
+- **豁免**：high 需在台账登记 9 个字段并同步 [backlog.md](../plan/backlog.md)；open 告警用 `no-fix` / `hard-fix`，dismissed 误报用 `false-positive`，Code Scanning 必须按实例 `location` 登记（同一 rule 不同文件分别登记）。复核条件满足（如上游发布修复版本）后立即移除；stale 台账只告警不阻断。
 
 ## 前置配置（一次性）
 
@@ -91,7 +100,8 @@
 ### 3. CI 环境要求
 
 - **pnpm 版本**：发布走 `pnpm publish` 的 OIDC 路径。pnpm 11.0.3 存在 OIDC 回归（pnpm/pnpm#11566，已修复），CI 使用 `pnpm/action-setup@v4` 默认解析的最新 pnpm（11.x 后期 / 12.x）即可；
-- `release.yml` 已配置 `permissions: id-token: write`。
+- `release.yml` 已配置 `permissions: id-token: write` + `security-events: read`（Code Scanning 读取）。
+- **`GH_PAT` secret（Dependabot alerts）**：Dependabot alerts API 无法用 `GITHUB_TOKEN` 读取（恒 403 `Resource not accessible by integration`），需在 Settings → Secrets and variables → Actions 配置 `GH_PAT`（fine-grained 仅 `Dependabot alerts: read`，classic 需 `security_events`）。缺失时发布前安全门禁 fail-closed，发布中止。
 
 ## 首次发布（0.1.0，手动，一次性）
 
@@ -106,7 +116,7 @@ git fetch && git log HEAD..@{u}      # 期望无输出（无落后提交）
 正式发布：
 
 ```bash
-# 1. 质量门全绿
+# 1. 质量门全绿 + 发布前安全检查通过（告警门禁见「发布前安全检查」一节）
 pnpm lint
 pnpm typecheck
 pnpm test
@@ -192,6 +202,9 @@ gh release create v0.1.0 --generate-notes --prerelease
 ### 常规流程
 
 ```bash
+# 0.（可选）本地早期核对：无未豁免的 critical / high（CI 会在发布前强制执行同一门禁）
+GH_PAT=<token> pnpm run check:release-security
+
 # 1. 自动生成发布计划（从 git log 推导版本提升级别，生成 release-plan.md，见"release:plan 生成规则"）
 pnpm release:plan
 
@@ -217,7 +230,7 @@ git push origin master
 
 ### 定时自动发布（1.0.0+ 启用）
 
-`release.yml` 已内嵌 `schedule` 定时发布（每周六 UTC+0 12:00 = UTC+8 20:00，参照 momei），**1.0.0 正式版发布后取消 `schedule` 注释即启用**。定时触发时 CI 自动完成：
+`release.yml` 已内嵌 `schedule` 定时发布（每周六 UTC+0 12:00 = UTC+8 20:00，参照 momei），**1.0.0 正式版发布后取消 `schedule` 注释即启用**（安全告警门禁已内置于 `release.yml`，见「发布前安全检查」）。定时触发时 CI 自动完成：
 
 1. `release:plan`（推导计划，无推导结果则跳过）+ `release:version`（消费计划提升版本）+ `pnpm changelog`（生成日志）+ 提交并推送 master（semantic-release 风格提交：`chore(release): x.y.z [skip ci]` + 根 CHANGELOG 版本段全文）——全流程由 `pnpm release:auto-version` 脚本化执行（无变更安全 no-op，见 [scripts/README.md](../../scripts/README.md)）；
 2. 随后执行与手动发布相同的完整流程：质量门 → changelog 校验 → `release:publish`（OIDC）→ push tags。
@@ -228,18 +241,20 @@ git push origin master
 
 `release.yml`（`workflow_dispatch` 手动触发；1.0.0 后增加 `schedule` 定时触发）依次执行：
 
-1. （仅 `schedule` 触发）`Auto version & changelog`：自动版本提升 + CHANGELOG 生成 + 提交推送（`pnpm release:auto-version` 脚本化执行）；
-2. lint → **文档与治理门禁**（`pnpm run gates:docs`，与 `test.yml` 同集合，单点声明见 `scripts/run-doc-gates.mjs`）→ typecheck → test → build（质量门，任一失败即中止）；
-3. `Verify changelog is up to date`：校验六份 CHANGELOG（根级 + `packages/cli` / `packages/core` / `packages/engine` / `packages/skills` / `packages/mcp`）已包含当前版本段（防止漏跑 `pnpm changelog` 直接发布；普通提交版本未变时自动通过）；
-4. `pnpm release:publish`：
+1. `Pre-check release security alerts`：安全告警只读预检（在自动版本提升之前，避免先提升版本再被拦下）；
+2. （仅 `schedule` 触发）`Auto version & changelog`：自动版本提升 + CHANGELOG 生成 + 提交推送（`pnpm release:auto-version` 脚本化执行）；
+3. lint → **文档与治理门禁**（`pnpm run gates:docs`，与 `test.yml` 同集合，单点声明见 `scripts/run-doc-gates.mjs`）→ typecheck → test → build（质量门，任一失败即中止）；
+4. `Verify changelog is up to date`：校验六份 CHANGELOG（根级 + `packages/cli` / `packages/core` / `packages/engine` / `packages/skills` / `packages/mcp`）已包含当前版本段（防止漏跑 `pnpm changelog` 直接发布；普通提交版本未变时自动通过）；
+5. `Check release security alerts`：发布前安全告警门禁（`pnpm run check:release-security`）——critical 一律阻断（含 dismissed）、high 需台账豁免、API / token 异常 fail-closed（口径见 [安全规范 §5.9](../standards/security.md#_5-9-发布前安全告警门禁-dependabot-alerts-code-scanning-2026-10-29-用户决策)）；
+6. `pnpm release:publish`：
    - **只发布"本地版本未出现在 npm registry"的包**（fetch 直连 registry 对比，见 [经验归档 §三十二](../design/governance/experience-archive.md)），无待发布版本时安全退出（天然处理包版本不同步）；
    - 在 pnpm 项目内部调用 `pnpm publish`：自动替换 `workspace:*` 为实际版本，发布顺序按 `publishOrder`（`@dependfix/core` / `@dependfix/engine` / `@dependfix/skills` 先于 `dependfix` / `@dependfix/mcp`）；
    - 通过 **OIDC trusted publishing** 认证（`id-token: write` + npmjs.com 的 Trusted Publisher 配置），无需 `NPM_TOKEN`；
    - 发布前校验 **HEAD 锚点**（HEAD 必须 touch 待发布包路径，防误在非发布提交执行）；
    - 发布成功后本地创建 `<pkg>@<version>` 格式的 annotated git tag（如 `dependfix@0.1.1`）+ `v<锚版本>` 聚合 tag（锚 = 主交付物优先，见"GitHub Release 自动化"）；
    - **幂等自愈**：npm 已发布但本地无 tag（上次发布中途失败等中间态）时自动补 annotated tag（HEAD 锚点校验通过才打，否则安全跳过），并计入 v tag 锚点解析——重跑 CI 即可全链路恢复，无需手动补打（见"tag 策略与包版本不同步"）；
-5. `Push release tags`：将 `release:publish` 创建的本地 tag 推送到 GitHub（`git push <url> --tags`，显式 token URL + 推送后核验，通过 `GITHUB_TOKEN` 认证）；
-6. `Create GitHub Release`（`pnpm release:github`）：读 `release-publish-result.json` 为本轮发布创建聚合 GitHub Release——tag 为 `v<锚版本>`，notes 为版本矩阵 + 根 CHANGELOG 最新段（core-only 轮次取锚包包级段），0.x 阶段标 pre-release；Release 已存在则跳过，创建失败仅警告不阻断（npm 已发布完成，可后补 `gh release create`）。
+7. `Push release tags`：将 `release:publish` 创建的本地 tag 推送到 GitHub（`git push <url> --tags`，显式 token URL + 推送后核验，通过 `GITHUB_TOKEN` 认证）；
+8. `Create GitHub Release`（`pnpm release:github`）：读 `release-publish-result.json` 为本轮发布创建聚合 GitHub Release——tag 为 `v<锚版本>`，notes 为版本矩阵 + 根 CHANGELOG 最新段（core-only 轮次取锚包包级段），0.x 阶段标 pre-release；Release 已存在则跳过，创建失败仅警告不阻断（npm 已发布完成，可后补 `gh release create`）。
 
 ### GitHub Release 自动化
 
@@ -286,6 +301,7 @@ git push origin master
 | `pnpm changelog` 输出英文分组 | 根 `package.json` 缺少 `changelog.language: "zh"`（cmyr-config 从 cwd 的 package.json 读取语言） |
 | `pnpm changelog` 报模板错误 | conventional-changelog 被解析为 8.x。必须使用 `conventional-changelog@^7`（8.x 模板引擎与 cmyr-config 3.x 不兼容） |
 | CI 报 "CHANGELOG 缺少版本段" | 版本已提升但漏跑了 `pnpm changelog`（发布前必须生成并提交日志） |
+| 发布被安全告警门禁拦下 | 存在 critical（含 dismissed）、未按状态登记豁免的 high、或 `GH_PAT` / 权限 / 台账问题；按 [安全规范 §5.9](../standards/security.md#_5-9-发布前安全告警门禁-dependabot-alerts-code-scanning-2026-10-29-用户决策) 修复或登记台账后，**重新走 `release:plan` → `release:version` → `pnpm changelog` 产生新发布提交**再发（新提交必须 touch 包路径，`release:publish` 的 HEAD 锚点校验会拒绝不 touch 包路径的提交；不要直接重跑 publish 步骤） |
 | 包级 CHANGELOG 非增量（0.2.0 段吞掉全部历史） | `<pkg>@<version>` 锚点 tag 缺失，或指向的 commit 未 touch 该包路径（path 过滤后看不到锚点）。处理：补打/移动 tag 到 touch 该包路径的 commit 后重跑 `pnpm changelog` |
 | `release:publish` 报 "Committer identity unknown" | CI runner 全局 git config 无 user.name/user.email（annotated tag 创建需要 identity；此前 identity 仅在 schedule-only 的 Auto version 步骤中配置，手动触发时缺失）。处理：release.yml 已在 Release Publish 前显式配置 github-actions[bot] 身份；旧 run 遗留的中间态（npm 已发布但 tag 缺失）直接重跑即可自愈补 tag |
 | `release:publish` 报"HEAD 不是 touch `<path>` 的提交" | 在非发布提交上执行了发布（未走 release:version + changelog 提交）。处理：完成版本提升与 changelog 提交后再发布 |

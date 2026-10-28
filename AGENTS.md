@@ -109,6 +109,17 @@ A 阶段 `code-auditor` 审计必须触发的场景：
 - `build` 和 `test` 按改动影响按需执行，而不是每次编辑都盲目运行。
 - 如果相关检查没有运行，最终交付说明中必须明确解释原因。
 
+### 发布前安全检查（hard requirement）
+
+发布（`release.yml` / 手动 `workflow_dispatch` / 定时发布 / 镜像与 GitHub Release）前必须通过安全告警门禁：
+
+1. Dependabot alerts 与 Code Scanning alerts 中 **critical 一律不得存在（含被 dismiss 的告警），禁止任何形式豁免**（无修复版本时须移除 / 替换依赖或下线受影响能力）。
+2. high 原则上阻断；仅「上游无可用修复版本」或「修复难度大、本发布窗口无法完成」（open）或误报（dismissed，`false-positive`）时，可登记到 [`.github/release-security-exemptions.json`](.github/release-security-exemptions.json) 台账后放行（Code Scanning 必须按实例 `location` 登记），并同步 [docs/plan/backlog.md](docs/plan/backlog.md) 追踪、尽快修复。
+3. moderate / low 不阻断，随后续版本修复。
+4. 门禁由 `pnpm run check:release-security` 在 `release.yml` 的 `release:publish` 之前执行，token / 台账 / API 异常一律 fail-closed；Dependabot alerts 读取依赖仓库 secret `GH_PAT`（`GITHUB_TOKEN` 恒 403）。
+
+权威口径见 [安全规范 §5.9](docs/standards/security.md#_5-9-发布前安全告警门禁-dependabot-alerts-code-scanning-2026-10-29-用户决策)，执行步骤见 [发布指南](docs/guide/release.md#发布前安全检查-安全告警门禁)。
+
 ## 新需求处理原则（hard requirement）
 
 按 [规划规范 §3.1 新需求默认走"评估 → backlog"原则](docs/standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) + [AI 协作规范 §2.1.1 新需求总原则](docs/standards/ai-collaboration.md#211新需求总原则跨工作流适用)：

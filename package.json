@@ -18,6 +18,7 @@
     "release:push-tags": "node scripts/push-release-tags.mjs",
     "release:auto-version": "node scripts/auto-version.mjs",
     "verify:changelog": "node scripts/verify-changelog.mjs",
+    "check:release-security": "node scripts/check-release-security-alerts.mjs",
     "changelog": "node scripts/changelog.mjs",
     "tag:released": "node scripts/tag-released-versions.mjs",
     "distill:wisdom": "node scripts/distill-wisdom.mjs",

@@ -57,6 +57,8 @@
 4. 可模板化处理的 code scanning 问题
 5. 其余问题只输出建议
 
+**发布前置门禁**：发布前必须通过安全告警门禁——critical 必须修复（禁止豁免）；high 仅在无可用修复版本或修复难度大时按 [豁免台账](../../.github/release-security-exemptions.json) 放行并追踪；moderate / low 可延后。门禁已在 `release.yml` 强制执行（`pnpm run check:release-security`），口径见 [安全规范 §5.9](security.md#_5-9-发布前安全告警门禁-dependabot-alerts-code-scanning-2026-10-29-用户决策)，执行步骤见 [发布指南](../guide/release.md#发布前安全检查-安全告警门禁)。
+
 ### 质量门
 
 参见 [AGENTS.md §必要检查](../../AGENTS.md#必要检查)：
