@@ -82,8 +82,9 @@ describe('插件分类一致性', () => {
     it('清单内每个插件均在源码中调用守卫（防「声明了但没跳过」）', () => {
         for (const name of HTTP_ONLY_PLUGINS) {
             const source = readFileSync(join(PLUGINS_DIR, `${name}.ts`), 'utf8')
+            // 允许带可选参数（如注入统一 logger）：不变量是「用自身插件名调用守卫」
             expect(source, `${name}.ts 应调用 shouldSkipHttpOnlyPlugin('${name}')`).toContain(
-                `shouldSkipHttpOnlyPlugin('${name}')`,
+                `shouldSkipHttpOnlyPlugin('${name}'`,
             )
         }
     })
