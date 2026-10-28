@@ -256,6 +256,10 @@
 - **release.yml 补齐 prod 依赖审计阻断（P1 🛡️）** —— `test.yml` 有 prod 阻断 + 全量信号，`release.yml` 不含审计 → 审计红的提交仍可发版。**目标**：release 与 Test 审计口径一致。**范围**：release 增加 blocking（同 [security.md §5.6](../standards/security.md)）与全量信号。**验收**：① 阻断步骤日志含审计结果行；② registry 不可达 exit 0 不假绿；③ 本地 / CI 基线各一次。**不做**：不改命令与 ignore。**交付物**：1 commit / 1-2 files / 20-40 行。
 - **release 构建范围与 Test 对齐（P2 🛠️）** —— release 只跑 `pnpm run build`（packages），Test 含 platform 构建 → 平台构建失败只在 Docker 阶段暴露。**目标**：发布前可发现或登记边界。**范围**：release build 对齐或 release.md 记录理由。**验收**：① 破坏 platform 构建时前置门禁失败（或边界有据）；② 发布时长增量 < 2min。**不做**：不改 Docker 链。
 
+**2026-10-29 发布工具链残余**（不占阶段编号）：
+
+- **CHANGELOG 新鲜度门禁（P2 🛠️）** —— 现象：`verify-changelog` 只校验版本段存在，发布提交若在 changelog 生成后又有新 commit，段内会缺条目但门禁仍绿（2026-10-29 实测：发布提交的根级 CHANGELOG 缺其父提交条目）。**目标**：发布前能发现「版本段存在但内容陈旧」。**范围**：`verify-changelog` 增加可选 `--max-lag`（比较段内最后 commit 与 HEAD 距离）或发布流程在 `changelog` 后强制 clean 检查；`release.yml` 接线。**验收**：① changelog 后新增 commit 时门禁非零；② 正常发布不误报；③ CI 基线一次。**不做**：不改 changelog 生成算法。**交付物**：1 commit / 3-5 files / 80-150 行。
+
 ### 待上收候选（评估完成，等待用户决策）
 
 > 本节为「评估完成、等待用户决策」候选的暂存区；候选**不含 `M\d+` 阶段编号**（[规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement)）。

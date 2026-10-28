@@ -228,6 +228,8 @@ git push origin master
 # 7. 手动触发发布：GitHub Actions → Release → Run workflow（workflow_dispatch）
 ```
 
+> **本地手动发布（备用通道）**：`pnpm release:publish --otp <6-8 位数字>`。脚本固定 `--registry https://registry.npmjs.org/`（不继承本机 pnpm / npm registry 配置，避免被只读镜像配置带偏），并把 OTP 透传给每个包的 `pnpm publish`；发布成功后需用户自行 `git push` + `git push --tags`。CI OIDC 仍是默认通道，本地发布仅用于 CI 不可用时的兜底。OTP 有时效（约 30 秒），过期直接生成新码重跑即可，脚本不缓存 OTP。
+
 ### 定时自动发布（1.0.0+ 启用）
 
 `release.yml` 已内嵌 `schedule` 定时发布（每周六 UTC+0 12:00 = UTC+8 20:00，参照 momei），**1.0.0 正式版发布后取消 `schedule` 注释即启用**（安全告警门禁已内置于 `release.yml`，见「发布前安全检查」）。定时触发时 CI 自动完成：
