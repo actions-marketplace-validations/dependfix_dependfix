@@ -141,6 +141,28 @@ activate_pnpm_store() {
     return 0
 }
 
+# ---- 进程级日志文件通道（日志落数据卷）----
+# 平台进程级日志（启动 / 队列 / 执行 / 通知）由 server/utils/logger.ts 写文件；目录缺省跟随数据卷
+# （$DATA_DIR/logs），自定义 DATA_DIR 时自动跟随，容器重建后日志仍在卷内。
+# 显式设置 LOG_DIR 时尊重用户值（建议绝对路径）；相对路径由日志模块按进程 cwd（/app）解析，入口不代建。
+# 目录以**运行身份**创建（root 启动时经 su-exec 降权），创建失败不阻断启动——日志模块自身有写探针，
+# 不可写时回退控制台（stderr/stdout）并 warn。口径见 docs/standards/platform.md §10.9。
+LOG_DIR="${LOG_DIR:-${DATA_DIR_CANON}/logs}"
+export LOG_DIR
+
+prepare_log_dir() {
+    case "$LOG_DIR" in
+        ""|"/") return 0 ;;
+        /*) : ;;
+        *) return 0 ;;
+    esac
+    if [ "$(id -u)" = "0" ] && command -v su-exec > /dev/null 2>&1; then
+        su-exec "$RUN_IDENTITY" mkdir -p "$LOG_DIR" 2>/dev/null || true
+    else
+        mkdir -p "$LOG_DIR" 2>/dev/null || true
+    fi
+}
+
 # ---- 队列执行进程隔离（独立 worker 进程形态）----
 # DEPENDFIX_QUEUE_WORKER=1 时启动双进程形态：
 #   worker 进程：NUXT_IN_PROCESS_WORKER=true 消费扫描队列（扫描与引擎同步调用均在此进程）；
@@ -325,6 +347,7 @@ if [ "$(id -u)" != "0" ]; then
     [ -w "$HOME_DIR_CANON" ] || echo "warn: $HOME_DIR_CANON not writable by uid $(id -u); pnpm/npm cache may fail (pre-authorize the volume + HOME)" >&2
     prepare_pnpm_store
     activate_pnpm_store
+    prepare_log_dir
     run_platform "" "$@"
 fi
 
@@ -339,6 +362,7 @@ done
 
 prepare_pnpm_store
 activate_pnpm_store
+prepare_log_dir
 
 # 降权执行；su-exec 缺失属构建损坏（构建期 apk add 固定安装），fail-closed 拒绝以 root 运行
 if command -v su-exec > /dev/null 2>&1; then

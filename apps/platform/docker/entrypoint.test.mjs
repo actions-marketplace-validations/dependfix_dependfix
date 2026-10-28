@@ -109,6 +109,8 @@ const start = ({ stub, env = {}, dateShim = false, sleepStub = 'exit 0', rootUid
     delete baseEnv.DEPENDFIX_ROLE
     // store 路径由入口默认注入：清理宿主残留，保证「默认值」断言确定性
     delete baseEnv.PNPM_CONFIG_STORE_DIR
+    // 日志目录同样由入口派生：清理宿主残留
+    delete baseEnv.LOG_DIR
 
     const child = spawn('sh', [entrypointPath, stubPath], {
         env: {
@@ -232,17 +234,18 @@ describe.skipIf(skipOnWindows)('entrypoint.sh 队列 worker 看护', () => {
         expect(handle.output()).not.toContain('次重启')
     })
 
-    it('角色注入：父进程未预置角色时，worker 子进程收到 worker、HTTP 主进程收到 server', async () => {
+    it('角色注入：worker / HTTP 两进程分别收到角色，并继承同一 LOG_DIR', async () => {
         const handle = start({
-            stub: 'if [ "$NUXT_IN_PROCESS_WORKER" = "true" ]; then\n    echo "role-marker worker=[$DEPENDFIX_ROLE]"\n    exec tail -f /dev/null\nfi\necho "role-marker http=[$DEPENDFIX_ROLE]"\nexec tail -f /dev/null',
+            stub: 'if [ "$NUXT_IN_PROCESS_WORKER" = "true" ]; then\n    echo "role-marker worker=[$DEPENDFIX_ROLE] log=[$LOG_DIR]"\n    exec tail -f /dev/null\nfi\necho "role-marker http=[$DEPENDFIX_ROLE] log=[$LOG_DIR]"\nexec tail -f /dev/null',
             // 不预置 DEPENDFIX_ROLE（start() 已清理宿主残留）：worker 侧取值只可能来自入口注入
             env: { DEPENDFIX_QUEUE_WORKER: '1', NUXT_QUEUE_ENABLED: 'true' },
         })
+        const expectedLogDir = join(handle.root, 'data', 'logs')
         await waitFor(() => handle.output().includes('role-marker worker=[worker]'))
         await waitFor(() => handle.output().includes('role-marker http=[server]'))
         const output = handle.output()
-        expect(output).toContain('role-marker worker=[worker]')
-        expect(output).toContain('role-marker http=[server]')
+        expect(output).toContain(`role-marker worker=[worker] log=[${expectedLogDir}]`)
+        expect(output).toContain(`role-marker http=[server] log=[${expectedLogDir}]`)
         await terminate(handle)
     })
 
@@ -520,7 +523,8 @@ describe.skipIf(skipOnWindows)('entrypoint.sh pnpm store 持久化', () => {
         expect(code).toBe(0)
         expect(handle.output()).toContain('pnpm store 目录不能是根路径')
         expect(handle.output()).toContain('store=[]')
-        expect(readFileSync(join(handle.root, 'suexec.log'), 'utf-8')).not.toContain('mkdir -p /')
+        const suexecLog = readFileSync(join(handle.root, 'suexec.log'), 'utf-8')
+        expect(suexecLog.split('\n').some((line) => line.trim().endsWith('mkdir -p /'))).toBe(false)
         // 也不得对根路径 chown（chown 桩记录实参，避免「不对任意路径 chown」只停留在标题里）
         expect(readFileSync(join(handle.root, 'chown.log'), 'utf-8')).not.toContain('-R 100:101 /\n')
     })
@@ -539,6 +543,72 @@ describe.skipIf(skipOnWindows)('entrypoint.sh pnpm store 持久化', () => {
         expect(handle.output()).toContain('store=[]')
     })
 
+    it('日志目录默认跟随数据卷并导出 LOG_DIR', async () => {
+        const handle = start({
+            stub: 'echo "log=[$LOG_DIR]"\nexit 0',
+            env: { DEPENDFIX_QUEUE_WORKER: '0' },
+        })
+        const { code } = await waitExit(handle)
+        const expected = join(handle.root, 'data', 'logs')
+
+        expect(code).toBe(0)
+        expect(handle.output()).toContain(`log=[${expected}]`)
+        expect(existsSync(expected)).toBe(true)
+    })
+
+    it('显式 LOG_DIR 优先于数据卷默认值', async () => {
+        const logDir = mkdtempSync(join(tmpdir(), 'entrypoint-logs-'))
+        try {
+            const handle = start({
+                stub: 'echo "log=[$LOG_DIR]"\nexit 0',
+                env: { DEPENDFIX_QUEUE_WORKER: '0', LOG_DIR: logDir },
+            })
+            expect((await waitExit(handle)).code).toBe(0)
+            expect(handle.output()).toContain(`log=[${logDir}]`)
+        } finally {
+            rmSync(logDir, { recursive: true, force: true })
+        }
+    })
+
+    it('日志目录不可创建时不阻断启动（日志模块自身写探针兜底）', async () => {
+        const dataDir = mkdtempSync(join(tmpdir(), 'entrypoint-data-'))
+        writeFileSync(join(dataDir, 'blocked'), 'not a directory')
+        try {
+            const handle = start({
+                stub: 'echo "log=[$LOG_DIR] marker"\nexit 0',
+                env: { DEPENDFIX_QUEUE_WORKER: '0', LOG_DIR: join(dataDir, 'blocked', 'logs') },
+            })
+            const { code } = await waitExit(handle)
+
+            expect(code).toBe(0)
+            expect(handle.output()).toContain('marker')
+            expect(handle.output()).toContain('log=[')
+        } finally {
+            rmSync(dataDir, { recursive: true, force: true })
+        }
+    })
+
+    it('root 启动：日志目录以运行身份创建', async () => {
+        const handle = start({
+            rootUid: true,
+            stub: 'exit 0',
+            env: { DEPENDFIX_QUEUE_WORKER: '0' },
+        })
+        expect((await waitExit(handle)).code).toBe(0)
+        const expected = join(handle.root, 'data', 'logs')
+        expect(readFileSync(join(handle.root, 'suexec.log'), 'utf-8')).toContain(`mkdir -p ${expected}`)
+    })
+
+    it('相对 LOG_DIR：入口不代建（按平台进程 cwd 解析）', async () => {
+        const handle = start({
+            stub: 'echo "log=[$LOG_DIR]"',
+            env: { DEPENDFIX_QUEUE_WORKER: '0', LOG_DIR: 'relative-logs' },
+        })
+        expect((await waitExit(handle)).code).toBe(0)
+        expect(handle.output()).toContain('log=[relative-logs]')
+        expect(existsSync(join(handle.root, 'relative-logs'))).toBe(false)
+    })
+
     it('root 路径顺序：chown → 以运行身份建目录 → 探针判定', () => {
         const source = readFileSync(entrypointPath, 'utf8')
         // 只看「最终降权段」（非 root 分支之后）：锚定稳定 token，不依赖空行 / 缩进
@@ -546,9 +616,12 @@ describe.skipIf(skipOnWindows)('entrypoint.sh pnpm store 持久化', () => {
         const chownAt = rootBlock.indexOf('chown -R "$RUN_IDENTITY"')
         const prepareAt = rootBlock.indexOf('\nprepare_pnpm_store\n')
         const activateAt = rootBlock.indexOf('\nactivate_pnpm_store\n')
+        const logDirAt = rootBlock.indexOf('\nprepare_log_dir\n')
 
         expect(chownAt).toBeGreaterThan(-1)
         expect(prepareAt).toBeGreaterThan(chownAt)
         expect(activateAt).toBeGreaterThan(prepareAt)
+        // 日志目录同样必须在 chown 之后以运行身份创建（root 先建会让运行身份写不进去）
+        expect(logDirAt).toBeGreaterThan(chownAt)
     })
 })
