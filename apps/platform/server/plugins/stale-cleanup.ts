@@ -6,13 +6,14 @@ import { releaseOrphanQueueJobs } from '#server/services/queue/orphan-job-releas
 import { getQueueService, type QueueService } from '#server/services/queue/queue.service'
 import type { ScanQueue } from '#server/services/queue/scan-queue'
 import { resolveExecutionTimeoutMs } from '#server/services/executor/container-executor'
+import { logger } from '#server/utils/logger'
 import { shouldSkipHttpOnlyPlugin } from '#server/utils/process-role'
 
 /**
  * 周期清理孤儿 ScanRun / BatchRun + 周期兜底对账 + `_pending/` 过期 workDir：
  * - 启动延迟 30 秒（让 DB / 队列就绪，避免阻塞 nitro 启动）
  * - 之后每 STALE_CLEANUP_INTERVAL_MS（默认 5 分钟）执行一次
- * - 清理结果通过 console.info / console.error 上报；失败不抛（下次重试）
+ * - 清理结果通过统一 logger 上报（控制台 + 数据卷日志文件）；失败不抛（下次重试）
  * - nitro 关闭时清理 timer（避免热重载期间句柄泄漏）
  *
  * 执行范围（按顺序）：
@@ -52,7 +53,7 @@ export const runStaleCleanupOnce = async (): Promise<void> => {
     try {
         queueService = await getQueueService()
     } catch (error) {
-        console.error('[stale-cleanup] 队列服务初始化失败:', error)
+        logger.error('[stale-cleanup] 队列服务初始化失败', { error })
     }
     const scanQueue: ScanQueue | null = queueService?.mode === 'async' ? queueService.queue : null
 
@@ -90,7 +91,7 @@ export const runStaleCleanupOnce = async (): Promise<void> => {
             if (consumers !== null) {
                 consumersLabel = consumers ? 'yes' : 'no'
             }
-            console.info(
+            logger.info(
                 `[stale-cleanup] ${result.checkedAt} — scan=${result.scanRunsFailed} batch=${result.batchRunsFailed} consumers=${consumersLabel}`,
             )
         }
@@ -108,41 +109,41 @@ export const runStaleCleanupOnce = async (): Promise<void> => {
                     ]
                 }
             } catch (error) {
-                console.warn('[stale-cleanup] 近期孤儿 run 查询失败（仅释放本轮候选）:', error)
+                logger.warn('[stale-cleanup] 近期孤儿 run 查询失败（仅释放本轮候选）', { error })
             }
             const released = await releaseOrphanQueueJobs(scanQueue, releaseCandidates)
             if (released.removed > 0 || released.skipped > 0) {
-                console.info(
+                logger.info(
                     `[stale-cleanup] 释放孤儿队列 job：removed=${released.removed} skipped=${released.skipped}/${releaseCandidates.length}`,
                 )
             }
         }
     } catch (error) {
-        console.error('[stale-cleanup] 孤儿清理失败:', error)
+        logger.error('[stale-cleanup] 孤儿清理失败', { error })
     }
 
     // 周期兜底对账：子项已全部终态但父批次仍 running 的批次终结化 + 进行中批次进度写回
     try {
         const reconciled = await reconcileRunningBatchRuns()
         if (reconciled.completed > 0 || reconciled.progressUpdated > 0 || reconciled.orphaned > 0) {
-            console.info(
+            logger.info(
                 `[stale-cleanup] ${reconciled.checkedAt} — batch reconcile: scanned=${reconciled.scanned} completed=${reconciled.completed} progress=${reconciled.progressUpdated} orphaned=${reconciled.orphaned}`,
             )
         }
     } catch (error) {
-        console.error('[stale-cleanup] 批次对账失败:', error)
+        logger.error('[stale-cleanup] 批次对账失败', { error })
     }
 
     // `_pending/` 过期 workDir 清理（PR 失败保留的诊断目录，默认 24h 过期）
     try {
         const pending = await cleanupPendingWorkdirs()
         if (pending.removed > 0) {
-            console.info(
+            logger.info(
                 `[stale-cleanup] ${pending.checkedAt} — pending workdirs removed=${pending.removed} skipped=${pending.skippedMissingMeta}`,
             )
         }
     } catch (error) {
-        console.error('[stale-cleanup] pending workdir 清理失败:', error)
+        logger.error('[stale-cleanup] pending workdir 清理失败', { error })
     }
 }
 
@@ -150,7 +151,7 @@ export default defineNitroPlugin((nitroApp) => {
     // 队列 worker 进程跳过周期清理：周期任务只需一个进程执行——容器双进程形态下 HTTP 主进程恒存在，
     // 且 §10.6 已把「worker 崩溃后的兜底」挂在它身上；两进程同跑会产生重复 DB 查询与
     // `_pending/` 目录删除竞态。角色判定与清单见 docs/standards/platform.md §10.6。
-    if (shouldSkipHttpOnlyPlugin('stale-cleanup')) {
+    if (shouldSkipHttpOnlyPlugin('stale-cleanup', process.env, logger)) {
         return
     }
 

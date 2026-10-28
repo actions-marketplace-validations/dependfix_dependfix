@@ -16,6 +16,7 @@ import { parseSupportedLocale } from './channel'
 import { isDeploymentNotificationEnabled } from './preferences'
 import { resolveNotificationRecipients } from './recipients'
 import { resolveWeeklyDigestHour, resolveWeeklyDigestSlot } from './weekly-digest-schedule'
+import { logger } from '#server/utils/logger'
 
 const resolveBaseUrl = (): string =>
     (process.env.NUXT_PUBLIC_BETTER_AUTH_URL || process.env.NUXT_PUBLIC_BASE_URL || '').replace(/\/$/, '')
@@ -62,13 +63,13 @@ export const sendWeeklyDigest = async (now: Date = new Date()): Promise<WeeklyDi
     }
 
     if (!isDeploymentNotificationEnabled()) {
-        console.info(`[weekly-digest] ${weekKey} deployment notifications disabled; skip`)
+        logger.info(`[weekly-digest] ${weekKey} deployment notifications disabled; skip`)
         return base
     }
 
     const { settings } = await loadOrganizationNotificationSettings()
     if (!settings.categories.weeklyDigest) {
-        console.info(`[weekly-digest] ${weekKey} organization weekly digest disabled; skip`)
+        logger.info(`[weekly-digest] ${weekKey} organization weekly digest disabled; skip`)
         return { ...base, status: 'skipped_org_disabled' }
     }
 
@@ -84,7 +85,7 @@ export const sendWeeklyDigest = async (now: Date = new Date()): Promise<WeeklyDi
             recipients: [],
             status: 'skipped_no_recipient',
         })
-        console.info(`[weekly-digest] ${weekKey} no recipients enabled; skip`)
+        logger.info(`[weekly-digest] ${weekKey} no recipients enabled; skip`)
         return { ...base, status: 'skipped_no_recipient' }
     }
 
@@ -133,7 +134,7 @@ export const sendWeeklyDigest = async (now: Date = new Date()): Promise<WeeklyDi
         // 同周重复触发：逐用户投递键全部命中，未产生新邮件
         result.status = result.skipped > 0 ? 'skipped_duplicate' : 'failed'
     }
-    console.info(
+    logger.info(
         `[weekly-digest] ${weekKey} recipients=${result.recipients} sent=${result.sent} failed=${result.failed} noop=${result.noop} skipped=${result.skipped} (${result.status})`,
     )
     return result

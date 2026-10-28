@@ -14,6 +14,11 @@ import { User } from '#server/entities/user'
 import { AuditEvent } from '#server/entities/audit-event'
 import { NotificationLog } from '#server/entities/notification-log'
 
+const { logWarnMock, logErrorMock } = vi.hoisted(() => ({ logWarnMock: vi.fn(), logErrorMock: vi.fn() }))
+vi.mock('#server/utils/logger', () => ({
+    logger: { debug: vi.fn(), info: vi.fn(), warn: logWarnMock, error: logErrorMock },
+}))
+
 describe('notification module 注册表', () => {
     it('ensureNotificationChannelsRegistered 后 list 至少含 email 渠道', () => {
         ensureNotificationChannelsRegistered()
@@ -37,14 +42,11 @@ describe('notification module 注册表', () => {
 })
 
 describe('notifyEnvEvent', () => {
-    let consoleSpy: ReturnType<typeof vi.spyOn>
-    let consoleErrorSpy: ReturnType<typeof vi.spyOn>
-
     beforeEach(async () => {
         setupMemoryDatabase()
         delete process.env.DEPENDFIX_ENV_ALERT_RECIPIENTS
-        consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
-        consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+        logWarnMock.mockClear()
+        logErrorMock.mockClear()
         // SMTP 未配置 → EmailNotificationChannel.isAvailable()=false → noop
         vi.stubGlobal('useRuntimeConfig', () => ({ smtpHost: '' }))
     })
@@ -52,8 +54,6 @@ describe('notifyEnvEvent', () => {
     afterEach(() => {
         teardownMemoryDatabase()
         vi.unstubAllGlobals()
-        consoleSpy.mockRestore()
-        consoleErrorSpy.mockRestore()
     })
 
     it('无收件人时 warn + AuditEvent 标记 notified=false', async () => {
@@ -74,7 +74,7 @@ describe('notifyEnvEvent', () => {
             message: 'docker down',
             createdAt: event.createdAt,
         })
-        expect(consoleSpy).toHaveBeenCalled()
+        expect(logWarnMock).toHaveBeenCalled()
         const updated = await ds.getRepository(AuditEvent).findOne({ where: { id: event.id } })
         expect(updated?.notified).toBe(false)
         expect(updated?.notifiedVia).toBe(null)

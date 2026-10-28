@@ -5,12 +5,24 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
  * （queueJobProbe 下行 + 本轮 / 近期孤儿 job 按 run 归属释放）与失败降级路径。
  * 依赖模块全部 mock，不触达真实 DB / Redis。
  */
-const { cleanupStaleRunsMock, findRecentOrphanedRunsMock, reconcileMock, pendingMock, getQueueServiceMock } = vi.hoisted(() => ({
+const {
+    cleanupStaleRunsMock,
+    findRecentOrphanedRunsMock,
+    reconcileMock,
+    pendingMock,
+    getQueueServiceMock,
+    logErrorMock,
+    logInfoMock,
+    logWarnMock,
+} = vi.hoisted(() => ({
     cleanupStaleRunsMock: vi.fn(),
     findRecentOrphanedRunsMock: vi.fn(),
     reconcileMock: vi.fn(),
     pendingMock: vi.fn(),
     getQueueServiceMock: vi.fn(),
+    logErrorMock: vi.fn(),
+    logInfoMock: vi.fn(),
+    logWarnMock: vi.fn(),
 }))
 
 vi.mock('nitropack/runtime', () => ({
@@ -23,6 +35,9 @@ vi.mock('#server/services/batch/stale-cleanup', () => ({
 vi.mock('#server/services/batch/batch-reconciler', () => ({ reconcileRunningBatchRuns: reconcileMock }))
 vi.mock('#server/services/batch/cleanup-pending-workdirs', () => ({ cleanupPendingWorkdirs: pendingMock }))
 vi.mock('#server/services/queue/queue.service', () => ({ getQueueService: getQueueServiceMock }))
+vi.mock('#server/utils/logger', () => ({
+    logger: { debug: vi.fn(), info: logInfoMock, warn: logWarnMock, error: logErrorMock },
+}))
 
 import staleCleanupPlugin, { runStaleCleanupOnce } from './stale-cleanup'
 import { resolveExecutionTimeoutMs } from '#server/services/executor/container-executor'
@@ -143,28 +158,22 @@ describe('stale-cleanup 插件 runStaleCleanupOnce', () => {
             orphanedRuns: [{ repositoryId: 'repo-1', runId: 'run-1' }],
             checkedAt: 'T',
         })
-        const errSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
-
         await runStaleCleanupOnce()
 
         expect(cleanupStaleRunsMock).toHaveBeenCalledWith(expect.objectContaining({
             scanRunTimeoutMs: resolveExecutionTimeoutMs(),
             queueJobProbe: undefined,
         }))
-        expect(errSpy).toHaveBeenCalled()
-        errSpy.mockRestore()
+        expect(logErrorMock).toHaveBeenCalled()
     })
 
     it('cleanupStaleRuns 抛错：捕获后继续兜底对账与 pending workdir 清理', async () => {
         cleanupStaleRunsMock.mockRejectedValue(new Error('db down'))
-        const errSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
-
         await runStaleCleanupOnce()
 
         expect(reconcileMock).toHaveBeenCalledTimes(1)
         expect(pendingMock).toHaveBeenCalledTimes(1)
-        expect(errSpy).toHaveBeenCalled()
-        errSpy.mockRestore()
+        expect(logErrorMock).toHaveBeenCalled()
     })
 
     it('单 run 释放抛错：捕获记录且不阻断其余孤儿释放', async () => {
@@ -192,13 +201,10 @@ describe('stale-cleanup 插件 runStaleCleanupOnce', () => {
             ],
             checkedAt: 'T',
         })
-        const errSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
-
         await runStaleCleanupOnce()
 
         expect(remove).toHaveBeenCalledTimes(2)
-        expect(errSpy).toHaveBeenCalled()
-        errSpy.mockRestore()
+        expect(logErrorMock).toHaveBeenCalled()
     })
 
     it('ScanRun 孤儿阈值与执行超时同源联动（EXECUTION_TIMEOUT_MS 覆盖生效）', async () => {
@@ -234,20 +240,18 @@ describe('stale-cleanup 插件注册守卫', () => {
 
     afterEach(() => {
         vi.useRealTimers()
-        // console spy 兜底清理（用例中途失败时不残留）
+        // 日志 mock 兜底清理（用例中途失败时不残留）
         vi.restoreAllMocks()
         delete process.env.DEPENDFIX_ROLE
     })
 
     it('worker 角色：不注册周期定时器与 close 钩子，并输出跳过日志', () => {
         process.env.DEPENDFIX_ROLE = 'worker'
-        const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => undefined)
         const nitroApp = runPlugin()
 
         expect(nitroApp.hooks.hook).not.toHaveBeenCalled()
         expect(vi.getTimerCount()).toBe(0)
-        expect(infoSpy).toHaveBeenCalled()
-        infoSpy.mockRestore()
+        expect(logInfoMock).toHaveBeenCalled()
     })
 
     it('未设置角色：照常注册（单进程形态行为不变）', () => {

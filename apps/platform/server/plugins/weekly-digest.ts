@@ -6,6 +6,7 @@ import {
     WEEKLY_DIGEST_HOUR_ENV,
 } from '#server/services/notification/weekly-digest-schedule'
 import { sendWeeklyDigest } from '#server/services/notification/weekly-digest.service'
+import { logger } from '#server/utils/logger'
 import { shouldSkipHttpOnlyPlugin } from '#server/utils/process-role'
 
 /**
@@ -24,13 +25,13 @@ export const WEEKLY_DIGEST_FIRST_RUN_DELAY_MS = 30 * 1000
 export const WEEKLY_DIGEST_CHECK_INTERVAL_MS = 15 * 60 * 1000
 
 export default defineNitroPlugin((nitroApp) => {
-    if (shouldSkipHttpOnlyPlugin('weekly-digest')) {
+    if (shouldSkipHttpOnlyPlugin('weekly-digest', process.env, logger)) {
         return
     }
 
     const parsedHour = parseWeeklyDigestHour(process.env[WEEKLY_DIGEST_HOUR_ENV])
     if (parsedHour.invalid) {
-        console.warn(
+        logger.warn(
             `[weekly-digest] invalid ${WEEKLY_DIGEST_HOUR_ENV}=${JSON.stringify(process.env[WEEKLY_DIGEST_HOUR_ENV])}（仅支持 0-23 整数）——回退 ${parsedHour.hour} 时`,
         )
     }
@@ -56,7 +57,7 @@ export default defineNitroPlugin((nitroApp) => {
         } catch (error) {
             // 允许下一轮重试（DB / 渠道临时故障）；成功路径不重置，避免同周重复尝试。
             lastAttemptedWeekKey = null
-            console.error('[weekly-digest] 周报发送失败:', error)
+            logger.error('[weekly-digest] 周报发送失败', { error })
         }
     }
 

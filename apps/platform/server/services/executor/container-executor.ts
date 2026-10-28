@@ -22,6 +22,7 @@ import {
 } from './platform-delivery'
 import { ABORT_GRACE_MS, ExecutionTimeoutError, settleWithin, withTimeout } from './engine-run'
 import { MemoryLogger } from '#server/utils/memory-logger'
+import { logger as platformLogger } from '#server/utils/logger'
 import { detectSigkill, startResourceMonitor } from '#server/utils/resource-usage'
 import { sanitizeString } from '#server/utils/sanitize'
 
@@ -467,7 +468,7 @@ export class ContainerExecutor implements ScanExecutor {
 
             const executorFailMsg = `[executor] ${owner}/${name} failed: ${errorSource} - ${message}`
             memLogger.error(executorFailMsg)
-            console.error(executorFailMsg)
+            platformLogger.error(executorFailMsg)
 
             let errorCode: string = 'execution_failed'
             if (isTimeout) {
@@ -524,7 +525,7 @@ export class ContainerExecutor implements ScanExecutor {
         // 诊断日志：clone 配置（不含 token）
         const cloneInfo = `[clone] ${owner}/${name} → branch=${branch}, timeout=${this.cloneTimeoutMs}ms, maxRetries=${this.cloneMaxRetries}`
         logger?.info(cloneInfo)
-        console.log(cloneInfo)
+        platformLogger.info(cloneInfo)
 
         let lastError: Error | undefined
         for (let attempt = 1; attempt <= this.cloneMaxRetries; attempt++) {
@@ -541,7 +542,7 @@ export class ContainerExecutor implements ScanExecutor {
                 if (attempt > 1) {
                     const msg = `[clone] ${owner}/${name} succeeded on attempt ${attempt} (${Date.now() - attemptStart}ms)`
                     logger?.info(msg)
-                    console.log(msg)
+                    platformLogger.info(msg)
                 }
                 return
             } catch (err) {
@@ -555,7 +556,7 @@ export class ContainerExecutor implements ScanExecutor {
                 if (isTimeout) {
                     const msg = `[clone] ${owner}/${name} timeout on attempt ${attempt}/${this.cloneMaxRetries} (${elapsed}ms, limit ${this.cloneTimeoutMs}ms)`
                     logger?.warn(msg)
-                    console.warn(msg)
+                    platformLogger.warn(msg)
                     // 最后一次尝试超时 → 抛 ExecutionTimeoutError（让 execute() 正确分类）
                     if (attempt === this.cloneMaxRetries) {
                         throw new ExecutionTimeoutError(this.cloneTimeoutMs, 'clone')
@@ -565,7 +566,7 @@ export class ContainerExecutor implements ScanExecutor {
                     const gitMsg = extractGitErrorMessage(lastError.message)
                     const msg = `[clone] ${owner}/${name} failed on attempt ${attempt}: ${gitMsg}`
                     logger?.warn(msg)
-                    console.warn(msg)
+                    platformLogger.warn(msg)
                     // 认证/权限/不存在类错误重试无意义
                     if (/authentication|401|403|not found|404/i.test(lastError.message)) {
                         throw new Error(`git clone 失败：${gitMsg}`)
@@ -584,7 +585,7 @@ export class ContainerExecutor implements ScanExecutor {
                 const delay = CLONE_RETRY_BASE_DELAY_MS * attempt
                 const retryMsg = `[clone] retrying in ${delay}ms...`
                 logger?.info(retryMsg)
-                console.log(retryMsg)
+                platformLogger.info(retryMsg)
                 await new Promise((r) => setTimeout(r, delay))
             }
         }

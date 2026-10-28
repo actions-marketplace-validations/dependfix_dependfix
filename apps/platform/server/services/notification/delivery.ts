@@ -10,6 +10,7 @@ import { resolveOrganizationId } from '#server/utils/organization'
 import { Organization } from '#server/entities/organization'
 import { NotificationLog, type NotificationScopeType } from '#server/entities/notification-log'
 import { ensureDatabaseInitialized } from '#server/database'
+import { logger } from '#server/utils/logger'
 
 export interface LoadedNotificationSettings {
     organizationId: string
@@ -51,7 +52,7 @@ export const reclaimStaleSendingLog = async (deliveryKey: string, now = new Date
             await repo.delete(row.id)
         }
     } catch (error) {
-        console.error('[notification:delivery] failed to reclaim stale sending log:', error)
+        logger.error('[notification:delivery] failed to reclaim stale sending log', { error })
     }
 }
 
@@ -88,7 +89,7 @@ export const recordNotificationLog = async (input: {
         if (isUniqueViolation(error)) {
             throw error
         }
-        console.error('[notification:delivery] failed to write notification_log:', error)
+        logger.error('[notification:delivery] failed to write notification_log', { error })
         return null
     }
 }
@@ -101,7 +102,7 @@ export const updateNotificationLog = async (log: NotificationLog | null, patch: 
         const ds = await ensureDatabaseInitialized()
         await ds.getRepository(NotificationLog).update(log.id, patch)
     } catch (error) {
-        console.error('[notification:delivery] failed to update notification_log:', error)
+        logger.error('[notification:delivery] failed to update notification_log', { error })
     }
 }
 
@@ -270,7 +271,7 @@ export const dispatchNotification = async (input: DispatchNotificationInput): Pr
     } else if (isDigest) {
         const identity = input.recipientIdentity || (recipients.length === 1 ? recipients[0]?.email : '')
         if (!identity) {
-            console.error('[notification:delivery] weekly_digest requires recipientIdentity for multi-recipient dispatch')
+            logger.error('[notification:delivery] weekly_digest requires recipientIdentity for multi-recipient dispatch')
             return { status: 'failed', delivered: false, channel: channel.name, recipientCount: recipients.length }
         }
         deliveryKey = buildDigestDeliveryKey(input.scopeId, identity, channel.name)
@@ -317,7 +318,7 @@ export const dispatchNotification = async (input: DispatchNotificationInput): Pr
             })
             return { status: 'skipped_duplicate', delivered: false, channel: channel.name, recipientCount: recipients.length }
         }
-        console.error('[notification:delivery] failed to reserve delivery key:', error)
+        logger.error('[notification:delivery] failed to reserve delivery key', { error })
         return { status: 'failed', delivered: false, channel: channel.name, recipientCount: recipients.length }
     }
 

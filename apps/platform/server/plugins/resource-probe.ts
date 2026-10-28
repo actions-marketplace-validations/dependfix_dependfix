@@ -4,6 +4,7 @@ import {
     formatStartupResourceWarning,
     resolveStartupResource,
 } from '#server/utils/resource-budget'
+import { logger } from '#server/utils/logger'
 
 /**
  * 启动期资源探测（只读、不阻断）：打印 cgroup / 宿主内存上限与队列并发。
@@ -14,9 +15,9 @@ import {
  */
 export default defineNitroPlugin(() => {
     const info = resolveStartupResource()
-    console.info(formatStartupResourceLine(info))
+    logger.info(formatStartupResourceLine(info))
     const warning = formatStartupResourceWarning(info)
     if (warning) {
-        console.warn(warning)
+        logger.warn(warning)
     }
 })

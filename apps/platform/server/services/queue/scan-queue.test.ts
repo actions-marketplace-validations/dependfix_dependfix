@@ -11,9 +11,13 @@ interface QueueInstance {
     close: ReturnType<typeof vi.fn>
 }
 
-const { QueueMock, instances } = vi.hoisted(() => ({
+const { QueueMock, instances, logWarnMock } = vi.hoisted(() => ({
     QueueMock: vi.fn(),
     instances: [] as QueueInstance[],
+    logWarnMock: vi.fn(),
+}))
+vi.mock('#server/utils/logger', () => ({
+    logger: { debug: vi.fn(), info: vi.fn(), warn: logWarnMock, error: vi.fn() },
 }))
 vi.mock('bullmq', () => ({
     Queue: class {
@@ -65,6 +69,8 @@ describe('createScanQueue', () => {
     beforeEach(() => {
         instances.length = 0
         QueueMock.mockReset()
+        // logger mock 是模块级 vi.fn：清历史，避免更早用例的同类告警让断言恒真
+        logWarnMock.mockClear()
     })
 
     it('adds new job when no existing job with same id', async () => {
@@ -305,10 +311,11 @@ describe('createScanQueue', () => {
             const queue = createScanQueue(makeConnection(), {})
             const instance = currentInstance()
             instance.getWorkersCount.mockRejectedValue(new Error('ERR unknown command CLIENT'))
-            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
             await expect(queue.hasConsumers()).resolves.toBeNull()
-            expect(warnSpy).toHaveBeenCalled()
-            warnSpy.mockRestore()
+            expect(logWarnMock).toHaveBeenCalledWith(
+                expect.stringContaining('队列消费者探测失败'),
+                expect.objectContaining({ error: expect.any(Error) }),
+            )
         })
     })
 

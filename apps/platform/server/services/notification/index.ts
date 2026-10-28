@@ -16,6 +16,7 @@ import { isDeploymentNotificationEnabled } from './preferences'
 import { NotificationLog } from '#server/entities/notification-log'
 import { AuditEvent } from '#server/entities/audit-event'
 import { ensureDatabaseInitialized } from '#server/database'
+import { logger } from '#server/utils/logger'
 
 export { ensureNotificationChannelsRegistered, listNotificationChannels, registerNotificationChannel, unregisterNotificationChannel } from './registry'
 
@@ -37,7 +38,7 @@ const isUniqueViolation = (error: unknown): boolean => {
  */
 export const notifyEnvEvent = async (event: NotificationEvent): Promise<void> => {
     if (!shouldNotifyEnvEvent(event.type)) {
-        console.warn(`[notification] event type '${event.type}' is audit-only; skip notify for event ${event.id}`)
+        logger.warn(`[notification] event type '${event.type}' is audit-only; skip notify for event ${event.id}`)
         return
     }
 
@@ -62,7 +63,7 @@ export const notifyEnvEvent = async (event: NotificationEvent): Promise<void> =>
         settings,
     })
     if (recipients.length === 0) {
-        console.warn(`[notification] no recipients configured for event ${event.id}; skip`)
+        logger.warn(`[notification] no recipients configured for event ${event.id}; skip`)
         await recordNotificationLog({
             deliveryKey: null,
             category: 'platform_incident',
@@ -155,7 +156,7 @@ export const notifyEnvEvent = async (event: NotificationEvent): Promise<void> =>
             await markNotified(event.id, result.delivered, channel.name)
         } catch (e) {
             const code = e instanceof NotificationError ? e.code : 'NOTIFICATION_SEND_FAILED'
-            console.error(`[notification] channel '${channel.name}' send failed for event ${event.id} (${code}):`, e)
+            logger.error(`[notification] channel '${channel.name}' send failed for event ${event.id} (${code})`, { error: e })
             if (isUniqueViolation(e)) {
                 await recordNotificationLog({
                     deliveryKey: null,
@@ -189,7 +190,7 @@ async function markNotified(eventId: string, delivered: boolean, channelName: st
             notifiedVia: channelName,
         })
     } catch (e) {
-        console.error(`[notification] failed to update audit_event ${eventId} notified status:`, e)
+        logger.error(`[notification] failed to update audit_event ${eventId} notified status`, { error: e })
     }
 }
 

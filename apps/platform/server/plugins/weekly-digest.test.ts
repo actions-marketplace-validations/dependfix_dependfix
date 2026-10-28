@@ -4,8 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
  * 周汇总插件单测：注册守卫（worker 跳过）+ 触发窗口 + 本进程同周只尝试一次 +
  * 失败允许下一轮重试 + 非法小时 env 回退。周报服务整体 mock，不触达 DB / 渠道。
  */
-const { sendWeeklyDigestMock } = vi.hoisted(() => ({
+const { sendWeeklyDigestMock, logInfoMock, logWarnMock, logErrorMock } = vi.hoisted(() => ({
     sendWeeklyDigestMock: vi.fn(),
+    logInfoMock: vi.fn(),
+    logWarnMock: vi.fn(),
+    logErrorMock: vi.fn(),
 }))
 
 vi.mock('nitropack/runtime', () => ({
@@ -13,6 +16,9 @@ vi.mock('nitropack/runtime', () => ({
 }))
 vi.mock('#server/services/notification/weekly-digest.service', () => ({
     sendWeeklyDigest: sendWeeklyDigestMock,
+}))
+vi.mock('#server/utils/logger', () => ({
+    logger: { debug: vi.fn(), info: logInfoMock, warn: logWarnMock, error: logErrorMock },
 }))
 
 import weeklyDigestPlugin, {
@@ -39,6 +45,10 @@ const result = () => ({
 })
 
 describe('weekly-digest 插件注册守卫', () => {
+    beforeEach(() => {
+        vi.clearAllMocks()
+    })
+
     afterEach(() => {
         vi.useRealTimers()
         vi.restoreAllMocks()
@@ -48,12 +58,11 @@ describe('weekly-digest 插件注册守卫', () => {
     it('worker 角色：不注册定时器与 close 钩子，并输出跳过日志', () => {
         vi.useFakeTimers()
         process.env.DEPENDFIX_ROLE = 'worker'
-        const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => undefined)
         const nitroApp = runPlugin()
 
         expect(nitroApp.hooks.hook).not.toHaveBeenCalled()
         expect(vi.getTimerCount()).toBe(0)
-        expect(infoSpy).toHaveBeenCalled()
+        expect(logInfoMock).toHaveBeenCalled()
     })
 
     it('未设置角色：照常注册，close 钩子清理定时器', () => {
@@ -113,11 +122,10 @@ describe('weekly-digest 插件触发', () => {
     it('失败后允许下一轮重试（异常不静默停用）', async () => {
         vi.setSystemTime(new Date(2026, 9, 26, 9, 1))
         sendWeeklyDigestMock.mockRejectedValueOnce(new Error('db down'))
-        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
         runPlugin()
         await vi.advanceTimersByTimeAsync(WEEKLY_DIGEST_FIRST_RUN_DELAY_MS)
         expect(sendWeeklyDigestMock).toHaveBeenCalledTimes(1)
-        expect(errorSpy).toHaveBeenCalled()
+        expect(logErrorMock).toHaveBeenCalled()
 
         await vi.advanceTimersByTimeAsync(WEEKLY_DIGEST_CHECK_INTERVAL_MS)
         expect(sendWeeklyDigestMock).toHaveBeenCalledTimes(2)
@@ -137,10 +145,9 @@ describe('weekly-digest 插件触发', () => {
     it('非法小时 env → warn 并按默认 9 时触发', async () => {
         process.env.DEPENDFIX_WEEKLY_DIGEST_HOUR = '26'
         vi.setSystemTime(new Date(2026, 9, 26, 9, 1))
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
         runPlugin()
         await vi.advanceTimersByTimeAsync(WEEKLY_DIGEST_FIRST_RUN_DELAY_MS)
-        expect(warnSpy).toHaveBeenCalled()
+        expect(logWarnMock).toHaveBeenCalled()
         expect(sendWeeklyDigestMock).toHaveBeenCalledTimes(1)
     })
 })

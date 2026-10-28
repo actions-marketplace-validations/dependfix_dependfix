@@ -8,9 +8,11 @@ import {
 } from 'vitest'
 
 // ---------- mock 依赖 ----------
-const { triggerScheduleMock, runScanMock, workerInstances } = vi.hoisted(() => ({
+const { triggerScheduleMock, runScanMock, workerInstances, logWarnMock, logErrorMock } = vi.hoisted(() => ({
     triggerScheduleMock: vi.fn(),
     runScanMock: vi.fn(),
+    logWarnMock: vi.fn(),
+    logErrorMock: vi.fn(),
     workerInstances: [] as {
         queueName: string
         handler: (job: { name: string, data: unknown }) => Promise<unknown>
@@ -27,6 +29,10 @@ vi.mock('../scheduler/scheduler.service', () => ({
 
 vi.mock('../scan-orchestrator.service', () => ({
     runScanForRepository: runScanMock,
+}))
+
+vi.mock('#server/utils/logger', () => ({
+    logger: { debug: vi.fn(), info: vi.fn(), warn: logWarnMock, error: logErrorMock },
 }))
 
 vi.mock('bullmq', () => ({
@@ -64,7 +70,7 @@ import {
     SCAN_WORKER_LOCK_OPTIONS,
 } from './scan-worker'
 
-/** 从 console 调用的首参提取结构化日志载荷（形如 `[scan-worker] {json}`） */
+/** 从 logger 调用的首参提取结构化日志载荷（形如 `[scan-worker] {json}`） */
 const payloadOf = (call: unknown[]): Record<string, unknown> =>
     JSON.parse(String(call[0]).replace('[scan-worker] ', '')) as Record<string, unknown>
 
@@ -178,7 +184,7 @@ describe('scan-worker（job 分发 + worker 封装 + 锁观测）', () => {
 
     describe('事件处理（结构化日志）', () => {
         it('stalled：日志含 event / jobId / prev / runId（经注入 getJob 解析）', async () => {
-            const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+            const warn = logWarnMock
             const getJob = vi.fn(async () => ({ data: { runId: 'run-9' } }))
 
             await handleStalledEvent(getJob, 'scan-repo-1', 'active')
@@ -193,7 +199,7 @@ describe('scan-worker（job 分发 + worker 封装 + 锁观测）', () => {
         })
 
         it('stalled：未注入 getJob / 查询抛错 → runId 降级 undefined（告警不丢失）', async () => {
-            const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+            const warn = logWarnMock
             const failingLookup = vi.fn(async () => {
                 throw new Error('redis down')
             })
@@ -211,7 +217,7 @@ describe('scan-worker（job 分发 + worker 封装 + 锁观测）', () => {
         })
 
         it('lockRenewalFailed：日志含 jobIds 与已解析 runIds（未解析项被过滤）', async () => {
-            const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+            const warn = logWarnMock
             const getJob = vi.fn(async (jobId: string) => jobId === 'scan-repo-1'
                 ? { data: { runId: 'run-1' } }
                 : undefined)
@@ -226,7 +232,7 @@ describe('scan-worker（job 分发 + worker 封装 + 锁观测）', () => {
         })
 
         it('error：普通错误记 message；续期失败错误标 duplicateOf（与 lockRenewalFailed 同根因去重）', () => {
-            const error = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+            const error = logErrorMock
 
             handleWorkerError(new Error('redis connection lost'))
             handleWorkerError(new Error(`${LOCK_RENEWAL_ERROR_PREFIX}scan-repo-1`))
@@ -241,7 +247,7 @@ describe('scan-worker（job 分发 + worker 封装 + 锁观测）', () => {
         })
 
         it('error：message 脱敏（内联凭据不落入日志）', () => {
-            const error = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+            const error = logErrorMock
 
             handleWorkerError(new Error('clone failed: https://x-access-token:secret-token@github.com/a/b.git'))
 

@@ -18,6 +18,7 @@ import { SCHEDULED_JOB_NAME, triggerSchedule } from '../scheduler/scheduler.serv
 import { SCAN_QUEUE_NAME, type ScanJobData } from './scan-queue'
 import { sanitizeString } from '#server/utils/sanitize'
 import { DEFAULT_SCAN_CONCURRENCY } from '#server/utils/resource-budget'
+import { logger } from '#server/utils/logger'
 
 /** scheduled-scan job 数据（BullMQ job scheduler 模板，见 scheduler.service registerSchedule） */
 export interface ScheduledScanJobData {
@@ -121,7 +122,7 @@ export const handleStalledEvent = async (
     const runId = await resolveRunId(getJob, jobId)
     // runId 未解析时显式 null（而非省略字段）：区分「已尝试解析但未得」与「无此字段」
     const payload: ScanWorkerEventLog = { event: 'stalled', jobId, prev, runId: runId ?? null }
-    console.warn(`[scan-worker] ${JSON.stringify(payload)}`)
+    logger.warn(`[scan-worker] ${JSON.stringify(payload)}`)
 }
 
 /** lockRenewalFailed 事件处理（导出便于单测）：`could not renew lock` 的精确结构化信号 */
@@ -135,7 +136,7 @@ export const handleLockRenewalFailedEvent = async (
         jobIds,
         runIds: resolved.filter((runId): runId is string => Boolean(runId)),
     }
-    console.warn(`[scan-worker] ${JSON.stringify(payload)}`)
+    logger.warn(`[scan-worker] ${JSON.stringify(payload)}`)
 }
 
 /**
@@ -152,7 +153,7 @@ export const handleWorkerError = (error: Error): void => {
         message: sanitizeString(error.message),
         ...(isLockRenewalError ? { duplicateOf: 'lockRenewalFailed' as const } : {}),
     }
-    console.error(`[scan-worker] ${JSON.stringify(payload)}`)
+    logger.error(`[scan-worker] ${JSON.stringify(payload)}`)
 }
 
 export interface ScanWorkerOptions {

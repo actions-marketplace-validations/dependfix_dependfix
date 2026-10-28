@@ -3,15 +3,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getQueueService } from './queue.service'
 
 // 外部依赖 mock（真实 Redis/BullMQ 不可控）
-const { createRedisClient, probeRedis, createScanQueue, createScanWorker } = vi.hoisted(() => ({
+const { createRedisClient, probeRedis, createScanQueue, createScanWorker, logWarnMock } = vi.hoisted(() => ({
     createRedisClient: vi.fn(),
     probeRedis: vi.fn(),
     createScanQueue: vi.fn(),
     createScanWorker: vi.fn(),
+    logWarnMock: vi.fn(),
 }))
 vi.mock('./redis', () => ({ createRedisClient, probeRedis }))
 vi.mock('./scan-queue', () => ({ createScanQueue }))
 vi.mock('./scan-worker', () => ({ createScanWorker }))
+vi.mock('#server/utils/logger', () => ({
+    logger: { debug: vi.fn(), info: vi.fn(), warn: logWarnMock, error: vi.fn() },
+}))
 
 const QUEUE_GLOBAL_KEY = '__dependfix_queue_service__'
 
@@ -68,7 +72,7 @@ describe('getQueueService', () => {
     it('warns about failover when QUEUE_ENABLED=true but Redis is down', async () => {
         stubConfig({ queueEnabled: 'true' })
         probeRedis.mockResolvedValue({ available: false, reason: 'unreachable', version: null })
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+        const warnSpy = logWarnMock
         const service = await getQueueService()
         expect(service.mode).toBe('sync')
         expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('QUEUE_ENABLED=true'))
@@ -77,7 +81,7 @@ describe('getQueueService', () => {
     it('warns when Redis version is too old for BullMQ (>= 5.0)', async () => {
         stubConfig({ queueEnabled: 'auto' })
         probeRedis.mockResolvedValue({ available: false, reason: 'version_too_old', version: '3.0.0' })
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+        const warnSpy = logWarnMock
         const service = await getQueueService()
         expect(service.mode).toBe('sync')
         expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Redis 版本 3.0.0 低于 BullMQ'))
@@ -86,7 +90,7 @@ describe('getQueueService', () => {
     it('degrades to sync (with warn) when auto mode has no in-process worker', async () => {
         stubConfig({ queueEnabled: 'auto', inProcessWorker: false })
         probeRedis.mockResolvedValue({ available: true, reason: null, version: '7.4.1' })
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+        const warnSpy = logWarnMock
         const service = await getQueueService()
         expect(service.mode).toBe('sync')
         expect(service.queue).toBeNull()
@@ -101,7 +105,7 @@ describe('getQueueService', () => {
     it('keeps async (with warn) when QUEUE_ENABLED=true forces async without in-process worker', async () => {
         stubConfig({ queueEnabled: 'true', inProcessWorker: false })
         probeRedis.mockResolvedValue({ available: true, reason: null, version: '7.4.1' })
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+        const warnSpy = logWarnMock
         const service = await getQueueService()
         expect(service.mode).toBe('async')
         expect(service.queue).not.toBeNull()

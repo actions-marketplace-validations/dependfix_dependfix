@@ -10,6 +10,7 @@ import { createRedisClient, probeRedis } from './redis'
 import { createScanQueue, type ScanQueue } from './scan-queue'
 import { createScanWorker, type ScanWorker } from './scan-worker'
 import { parseQueueEnabled, resolveQueueMode, type QueueMode } from './queue-mode'
+import { logger } from '#server/utils/logger'
 
 export interface QueueService {
     mode: QueueMode
@@ -44,14 +45,14 @@ export const getQueueService = async (): Promise<QueueService> => {
     const mode = resolveQueueMode({ enabled, redisAvailable, inProcessWorker })
 
     if (mode === 'sync') {
-        console.info(`[queue] 同步模式（queueEnabled=${enabled}，Redis ${redisAvailable ? '可用' : '不可用'}${probe.reason === 'version_too_old' ? `，版本 ${probe.version} 低于 5.0` : ''}）`)
+        logger.info(`[queue] 同步模式（queueEnabled=${enabled}，Redis ${redisAvailable ? '可用' : '不可用'}${probe.reason === 'version_too_old' ? `，版本 ${probe.version} 低于 5.0` : ''}）`)
         if (enabled === 'true' && !redisAvailable) {
-            console.warn(`[queue] QUEUE_ENABLED=true 但 Redis 不可用，降级同步执行（failover）：${probe.reason === 'version_too_old' ? `Redis 版本 ${probe.version} 低于 BullMQ 要求的 5.0` : probe.reason}`)
+            logger.warn(`[queue] QUEUE_ENABLED=true 但 Redis 不可用，降级同步执行（failover）：${probe.reason === 'version_too_old' ? `Redis 版本 ${probe.version} 低于 BullMQ 要求的 5.0` : probe.reason}`)
         } else if (probe.reason === 'version_too_old') {
-            console.warn(`[queue] Redis 版本 ${probe.version} 低于 BullMQ 要求的 5.0，降级同步执行（可用性优先）`)
+            logger.warn(`[queue] Redis 版本 ${probe.version} 低于 BullMQ 要求的 5.0，降级同步执行（可用性优先）`)
         } else if (enabled === 'auto' && redisAvailable && !inProcessWorker) {
             // 消费者维度自动降级：Redis 可用但本进程不消费队列，且未启用独立 worker 进程
-            console.warn('[queue] 自动模式降级同步：Redis 可用但本进程不消费队列（NUXT_IN_PROCESS_WORKER 未启用），且未启用独立 worker 进程；如需异步请设 NUXT_IN_PROCESS_WORKER=true（单进程），或容器设 DEPENDFIX_QUEUE_WORKER=1 由入口启动独立 worker 进程（见 platform.md §10.6）')
+            logger.warn('[queue] 自动模式降级同步：Redis 可用但本进程不消费队列（NUXT_IN_PROCESS_WORKER 未启用），且未启用独立 worker 进程；如需异步请设 NUXT_IN_PROCESS_WORKER=true（单进程），或容器设 DEPENDFIX_QUEUE_WORKER=1 由入口启动独立 worker 进程（见 platform.md §10.6）')
         }
         // 同步模式：不创建队列（探测连接已在 probeRedis 内断开）
         scope[GLOBAL_QUEUE_KEY] = {
@@ -66,12 +67,12 @@ export const getQueueService = async (): Promise<QueueService> => {
     }
 
     // async 模式：队列连接（与探测连接分离；BullMQ 自管重连）
-    console.info(`[queue] 异步模式（queueEnabled=${enabled}，Redis ${probe.version ?? '未知版本'}）`)
+    logger.info(`[queue] 异步模式（queueEnabled=${enabled}，Redis ${probe.version ?? '未知版本'}）`)
     if (!inProcessWorker) {
         // 仅 QUEUE_ENABLED=true 强制异步可到达（auto + 无消费者已降级 sync）。
         // 独立 worker 进程形态已支持：容器部署可设 DEPENDFIX_QUEUE_WORKER=1 由入口启动 worker 进程
         // （本进程为纯 producer，口径见 docs/standards/platform.md §10.6）。
-        console.warn('[queue] QUEUE_ENABLED=true 强制异步但本进程不消费队列（NUXT_IN_PROCESS_WORKER 未启用）；需确保存在独立 worker 进程消费队列（容器可设 DEPENDFIX_QUEUE_WORKER=1，见 platform.md §10.6），否则任务可能挂起。可设 NUXT_IN_PROCESS_WORKER=true，或改回 NUXT_QUEUE_ENABLED=auto 自动降级同步')
+        logger.warn('[queue] QUEUE_ENABLED=true 强制异步但本进程不消费队列（NUXT_IN_PROCESS_WORKER 未启用）；需确保存在独立 worker 进程消费队列（容器可设 DEPENDFIX_QUEUE_WORKER=1，见 platform.md §10.6），否则任务可能挂起。可设 NUXT_IN_PROCESS_WORKER=true，或改回 NUXT_QUEUE_ENABLED=auto 自动降级同步')
     }
     const queueConnection = createRedisClient(config.redisUrl)
     const queue = createScanQueue(queueConnection, {
@@ -90,7 +91,7 @@ export const getQueueService = async (): Promise<QueueService> => {
             // stalled / lockRenewalFailed 事件补全 runId（BullMQ Worker 不暴露 getJob，用 queue 查）
             getJob: (jobId) => queue.getJob(jobId),
         })
-        console.info('[queue] IN_PROCESS_WORKER=true，当前进程消费扫描队列')
+        logger.info('[queue] IN_PROCESS_WORKER=true，当前进程消费扫描队列')
     }
 
     scope[GLOBAL_QUEUE_KEY] = {

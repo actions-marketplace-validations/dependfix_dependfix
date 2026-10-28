@@ -1,6 +1,11 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { releaseOrphanQueueJobs } from './orphan-job-release'
 import type { ScanJobInspection } from './scan-queue'
+
+const { logErrorMock } = vi.hoisted(() => ({ logErrorMock: vi.fn() }))
+vi.mock('#server/utils/logger', () => ({
+    logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: logErrorMock },
+}))
 
 const ORPHAN = { repositoryId: 'repo-1', runId: 'run-1' }
 
@@ -11,6 +16,10 @@ const makeQueue = (inspection: ScanJobInspection | null, removeResult = { remove
 }
 
 describe('releaseOrphanQueueJobs（孤儿去重键释放）', () => {
+    beforeEach(() => {
+        logErrorMock.mockClear()
+    })
+
     it('job 归属当前孤儿 run → 按 runId 释放', async () => {
         const { queue, remove } = makeQueue({
             jobId: 'scan-repo-1',
@@ -121,15 +130,12 @@ describe('releaseOrphanQueueJobs（孤儿去重键释放）', () => {
             .mockRejectedValueOnce(new Error('redis unavailable'))
             .mockResolvedValueOnce({ jobId: 'scan-repo-2', state: 'waiting', runId: 'run-2', runIdKey: 'run-2', ageMs: 0 })
         const remove = vi.fn().mockResolvedValue({ removed: true })
-        const errSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
-
         const result = await releaseOrphanQueueJobs(
             { inspect, remove },
             [ORPHAN, { repositoryId: 'repo-2', runId: 'run-2' }],
         )
 
         expect(result).toEqual({ removed: 1, skipped: 0 })
-        expect(errSpy).toHaveBeenCalled()
-        errSpy.mockRestore()
+        expect(logErrorMock).toHaveBeenCalled()
     })
 })

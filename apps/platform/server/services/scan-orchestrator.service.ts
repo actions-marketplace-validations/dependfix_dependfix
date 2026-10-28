@@ -21,6 +21,7 @@ import { AuditEvent, type AuditEventType } from '#server/entities/audit-event'
 import { ensureDatabaseInitialized } from '#server/database'
 import { detectSigkill, unavailableResourceUsage } from '#server/utils/resource-usage'
 import { resolveRunBuildStamp } from '#server/utils/run-build-info'
+import { logger } from '#server/utils/logger'
 
 /**
  * 扫描编排：触发 → 执行 → 落库（同步执行模型 Q2，请求内完成）。
@@ -266,7 +267,7 @@ const runScanInternal = async (
 
     const rollbackGranularityRaw = process.env.DEPENDFIX_ROLLBACK_GRANULARITY?.trim().toLowerCase()
     if (rollbackGranularityRaw && rollbackGranularityRaw !== 'unit' && rollbackGranularityRaw !== 'repo') {
-        console.warn(
+        logger.warn(
             `[engine] invalid DEPENDFIX_ROLLBACK_GRANULARITY="${process.env.DEPENDFIX_ROLLBACK_GRANULARITY}" — fallback to unit`,
         )
     }
@@ -507,7 +508,7 @@ const runScanInternal = async (
 
         // 业务通知 fire-and-forget：批次内 run 由批次终态合并；失败不阻断扫描
         void notifyRunTerminal(persistedRun).catch((notifyError) => {
-            console.error('[notification] run terminal notify failed:', notifyError)
+            logger.error('[notification] run terminal notify failed', { error: notifyError })
         })
 
         return persistedRun
@@ -528,7 +529,7 @@ const runScanInternal = async (
         applyFailureClassification(savedRun, { status: 'failed', error: orchestrationFailure })
         const persisted = await runRepo.save(savedRun)
         void notifyRunTerminal(persisted).catch((notifyError) => {
-            console.error('[notification] run terminal notify failed:', notifyError)
+            logger.error('[notification] run terminal notify failed', { error: notifyError })
         })
         return persisted
     }
@@ -668,9 +669,9 @@ async function recordEnvAuditEvent(
         }
         // 异步触发：失败由 notifyEnvEvent 内部捕获（fail-closed）
         notifyEnvEvent(notificationEvent).catch((e) => {
-            console.error(`[scan-orchestrator] notifyEnvEvent fire-and-forget failed for audit ${audit.id}:`, e)
+            logger.error(`[scan-orchestrator] notifyEnvEvent fire-and-forget failed for audit ${audit.id}`, { error: e })
         })
     } catch (e) {
-        console.error('[scan-orchestrator] failed to record env audit event:', e)
+        logger.error('[scan-orchestrator] failed to record env audit event', { error: e })
     }
 }

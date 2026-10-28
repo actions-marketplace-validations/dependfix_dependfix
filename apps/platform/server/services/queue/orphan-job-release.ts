@@ -2,6 +2,7 @@ import { isTerminalScanRunStatus } from '../scan-run-status'
 import type { ScanQueue } from './scan-queue'
 import { ScanRun } from '#server/entities/scan-run'
 import { ensureDatabaseInitialized } from '#server/database'
+import { logger } from '#server/utils/logger'
 
 /** 孤儿 run 引用（repositoryId 定位 jobId，runId 用于归属校验） */
 export interface OrphanRunRef {
@@ -88,7 +89,7 @@ export const releaseOrphanQueueJobs = async (
                 skipped++
             }
         } catch (error) {
-            console.error(`[stale-cleanup] 释放孤儿 run ${run.runId} 队列 job 失败:`, error)
+            logger.error(`[stale-cleanup] 释放孤儿 run ${run.runId} 队列 job 失败`, { error })
         }
     }
 

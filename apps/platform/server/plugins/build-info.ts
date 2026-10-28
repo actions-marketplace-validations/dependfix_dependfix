@@ -1,5 +1,6 @@
 import { defineNitroPlugin } from 'nitropack/runtime'
 import { formatBuildInfoLine, resolveBuildInfo, resolveStartedAt } from '#server/utils/build-info'
+import { logger } from '#server/utils/logger'
 import { shouldSkipHttpOnlyPlugin } from '#server/utils/process-role'
 
 /**
@@ -10,9 +11,9 @@ import { shouldSkipHttpOnlyPlugin } from '#server/utils/process-role'
  * 队列 worker 进程跳过本插件，避免每次自动重启多打印一行（角色判定见 docs/standards/platform.md §10.6）。
  */
 export default defineNitroPlugin(() => {
-    if (shouldSkipHttpOnlyPlugin('build-info')) {
+    if (shouldSkipHttpOnlyPlugin('build-info', process.env, logger)) {
         return
     }
     const config = useRuntimeConfig()
-    console.info(formatBuildInfoLine(resolveBuildInfo(config), resolveStartedAt()))
+    logger.info(formatBuildInfoLine(resolveBuildInfo(config), resolveStartedAt()))
 })

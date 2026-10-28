@@ -2,23 +2,24 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 /**
  * 启动期版本戳插件单测（任务登记见 docs/plan/todo-archive.md §M40.1）：
- * 验证启动时向 stdout 打印含 version / commit / startedAt 的日志行。
+ * 验证启动时通过统一 logger 输出含 version / commit / startedAt 的日志行。
  */
+const { infoMock, warnMock } = vi.hoisted(() => ({ infoMock: vi.fn(), warnMock: vi.fn() }))
+
 vi.mock('nitropack/runtime', () => ({
     defineNitroPlugin: (fn: unknown) => fn,
+}))
+vi.mock('#server/utils/logger', () => ({
+    logger: { debug: vi.fn(), info: infoMock, warn: warnMock, error: vi.fn() },
 }))
 
 import buildInfoPlugin from './build-info'
 
 const runPlugin = (config: Record<string, unknown>): string[] => {
     vi.stubGlobal('useRuntimeConfig', () => config)
-    const spy = vi.spyOn(console, 'info').mockImplementation(() => undefined)
-    try {
-        ;(buildInfoPlugin as unknown as () => void)()
-        return spy.mock.calls.map((args) => String(args[0]))
-    } finally {
-        spy.mockRestore()
-    }
+    vi.clearAllMocks()
+    ;(buildInfoPlugin as unknown as () => void)()
+    return [...infoMock.mock.calls, ...warnMock.mock.calls].map((args) => String(args[0]))
 }
 
 describe('build-info 插件', () => {

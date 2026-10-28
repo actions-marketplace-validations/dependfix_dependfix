@@ -13,6 +13,7 @@ import { Queue } from 'bullmq'
 import type { Redis } from 'ioredis'
 import type { ScanRequest } from '../scan-orchestrator.service'
 import { buildScanJobId, parseRetryConfig, SCAN_JOB_PRIORITY } from './queue-mode'
+import { logger } from '#server/utils/logger'
 
 export const SCAN_QUEUE_NAME = 'scan'
 
@@ -178,7 +179,7 @@ export const createScanQueue = (connection: Redis, options: { retriesRaw?: strin
             } catch (error) {
                 // active 且被 worker 锁定：BullMQ removeJob 对 locked job 返回 0（remove() 抛错）。
                 // 此时无法释放（worker 仍持有锁），交由 worker 正常收尾或锁过期后的下一轮处理。
-                console.warn(`[scan-queue] 释放仓库 ${repositoryId} 队列 job 失败（可能被 worker 锁定）:`, error)
+                logger.warn(`[scan-queue] 释放仓库 ${repositoryId} 队列 job 失败（可能被 worker 锁定）:`, { error })
                 return { removed: false }
             }
         },
@@ -212,7 +213,7 @@ export const createScanQueue = (connection: Redis, options: { retriesRaw?: strin
             } catch (error) {
                 // 查询异常（非 CLIENT 命令受限——那种情况 BullMQ 会返回伪 worker → true）：
                 // 返回未知，调用方按保守方向处理
-                console.warn('[scan-queue] 队列消费者探测失败（返回未知）:', error)
+                logger.warn('[scan-queue] 队列消费者探测失败（返回未知）:', { error })
                 return null
             }
         },
