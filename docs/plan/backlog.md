@@ -251,6 +251,11 @@
 
 - **平台健康检查与外部 uptime 接入（P2 🛠️，1.0 后）** —— 详见 [评估](../research/2026-10-27-third-party-observability-evaluation.md)。**目标**：进程死亡 / 容器未启动 / DB 不可用可发现。**范围**：`Dockerfile` HEALTHCHECK、`deployment.md` 探针口径、鉴权 `/api/health/details`。**验收**：① `docker inspect` healthy；② liveness 200 / readiness 异常非 200；③ 文档可复现；④ 公开端点无新增敏感字段。**不做**：不暴露 DB / Redis 细节；不绑定商业服务；不改运行模型。**交付物**：2-3 commits / 5-8 files / 150-250 行。**风险**：误判 → start-period + 重试；信息面 → 详情鉴权。
 
+**2026-10-28 发布门禁残余**：
+
+- **release.yml 补齐 prod 依赖审计阻断（P1 🛡️）** —— `test.yml` 有 prod 阻断 + 全量信号，`release.yml` 不含审计 → 审计红的提交仍可发版。**目标**：release 与 Test 审计口径一致。**范围**：release 增加 blocking（同 [security.md §5.6](../standards/security.md)）与全量信号。**验收**：① 阻断步骤日志含审计结果行；② registry 不可达 exit 0 不假绿；③ 本地 / CI 基线各一次。**不做**：不改命令与 ignore。**交付物**：1 commit / 1-2 files / 20-40 行。
+- **release 构建范围与 Test 对齐（P2 🛠️）** —— release 只跑 `pnpm run build`（packages），Test 含 platform 构建 → 平台构建失败只在 Docker 阶段暴露。**目标**：发布前可发现或登记边界。**范围**：release build 对齐或 release.md 记录理由。**验收**：① 破坏 platform 构建时前置门禁失败（或边界有据）；② 发布时长增量 < 2min。**不做**：不改 Docker 链。
+
 ### 待上收候选（评估完成，等待用户决策）
 
 > 本节为「评估完成、等待用户决策」候选的暂存区；候选**不含 `M\d+` 阶段编号**（[规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement)）。

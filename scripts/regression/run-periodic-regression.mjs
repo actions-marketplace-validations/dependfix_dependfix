@@ -21,6 +21,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
+import { DOC_GATES } from '../run-doc-gates.mjs'
 import { isDirectExecution, parseCliOptions } from '../shared/cli.mjs'
 import {
     resolveRegressionWindowPath,
@@ -29,6 +30,21 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(__dirname, '..', '..')
+
+/**
+ * 文档与治理门禁步骤（与 release.yml / test.yml 同集合，单点声明在 run-doc-gates.mjs）。
+ * 每次调用返回新对象：三个 profile 共享同一批 step 引用时，后续按 profile 覆写
+ * `required` / `timeoutBudget` 会串味。
+ */
+function buildDocGateSteps() {
+    return DOC_GATES.map((gate) => ({
+        command: 'pnpm',
+        commandArgs: ['run', gate],
+        label: gate,
+        required: true,
+        timeoutBudget: '10m',
+    }))
+}
 
 /**
  * 回归日志窗口限制配置
@@ -112,10 +128,7 @@ export const PERIODIC_REGRESSION_PROFILES = {
         steps: [
             createPnpmStep('test:coverage', 'test:coverage', { timeoutBudget: '30m' }),
             createPnpmStep('security:audit-deps', 'security:audit-deps', { timeoutBudget: '10m' }),
-            createPnpmStep('docs:check:i18n', 'docs:check:i18n', { timeoutBudget: '10m' }),
-            createPnpmStep('lint:md:check', 'lint:md:check', { timeoutBudget: '10m' }),
-            createPnpmStep('check:docs', 'check:docs', { timeoutBudget: '10m' }),
-            createPnpmStep('i18n:audit:missing', 'i18n:audit:missing', { timeoutBudget: '10m' }),
+            ...buildDocGateSteps(),
             createPnpmStep('lint', 'lint', { timeoutBudget: '10m' }),
             createPnpmStep('typecheck', 'typecheck', { timeoutBudget: '10m' }),
             createPnpmStep('build', 'build', { timeoutBudget: '10m' }),
@@ -135,10 +148,7 @@ export const PERIODIC_REGRESSION_PROFILES = {
         steps: [
             createPnpmStep('test:coverage', 'test:coverage', { timeoutBudget: '30m' }),
             createPnpmStep('security:audit-deps', 'security:audit-deps', { timeoutBudget: '10m' }),
-            createPnpmStep('docs:check:i18n', 'docs:check:i18n', { timeoutBudget: '10m' }),
-            createPnpmStep('lint:md:check', 'lint:md:check', { timeoutBudget: '10m' }),
-            createPnpmStep('check:docs', 'check:docs', { timeoutBudget: '10m' }),
-            createPnpmStep('i18n:audit:missing', 'i18n:audit:missing', { timeoutBudget: '10m' }),
+            ...buildDocGateSteps(),
             createPnpmStep('lint', 'lint', { timeoutBudget: '10m' }),
             createPnpmStep('typecheck', 'typecheck', { timeoutBudget: '10m' }),
             createPnpmStep('build', 'build', { timeoutBudget: '10m' }),
@@ -159,10 +169,7 @@ export const PERIODIC_REGRESSION_PROFILES = {
         steps: [
             createPnpmStep('test:coverage', 'test:coverage', { timeoutBudget: '30m' }),
             createPnpmStep('security:audit-deps', 'security:audit-deps', { timeoutBudget: '10m' }),
-            createPnpmStep('docs:check:i18n', 'docs:check:i18n', { timeoutBudget: '10m' }),
-            createPnpmStep('lint:md:check', 'lint:md:check', { timeoutBudget: '10m' }),
-            createPnpmStep('check:docs', 'check:docs', { timeoutBudget: '10m' }),
-            createPnpmStep('i18n:audit:missing', 'i18n:audit:missing', { timeoutBudget: '10m' }),
+            ...buildDocGateSteps(),
             createPnpmStep('lint', 'lint', { timeoutBudget: '10m' }),
             createPnpmStep('typecheck', 'typecheck', { timeoutBudget: '10m' }),
             createPnpmStep('build', 'build', { timeoutBudget: '10m' }),

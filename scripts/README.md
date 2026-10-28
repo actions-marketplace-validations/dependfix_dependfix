@@ -29,6 +29,7 @@
 | `pnpm docs:check:i18n` | `docs/check-i18n-duplicates.mjs` | 检查 docs 翻译页是否同时存在于旧目录（`docs/<locale>/`）与 `docs/i18n/<locale>/`（回流即报错；详见 [i18n 规范](../docs/standards/i18n.md)） |
 | `pnpm check:experience-landing` | `check-experience-landing.mjs` | 校验归档条目落点非空（编号子条目逐条校验；无编号子条目的 `##` 整体校验；占位符与自指落点判空）；**已接入 CI Test job（命中即阻断）** |
 | `pnpm check:doc-size` | `check-doc-size.mjs` | 按 [文档规范 §3](../docs/standards/documentation.md#3-文档行数阈值) 的阈值表计量文档行数（单一事实源，脚本不硬编码）；超强制分片阈值阻断，warning 带仅报告；**已接入 CI Test job** |
+| `pnpm gates:docs` | `run-doc-gates.mjs` | 文档与治理门禁总入口（`DOC_GATES` 单点声明）：顺序执行 i18n / markdown / 链接 / 编号 / 规范 / 机制一致性 / docs 构建等 16 项；`release.yml` 与 weekly / pre-release / phase-close 回归 profile 共用（与 `test.yml` 同集合）；任一失败非零退出 |
 | `pnpm check:doc-governance` | `check-doc-governance.mjs` | 文档治理结构与密度机检：字符/规则条数预算（[文档治理执行规范 §4.2](../docs/design/governance/doc-governance.md#42-字符与密度预算)）+ 归档索引不变量 + freshness warning；**已接入 CI Test job（阻断项命中即失败）** |
 
 ### 代码注释治理

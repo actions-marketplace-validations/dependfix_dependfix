@@ -60,7 +60,9 @@ jobs:
         run: pnpm release:auto-version
 
       - run: pnpm run lint
-      - run: pnpm run lint:md:check
+      # 文档与治理门禁：与 Test job 同集合（单点声明见 scripts/run-doc-gates.mjs）。
+      # 用途：防止「Test 因文档门禁变红、但 release 仍可手动发版」的口径缺口。
+      - run: pnpm run gates:docs
       - run: pnpm run typecheck
       - run: pnpm run test
       - run: pnpm run build

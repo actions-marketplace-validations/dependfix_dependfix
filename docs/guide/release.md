@@ -229,7 +229,7 @@ git push origin master
 `release.yml`（`workflow_dispatch` 手动触发；1.0.0 后增加 `schedule` 定时触发）依次执行：
 
 1. （仅 `schedule` 触发）`Auto version & changelog`：自动版本提升 + CHANGELOG 生成 + 提交推送（`pnpm release:auto-version` 脚本化执行）；
-2. lint → typecheck → test → build（质量门，任一失败即中止）；
+2. lint → **文档与治理门禁**（`pnpm run gates:docs`，与 `test.yml` 同集合，单点声明见 `scripts/run-doc-gates.mjs`）→ typecheck → test → build（质量门，任一失败即中止）；
 3. `Verify changelog is up to date`：校验六份 CHANGELOG（根级 + `packages/cli` / `packages/core` / `packages/engine` / `packages/skills` / `packages/mcp`）已包含当前版本段（防止漏跑 `pnpm changelog` 直接发布；普通提交版本未变时自动通过）；
 4. `pnpm release:publish`：
    - **只发布"本地版本未出现在 npm registry"的包**（fetch 直连 registry 对比，见 [经验归档 §三十二](../design/governance/experience-archive.md)），无待发布版本时安全退出（天然处理包版本不同步）；

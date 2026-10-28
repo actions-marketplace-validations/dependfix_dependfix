@@ -33,6 +33,7 @@
     "check:experience-landing": "node scripts/check-experience-landing.mjs",
     "check:verify-chain": "node scripts/check-verify-chain.mjs",
     "check:mergify": "node scripts/check-mergify-conditions.mjs",
+    "gates:docs": "node scripts/run-doc-gates.mjs",
     "i18n:audit": "node scripts/i18n/audit-locale-keys.mjs",
     "i18n:audit:missing": "node scripts/i18n/audit-locale-keys.mjs --only=missing --fail-on-missing",
     "i18n:audit:unused": "node scripts/i18n/audit-locale-keys.mjs --only=unused",
