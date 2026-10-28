@@ -288,6 +288,7 @@ if (value) { ... }  // 对 0, "", false 失效
 | [development.md §5.1.53](../../../../docs/standards/development.md) | 跨运行状态（尝试次数 / 上次结果）落在 PR 正文标记等可读回载体 | 读取失败 / 越界 / 标记被改写是否 **fail-open**（不误跳过）；计数键是否只用写入前可确定的输入（是否混入执行结果字段）；跳过是否落在安装与验证**之前**且不改变失败计数（`noOp` + 跳过原因分组，分组之和仍等于总数）；缓存是否按仓库 / 按轮复用而非逐告警重复查询 |
 | [development.md §5.1.54](../../../../docs/standards/development.md) | 改自动提交的暂存面 / 新增写盘来源 | 是否以「固定白名单 ∪ 声明路径」执行 `git add -- <paths>`（无通配暂存）；未声明的**已跟踪**改动是否拒绝提交并打印路径；生成物是否不提交且不报未声明；空集合是否拒绝；索引区已有暂存内容是否全部落在提交集合内（越界即拒绝且不擅自 `git reset`）；新写盘来源是否声明 `FixAction.changedPaths`（仅成功且非 noOp）且路径经校验（绝对 / `..` / pathspec magic / 控制字符） |
 | [development.md §5.1.55](../../../../docs/standards/development.md) | 新增等待 / 轮询外部异步结果（PR check / 部署 / 审批） | 空观测是否**绝不判成功**（宽限期 + 最少轮数后才允许未观测类终态）；是否双层预算（单对象 + 运行级，且受剩余 job 预算约束）并在超预算时记专用计数、保留对象；等待 / 评论 / 关闭失败是否只降级记录（不改结论与 exit code）；破坏性处置是否要求显式开关 + 归因一致（混合按未知）+ dry-run 守卫；采集失败是否与「零观测」区分 |
+| [development.md §5.1.56](../../../../docs/standards/development.md) | 升级传递依赖 / 复核或移除审计豁免 | 是否用 `pnpm why` + `semver.satisfies` 逐边核验 range（overrides 是上限：新版本声明高于 override 会被压回）；`--frozen-lockfile` 与 `pnpm audit` 是否都不报错却被静默压低；advisory 撤回 / 影响范围不再匹配是否同样移除豁免并留复核记录 |
 | [platform.md §3.9](../../../../docs/standards/platform.md) | `.github/dependfix.yml` 读取 / 合并 | **中央优先**（防目标仓库绕过）与**不提供 UI 入口**两条约束是否保持 |
 | [planning.md §2.3](../../../../docs/standards/planning.md) | 候选上收 / 关闭 | 父段标题括号枚举是否同步收敛；已失效候选是否清理 |
 | [planning.md §2.5](../../../../docs/standards/planning.md) | 条目含统计数字 / 跨文档引用同一批需求 | **量化断言**可复现口径：量级区间 + 测量方 + 可复现命令（第三方可复现）；**跨文档同源区分**：用户报告项数 / 登记候选数 / 上收原子数是否给出一致换算（无互相矛盾数字） |
@@ -346,8 +347,10 @@ if (value) { ... }  // 对 0, "", false 失效
 | [development.md §5.1.43](../../../../docs/standards/development.md) | client / server 共享字符串哨兵 / 「是否未知」判定 | 是否导出**镜像常量**（或共享包导入）并在 server 测试断言两侧相等？「是否未知」类判定是否收敛到单一纯函数，而非两端各写裸字面量？（枚举 / 阈值镜像见 §5.1.43） |
 | [engineering-practice-notes.md EP-34](../../../../docs/design/governance/engineering-practice-notes.md) | 某通知 / 投递类别豁免限流（指纹 / 冷却 / 每小时上限） | 是否只跳过自身限流判定，却仍让该类别的 `sent` 行计入**共享计数查询**（一次批量投递可挤掉常规类别）？是否补「豁免类别发送后常规类别仍可发送」用例？ |
 | [testing.md §6.10](../../../../docs/standards/testing.md) | 脚本级测试中的 shell 管道 / 退出码断言 | 管道 + tail 后接双竖线 fail 在 dash（无 `pipefail`）下是否为死代码（管道状态取末命令）？是否拆分为「捕获输出（带失败判定）」与「解析输出」两步并单独断言关键日志行？ |
+| [testing.md §6.13](../../../../docs/standards/testing.md) | 新增脚本 / CLI 入口 / 依赖环境变量的用例 | 默认参数箭头函数与 `isDirectExecution` 守卫是否拉低 patch 覆盖率（显式参数 seam + 真实最便宜命令；守卫 `v8 ignore` 是否注明理由）？依赖 `GITHUB_ACTIONS` 等变量的用例是否 `vi.stubEnv` + `finally vi.unstubAllEnvs()` 隔离（本地绿 ≠ CI 绿）？ |
 | [testing.md §6.8](../../../../docs/standards/testing.md) | mutation / 审计取证工件 | 是否逐项记录**文件、变异前 md5、失败用例名、复现命令**，而非只写「N/N 击杀」汇总？还原后是否 md5 核对一致？ |
 | [git.md §3.7.1](../../../../docs/standards/git.md) | 拆批提交 / lint-staged 文件级任务 | 拆批前是否先把**未暂存文档** stash / 还原到 HEAD（lint-staged 的 updateIndex 会按任务前后 diff 重暂存，未暂存文档可能被带入 feat commit）？每组 `git add` 后是否 `git diff --cached --name-only` 核对、提交后 `git show --stat HEAD` 复核？ |
+| [git.md §3.7](../../../../docs/standards/git.md) | 为新增依赖跑过 `pnpm install`（lockfile 变更） | 是否 `git diff -U0 pnpm-lock.yaml` 逐 hunk 核验，只保留目标依赖的 importer / packages / snapshots 条目；非目标依赖的 range 内顺手升级是否已还原；还原后是否复跑 `--frozen-lockfile` |
 | [documentation.md §2](../../../../docs/standards/documentation.md) | Markdown 表格单元格含双竖线 | 是否用「反斜杠 + 双竖线」转义？`check:docs` / `lint-md` / `docs:build` 都不校验列数（门禁全绿但渲染丢列），改完是否解析产物 HTML 复核列数？ |
 | [documentation.md §6](../../../../docs/standards/documentation.md) | 实现形态反转（如「先建后 chown」→「以运行身份创建」） | 检查点矩阵行是否与条款**同批更新**？矩阵仍写旧形态会让后续审计按矩阵「整改」重新引入缺陷 |
 | [planning.md §2.5](../../../../docs/standards/planning.md) | 设计 / 验收中出现计数 | 是否写明**单位与分母**（如「安装尝试数」而非「故障事件数」）？同一故障在多链路各落一条审计时，按事件理解会误判重复计数 |

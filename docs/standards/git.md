@@ -151,9 +151,9 @@ commit message 应聚焦于"当次提交的改动"+"可供事后复查的信息"
 
 修复一个功能点时，**支撑文件必须与修复点同 commit 入库**——类型扩展 / 字段透传 / i18n key / 测试 mock 等任一项留在工作区未暂存，都会造成"提交态不自洽"（类型谎言 / i18n 裸 key / 测试断链），工作区看似正常但提交后运行时半失效。
 
-- **执行**：`git commit` / `git commit --amend` 前先 `git status`，逐项确认所有关联文件已暂存（不只修复点文件）。
-- **审计口径**：Review Gate 以「提交态自洽」而非「工作区自洽」为准。
+- **执行与审计口径**：`git commit` / `git commit --amend` 前先 `git status` 逐项确认关联文件已暂存（不只修复点文件）；Review Gate 以「提交态自洽」而非「工作区自洽」为准。
 - **反例**：M29.7 修复 commit 只含 4 文件（纯函数 + 组件 + 测试 + e2e 注释），`disabled` 透传 + i18n key 未暂存 → A 阶段审计 RG-B3 Reject。
+- **锁文件随安装连带升级**：为新增依赖跑 `pnpm install` 会把其它包 range 内的依赖一并升到最新（`--frozen-lockfile` 拦不住）。提交前 `git diff -U0 pnpm-lock.yaml` 逐 hunk 核验，只保留目标依赖的 importer / packages / snapshots 条目，其余还原后再跑 `--frozen-lockfile` 验证。
 - 详见 [归档 §六十五](../design/governance/experience-archive-§49-§69-recent-investigation.md#六十五m30-归档批次经验沉淀)
 
 ### 3.7.1 lint-staged 的 `git add` 任务会连带暂存工作区其它已改文件

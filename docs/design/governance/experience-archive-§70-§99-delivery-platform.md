@@ -223,3 +223,37 @@
 - **现象**：官方镜像默认 corepack shim 会回源下载 pnpm 覆盖镜像内版本；node-gyp 默认回源 headers；pnpm 11 只认 `pnpm_config_*` 前缀。
 - **手法**：钉 pnpm 前先移除 shim；受限网络设 `npm_config_nodedir`；切 registry 时同时导出两种前缀，并在构建期断言版本基线。
 - **落点**：[platform.md §10.1](../../standards/platform.md) + 检查点矩阵行。
+
+---
+
+## 七十五、M49 归档批次经验沉淀（发布通道 / 发布物自检 / 事实取证 / 验收对账 / 版本引用）
+
+### 1. 发布通道必须与安全门禁同源
+
+- **现象**：发布前安全告警门禁只接在 `release.yml`，本地备用通道 `pnpm release:publish --otp` 无门禁调用；0.6.0 即经该通道发布，门禁脚本存在但未执行。
+- **手法**：任一路径发布前都跑同一门禁（脚本内调用或显式 `--skip-security` 并记录理由）；备用通道步骤在发布指南中与 CI 通道同列。
+- **落点**：backlog「本地发布通道不执行发布前安全门禁」+ [security.md §5.9](../../standards/security.md)。
+
+### 2. 发布物自检要实测元数据，help 正常不等于版本正确
+
+- **现象**：`meta.version` 硬编码 `0.1.0`，0.6.0 发布后 `npx dependfix@0.6.0 --version` 仍返回 0.1.0；`report-only --help` 完全正常，发布后验若只看 help 会漏判。
+- **手法**：发布后验逐项实测 `--version` / 安装路径 / 帮助输出；版本类元数据一律从 `package.json` 读取（发布产物与源码两种布局都要覆盖）并补一致性用例，禁止硬编码。
+- **落点**：[backlog.md](../../plan/backlog.md)「0.6.0 发布物 `--version` 报 0.1.0」+ `packages/cli/src/cli/runner.ts` 的 `resolveCliVersion` 双布局读取。
+
+### 3. 发布事实以四方取证，脚本 exit 0 不作证据
+
+- **现象**：`release:publish` 成功后 tag 创建、npm 发布时间与 GitHub Release 各自独立；Docker 镜像推送要等 `docker.yml` 的 QA + 多架构构建，滞后约 8 分钟。只看脚本退出码会把「已发布」写早。
+- **手法**：归档前按 npm registry（版本 + 发布时间）、`git tag`、GitHub Release、Actions run 四方复核，并记录时点；口径不一致（如镜像仍在推送）如实写「执行中 / 待复核」。
+- **落点**：[release-1.0-readiness.md G3.8](./release-1.0-readiness.md#_2-门槛与判定-g1-g8) + [backlog.md](../../plan/backlog.md) Docker tag 复核条目。
+
+### 4. 「已完成」要与验收标准逐条对账，未达标项转 backlog
+
+- **现象**：M49.5 五项验收中 `--version`、3 连绿窗口、Docker tag health 三项在归档时点未完全达成；若按「阶段已完成」笼统收口，会把未验证项写成已通过。
+- **手法**：归档正文按 AC 逐条标注 ✅ / ◐ / ❌ 并附证据；未达标项转 backlog 并写恢复条件（发布 0.6.1 / 后续 push 累计 / run 收尾复核），不修改验收口径。
+- **落点**：[release-1.0-readiness.md](./release-1.0-readiness.md#_2-门槛与判定-g1-g8) 的 G1 / G4 未达标标注 + [backlog.md](../../plan/backlog.md) 0.6.1 / 3 连绿窗口条目。
+
+### 5. 发布后必须回填用户可见文档的版本引用
+
+- **现象**：Action 示例在 M49.4 按当时已发布的 `v0.5.0` 对齐，0.6.0 发布后仍有 10 处旧版本（`quick-start` / 首页 / README 4 处 + 设计文档 4 处 + en-US 镜像 2 处）；文档门禁不校验「引用的 tag 是否为最新」。
+- **手法**：发布收口清单增加「示例版本引用回填」一项，发布后 `rg '@v[0-9]'` 全量复核；版本引用属发布事实，随发布批次同批更新。
+- **落点**：[documentation.md §6](../../standards/documentation.md) 状态口径同步面 + 检查点矩阵。

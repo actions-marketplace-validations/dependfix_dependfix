@@ -15,6 +15,7 @@
 - **条款标题内禁止嵌套强调标记**：为条款标题补「与相邻条款的边界说明」时，不得把 `**...**` 嵌进已加粗的标题内；markdown 渲染会破损（外露字面 `**` + 强调范围错乱）；`lint:md` 与 `docs:build` **均不报错**（属「合法 HTML、错误强调」类盲区）；`check:docs` 的 `emphasis` 规则只覆盖**未配对**（块内计数为奇数）形态，成对但语义错位仍属盲区，只有渲染级实测能检出。**做法**：边界说明 / 交叉引用一律放**正文**，标题只保留规则名。
 - **Markdown 格式检查**：`pnpm run lint:md`（`@lint-md/cli`，`--fix` 自动格式化中英文 / 数字间距、标题规范、列表缩进）与 `pnpm run lint:md:check`（无 `--fix`，CI 门禁用，已接入 test.yml / release.yml）；规则裁剪见根目录 [`.lintmdrc`](../../.lintmdrc)；lint-staged 已挂载 `*.md` 自动执行。
 - **表格单元格含 `||` 必须转义为 `\|\|`**：`check:docs` / `lint-md` / `docs:build` 都不校验表格列数，门禁全绿但渲染会丢列；改完须解析产物 HTML 复核列数。
+- **VitePress 锚点以产物 id 为准**：数字开头的标题（`## 2.` / `### 5.6`）产物 id 带下划线前缀（`_2-…` / `_5-6-…`），`D+E` 归一为 `d-e`，全角括号按分隔符处理为单个连字符（`隔离（独立` → `隔离-独立`）。`check:docs` 的宽松规范化会把错锚判绿，**唯一证据是 `docs:build` 后 `rg -o 'id="…"' dist/<page>.html` 实测**——跨文档新锚点一律以产物 id 为准。另：首页 `features[].details` 是纯文本（不解析 markdown），写入加粗 / 链接会原样显示，卡片要么用 `link:` 要么纯文本。
 - **裸 HTML 标签禁令（必须）**：正文与表格中引用 `<tag>` / `<file>` / `<hash>` 等占位符、命令或路径时**必须用反引号包裹**——裸 `<tag>` 会被 markdown-it 按 raw HTML 原样透传，VitePress 的 vue 模板编译把任何非自闭合标签视为需要闭合 → `docs:build` 报 `Element is missing end tag`（报错行号是**转换产物行号**，不能按源文件行号找）；同理加粗 `**...**` 内的裸 `*`（如 `*.test.ts`）会破坏强调解析，须反引号包裹。lint:md 与 check:docs 均**不检查 HTML 标签配对**，`docs:build`（`pnpm --filter dependfix-docs build`）是唯一防线——**新增 / 修改 docs/ 站点内 md 时必须本地执行**；排查用 `rg '<[a-z][a-z0-9-]*>'` 后人工过滤反引号内命中。
 
 ## 3. 文档行数阈值
