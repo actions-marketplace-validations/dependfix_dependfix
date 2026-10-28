@@ -1,5 +1,107 @@
 # @dependfix/engine
 
+# [0.5.0](https://github.com/dependfix/dependfix/compare/@dependfix/engine@0.4.0...@dependfix/engine@0.5.0) (2026-10-28)
+
+
+### ⚡ 性能优化
+
+* **engine:** 版本化 overrides 合批，单仓安装次数由每包一次压到一次 ([9f747fe](https://github.com/dependfix/dependfix/commit/9f747fe))
+
+
+### ✨ 新功能
+
+* **core:** 在运行汇总中新增环境性失败计数 ([c313255](https://github.com/dependfix/dependfix/commit/c313255))
+* **engine:** buildVersionedOverrides 支持路径级 override（parent>child） ([4e04090](https://github.com/dependfix/dependfix/commit/4e04090))
+* **engine:** M30.4 C74 getCommitAuthor() 接线（仅 App 路径） ([61acfae](https://github.com/dependfix/dependfix/commit/61acfae))
+* **engine:** overrides 保护名单（按仓库粒度，防破坏性 override 复发） ([4e3a2b5](https://github.com/dependfix/dependfix/commit/4e3a2b5)), closes [#1095](https://github.com/dependfix/dependfix/issues/1095)
+* **engine:** pnpm-audit-fetcher 解析依赖链路径 findings[].paths[] ([8d9315c](https://github.com/dependfix/dependfix/commit/8d9315c))
+* **engine:** pnpm-workspace 覆盖写入改为定点编辑 ([6178859](https://github.com/dependfix/dependfix/commit/6178859))
+* **engine:** PR 正文展示家族锁步 ([ca4a95a](https://github.com/dependfix/dependfix/commit/ca4a95a))
+* **engine:** PR 正文披露跳过与截断分组 ([37c9306](https://github.com/dependfix/dependfix/commit/37c9306))
+* **engine:** 交付前排除安装产物，避免依赖目录进入修复提交 ([083b7a6](https://github.com/dependfix/dependfix/commit/083b7a6))
+* **engine:** 交付拒绝路径写入专属失败类别 ([97683eb](https://github.com/dependfix/dependfix/commit/97683eb))
+* **engine:** 交付提交按路径集合收口 ([fdc1e8a](https://github.com/dependfix/dependfix/commit/fdc1e8a))
+* **engine:** 出站白名单扩充镜像站并从配置面动态发现 registry ([380e8f4](https://github.com/dependfix/dependfix/commit/380e8f4))
+* **engine:** 区分 Dependabot alerts 未启用与获取失败 ([6fd6aad](https://github.com/dependfix/dependfix/commit/6fd6aad))
+* **engine:** 单元 checkpoint 与选择性回滚 ([dd19521](https://github.com/dependfix/dependfix/commit/dd19521))
+* **engine:** 受管进程执行基座与安装超时口径单一事实源 ([70585b3](https://github.com/dependfix/dependfix/commit/70585b3))
+* **engine:** 启动日志输出版本与构建 commit 回执 ([abed1ad](https://github.com/dependfix/dependfix/commit/abed1ad))
+* **engine:** 基线采样改为完整命令链 ([d76dcea](https://github.com/dependfix/dependfix/commit/d76dcea))
+* **engine:** 家族锁步接入常规 / 成员 / 跨线升级路径 ([8ff42a7](https://github.com/dependfix/dependfix/commit/8ff42a7))
+* **engine:** 将 CI 脚本镜像接入验证链与基线 ([c527f56](https://github.com/dependfix/dependfix/commit/c527f56))
+* **engine:** 将尝试上限判定接入修复链与 PR 标记 ([21ae012](https://github.com/dependfix/dependfix/commit/21ae012))
+* **engine:** 按原因累加跳过并计算告警级未修复数 ([54942da](https://github.com/dependfix/dependfix/commit/54942da))
+* **engine:** 接入 PR check 回环与报告字段 ([ff8fa60](https://github.com/dependfix/dependfix/commit/ff8fa60))
+* **engine:** 支持目标仓库专属配置并落地中央优先合并 ([40ac252](https://github.com/dependfix/dependfix/commit/40ac252))
+* **engine:** 新增 PR check 等待状态机与处置 ([1b37a35](https://github.com/dependfix/dependfix/commit/1b37a35))
+* **engine:** 新增 PR check 等待配置与 CLI 开关 ([3ef294e](https://github.com/dependfix/dependfix/commit/3ef294e))
+* **engine:** 新增交付提交集合判定与路径白名单 ([71ccef1](https://github.com/dependfix/dependfix/commit/71ccef1))
+* **engine:** 新增依赖家族锁步规则与 registry 版本解析 ([5fb836b](https://github.com/dependfix/dependfix/commit/5fb836b))
+* **engine:** 新增同告警尝试上限判定模块 ([1daf5f4](https://github.com/dependfix/dependfix/commit/1daf5f4))
+* **engine:** 新增家族锁步升级编排 ([88c5274](https://github.com/dependfix/dependfix/commit/88c5274))
+* **engine:** 新增尝试指纹、关闭 PR 索引与 retry-failed 开关 ([c600eb6](https://github.com/dependfix/dependfix/commit/c600eb6))
+* **engine:** 新增验证回滚粒度配置 ([a0b5adf](https://github.com/dependfix/dependfix/commit/a0b5adf))
+* **engine:** 既有失败基线判定与交付门禁归因 ([5a544da](https://github.com/dependfix/dependfix/commit/5a544da))
+* **engine:** 解析 CI 脚本并生成有界镜像计划 ([979a977](https://github.com/dependfix/dependfix/commit/979a977))
+* **engine:** 解析目标仓库 workflow 并比对验证口径 ([8888999](https://github.com/dependfix/dependfix/commit/8888999))
+* **engine:** 记录验证口径并对齐 PR 正文与运行报告 ([612a457](https://github.com/dependfix/dependfix/commit/612a457))
+* **engine:** 运行级取消接入编排层与验证链 ([0efe5e7](https://github.com/dependfix/dependfix/commit/0efe5e7))
+* **engine:** 零告警仓库按需跳过修复前基线采样 ([d5e5883](https://github.com/dependfix/dependfix/commit/d5e5883))
+* **engine:** 默认验证链纳入 test 命令 ([b414312](https://github.com/dependfix/dependfix/commit/b414312))
+* **engine:** 默认验证链纳入 typecheck 阻断类型面假绿交付 ([4a47ef8](https://github.com/dependfix/dependfix/commit/4a47ef8))
+
+
+### 🐛 Bug 修复
+
+* **engine:** .gitignore 幂等判定与 git 语义对齐消除重复追加 ([6a258d8](https://github.com/dependfix/dependfix/commit/6a258d8))
+* **engine:** git 边界收口非仓库目录语义与 push 侧钩子隔离 ([8a6c84e](https://github.com/dependfix/dependfix/commit/8a6c84e))
+* **engine:** M29.4 审计修复（双重计数 / 设计文档失准 / 间接路径补测） ([1a73abc](https://github.com/dependfix/dependfix/commit/1a73abc))
+* **engine:** M30.1 C87 跳过类审计条目不影响退出码 ([41a13ab](https://github.com/dependfix/dependfix/commit/41a13ab))
+* **engine:** override 写入后校验 lockfile 生效 ([873735d](https://github.com/dependfix/dependfix/commit/873735d))
+* **engine:** pnpm overrides key 语义归一化，消除 pkg@^1 / pkg@1 重复写法 ([b7ded32](https://github.com/dependfix/dependfix/commit/b7ded32))
+* **engine:** 保持单包 toVersion 口径并让取消态回退短路 ([823dd07](https://github.com/dependfix/dependfix/commit/823dd07))
+* **engine:** 区分 lockfile 已合规与修复生效的日志语义 ([1a557e1](https://github.com/dependfix/dependfix/commit/1a557e1))
+* **engine:** 区分告警源未启用与获取失败并给出源准确文案 ([00a11ff](https://github.com/dependfix/dependfix/commit/00a11ff))
+* **engine:** 升级失败就地留痕并清理失效归因指针 ([7f01d3b](https://github.com/dependfix/dependfix/commit/7f01d3b))
+* **engine:** 受管执行补跨平台 shell 与中止证据标识 ([242ab29](https://github.com/dependfix/dependfix/commit/242ab29))
+* **engine:** 告警源全失败判据改为无成功源且存在失败源 ([1b947ad](https://github.com/dependfix/dependfix/commit/1b947ad))
+* **engine:** 告警源失败信号去重与 token 指引三源合一 ([340ca85](https://github.com/dependfix/dependfix/commit/340ca85))
+* **engine:** 安装与验证命令超时有界落定 ([0db37e2](https://github.com/dependfix/dependfix/commit/0db37e2))
+* **engine:** 安装基线失败时跳过依赖安装链 ([312ada2](https://github.com/dependfix/dependfix/commit/312ada2))
+* **engine:** 安装失败证据补进程信号与 err.message 回退并共享抽取 ([9ccd60d](https://github.com/dependfix/dependfix/commit/9ccd60d))
+* **engine:** 容器内安装失败保留进程级信号并改判环境性失败不归因 ([4fee403](https://github.com/dependfix/dependfix/commit/4fee403))
+* **engine:** 尝试标记解析改为线性扫描（code scanning） ([a71a3cb](https://github.com/dependfix/dependfix/commit/a71a3cb))
+* **engine:** 收敛按全部实例且 noOp 修复不计交付 ([ec2c22b](https://github.com/dependfix/dependfix/commit/ec2c22b))
+* **engine:** 既有基线失败不再将运行判为失败 ([e5c59b8](https://github.com/dependfix/dependfix/commit/e5c59b8))
+* **engine:** 环境性安装失败不再归因目标仓库 ([0d1dd45](https://github.com/dependfix/dependfix/commit/0d1dd45))
+* **engine:** 自动 commit 跳过目标仓库 git hooks，消除 husky 阻断交付 ([cb5c146](https://github.com/dependfix/dependfix/commit/cb5c146))
+* **engine:** 补 quick-verify 失败留痕的失败命令与原因 ([701f55f](https://github.com/dependfix/dependfix/commit/701f55f))
+* **engine:** 补全失败评论表格单元格的转义（code scanning） ([43bad2c](https://github.com/dependfix/dependfix/commit/43bad2c))
+* **engine:** 补齐安装失败 stdout 证据与诊断提示 ([d6bc68a](https://github.com/dependfix/dependfix/commit/d6bc68a))
+* **engine:** 路径级 override 跨告警取 max + JSDoc 归位 ([e8e5f32](https://github.com/dependfix/dependfix/commit/e8e5f32))
+* **engine:** 隔离 tsdown dts 共享 chunk 修复入口声明错位 ([644f9f0](https://github.com/dependfix/dependfix/commit/644f9f0))
+* **engine:** 隔离宿主 git 签名配置，避免 commit 失败或带个人签名 ([fd2280b](https://github.com/dependfix/dependfix/commit/fd2280b))
+* **engine:** 隔离宿主 git 签名配置对 push 的污染 ([f6150b0](https://github.com/dependfix/dependfix/commit/f6150b0))
+* **engine:** 零修复与安装既有失败不交付 ([eb9f094](https://github.com/dependfix/dependfix/commit/eb9f094))
+* **engine:** 非 git 工作目录跳过本地提交并显式探测仓库 ([53b6ffb](https://github.com/dependfix/dependfix/commit/53b6ffb))
+
+
+### 📦 代码重构
+
+* **engine:** M30.2 C86 repo-fix.ts 行数拆分至 803 行 ([6923fdc](https://github.com/dependfix/dependfix/commit/6923fdc))
+* **engine:** 抽出告警升级与跨线升级步骤 ([4a358bd](https://github.com/dependfix/dependfix/commit/4a358bd))
+* **engine:** 抽分配置校验与错误提示模块治理 max-lines ([9226ddd](https://github.com/dependfix/dependfix/commit/9226ddd))
+* **engine:** 拆出收尾与基线采样交接面模块 ([7d96dcf](https://github.com/dependfix/dependfix/commit/7d96dcf))
+* **engine:** 统一 manifest 依赖升级的一次写盘路径 ([c15bf8a](https://github.com/dependfix/dependfix/commit/c15bf8a))
+* **engine:** 锁文件修复调用方适配异步签名 ([7a91501](https://github.com/dependfix/dependfix/commit/7a91501))
+* **engine:** 验证链拆分独立模块 verify-project ([4ed008e](https://github.com/dependfix/dependfix/commit/4ed008e))
+* **engine:** 默认验证链收敛为唯一事实源 ([fbed8e7](https://github.com/dependfix/dependfix/commit/fbed8e7))
+
+
+### 💥 BREAKING CHANGES
+
+* **engine:** @dependfix/engine 的 tryLockfileRepair 由同步改为异步（返回 Promise）。
+
 # [0.4.0](https://github.com/dependfix/dependfix/compare/@dependfix/engine@0.3.0...@dependfix/engine@0.4.0) (2026-09-18)
 
 

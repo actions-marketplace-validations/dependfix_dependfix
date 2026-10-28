@@ -1,5 +1,16 @@
 # dependfix
 
+# [0.6.0](https://github.com/dependfix/dependfix/compare/dependfix@0.5.0...dependfix@0.6.0) (2026-10-28)
+
+
+### ✨ 新功能
+
+* **cli:** 新增 --mirror-ci-scripts 开关与 Action 输入 ([c375084](https://github.com/dependfix/dependfix/commit/c375084))
+* **cli:** 新增 --retry-failed 开关与 Action 输入 ([fe23df0](https://github.com/dependfix/dependfix/commit/fe23df0))
+* **engine:** overrides 保护名单（按仓库粒度，防破坏性 override 复发） ([4e3a2b5](https://github.com/dependfix/dependfix/commit/4e3a2b5)), closes [#1095](https://github.com/dependfix/dependfix/issues/1095)
+* **engine:** 新增 PR check 等待配置与 CLI 开关 ([3ef294e](https://github.com/dependfix/dependfix/commit/3ef294e))
+* **engine:** 新增验证回滚粒度配置 ([a0b5adf](https://github.com/dependfix/dependfix/commit/a0b5adf))
+
 # [0.5.0](https://github.com/dependfix/dependfix/compare/dependfix@0.4.0...dependfix@0.5.0) (2026-09-18)
 
 
