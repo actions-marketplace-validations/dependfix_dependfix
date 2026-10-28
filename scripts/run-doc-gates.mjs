@@ -83,11 +83,12 @@ export function runPnpmScript(
  * runner / log / error 可注入，便于单测。
  */
 export function runDocGates({
+    gates = DOC_GATES,
     runner = (script) => runPnpmScript(script),
     log = (line) => console.log(line),
     error = (line) => console.error(line),
 } = {}) {
-    for (const gate of DOC_GATES) {
+    for (const gate of gates) {
         log(`▶ [gates:docs] pnpm run ${gate}`)
         let status
         try {
@@ -101,11 +102,13 @@ export function runDocGates({
             return status || 1
         }
     }
-    log(`[gates:docs] OK：${DOC_GATES.length} 项通过`)
+    log(`[gates:docs] OK：${gates.length} 项通过`)
     return 0
 }
 
+/* v8 ignore start -- CLI 入口守卫：与 logger 等脚本同惯例（进程级副作用不可在单测内触发） */
 if (isDirectExecution(import.meta.url)) {
     // 用 exitCode 而非 process.exit：让 stdio 缓冲自然冲刷，避免末行输出被截断
     process.exitCode = runDocGates()
 }
+/* v8 ignore stop */

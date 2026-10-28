@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
@@ -67,6 +68,23 @@ describe('buildPnpmCommand', () => {
     })
 })
 
+describe('runPnpmScript（默认执行器无法启动）', () => {
+    it('PATH 不可用时输出原因并返回 1（默认 error 通道）', () => {
+        const originalPath = process.env.PATH
+        const emptyDir = mkdtempSync(path.join(tmpdir(), 'gates-nopath-'))
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+        try {
+            process.env.PATH = emptyDir
+            expect(runPnpmScript('check:mergify')).toBe(1)
+            expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('无法执行'))
+        } finally {
+            process.env.PATH = originalPath
+            errorSpy.mockRestore()
+            rmSync(emptyDir, { recursive: true, force: true })
+        }
+    })
+})
+
 describe('runPnpmScript', () => {
     it('成功返回 0', () => {
         const exec = vi.fn()
@@ -125,6 +143,21 @@ describe('runDocGates', () => {
     it('runner 返回 0 以外的假值（false / undefined）按失败处理', () => {
         for (const falsy of [false, undefined, null]) {
             expect(runDocGates({ runner: () => falsy, log: vi.fn(), error: vi.fn() })).toBe(1)
+        }
+    })
+
+    it('默认 runner / log / error 可用（真实执行最便宜门禁）', () => {
+        const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined)
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+        try {
+            expect(runDocGates({ gates: ['check:mergify'] })).toBe(0)
+            expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('check:mergify'))
+
+            expect(runDocGates({ gates: ['missing-script'], runner: () => 1 })).toBe(1)
+            expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('missing-script'))
+        } finally {
+            logSpy.mockRestore()
+            errorSpy.mockRestore()
         }
     })
 
