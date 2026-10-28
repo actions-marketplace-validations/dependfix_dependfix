@@ -9,6 +9,7 @@
 
 | 阶段 | 主题 | 归档文件 | 归档日期 |
 |:--|:--|:--|:--|
+| M49 | 0.6.0 发版清障 | [M49](archive/todo-archive-phases-m49.md) | 2026-10-29 |
 | M48 | 对外 PR 交付闭环 | [M48](archive/todo-archive-phases-m48.md) | 2026-10-25 |
 | M47 | 交付判定可信与运行自证 | [M47](archive/todo-archive-phases-m47.md) | 2026-10-24 |
 | M46 | 运行结果可信度与可观测性 | [M46](archive/todo-archive-phases-m46.md) | 2026-10-22 |

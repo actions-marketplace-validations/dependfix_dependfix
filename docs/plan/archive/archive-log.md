@@ -4,6 +4,12 @@
 > 阶段正文在 [todo-archive.md](../todo-archive.md) 索引指向的分片；本文件不重复正文。
 > 新增记录追加到顶部；超过 600 行或字符预算时按年份分片（见 [文档治理执行规范 §4.2](../../design/governance/doc-governance.md#42-字符与密度预算)）。
 
+## 2026-10 阶段归档批次
+
+- **2026-10-29 M49 阶段归档 + 沉淀**：M49 六原子 + 三批追加临时待办全部闭环（0.6.0 已发布，发布后残余登记 backlog）；阶段窗口 58 commits / 唯一 diff 185 文件 / +9919 −3485；插队 3 批 / 再平衡移出 0 项（剩余原子均为 P0 发版阻断）；正文入 [todo-archive-phases-m49.md](todo-archive-phases-m49.md)，roadmap 详情入 [roadmap-phases-m49.md](roadmap-phases-m49.md)；`todo.md` 骨架化为无活跃阶段；wisdom 蒸馏 28 → 0；门禁 check:docs / doc-size / doc-governance / docs:build。
+
+---
+
 ## 2026-10 文档治理批次
 
 - **2026-10-26 归档索引化**：`todo-archive.md` 由「主窗口 + 指针段」改为纯索引（48 行，37 个分片倒序）；M48 / M47 / M46 / M41 正文迁入 `archive/todo-archive-phases-m{48,47,46,41}.md`；原「主窗口保留范围」与 `archive/index.md §4/§5` 批次记录迁入本文件。索引由 `check-doc-governance` 校验；`check:docs` / `docs:build` / 802 scripts tests 全绿。

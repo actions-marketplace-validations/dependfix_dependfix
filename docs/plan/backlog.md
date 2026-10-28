@@ -54,7 +54,7 @@
 
 ### 候选评估中（待评估 / 本阶段延后项）
 
-> **候选池概览（2026-10-27 实测）**：本区 52 项；P0 0 / P1 4 / P2 15 / P3 2 / 未标注 31；另有延期 P3 1 项（Umami，不计入本区）。分档见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)；未标注候选评估时补 P 标签，不默认升级。
+> **候选池概览（2026-10-29 实测）**：本区 60 项；P 标签覆盖不全（未标注者评估时补 P 标签，不默认升级）；本文件不维护分档统计，1.0 分档只见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)；未标注候选评估时补 P 标签，不默认升级。
 > **1.0 门槛与分档**：P0 23 / P1 8 / 1.0 后 15 的分档、门槛判定与批次计划见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)；本区候选在未上收前保持候选状态，上收后按批次从本表移除。
 > **E 阶段候选（2026-10-24 用户决策 D+E）**：`critical` 必选不可关闭 / 通知严重级别术语与阈值命名 / 周报投递重试与窗口锁 / `/settings` 与通知页 dark 视觉 4 项已获授权作为 M48 归档后的下一阶段，当前保持候选状态（不含阶段编号）；M48 已归档，待启动 P 阶段。
 
@@ -260,6 +260,16 @@
 
 - **CHANGELOG 新鲜度门禁（P2 🛠️）** —— 现象：`verify-changelog` 只校验版本段存在，发布提交若在 changelog 生成后又有新 commit，段内会缺条目但门禁仍绿（2026-10-29 实测：发布提交的根级 CHANGELOG 缺其父提交条目）。**目标**：发布前能发现「版本段存在但内容陈旧」。**范围**：`verify-changelog` 增加可选 `--max-lag`（比较段内最后 commit 与 HEAD 距离）或发布流程在 `changelog` 后强制 clean 检查；`release.yml` 接线。**验收**：① changelog 后新增 commit 时门禁非零；② 正常发布不误报；③ CI 基线一次。**不做**：不改 changelog 生成算法。**交付物**：1 commit / 3-5 files / 80-150 行。
 
+- **本地发布通道不执行发布前安全门禁（P1 🛡️，M49.5 发现）** —— `check:release-security` 只接在 `release.yml`；本地备用通道 `pnpm release:publish --otp` 无门禁调用，0.6.0 即经该通道发布（门禁脚本存在但未执行）。**目标**：任一路径发布前都跑同一门禁。**范围**：`release-publish` 内调用门禁（或拒绝无 `--skip-security` 之外的绕过），[release.md](../guide/release.md) 备用通道步骤同步。**验收**：① 无 token / 有 critical 时本地发布中止；② `--skip-security` 需显式且记录理由；③ CI 通道行为不变。
+
+- **0.6.0 发布物 `--version` 报 0.1.0（P0 🛡️，随 0.6.1 修复）** —— `packages/cli/src/cli/runner.ts` 的 `meta.version` 曾硬编码 `0.1.0`，`npx dependfix@0.6.0 --version` 实测返回 0.1.0；修复 `8fd83fc3`（读 `package.json` + 包名校验 + 兜底 `0.0.0-unknown` + 一致性用例）已提交、未推送未发布。**触发**：0.6.1 发布后复核 `npx dependfix@latest --version` 与全局安装。
+
+- **0.6.0 发布后 master 3 连绿窗口未完成（P0 📚，G4 起点）** —— 发布提交 `efaa555f` 的 Test run `40744772890` success（E2E / Coverage / Visual 同步 success），但此后仅 1 次；G4 要求连续 20 次 push 绿或 2 周无红。**触发**：后续 push 累计；任一次红需按 §5.6 / G4 口径记录归因。
+
+- **存量归档锚点与产物 id 失配（P2 📚，2026-10-29 复审发现）** —— M0-M48 归档分片 / roadmap 分片中大量链接仍用旧形态（双连字符 / 数字标题无 `_` 前缀），`check:docs` 的宽松规范化判绿而站内跳转失效（抽样 `todo-archive-phases-m38.md:41` 与 `roadmap-phases-m0-m38.md` 均命中）。**目标**：以 `docs:build` 产物 id 为准一次性回填，并补机检。**范围**：`rg -o` 提取 dist id 与 md 链接逐字比对；新增 check 规则（严格相等，含 `_N-` 前缀与单连字符）；分批改指。**验收**：① 抽样 20 处跳转实测可达；② 新机检在存量回填后 0 命中；③ `check:docs` 与 `docs:build` 通过。**不做**：不改归档正文。
+
+- **Docker `platform-0.4.0` tag 与镜像 health 待复核（P2 🚀，M49.5 残余）** —— `workflow_dispatch` `40745976335` 的 QA 与 smoke 步骤 success（哨兵 build-arg → `/api/health` 端到端），多架构推送与 ACR / Jenkins 步骤在归档时仍在执行，`updatedAt` 停滞于 2026-10-28T18:35:56Z（疑似挂起）。**目标**：确认 `platform-0.4.0` tag 存在且镜像可启动。**验收**：① 三 registry 均有该 tag；② `docker run` 后 `/api/health` 200；③ run 结论 success。
+
 ### 待上收候选（评估完成，等待用户决策）
 
 > 本节为「评估完成、等待用户决策」候选的暂存区；候选**不含 `M\d+` 阶段编号**（[规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement)）。
@@ -431,9 +441,9 @@
 
 | 内容类型 | 位置 |
 |:--|:--|
-| 当前阶段活跃任务 | **M49：0.6.0 发版清障**（2026-10-25 用户决策；见 [todo.md §M49](todo.md#m49-0-6-0-发版清障-2026-10-25-用户决策)）；插队容量治理见 [planning.md §3.1.1](../standards/planning.md#_3-1-1-插队后的阶段容量再平衡-hard-requirement-2026-10-19) |
+| 当前阶段活跃任务 | **无活跃阶段**（M49 已闭环归档，见 [todo-archive.md §M49](archive/todo-archive-phases-m49.md#m49-0-6-0-发版清障-2026-10-25-用户决策-2026-10-29-归档)）；插队容量治理见 [planning.md §3.1.1](../standards/planning.md#_3-1-1-插队后的阶段容量再平衡-hard-requirement-2026-10-19) |
 | 下一阶段（已授权，待规划） | **1.0 发布门槛收口**（E → F1 → F2 → G；台账见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)） |
 | 已完成阶段归档 | [todo-archive.md](todo-archive.md)（阶段索引 + [archive/](archive/) 分片） |
-| 里程碑与阶段交付 | [roadmap.md](roadmap.md)（M0-M48 已归档；M49 进行中） |
+| 里程碑与阶段交付 | [roadmap.md](roadmap.md)（M0-M49 已归档；1.0 门槛收口待规划） |
 | 长期主线 / 候选 / 待人工验收 / 已知边界 | 本文档（按四象限结构） |
 | 历史归档索引 | [archive/index.md](archive/index.md) |

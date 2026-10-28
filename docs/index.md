@@ -19,7 +19,7 @@ features:
       details: report-only / fix / fix-and-pr / cleanup-branches 四类命令，npx 零依赖上手，支持 owner / topic 多仓库治理。
       link: /guide/quick-start
     - title: GitHub Action 集成
-      details: "通过 uses: dependfix/dependfix@v0.5.0 一行接入 CI，支持定时、手动、PR 触发，可自定义验证命令。"
+      details: "通过 uses: dependfix/dependfix@v0.6.0 一行接入 CI，支持定时、手动、PR 触发，可自定义验证命令。"
       link: /guide/quick-start
     - title: AI 研判 breaking change
       details: 跨大版本升级时自动采集 Changelog，多 provider 研判（DeepSeek / OpenAI），输出结构化 patch 与安全门建议。
@@ -40,10 +40,10 @@ features:
       details: 模块边界、依赖分组升级、依赖图与执行矩阵；系统级设计见架构文档。
       link: /design/governance/architecture
     - title: 路线图
-      details: M0-M48 已全部闭环归档；M49：0.6.0 发版清障进行中（code scanning / 依赖 / Security 门禁 / 发版文档 / 发布验证）；1.0 发布门槛（G1-G8）与批次计划见 design/governance/release-1.0-readiness；插队容量治理规则见规划规范 §3.1.1。
+      details: M0-M49 已全部闭环归档；当前无活跃阶段，1.0 发布门槛（G1-G8）与批次计划见 design/governance/release-1.0-readiness；插队容量治理规则见规划规范 §3.1.1。
       link: /plan/roadmap
     - title: 当前任务
-      details: 查看进行中的开发任务、验收指标与依赖；待办积压与归档历史。
+      details: 查看下一阶段规划与归档历史、验收指标与依赖；待办积压与已知边界。
       link: /plan/todo
     - title: 项目规范
       details: AI 协作、开发、测试、文档、安全、Git、规划、API、平台、i18n 等 13 项规范的索引入口。
