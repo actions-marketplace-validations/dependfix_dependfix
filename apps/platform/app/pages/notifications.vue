@@ -215,6 +215,10 @@ onMounted(load)
                         <small class="text-muted">{{ t('notifications.platformIncidentNote') }}</small>
                     </div>
                     <div class="notifications-row">
+                        <span>{{ t('notifications.category.security_critical') }}</span>
+                        <small class="text-muted">{{ t('notifications.criticalNote') }}</small>
+                    </div>
+                    <div class="notifications-row">
                         <label for="org-notify-security">{{ t('notifications.category.security_high') }}</label>
                         <CaomeiSwitch id="org-notify-security" v-model="settings.categories.securityHigh" />
                     </div>

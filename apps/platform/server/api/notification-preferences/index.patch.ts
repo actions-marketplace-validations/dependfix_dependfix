@@ -4,7 +4,7 @@ import { createLocalizedError } from '#server/utils/localized-error'
 import { ensureDatabaseInitialized } from '#server/database'
 import { NotificationPreference } from '#server/entities/notification-preference'
 import { loadOrganizationNotificationSettings } from '#server/services/notification/delivery'
-import { isDeploymentNotificationEnabled, normalizeNotificationRole, resolveAllNotificationPreferences } from '#server/services/notification/preferences'
+import { isDeploymentNotificationEnabled, normalizeNotificationRole, resolveNotificationPreferenceRows } from '#server/services/notification/preferences'
 import { ORG_CATEGORY_KEYS, type BusinessNotificationCategory } from '#server/services/notification/types'
 
 const bodySchema = z.object({
@@ -64,7 +64,7 @@ export default defineEventHandler(async (event) => {
     const rows = await repo.find({ where: { userId: user.id, channel: 'email' } })
     const overrides = Object.fromEntries(rows.map((row) => [row.category, row.enabled]))
     return {
-        categories: resolveAllNotificationPreferences({
+        categories: resolveNotificationPreferenceRows({
             role,
             settings,
             overrides,

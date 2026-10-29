@@ -1,6 +1,6 @@
 # 平台通知与邮件推送设计
 
-> 状态：✅ B1-B5 全部落地（B1-B4 2026-10-21；B5 周汇总随 M47.5，2026-10-24）；**M50 修订中**（D4-D6：`critical` 必选 / 术语收敛 / 周报重试，2026-10-29 规划，落地见 [todo.md](../../plan/todo.md)）；来源 [issue #190](https://github.com/dependfix/dependfix/issues/190)）
+> 状态：✅ B1-B5 全部落地（B1-B4 2026-10-21；B5 周汇总随 M47.5，2026-10-24）；**M50 修订中**：D4 `security_critical` 必选已落地（M50.1），D5 术语收敛（M50.2）与 D6 周报重试（M50.3）待实现——见 [todo.md](../../plan/todo.md)；来源 [issue #190](https://github.com/dependfix/dependfix/issues/190)）
 > 关联：[系统架构](./architecture-platform.md) · [定时扫描与批量处理设计](./platform-scheduled-batch.md) · [运行失败分类与筛选设计](./run-failure-taxonomy.md) · [平台规范](../../standards/platform.md) · [安全规范](../../standards/security.md)
 
 ## 1. 背景与现状
@@ -45,12 +45,14 @@
 | 类别 | 语义 | 默认 | 必选性 | 收件人 | 标题标签 |
 |:---|:---|:---:|:---:|:---|:---|
 | `platform_incident` | 平台自身问题：执行器不可用 / 沙箱降级 / 容器环境异常 | 开 | **必选** | admin / org_admin（+ env 覆盖） | `[平台]` |
-| `security_high` | 仓库存在**未修复**的 critical / high 告警 | 开 | 可选 | 触发者 + 已开启该类别的管理员 | `[告警]` |
+| `security_critical` | 仓库存在**未修复**的 `critical` 告警 | 开 | **必选** | 触发者 + 全部管理员 + 额外收件人 | `[告警]` |
+| `security_high` | 仓库存在**未修复**的 `high` 告警（`critical` 归必选类别，不重复计入） | 开 | 可选 | 触发者 + 已开启该类别的管理员 | `[告警]` |
 | `run_failure` | 运行或批次以 `failed` 终止 | 开 | 可选 | 触发者 + 已开启该类别的管理员 | `[运行]` |
 | `run_completed` | 运行或批次正常完成摘要 | **关** | 可选 | 触发者（开启后） | `[摘要]` |
 | `weekly_digest` | 每周未修复高危汇总（按仓库分组） | **关** | 可选 | 已开启该类别的管理员 | `[周报]` |
 
 - 「必选」= 不提供关闭开关，个人偏好与组织设置均不能关闭；仅 `DEPENDFIX_NOTIFICATION_ENABLED=false` 可整体熔断。
+- `security_critical` 必选语义见 §15 D4：组织 `securityHigh` 与个人 `security_high` 关闭时仍发送；同一 run / 批次内与 `security_high` 各发一封，互不合并。
 - 「可选」= 组织级设置默认值，个人可进一步关闭；个人无法在组织关闭后重新开启。
 - 完成类默认关闭，符合「用户更关心失败」的预期；失败类默认开启。
 - `weekly_digest` 默认关闭，避免与「内容未变化不重复推送」冲突；启用后每周一 09:00（服务器时区）发送当前活跃未修复高危快照，可就近关闭。
@@ -71,8 +73,8 @@
 ```text
 effective(category, user)
   = DEPENDFIX_NOTIFICATION_ENABLED
-  && (category === 'platform_incident' || org.categories[ORG_KEY[category]])
-  && (category === 'platform_incident' || userPreference(user, category))
+  && (category ∈ {platform_incident, security_critical} || org.categories[ORG_KEY[category]])
+  && (category ∈ {platform_incident, security_critical} || userPreference(user, category))
 
 deliverable(category, user) = effective(category, user) && channel.isAvailable()
 
@@ -84,7 +86,7 @@ ORG_KEY = {
 }
 ```
 
-- 必选类别忽略组织与个人开关，仅受部署总开关约束。
+- 必选类别（`platform_incident` / `security_critical`）忽略组织与个人开关，仅受部署总开关约束；两者都不写入个人偏好表。
 - 组织冷却默认值固定为 24（组织可在 0-168 内覆盖）。周报触发小时见 §4.5 的 `DEPENDFIX_WEEKLY_DIGEST_HOUR`（默认 9，进程级）。
 - `weekly_digest` 与其余可选类别走同一优先级：组织开启是前提，个人可再关闭。
 - **个人偏好缺行 = 取角色默认值**（admin / org_admin：`security_high` / `run_failure` 开，`run_completed` / `weekly_digest` 关；viewer 全关）；组织开关是前提条件，不替代个人默认。不写默认行，避免存量用户迁移。
@@ -108,6 +110,7 @@ interface NotificationSettings {
 ```
 
 - 以 JSON 列承载，解析函数为纯函数 + Zod `.strict()`：未知键拒绝、越界值拒绝、缺省字段补默认值（对接 [开发规范](../../standards/development.md) 配置列写入闸门）。
+- **`security_critical` 不新增组织键**：必选类别无开关可配，故 `categories` 形状不变（无迁移）；`securityHigh` 只覆盖 `high`。
 - 存储前规范化（trim / 小写邮箱 / 去重）；读取失败按默认值降级并 warn，不阻断扫描。
 
 ### 4.4 个人偏好
@@ -121,9 +124,10 @@ interface NotificationPreference {
 }
 ```
 
-- 唯一索引 `(userId, category, channel)`；`platform_incident` 不落行。
+- 唯一索引 `(userId, category, channel)`；`platform_incident` 与 `security_critical` 不落行。
 - 默认值按角色：admin / org_admin 对 `security_high`、`run_failure` 默认开，对 `run_completed`、`weekly_digest` 默认关；viewer 不接收业务类通知，UI 中开关置灰并注明「当前角色无接收权限」。
 - 角色默认值仅在「无偏好行」时生效；用户显式关闭后不再被角色默认覆盖。
+- **个人设置页行集合**（`resolveNotificationPreferenceRows`）在四个业务类别前置一条只读的 `security_critical` 行：管理员展示为启用 + 「必选，不可关闭」，viewer 展示为禁用；PATCH 接口对必选类别返回 400，防止绕过 UI 写入。
 
 ### 4.5 部署层变量
 
@@ -139,6 +143,7 @@ interface NotificationPreference {
 | 类别 | 主收件人 | 管理员（已开启该类别） | 说明 |
 |:---|:---|:---|:---|
 | `platform_incident` | admin / org_admin | 全部必收 | env 覆盖优先；必选类别不读个人偏好 |
+| `security_critical` | 触发者（手动触发时） | 全部必收 | 必选类别不读组织 / 个人开关与偏好；仍受每小时上限（独立桶）约束 |
 | `security_high` | 触发者（手动触发时） | 默认开（个人可关） | 定时 / 批量无触发者时仅管理员 |
 | `run_failure` | 触发者 | 默认开（个人可关） | 同上 |
 | `run_completed` | 触发者 | 默认关（个人可开） | 定时 / 批量无触发者时不发送 |
@@ -161,15 +166,16 @@ interface NotificationPreference {
 
 - `run.batchRunId` 非空 → **不发送单仓邮件**，交由批次终态统一合并。
 - `run.batchRunId` 为空且 `status = failed` → `run_failure`。
-- `status = completed` → 先评估 `security_high`，再评估 `run_completed`（后者默认关）。
-- `status = degraded` → 评估 `security_high`（业务结果完整），但不发 `run_failure`：沙箱降级已由既有 `sandbox_degraded` 平台事件覆盖，避免同一现象双发。
+- `status = completed` → 先评估 `security_critical`（必选，恒查 `critical`）与 `security_high`（仅阈值含 `high` 时查 `high`），再评估 `run_completed`（后者默认关）。
+- `status = degraded` → 同上评估安全类别（业务结果完整），但不发 `run_failure`：沙箱降级已由既有 `sandbox_degraded` 平台事件覆盖，避免同一现象双发。
+- 两类安全类别各发一封、内容只含自身级别；`security_high` 受组织 / 个人开关约束，`security_critical` 不受。
 
 ### 6.3 批次终态
 
 在 `persistBatchAggregation()` 条件写回成功且状态首次进入终态时触发；`persistBatchFailedIfRunning()`（全部入队失败）同样触发一次 `run_failure`。
 
 - 聚合可能由详情查询、周期对账、sync 执行结束三处驱动，故触发必须以「条件写回 `persisted = true` + 状态由非终态转为终态」为门槛，不能只看聚合结果。
-- 一个批次只产生一封 `security_high`（跨仓库合并）与一封 `run_failure` / `run_completed`。
+- 一个批次只产生一封 `security_critical`、一封 `security_high`（跨仓库合并）与一封 `run_failure` / `run_completed`。
 
 ### 6.4 幂等与投递记录
 
@@ -229,7 +235,7 @@ AND scanRunId IN (<scope run ids>)
 - 「未修复」包含 `not-tried` / `failed` / `skipped`（覆盖跨 major 跳过与交付跳过）；`converged` 表示「本地已满足、无需升级」，不计入引擎的 `alertsUnfixed` 口径。**平台明细边界**：`ScanResult` 行不携带 converged 标记（写入路径固定 `not-tried`，修复结果不回写），因此按明细聚合的通知（`security_high` / `weekly_digest`）仍会把 converged 告警计入活跃明细；周报仅按 `RunSummary.alertsConverged` 单列披露该数量。
 - 已修复（`success`）与已关闭（`supersededAt` 非空）不计入，避免与 GitHub 的已关闭通知重复。
 - **截断告警不在 `ScanResult` 中**：引擎只持久化 `limited` 集合。扫描结果需同时读取 `summary.alertsTruncatedBySeverity`（M46.2 新增）的 critical / high 计数，在邮件正文以「另有 N 条截断未纳入明细」披露；无身份信息，不伪造逐条列表。
-- 严重级别阈值由组织设置 `severityThreshold` 控制：`high`（默认，含 critical + high）或 `critical`（仅 critical）。
+- 严重级别阈值由组织设置 `severityThreshold` 控制：`high`（默认，通知覆盖 critical + high）或 `critical`（仅 critical）。**类别拆分后**（§15 D4）：`security_critical` 恒查 `critical` 且不受阈值影响；`security_high` 只在阈值为 `high` 时查 `high`，因此阈值语义保持「是否附加 high」，枚举与存储不变。
 - 模板展示按严重级别分组的计数与仓库 Top N，单封最多列 50 条，其余折叠为「另有 N 条」；截断计数单独标注，避免少报。
 
 ### 7.2 内容指纹
@@ -246,6 +252,7 @@ AND scanRunId IN (<scope run ids>)
 - **内容未变化不发送**：指纹与上次已投递指纹相同 → 记录 `skipped_duplicate`，即使窗口已过也不重复发送；周期提醒由可选的 `weekly_digest` 承担。
 - 指纹变化但仍在窗口内 → 记录 `skipped_cooldown`，窗口结束后的下一轮运行重新评估（以「上次已投递指纹」为基线）。
 - 每小时投递上限默认 6（组织可配 1-60）：超出时记录 `skipped_throttled`，不排队补发；下一轮运行重新评估。
+- **独立计数桶**（§15 D4）：`security_critical` 的 `sent` 行只计入自身桶、不计入共享桶；共享桶（其余非周报类别）也不统计 `security_critical` 行。数值上限共用同一 `maxPerHour`——既保证 critical 不被批量运行的常规通知挤掉，又保留防邮件风暴兜底。
 - 平台事件不参与 24 小时窗口（每条 `AuditEvent` 唯一），但受每小时上限约束。
 - `weekly_digest` 不参与指纹与 24 小时窗口：按 `scopeType='digest'` / `scopeId=weekKey` 与 §6.4 周报专用键去重，同一用户同一渠道同一周最多一封（当前渠道仅 email）；内容未变化也按周发送（这是显式订阅的周期摘要）。
 - **共享上限计数排除周报行**：周报逐封投递写入的 `sent` 行不计入共享每小时上限（计数查询须排除 `weekly_digest`），否则一次周报可把平台事件 / 安全告警挤成 `skipped_throttled`；与「周报自身豁免上限」是两件事，须同批修改并补「周报发送后常规类别仍可发送」用例。
@@ -317,15 +324,16 @@ AND scanRunId IN (<scope run ids>)
 
 ## 13. 验收标准
 
-- **AC1** 默认策略：完成类不发；失败类发送；高危仅未修复；平台事件必选。
-- **AC2** 配置优先级：组织关闭后个人无法开启；必选类别无法被个人或组织关闭；部署总开关可熔断全部通知。
-- **AC3** 收件人：平台事件仅管理员；业务事件定向触发者（`triggeredByUserId`）+ 已开启该类别的管理员；标题包含 `[平台]` / `[告警]` / `[运行]` / `[摘要]` / `[周报]` 标签。
+- **AC1** 默认策略：完成类不发；失败类发送；高危仅未修复；平台事件与 `security_critical` 必选。
+- **AC2** 配置优先级：组织关闭后个人无法开启；必选类别（`platform_incident` / `security_critical`）无法被个人或组织关闭，PATCH 必选类别返回 400；部署总开关可熔断全部通知。
+- **AC3** 收件人：平台事件仅管理员；业务事件定向触发者（`triggeredByUserId`）+ 已开启该类别的管理员；`security_critical` 取触发者 + 全部管理员 + 额外收件人（忽略开关）；标题包含 `[平台]` / `[告警]` / `[运行]` / `[摘要]` / `[周报]` 标签。
 - **AC4** 合并与幂等：一个批次只发一封 `security_high`；重复聚合 / 并发查询不重复发送；相同指纹不再重复发送（即使 24 小时窗口已过）。
 - **AC5** 降噪：指纹变化且距上次发送超过 24 小时才再次发送；窗口内记录 `skipped_cooldown`；每小时超过上限记录 `skipped_throttled`。
 - **AC6** 失败语义：SMTP 未配置 noop；发送异常不阻断扫描；投递记录可查到对应状态与错误码。
 - **AC7** 迁移可重复执行且二次运行不报错；实体索引为类级声明（TypeORM 1.x 复合索引要求）。
 - **AC8** 测试覆盖：策略 / 路由 / 指纹 / 窗口 / 模板转义 / API 权限 / 迁移幂等单测通过；批次终态集成测试断言只发一封。
 - **AC9** 周汇总（✅ M47.5 已落地）：默认关闭；组织开启且个人开启时，每周一发送一次活跃未修复高危快照（按 ISO 周去重，内容不变也发送）；任一层关闭后不再产生周报邮件；正文披露截断与豁免计数。
+- **AC10** 必选 `critical`（✅ M50.1 已落地）：`securityHigh` 与个人 `security_high` 全关时仍投递 `security_critical`；`security_critical` 与 `security_high` 各发一封且内容只含自身级别；critical 使用独立计数桶、其 `sent` 行不计入共享桶，两者共用同一 `maxPerHour`；部署总开关关闭时 critical 亦落 `noop`；存量组织设置无需迁移。
 
 ## 14. 风险与缓解
 
@@ -341,6 +349,6 @@ AND scanRunId IN (<scope run ids>)
 - **D1 收件人定向（2026-10-20 用户决策）**：新增 `ScanRun.triggeredByUserId` / `BatchRun.triggeredByUserId`，手动触发精确投递；定时任务无触发者时回退管理员集合。
 - **D2 全局配置落点（2026-10-20 用户决策）**：新增管理员页 `/notifications`，承载组织设置、投递记录与测试发送；个人偏好保留在 `/settings`。
 - **D3 降噪策略（2026-10-20 用户决策）**：同一 scope + 类别 24 小时内最多发送一次；指纹变化才具备再次发送资格；内容未变化不重复发送；另提供可选的每周汇总（默认关闭）。
-- **D4 `critical` 必选（2026-10-24 用户决策 / 2026-10-29 细化，待 M50.1 实现）**：`critical` 级告警**豁免类别开关**——组织 `securityHigh` 与个人 `security_high` 均关闭时仍发送，仅受部署总开关熔断；**保留每小时上限**。实现口径（2026-10-29 用户决策）：新增必选类别 `security_critical`（与 `platform_incident` 同级，不入个人偏好表），`security_high` 收窄为仅 `high`；`severityThreshold` 枚举与语义不变（仅决定是否附加 `high`）；**独立计数桶**（`security_critical` 的 `sent` 行只计入自身上限，不计入共享桶，反之亦然）。冷却与内容指纹保持现状（不随类别开关豁免放开）。**本条覆盖 §3 表（`security_high` 收窄为仅 `high`、新增必选 `security_critical`）、§4.4（`security_critical` 不入偏好表）与 §7.1 口径，随 M50.1 落地时同步正文。**
+- **D4 `critical` 必选（2026-10-24 用户决策 / 2026-10-29 细化，待 M50.1 实现）**：`critical` 级告警**豁免类别开关**——组织 `securityHigh` 与个人 `security_high` 均关闭时仍发送，仅受部署总开关熔断；**保留每小时上限**。实现口径（2026-10-29 用户决策）：新增必选类别 `security_critical`（与 `platform_incident` 同级，不入个人偏好表），`security_high` 收窄为仅 `high`；`severityThreshold` 枚举与语义不变（仅决定是否附加 `high`）；**独立计数桶**（`security_critical` 的 `sent` 行只计入自身上限，不计入共享桶，反之亦然）。冷却与内容指纹保持现状（不随类别开关豁免放开）。**已由 M50.1 落地并同步正文**（§3 表 / §4.2 / §4.4 / §5 / §6.2 / §6.3 / §7.1 / §7.3 / §13 AC1-AC3 + AC10）。
 - **D5 通知侧严重级别术语（2026-10-29 用户决策，待 M50.2 实现）**：通知页 / 邮件 / 投递记录统一保留 `Critical` / `High` 专有名词，与扫描侧 `scanSeverityLabel` 单一事实源一致；类别名改为 `Critical 告警` / `High 告警`，阈值标签改为「严重级别阈值」+ 选项 `Critical + High` / `Critical only`；邮件主题的 `[dependfix][告警]` 前缀保持不变（既有过滤契约）。**本条覆盖 §10 模板文案表，随 M50.2 落地时同步正文。**
 - **D6 周报重试与窗口锁（2026-10-29 规划，待 M50.3 实现）**：`partial` / `failed` 结果不再占满整周——进程内同周锁按结果分类（仅 `sent` 为终态），窗口内按退避（≥ 30 分钟）重试，已发收件人由逐用户投递键记 `skipped_duplicate`；`skipped_no_recipient` 不永久占锁，同周同状态在 `notification_log` 最多 1 条以控制噪声；窗口长度与触发小时不变。**本条覆盖 §6.5（同进程同周只尝试一次）与 §13 AC9，随 M50.3 落地时同步正文。**

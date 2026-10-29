@@ -53,8 +53,19 @@ describe('notification APIs', () => {
     })
 
     it('GET preferences 返回业务类别与角色默认', async () => {
-        const res = await call(preferencesGet, 'GET', '/api/notification-preferences') as { categories: { category: string, enabled: boolean }[] }
-        expect(res.categories.map((row) => row.category)).toEqual(['security_high', 'run_failure', 'run_completed', 'weekly_digest'])
+        const res = await call(preferencesGet, 'GET', '/api/notification-preferences') as { categories: { category: string, enabled: boolean, editable: boolean, reason?: string }[] }
+        expect(res.categories.map((row) => row.category)).toEqual([
+            'security_critical',
+            'security_high',
+            'run_failure',
+            'run_completed',
+            'weekly_digest',
+        ])
+        // 必选 critical 行只读且置首（设计稿 §15 D4）
+        const critical = res.categories[0]
+        expect(critical?.editable).toBe(false)
+        expect(critical?.reason).toBe('mandatory')
+        expect(critical?.enabled).toBe(true)
         expect(res.categories.find((row) => row.category === 'security_high')?.enabled).toBe(true)
         expect(res.categories.find((row) => row.category === 'run_completed')?.enabled).toBe(false)
     })
@@ -64,10 +75,19 @@ describe('notification APIs', () => {
             preferences: { security_high: false },
         }) as { categories: { category: string, enabled: boolean }[] }
         expect(res.categories.find((row) => row.category === 'security_high')?.enabled).toBe(false)
+        // 必选 critical 行不随业务开关变化
+        expect(res.categories.find((row) => row.category === 'security_critical')?.enabled).toBe(true)
 
         const ds = await ensureDatabaseInitialized()
         const row = await ds.getRepository(NotificationPreference).findOne({ where: { userId: 'u1', category: 'security_high' } })
         expect(row?.enabled).toBe(false)
+    })
+
+    it('PATCH 必选类别 → 400（不可配置）', async () => {
+        guardState.role = 'admin'
+        await expectError(Promise.resolve(call(preferencesPatch, 'PATCH', '/api/notification-preferences', {
+            preferences: { security_critical: false },
+        })), 400)
     })
 
     it('viewer PATCH → 403；组织关闭类别 → 400', async () => {

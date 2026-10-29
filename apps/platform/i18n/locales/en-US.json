@@ -420,6 +420,8 @@
             "hint": "Email notifications. Platform incidents are always sent and cannot be disabled. Categories disabled by the organization cannot be enabled personally.",
             "platformIncident": "Platform incidents",
             "platformIncidentHint": "Executor / environment incidents are always sent to administrators and cannot be disabled.",
+            "securityCritical": "Critical alerts",
+            "mandatoryHint": "Required; cannot be disabled.",
             "securityHigh": "High-risk alerts",
             "runFailure": "Run failures",
             "runCompleted": "Completion summaries",
@@ -462,12 +464,14 @@
         "deliveryCard": "Delivery policy",
         "category": {
             "platform_incident": "Platform incidents",
+            "security_critical": "Critical alerts",
             "security_high": "High-risk alerts",
             "run_failure": "Run failures",
             "run_completed": "Completion summaries",
             "weekly_digest": "Weekly digest"
         },
         "platformIncidentNote": "Platform incidents are mandatory and always sent to administrators; they cannot be disabled.",
+        "criticalNote": "Critical alerts are mandatory and always sent to administrators; they cannot be disabled.",
         "severity": "High-risk threshold",
         "severityHigh": "Critical + High",
         "severityCritical": "Critical only",

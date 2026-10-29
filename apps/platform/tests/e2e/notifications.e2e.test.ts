@@ -20,6 +20,12 @@ test.describe('/notifications 管理员页', () => {
         await expect(page.getByText('通知偏好')).toBeVisible()
         await expect(page.getByText('平台自身问题', { exact: true })).toBeVisible()
         await expect(page.getByText('高危告警')).toBeVisible()
+        // 必选 critical 行：只读且注明不可关闭（组织 / 个人开关均不生效）
+        await expect(page.getByText('Critical 告警', { exact: true })).toBeVisible()
+        const critical = page.locator('#notification-security_critical')
+        await expect(critical).toHaveCount(1)
+        await expect(critical).toBeDisabled()
+        await expect(critical).toHaveAttribute('aria-checked', 'true')
         // 周汇总已是可配置类别：不再显示「后续版本提供」占位说明
         await expect(page.getByText('每周汇总将在后续版本提供，当前开关暂不生效。')).toHaveCount(0)
         await expect(page.locator('#notification-weekly_digest')).toHaveCount(1)
@@ -50,6 +56,10 @@ test.describe('/notifications 管理员页', () => {
         await expect(page.getByRole('heading', { name: '通知与邮件' })).toBeVisible()
         await expect(page.getByText('事件类别')).toBeVisible()
         await expect(page.getByText('最近投递记录')).toBeVisible()
+        // 必选 critical 为只读行，组织级无开关可配
+        await expect(page.getByText('Critical 告警', { exact: true })).toBeVisible()
+        await expect(page.getByText('Critical 告警为必选类别，始终发送给管理员，不可关闭。')).toBeVisible()
+        await expect(page.locator('#org-notify-critical')).toHaveCount(0)
         // 组织级周汇总开关可配置（回归：曾置灰并提示后续版本提供）
         const weekly = page.locator('#org-notify-weekly')
         await expect(weekly).toBeEnabled()

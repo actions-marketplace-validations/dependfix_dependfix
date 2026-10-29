@@ -269,10 +269,10 @@ const loadCurrentOrganization = async () => {
 onMounted(loadCurrentOrganization)
 
 interface NotificationPreferenceRow {
-    category: 'security_high' | 'run_failure' | 'run_completed' | 'weekly_digest'
+    category: 'security_critical' | 'security_high' | 'run_failure' | 'run_completed' | 'weekly_digest'
     enabled: boolean
     editable: boolean
-    reason?: 'viewer' | 'org_disabled'
+    reason?: 'viewer' | 'org_disabled' | 'mandatory'
 }
 
 const notificationPreferences = ref<NotificationPreferenceRow[]>([])
@@ -282,6 +282,7 @@ const notificationLoading = ref(true)
 const notificationSaving = ref(false)
 
 const NOTIFICATION_CATEGORY_LABELS: Record<NotificationPreferenceRow['category'], string> = {
+    security_critical: 'settings.notifications.securityCritical',
     security_high: 'settings.notifications.securityHigh',
     run_failure: 'settings.notifications.runFailure',
     run_completed: 'settings.notifications.runCompleted',
@@ -297,6 +298,9 @@ const notificationReason = (row: NotificationPreferenceRow) => {
     }
     if (row.reason === 'org_disabled') {
         return t('settings.notifications.orgDisabled')
+    }
+    if (row.reason === 'mandatory') {
+        return t('settings.notifications.mandatoryHint')
     }
     return ''
 }
