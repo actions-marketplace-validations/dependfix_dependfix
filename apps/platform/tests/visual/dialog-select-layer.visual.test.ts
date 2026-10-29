@@ -5,6 +5,7 @@ import {
     applyTheme,
     expectThemeApplied,
     expectViewportScreenshot,
+    openSelectPanel,
     waitForVisualStable,
 } from './helpers/visual'
 
@@ -143,10 +144,8 @@ test.describe('弹窗内 Select 层叠回归', () => {
         const firstTrigger = dialog.locator('.caomei-select').first()
         await expect(firstTrigger).toBeVisible()
         await expect(firstTrigger).toBeEnabled()
-        await firstTrigger.click()
-        const panel = page.locator('.caomei-select__content')
-        // 时序硬化：触发器 hydration 完成后点击仍可能早于门户挂载，给面板单独放宽等待
-        await expect(panel).toBeVisible({ timeout: 10000 })
+        // 时序硬化：首次点击偶发不挂载门户面板，由共享 helper 做一次有界重试（见 helpers/visual.ts）
+        await openSelectPanel(page, firstTrigger)
         await waitForVisualStable(page)
 
         const diagnostics = await readLayerDiagnostics(page)
@@ -188,9 +187,7 @@ test.describe('弹窗内 Select 层叠回归', () => {
         const lastSelect = dialog.locator('.caomei-select').last()
         await lastSelect.scrollIntoViewIfNeeded()
         await expect(lastSelect).toBeEnabled()
-        await lastSelect.click()
-        const panel = page.locator('.caomei-select__content')
-        await expect(panel).toBeVisible({ timeout: 10000 })
+        await openSelectPanel(page, lastSelect)
         await waitForVisualStable(page)
 
         const diagnostics = await readLayerDiagnostics(page)
@@ -222,9 +219,7 @@ test.describe('弹窗内 Select 展开态视觉基线', () => {
 
             const firstTrigger = dialog.locator('.caomei-select').first()
             await expect(firstTrigger).toBeEnabled()
-            await firstTrigger.click()
-            const panel = page.locator('.caomei-select__content')
-            await expect(panel).toBeVisible({ timeout: 10000 })
+            const panel = await openSelectPanel(page, firstTrigger)
             /* 基线前先断言面板「有选项且已挂到 body（非弹窗子树）」：门户挂载失败或选项未渲染时，
                截图会落成「只有弹窗 + 遮罩」的形态，基线被静默改成缺面板的形态（假绿）。 */
             await expect(panel.locator('[role="option"]').first()).toBeVisible()
