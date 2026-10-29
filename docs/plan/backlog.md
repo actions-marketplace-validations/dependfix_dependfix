@@ -224,7 +224,7 @@
   - **触发条件**：OOM 再次发生且 cgroup 标记无法解释；或 sandbox / action 成为主执行路径。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
-- **`ScanResult` 修复结果不回写（converged / success 状态缺失）（待评估，P2 🛠️）** —— 现象：per-alert 模型写入路径固定 `not-tried`，修复结果不回写，导致按明细聚合的通知（`security_high` / `weekly_digest`）无法剔除本地已满足告警，周报只能按 `RunSummary.alertsConverged` 单列披露（M47.5 审计 R1 实证）。**待评估点**：① 是否在 reconcile / 收尾链路回写 `fixStatus`（success / converged / failed）；② 回写后的历史数据兼容与迁移；③ 对告警列表「未修复」口径的影响。
+- **`ScanResult` 修复结果不回写（converged / success 状态缺失）（待评估，P2 🛠️）** —— 现象：per-alert 模型写入路径固定 `not-tried`，修复结果不回写，导致按明细聚合的通知（`security_critical` / `security_high` / `weekly_digest`）无法剔除本地已满足告警，周报只能按 `RunSummary.alertsConverged` 单列披露（M47.5 审计 R1 实证）。**待评估点**：① 是否在 reconcile / 收尾链路回写 `fixStatus`（success / converged / failed）；② 回写后的历史数据兼容与迁移；③ 对告警列表「未修复」口径的影响。
 - **alerts 原始列表的排序并列兜底（待评估，P2 🛠️）** —— 背景（2026-10-24）：CI `Visual Regression` 出现 flaky（`alerts 运行抽屉浮层（light）` 3284 px 差异，同 commit 重跑即绿）。根因：`GET /api/alerts` 的「原始列表」视图只按 `result.createdAt DESC` 排序、**无并列兜底**，而 `ScanResult.createdAt` 缺省为插入时刻 → 同批次插入落在同一毫秒形成并列 → 行序随数据库返回顺序漂移。视觉侧已用「fixtures 逐条钉死 `createdAt`」消除（见 `apps/platform/tests/visual/helpers/fixtures.ts` 与 [视觉 README](../../apps/platform/tests/visual/README.md)）；e2e 的原始列表用例经 `page.route` mock 单条告警，不依赖真实 tie 序，故无同类风险。
   - **待评估点**：默认排序是否补确定性兜底（`addOrderBy('result.id','DESC')` 或 `(createdAt, id)` 组合）；对现有视觉基线行序与未来分页 / 导出结果集边界的影响。
   - **触发条件**：真实告警同毫秒插入被报告顺序抖动；或列表分页 / 导出功能引入（届时并列顺序影响结果集边界）。

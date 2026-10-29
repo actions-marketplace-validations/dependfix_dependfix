@@ -232,7 +232,7 @@ AND fixStatus IN ('not-tried', 'failed', 'skipped')
 AND scanRunId IN (<scope run ids>)
 ```
 
-- 「未修复」包含 `not-tried` / `failed` / `skipped`（覆盖跨 major 跳过与交付跳过）；`converged` 表示「本地已满足、无需升级」，不计入引擎的 `alertsUnfixed` 口径。**平台明细边界**：`ScanResult` 行不携带 converged 标记（写入路径固定 `not-tried`，修复结果不回写），因此按明细聚合的通知（`security_high` / `weekly_digest`）仍会把 converged 告警计入活跃明细；周报仅按 `RunSummary.alertsConverged` 单列披露该数量。
+- 「未修复」包含 `not-tried` / `failed` / `skipped`（覆盖跨 major 跳过与交付跳过）；`converged` 表示「本地已满足、无需升级」，不计入引擎的 `alertsUnfixed` 口径。**平台明细边界**：`ScanResult` 行不携带 converged 标记（写入路径固定 `not-tried`，修复结果不回写），因此按明细聚合的通知（`security_critical` / `security_high` / `weekly_digest`）仍会把 converged 告警计入活跃明细；周报仅按 `RunSummary.alertsConverged` 单列披露该数量。
 - 已修复（`success`）与已关闭（`supersededAt` 非空）不计入，避免与 GitHub 的已关闭通知重复。
 - **截断告警不在 `ScanResult` 中**：引擎只持久化 `limited` 集合。扫描结果需同时读取 `summary.alertsTruncatedBySeverity`（M46.2 新增）的 critical / high 计数，在邮件正文以「另有 N 条截断未纳入明细」披露；无身份信息，不伪造逐条列表。
 - 严重级别阈值由组织设置 `severityThreshold` 控制：`high`（默认，通知覆盖 critical + high）或 `critical`（仅 critical）。**类别拆分后**（§15 D4）：`security_critical` 恒查 `critical` 且不受阈值影响；`security_high` 只在阈值为 `high` 时查 `high`，因此阈值语义保持「是否附加 high」，枚举与存储不变。
@@ -327,7 +327,7 @@ AND scanRunId IN (<scope run ids>)
 - **AC1** 默认策略：完成类不发；失败类发送；高危仅未修复；平台事件与 `security_critical` 必选。
 - **AC2** 配置优先级：组织关闭后个人无法开启；必选类别（`platform_incident` / `security_critical`）无法被个人或组织关闭，PATCH 必选类别返回 400；部署总开关可熔断全部通知。
 - **AC3** 收件人：平台事件仅管理员；业务事件定向触发者（`triggeredByUserId`）+ 已开启该类别的管理员；`security_critical` 取触发者 + 全部管理员 + 额外收件人（忽略开关）；标题包含 `[平台]` / `[告警]` / `[运行]` / `[摘要]` / `[周报]` 标签。
-- **AC4** 合并与幂等：一个批次只发一封 `security_high`；重复聚合 / 并发查询不重复发送；相同指纹不再重复发送（即使 24 小时窗口已过）。
+- **AC4** 合并与幂等：一个批次只发一封 `security_critical`、一封 `security_high`；重复聚合 / 并发查询不重复发送；相同指纹不再重复发送（即使 24 小时窗口已过）。
 - **AC5** 降噪：指纹变化且距上次发送超过 24 小时才再次发送；窗口内记录 `skipped_cooldown`；每小时超过上限记录 `skipped_throttled`。
 - **AC6** 失败语义：SMTP 未配置 noop；发送异常不阻断扫描；投递记录可查到对应状态与错误码。
 - **AC7** 迁移可重复执行且二次运行不报错；实体索引为类级声明（TypeORM 1.x 复合索引要求）。
@@ -349,6 +349,6 @@ AND scanRunId IN (<scope run ids>)
 - **D1 收件人定向（2026-10-20 用户决策）**：新增 `ScanRun.triggeredByUserId` / `BatchRun.triggeredByUserId`，手动触发精确投递；定时任务无触发者时回退管理员集合。
 - **D2 全局配置落点（2026-10-20 用户决策）**：新增管理员页 `/notifications`，承载组织设置、投递记录与测试发送；个人偏好保留在 `/settings`。
 - **D3 降噪策略（2026-10-20 用户决策）**：同一 scope + 类别 24 小时内最多发送一次；指纹变化才具备再次发送资格；内容未变化不重复发送；另提供可选的每周汇总（默认关闭）。
-- **D4 `critical` 必选（2026-10-24 用户决策 / 2026-10-29 细化，待 M50.1 实现）**：`critical` 级告警**豁免类别开关**——组织 `securityHigh` 与个人 `security_high` 均关闭时仍发送，仅受部署总开关熔断；**保留每小时上限**。实现口径（2026-10-29 用户决策）：新增必选类别 `security_critical`（与 `platform_incident` 同级，不入个人偏好表），`security_high` 收窄为仅 `high`；`severityThreshold` 枚举与语义不变（仅决定是否附加 `high`）；**独立计数桶**（`security_critical` 的 `sent` 行只计入自身上限，不计入共享桶，反之亦然）。冷却与内容指纹保持现状（不随类别开关豁免放开）。**已由 M50.1 落地并同步正文**（§3 表 / §4.2 / §4.4 / §5 / §6.2 / §6.3 / §7.1 / §7.3 / §13 AC1-AC3 + AC10）。
+- **D4 `critical` 必选（2026-10-24 用户决策 / 2026-10-29 细化 / M50.1 已实现）**：`critical` 级告警**豁免类别开关**——组织 `securityHigh` 与个人 `security_high` 均关闭时仍发送，仅受部署总开关熔断；**保留每小时上限**。实现口径（2026-10-29 用户决策）：新增必选类别 `security_critical`（与 `platform_incident` 同级，不入个人偏好表），`security_high` 收窄为仅 `high`；`severityThreshold` 枚举与语义不变（仅决定是否附加 `high`）；**独立计数桶**（`security_critical` 的 `sent` 行只计入自身上限，不计入共享桶，反之亦然）。冷却与内容指纹保持现状（不随类别开关豁免放开）。**已由 M50.1 落地并同步正文**（§3 表 / §4.2 / §4.4 / §5 / §6.2 / §6.3 / §7.1 / §7.3 / §13 AC1-AC3 + AC10）。
 - **D5 通知侧严重级别术语（2026-10-29 用户决策，待 M50.2 实现）**：通知页 / 邮件 / 投递记录统一保留 `Critical` / `High` 专有名词，与扫描侧 `scanSeverityLabel` 单一事实源一致；类别名改为 `Critical 告警` / `High 告警`，阈值标签改为「严重级别阈值」+ 选项 `Critical + High` / `Critical only`；邮件主题的 `[dependfix][告警]` 前缀保持不变（既有过滤契约）。**本条覆盖 §10 模板文案表，随 M50.2 落地时同步正文。**
 - **D6 周报重试与窗口锁（2026-10-29 规划，待 M50.3 实现）**：`partial` / `failed` 结果不再占满整周——进程内同周锁按结果分类（仅 `sent` 为终态），窗口内按退避（≥ 30 分钟）重试，已发收件人由逐用户投递键记 `skipped_duplicate`；`skipped_no_recipient` 不永久占锁，同周同状态在 `notification_log` 最多 1 条以控制噪声；窗口长度与触发小时不变。**本条覆盖 §6.5（同进程同周只尝试一次）与 §13 AC9，随 M50.3 落地时同步正文。**
