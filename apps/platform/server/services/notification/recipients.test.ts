@@ -94,6 +94,19 @@ describe('resolveNotificationRecipients', () => {
         })).toEqual([])
     })
 
+    it('必选 critical：已降级为 viewer 的触发者不计入收件人', async () => {
+        const admin = await makeUser('critical-guard', 'admin')
+        const viewer = await makeUser('critical-degraded', 'viewer')
+        const recipients = await resolveNotificationRecipients({
+            category: 'security_critical',
+            settings: DEFAULT_NOTIFICATION_SETTINGS,
+            triggeredByUserId: viewer.id,
+        })
+        const emails = recipients.map((r) => r.email)
+        expect(emails).toContain(admin.email)
+        expect(emails).not.toContain(viewer.email)
+    })
+
     it('run_completed 默认关闭；触发者显式开启后才接收', async () => {
         const admin = await makeUser('admin', 'admin')
         const other = await makeUser('other', 'admin')

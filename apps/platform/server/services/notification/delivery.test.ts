@@ -136,6 +136,28 @@ describe('dispatchNotification', () => {
         expect(second.status).toBe('skipped_throttled')
     })
 
+    it('部署总开关关闭时 security_critical 落 noop 且不发送', async () => {
+        const previous = process.env.DEPENDFIX_NOTIFICATION_ENABLED
+        process.env.DEPENDFIX_NOTIFICATION_ENABLED = 'false'
+        try {
+            const result = await dispatchNotification({
+                category: 'security_critical', scopeType: 'run', scopeId: 'crit-off', fingerprint: 'fpc5', message,
+                settings: DEFAULT_NOTIFICATION_SETTINGS,
+            })
+            expect(result.status).toBe('noop')
+            expect(sendMessage).not.toHaveBeenCalled()
+            const ds = await ensureDatabaseInitialized()
+            const logs = await ds.getRepository(NotificationLog).find({ where: { scopeId: 'crit-off' } })
+            expect(logs.map((log) => log.status)).toEqual(['noop'])
+        } finally {
+            if (previous === undefined) {
+                delete process.env.DEPENDFIX_NOTIFICATION_ENABLED
+            } else {
+                process.env.DEPENDFIX_NOTIFICATION_ENABLED = previous
+            }
+        }
+    })
+
     it('回收超过 10 分钟的 sending 占位后允许重新投递', async () => {
         const ds = await ensureDatabaseInitialized()
         const now = Date.now()

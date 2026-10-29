@@ -1,13 +1,13 @@
 import 'reflect-metadata'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { setupMemoryDatabase, teardownMemoryDatabase } from '../../../tests/api-helper'
-import { queryActiveUnfixedHighRisk, queryUnfixedHighRisk, queryUnfixedSecurityAlerts } from './high-risk'
+import { queryActiveUnfixedHighRisk, queryUnfixedSecurityAlerts } from './high-risk'
 import { ensureDatabaseInitialized } from '#server/database'
 import { Repository } from '#server/entities/repository'
 import { ScanResult } from '#server/entities/scan-result'
 import { ScanRun } from '#server/entities/scan-run'
 
-describe('queryUnfixedHighRisk', () => {
+describe('queryUnfixedSecurityAlerts（按类别查询）', () => {
     let runId: string
     let repositoryId: string
     let repositoryName: string
@@ -44,19 +44,20 @@ describe('queryUnfixedHighRisk', () => {
 
     afterEach(() => teardownMemoryDatabase())
 
-    it('只统计未修复 critical/high（排除 success / superseded / 低级别），并聚合截断', async () => {
-        const summary = await queryUnfixedHighRisk([runId], 'high')
-        expect(summary.rows.map((row) => row.upstreamId).sort()).toEqual(['dependabot:1', 'dependabot:2'])
-        expect(summary.counts).toEqual({ critical: 1, high: 1, total: 2 })
-        expect(summary.byRepository).toEqual([{ repositoryId, repository: `${repositoryName}/app`, critical: 1, high: 1, total: 2 }])
-        expect(summary.truncated).toEqual({ critical: 1, high: 2, total: 3 })
+    it('critical 类别只统计未修复 critical（排除 success / superseded / 低级别），截断只计 critical', async () => {
+        const summary = await queryUnfixedSecurityAlerts([runId], 'security_critical')
+        expect(summary.rows.map((row) => row.upstreamId)).toEqual(['dependabot:1'])
+        expect(summary.counts).toEqual({ critical: 1, high: 0, total: 1 })
+        expect(summary.byRepository).toEqual([{ repositoryId, repository: `${repositoryName}/app`, critical: 1, high: 0, total: 1 }])
+        expect(summary.truncated).toEqual({ critical: 1, high: 0, total: 1 })
         expect(summary.fingerprint).toHaveLength(16)
     })
 
-    it('阈值 critical 时只统计 critical，截断也只计 critical', async () => {
-        const summary = await queryUnfixedHighRisk([runId], 'critical')
-        expect(summary.rows.map((row) => row.upstreamId)).toEqual(['dependabot:1'])
-        expect(summary.truncated).toEqual({ critical: 1, high: 0, total: 1 })
+    it('high 类别只统计未修复 high（排除 success / superseded），截断只计 high', async () => {
+        const summary = await queryUnfixedSecurityAlerts([runId], 'security_high')
+        expect(summary.rows.map((row) => row.upstreamId)).toEqual(['dependabot:2'])
+        expect(summary.counts).toEqual({ critical: 0, high: 1, total: 1 })
+        expect(summary.truncated).toEqual({ critical: 0, high: 2, total: 2 })
     })
 
     it('按通知类别拆分查询：critical 与 high 互不包含且指纹不同', async () => {
@@ -70,8 +71,8 @@ describe('queryUnfixedHighRisk', () => {
     })
 
     it('空 run id / 无匹配 → 空摘要', async () => {
-        expect((await queryUnfixedHighRisk([], 'high')).rows).toEqual([])
-        expect((await queryUnfixedHighRisk(['none'], 'high')).counts.total).toBe(0)
+        expect((await queryUnfixedSecurityAlerts([], 'security_high')).rows).toEqual([])
+        expect((await queryUnfixedSecurityAlerts(['none'], 'security_high')).counts.total).toBe(0)
     })
 })
 

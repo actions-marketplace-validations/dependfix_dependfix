@@ -91,6 +91,20 @@ describe('通知生效优先级', () => {
         expect(rows[0]?.editable).toBe(false)
     })
 
+    it('组织关闭 securityHigh 不影响必选 critical 行的启用值', () => {
+        const rows = resolveNotificationPreferenceRows({
+            role: 'admin',
+            settings: { ...settings, categories: { ...settings.categories, securityHigh: false } },
+            deploymentEnabled: true,
+        })
+        expect(rows[0]?.category).toBe('security_critical')
+        expect(rows[0]?.enabled).toBe(true)
+        // 同场景下 security_high 行被组织关闭
+        const high = rows.find((row) => row.category === 'security_high')
+        expect(high?.enabled).toBe(false)
+        expect(high?.reason).toBe('org_disabled')
+    })
+
     it('部署开关仅 false 熔断；角色归一化 fail-closed 为 viewer', () => {
         expect(isDeploymentNotificationEnabled({})).toBe(true)
         expect(isDeploymentNotificationEnabled({ DEPENDFIX_NOTIFICATION_ENABLED: 'false' } as NodeJS.ProcessEnv)).toBe(false)

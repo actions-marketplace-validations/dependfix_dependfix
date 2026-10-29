@@ -149,6 +149,64 @@ describe('run / batch terminal notification', () => {
         expect(sendMessage).toHaveBeenCalledTimes(2)
     })
 
+    it('组织关闭 securityHigh 且 critical 与 high 同时存在时只投递 critical', async () => {
+        const { run } = await seedRepoRun('critical-mixed-off', 'critical')
+        const ds = await ensureDatabaseInitialized()
+        const repo = await ds.getRepository(Repository).findOneByOrFail({ id: run.repositoryId })
+        const now = new Date()
+        await ds.getRepository(ScanResult).save(ds.getRepository(ScanResult).create({
+            scanRunId: run.id,
+            repositoryId: repo.id,
+            upstreamId: `dependabot:mixed-off-high-${++seq}`,
+            source: 'dependabot',
+            severity: 'high',
+            packageName: 'minimist',
+            fixStatus: 'failed',
+            firstSeenAt: now,
+            lastSeenAt: now,
+        }))
+        await setOrgNotificationSettings({ securityHigh: false })
+        await notifyRunTerminal(run)
+
+        const logs = await ds.getRepository(NotificationLog).find({ where: { scopeType: 'run', scopeId: run.id } })
+        expect(logs.filter((log) => log.category === 'security_critical' && log.status === 'sent')).toHaveLength(1)
+        // high 类别被组织关闭 → 不会出现 sent；最多留下 skipped_no_recipient 记录
+        expect(logs.filter((log) => log.category === 'security_high' && log.status === 'sent')).toHaveLength(0)
+        expect(sendMessage).toHaveBeenCalledTimes(1)
+    })
+
+    it('阈值仅 critical 时 critical 仍投递、high 不投递', async () => {
+        const { run } = await seedRepoRun('threshold-critical-critical', 'critical')
+        const ds = await ensureDatabaseInitialized()
+        const repo = await ds.getRepository(Repository).findOneByOrFail({ id: run.repositoryId })
+        const now = new Date()
+        await ds.getRepository(ScanResult).save(ds.getRepository(ScanResult).create({
+            scanRunId: run.id,
+            repositoryId: repo.id,
+            upstreamId: `dependabot:threshold-critical-high-${++seq}`,
+            source: 'dependabot',
+            severity: 'high',
+            packageName: 'minimist',
+            fixStatus: 'failed',
+            firstSeenAt: now,
+            lastSeenAt: now,
+        }))
+        await ds.getRepository(Organization).update({ id: DEFAULT_ORGANIZATION_ID }, {
+            notificationSettingsJson: JSON.stringify({
+                categories: { securityHigh: true, runFailure: true, runCompleted: false, weeklyDigest: false },
+                severityThreshold: 'critical',
+                cooldownHours: 24,
+                maxPerHour: 6,
+                extraAdminRecipients: [],
+            }),
+        })
+        await notifyRunTerminal(run)
+
+        const logs = await ds.getRepository(NotificationLog).find({ where: { scopeType: 'run', scopeId: run.id } })
+        expect(logs.filter((log) => log.category === 'security_critical' && log.status === 'sent')).toHaveLength(1)
+        expect(logs.filter((log) => log.category === 'security_high')).toHaveLength(0)
+    })
+
     it('阈值仅 critical 时 high 告警不投递', async () => {
         const { run } = await seedRepoRun('critical-only-threshold', 'high')
         const ds = await ensureDatabaseInitialized()
