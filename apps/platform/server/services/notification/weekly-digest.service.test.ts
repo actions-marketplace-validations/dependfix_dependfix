@@ -273,13 +273,13 @@ describe('sendWeeklyDigest', () => {
         expect(log).toMatchObject({ status: 'noop', deliveryKey: null })
     })
 
-    it('零快照仍发送「本周无未修复高危」（周期任务存活信号）', async () => {
+    it('零快照仍发送「本周无未修复告警」（周期任务存活信号）', async () => {
         await makeAdmin()
         await setOrganizationSettings()
         const result = await sendWeeklyDigest(MONDAY)
         expect(result).toMatchObject({ status: 'sent', sent: 1 })
         const [message] = sendMessage.mock.calls[0] as unknown as [{ subject: string }]
-        expect(message.subject).toBe('[dependfix][周报] 本周无未修复高危')
+        expect(message.subject).toBe('[dependfix][周报] 本周无未修复告警')
     })
 
     it('部分收件人失败 → status=partial，失败落日志且不影响其余送达', async () => {
@@ -304,7 +304,7 @@ describe('sendWeeklyDigest', () => {
         await sendWeeklyDigest(MONDAY)
         const [message] = sendMessage.mock.calls[0] as unknown as [{ subject: string, html: string, text: string }]
         expect(message.subject).toContain('[dependfix][周报]')
-        expect(message.subject).toContain('1 个仓库存在未修复高危')
+        expect(message.subject).toContain('1 个仓库存在未修复告警')
         expect(message.html).toContain('另有 5 条截断未纳入明细')
         expect(message.html).toContain('引擎汇总另有 1 条告警本地已满足（converged）')
         expect(message.text).toContain('2026-W44')

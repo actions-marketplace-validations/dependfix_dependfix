@@ -14,20 +14,27 @@ describe('业务通知模板', () => {
         link: 'https://dependfix.example/batch-runs/batch-1',
     }
 
-    it('security_high：标题含 [告警]，正文含计数 / 截断 / 仓库分组', () => {
+    it('security_high：标题含 [告警] 与 High 专有名词，正文含计数 / 截断 / 仓库分组', () => {
         const out = renderSecurityNotification(security)
         expect(out.subject).toContain('[dependfix][告警]')
-        expect(out.subject).toContain('5 个高危告警未修复')
+        expect(out.subject).toContain('5 个 High 告警未修复')
         expect(out.html).toContain('acme/app')
         expect(out.html).toContain('另有 5 条截断未纳入明细')
-        expect(out.text).toContain('严重: 2')
-        expect(out.text).toContain('高危: 3')
+        expect(out.text).toContain('Critical: 2')
+        expect(out.text).toContain('High: 3')
+    })
+
+    it('security_critical：标题用 Critical 专有名词，与 high 类别不混用', () => {
+        const out = renderSecurityNotification(security, 'zh-CN', 'security_critical')
+        expect(out.subject).toContain('[dependfix][告警]')
+        expect(out.subject).toContain('5 个 Critical 告警未修复')
+        expect(out.subject).not.toContain('High 告警未修复')
     })
 
     it('security_high en-US 标签与文案', () => {
         const out = renderSecurityNotification(security, 'en-US')
         expect(out.subject).toContain('[dependfix][告警]')
-        expect(out.subject).toContain('5 high-risk alerts unfixed')
+        expect(out.subject).toContain('5 High alerts unfixed')
         expect(out.text).toContain('5 truncated alerts are not included')
     })
 
@@ -76,8 +83,8 @@ describe('周报模板', () => {
     it('标题含 [周报] 与仓库数；正文披露截断 / 豁免与仓库分组', () => {
         const out = renderWeeklyDigestNotification(digest)
         expect(out.subject).toContain('[dependfix][周报]')
-        expect(out.subject).toContain('2 个仓库存在未修复高危')
-        expect(out.subject).toContain('严重 2 / 高危 3')
+        expect(out.subject).toContain('2 个仓库存在未修复告警')
+        expect(out.subject).toContain('Critical 2 / High 3')
         expect(out.html).toContain('2026-W44')
         expect(out.html).toContain('acme/app')
         expect(out.html).toContain('另有 5 条截断未纳入明细')
@@ -96,7 +103,7 @@ describe('周报模板', () => {
         expect(out.text).not.toContain('converged')
     })
 
-    it('空快照：标题为「本周无未修复高危」', () => {
+    it('空快照：标题为「本周无未修复告警」', () => {
         const out = renderWeeklyDigestNotification({
             ...digest,
             counts: { critical: 0, high: 0, total: 0 },
@@ -104,14 +111,14 @@ describe('周报模板', () => {
             truncated: { critical: 0, high: 0, total: 0 },
             exempted: 0,
         })
-        expect(out.subject).toBe('[dependfix][周报] 本周无未修复高危')
+        expect(out.subject).toBe('[dependfix][周报] 本周无未修复告警')
         expect(out.text).toContain('2026-W44')
     })
 
     it('en-US 文案', () => {
         const out = renderWeeklyDigestNotification(digest, 'en-US')
         expect(out.subject).toContain('[dependfix][周报]')
-        expect(out.subject).toContain('2 repositories have unfixed high-risk alerts')
+        expect(out.subject).toContain('2 repositories have unfixed alerts')
         expect(out.text).toContain('5 truncated alerts are not included')
         expect(out.text).toContain('already satisfied locally')
     })

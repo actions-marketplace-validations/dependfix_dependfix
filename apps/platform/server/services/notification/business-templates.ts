@@ -43,7 +43,7 @@ export interface WeeklyDigestNotificationData {
 }
 
 interface Strings {
-    securityTitle: (total: number, repos: number) => string
+    securityTitle: (total: number, repos: number, label: string) => string
     failureTitle: (scope: string, failed: number) => string
     completedTitle: (scope: string, fixed: number, found: number) => string
     digestTitle: (repos: number, critical: number, high: number) => string
@@ -67,14 +67,14 @@ interface Strings {
 }
 
 const ZH: Strings = {
-    securityTitle: (total, repos) => `${total} 个高危告警未修复 — ${repos} 个仓库`,
+    securityTitle: (total, repos, label) => `${total} 个 ${label} 告警未修复 — ${repos} 个仓库`,
     failureTitle: (scope, failed) => `${scope}失败 — ${failed} 个仓库`,
     completedTitle: (scope, fixed, found) => `${scope}完成 — 修复 ${fixed} / 告警 ${found}`,
     digestTitle: (repos, critical, high) => critical + high === 0
-        ? '本周无未修复高危'
-        : `${repos} 个仓库存在未修复高危 — 严重 ${critical} / 高危 ${high}`,
-    critical: '严重',
-    high: '高危',
+        ? '本周无未修复告警'
+        : `${repos} 个仓库存在未修复告警 — Critical ${critical} / High ${high}`,
+    critical: 'Critical',
+    high: 'High',
     total: '合计',
     repository: '仓库',
     repositories: '仓库',
@@ -93,12 +93,12 @@ const ZH: Strings = {
 }
 
 const EN: Strings = {
-    securityTitle: (total, repos) => `${total} high-risk alerts unfixed — ${repos} repositories`,
+    securityTitle: (total, repos, label) => `${total} ${label} alerts unfixed — ${repos} repositories`,
     failureTitle: (scope, failed) => `${scope} failed — ${failed} repositories`,
     completedTitle: (scope, fixed, found) => `${scope} completed — ${fixed} fixed / ${found} alerts`,
     digestTitle: (repos, critical, high) => critical + high === 0
-        ? 'No unfixed high-risk alerts this week'
-        : `${repos} repositories have unfixed high-risk alerts — ${critical} critical / ${high} high`,
+        ? 'No unfixed alerts this week'
+        : `${repos} repositories have unfixed alerts — Critical ${critical} / High ${high}`,
     critical: 'Critical',
     high: 'High',
     total: 'Total',
@@ -166,7 +166,8 @@ export const renderSecurityNotification = (
 ): RenderedNotification => {
     const s = strings(locale)
     const scope = scopeLabel(data.scopeLabel, locale)
-    const title = `[dependfix]${NOTIFICATION_CATEGORY_TAGS[category]} ${s.securityTitle(data.counts.total, data.repositories.length)}`
+    const severityLabel = category === 'security_critical' ? s.critical : s.high
+    const title = `[dependfix]${NOTIFICATION_CATEGORY_TAGS[category]} ${s.securityTitle(data.counts.total, data.repositories.length, severityLabel)}`
     const shown = data.repositories.slice(0, 50)
     const rows = [
         cell(s.scope, escapeHtml(`${scope} ${data.scopeId}`)),
@@ -247,7 +248,7 @@ export const renderRunCompletedNotification = (
 }
 
 /**
- * 周汇总（`weekly_digest`）：按仓库分组的活跃未修复高危快照。
+ * 周汇总（`weekly_digest`）：按仓库分组的活跃未修复告警快照（Critical / High 分列）。
  * 单项豁免 / 截断单独成行披露——周报是周期摘要，必须在正文说清「还有多少没列」。
  */
 export const renderWeeklyDigestNotification = (
