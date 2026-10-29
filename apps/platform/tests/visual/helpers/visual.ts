@@ -94,18 +94,18 @@ export async function expectViewportScreenshot(page: Page, name: string): Promis
  * 打开 caomei `Select` 的门户面板并返回面板 locator。
  *
  * 本地实测：`Select` 首次点击偶发不挂载门户面板（约 1/6 轮次，现象为
- * `.caomei-select__content` 一直不出现，重跑即绿）。这里的重试仅覆盖「打开」这一动作：
- * 首次点击后短等 3 秒，未出现则按 `Escape` 复位再用默认超时点击一次；仍失败照常抛出，
- * 不改断言、超时口径与像素阈值，避免掩盖真实的面板回归。
+ * `.caomei-select__content` 一直不出现，重跑即绿）。这里的重试只覆盖「再点一次」这一个动作：
+ * 首次点击后等 10 秒（沿用既有浮层等待口径），仍未出现则再点击一次并等 15 秒；
+ * 仍失败照常抛出。不改断言、像素阈值，也不按 `Escape`——面板未挂载时 Escape 会连带关闭宿主
+ * 模态弹窗（`CaomeiDialog` 默认 `closeOnEsc`），重试路径反而失效。
  */
-export async function openSelectPanel(page: Page, trigger: Locator, timeout = 10000): Promise<Locator> {
+export async function openSelectPanel(page: Page, trigger: Locator, timeout = 15000): Promise<Locator> {
     const panel = page.locator('.caomei-select__content')
     await trigger.click()
     try {
-        await expect(panel).toBeVisible({ timeout: 3000 })
+        await expect(panel).toBeVisible({ timeout: 10000 })
         return panel
     } catch {
-        await page.keyboard.press('Escape')
         await trigger.click()
         await expect(panel).toBeVisible({ timeout })
         return panel

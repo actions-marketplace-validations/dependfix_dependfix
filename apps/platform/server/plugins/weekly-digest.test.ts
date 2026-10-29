@@ -174,9 +174,10 @@ describe('weekly-digest 插件触发', () => {
 
     it('发送未结束时跳过节拍（重入守卫：慢发送不并发进入）', async () => {
         vi.setSystemTime(new Date(2026, 9, 26, 9, 1))
-        let resolveSend: ((value: unknown) => void) | null = null
+        // 用对象持有 resolve：闭包内赋值不会被 TS 的流分析看到，直接 `let` 会被窄化为 null/undefined
+        const deferred: { resolve?: (value: unknown) => void } = {}
         sendWeeklyDigestMock.mockImplementationOnce(() => new Promise((resolve) => {
-            resolveSend = resolve
+            deferred.resolve = resolve
         }))
         runPlugin()
         await vi.advanceTimersByTimeAsync(WEEKLY_DIGEST_FIRST_RUN_DELAY_MS)
@@ -187,7 +188,7 @@ describe('weekly-digest 插件触发', () => {
         expect(sendWeeklyDigestMock).toHaveBeenCalledTimes(1)
 
         // 以失败结束：结束后按「完成时刻 + 退避」推进，退避到期才允许下一次尝试
-        resolveSend?.({ ...result(), status: 'failed', sent: 0, failed: 1 })
+        deferred.resolve?.({ ...result(), status: 'failed', sent: 0, failed: 1 })
         await vi.advanceTimersByTimeAsync(0)
         await vi.advanceTimersByTimeAsync(WEEKLY_DIGEST_CHECK_INTERVAL_MS)
         expect(sendWeeklyDigestMock).toHaveBeenCalledTimes(1)

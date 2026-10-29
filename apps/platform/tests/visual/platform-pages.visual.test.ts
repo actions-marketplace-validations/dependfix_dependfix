@@ -319,8 +319,10 @@ test.describe('平台页面视觉基线', () => {
             await expect(criticalRow).toBeVisible()
             await expect(criticalRow).toBeDisabled()
             await expect(page.getByText(/默认每周一 09:00/)).toBeVisible()
-            // 设备级扫描偏好为空时走系统兜底（确定性），派生行必须已渲染
-            await expect(page.getByText(/当前生效：/)).toBeVisible()
+            // 设备级扫描偏好为空时走系统兜底（确定性）：锁完整兜底串，避免只锁前缀时静默漂移
+            await expect(page.getByText('当前生效：仅报告（系统兜底）· High（系统兜底）')).toBeVisible()
+            // 界面语言由 i18n 配置决定（默认 zh-CN），锁显示名以免语言偏好漂移无声进入基线
+            await expect(page.locator('#language')).toContainText('简体中文')
             // AI 研判配置由组织接口驱动，未加载完成时输入框为空
             await expect(page.locator('#aiModel')).toHaveValue(/.+/)
 
