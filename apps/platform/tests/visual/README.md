@@ -78,7 +78,8 @@
 - `pr-checks`：行级渲染已由 M33.4 覆盖——fixtures 端点新增可选 `prChecks` 写入路径（5 行覆盖结论标签四档 danger / success / warning / primary 与 Alert 状态三态 firing / 已 ack / OK）；时间列由 fixtures 钉死 `lastPolledAt` + 视觉环境固定 `locale` / `timezoneId` 保证 `toLocaleString()` 确定性，无需 `data-visual-mask`。
 - `alerts`：1440 视口下表格容器横向溢出（`clientWidth 1166 < scrollWidth 1318`），整页基线只覆盖可视区左端；最右 `链接` / `详情` 两列由 `alerts-right-<theme>.png` 覆盖（M33.5：容器横向滚到最右后的元素级补拍，仅改容器内部滚动位置，不动 viewport / 阈值 / 列宽）。
 - 弹窗内浮层（M34.3）：`dialog-select-open-<theme>.png` 覆盖弹窗内 Select **展开态**（light / dark 各一张）。用**视口级**截图而非元素级 / 整页——门户面板挂在 body、不在弹窗子树内（元素级取不到），整页截图又会把 fixed 定位的遮罩与面板混进拼接；截图前另断言「面板不是弹窗后代」，防止面板未挂载时基线被落成缺面板形态。
-- 三个页面仅取亮色（`pr-checks` / `dialog-import-repos` / `login`），明暗两态仅覆盖 `alerts` / `repos` / `dialog-select-open`（后者因门户面板与遮罩存在叠色，分主题采基线）。
+- 三个页面仅取亮色（`pr-checks` / `dialog-import-repos` / `login`），明暗两态覆盖 `alerts` / `repos` / `notifications` / `settings` / `dialog-select-open`（后者因门户面板与遮罩存在叠色，分主题采基线）。
+- **`settings` / `notifications`（M50.4）**：个人设置页与通知管理员页各按整页截图覆盖明暗两态（`settings-<theme>.png` / `notifications-<theme>.png`）。前置断言锁定本页承载的通知语义（必选 `Critical` 只读行、周汇总提示、`严重级别阈值` 文案）与「当前生效」派生行、AI 表单已加载；设备级扫描偏好为空时走系统兜底（确定性），故不额外遮蔽。
 - **浮层落点页（M45.5，light 4 张 + dark 1 张）**——均按视口级截图覆盖「页面 + 遮罩 + 浮层」的合成结果：
   - `schedules-form-layer-<theme>.png`：定时计划「新建计划」弹窗 + 业务类型 Select 的**门户面板展开态**。表单的 cron 预览是「当前时刻 + cron」派生值（逐日/逐周变化），已在 `schedules.vue` 标 `data-visual-mask`（遮蔽块入基线）；其余字段与提示文案静态。
   - `scans-run-detail-light.png`：`/scans?run=` 深链触发的 `repo-history-dialog`（`scans.vue` 唯一弹窗落点）。该视图**不渲染运行元信息块**（id / 时间 / 时长），内容主体是结果表——故运行 ID 与时间戳不是本基线的检查面，时间列由底图运行列表覆盖。
@@ -97,6 +98,8 @@
 | `ScanRun.summaryJson` / `errorJson` | 可缺省 | 可选 `summary` / `error`；失败运行的详情横幅据此渲染 |
 | `ScanResult.createdAt` | `@CreateDateColumn`（注入时刻） | 可选 `createdAt`；**不直接渲染**，但决定 alerts 页「原始列表」的行序（端点按 `createdAt DESC` 排序，同批次插入并列会让行序漂移）→ 视觉 fixtures 逐条取同条 `firstSeenAt` |
 | 瞬时时刻（cron 预览、`now()` 派生文案） | 随运行时刻变化 | 页面侧 `data-visual-mask` 遮蔽（加遮蔽必须重生成基线） |
+| 设置页「当前生效」派生行 | 读设备级 `localStorage`（`dependfix-scan-preferences`） | 新上下文为空 → 走系统兜底，基线取该兜底文案；若将来把「上次选择」写入存储，需在用例侧显式钉死 |
+| 设置页 AI 研判表单 | 组织接口返回的 provider / model / URL | 视觉库为默认组织，字段稳定；用例断言 `#aiModel` 非空，接口失败时先失败而非截成空表单 |
 
 用例侧以 `pinnedRunId(index)` 读取钉死取值并 **fail-fast**：fixtures 被改动去掉 `id` 时用例直接失败，而不是静默产出一张不可复现的基线。
 
@@ -112,6 +115,8 @@
 - **运行失败「受约束重试入口」+ 二次确认层**（M45.4 的 `run-detail-dialog` + `CaomeiConfirmDialog`）：只挂在 `alerts` 页，且需要「告警 → `transient` 失败运行」链路；现有视觉数据集的告警只指向已完成运行，补齐会连带重建 `alerts` 基线（改动面超出视觉扩面条目）→ 待该链路有独立需求时再覆盖。
 - `scans` 的 Tabs 切换态（按仓库聚合视图）与 `schedules` 列表行（视觉库不注入定时计划 fixtures，仅覆盖空态 + 表单浮层）。
 - Toast 的其余 tone（success / danger）与「自动消失」时序。
+- 设置页交互态（保存成功 / 校验错误提示 / 禁用点击）与通知页发送测试邮件的提示条：本批只覆盖静态渲染态。
+- `Select` 门户面板「首次点击偶发不挂载」的根因未定位（本地实测约 1/6 轮次，重跑即绿）；用例侧以 `openSelectPanel` 做一次有界重试兜底，M50.4 连跑 6 轮全绿后仍保留该观察项。
 
 ## 顺序约束与 M45.6 连带重建记录（2026-10-19）
 
