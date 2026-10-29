@@ -1,5 +1,5 @@
 import { escapeHtml, type NotificationLocale } from './templates'
-import { NOTIFICATION_CATEGORY_TAGS } from './types'
+import { NOTIFICATION_CATEGORY_TAGS, type SecurityNotificationCategory } from './types'
 import type { RenderedNotification } from './channel'
 
 export interface SecurityNotificationData {
@@ -162,10 +162,11 @@ const repositoryBreakdownHtml = (
 export const renderSecurityNotification = (
     data: SecurityNotificationData,
     locale: NotificationLocale = 'zh-CN',
+    category: SecurityNotificationCategory = 'security_high',
 ): RenderedNotification => {
     const s = strings(locale)
     const scope = scopeLabel(data.scopeLabel, locale)
-    const title = `[dependfix]${NOTIFICATION_CATEGORY_TAGS.security_high} ${s.securityTitle(data.counts.total, data.repositories.length)}`
+    const title = `[dependfix]${NOTIFICATION_CATEGORY_TAGS[category]} ${s.securityTitle(data.counts.total, data.repositories.length)}`
     const shown = data.repositories.slice(0, 50)
     const rows = [
         cell(s.scope, escapeHtml(`${scope} ${data.scopeId}`)),

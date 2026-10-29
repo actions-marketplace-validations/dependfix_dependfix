@@ -1,5 +1,5 @@
 import { dispatchNotification, loadOrganizationNotificationSettings } from './delivery'
-import { queryUnfixedHighRisk } from './high-risk'
+import { queryUnfixedSecurityAlerts } from './high-risk'
 import { renderRunCompletedNotification, renderRunFailureNotification, renderSecurityNotification } from './business-templates'
 import { parseSupportedLocale } from './channel'
 import { ensureDatabaseInitialized } from '#server/database'
@@ -25,7 +25,8 @@ const parseSummary = (raw: string | null): { alertsTotal: number, fixedCount: nu
 }
 
 /**
- * 批次终态通知（设计稿 §6.3）：一个批次只发一封 security_high 与一封 run_failure / run_completed。
+ * 批次终态通知（设计稿 §6.3 / §15 D4）：一个批次只发一封 security_critical、一封 security_high
+ * 与一封 run_failure / run_completed。
  * 调用方须在条件写回成功且状态首次进入终态后触发；deliveryKey / 指纹去重兜底并发重复调用。
  */
 export const notifyBatchTerminal = async (batch: BatchRun): Promise<void> => {
@@ -60,24 +61,46 @@ export const notifyBatchTerminal = async (batch: BatchRun): Promise<void> => {
     }
 
     const runIds = runs.map((run) => run.id)
-    const highRisk = await queryUnfixedHighRisk(runIds, settings.severityThreshold)
-    if (highRisk.counts.total > 0) {
+    const criticalRisk = await queryUnfixedSecurityAlerts(runIds, 'security_critical')
+    if (criticalRisk.counts.total > 0) {
         await dispatchNotification({
-            category: 'security_high',
+            category: 'security_critical',
             scopeType: 'batch',
             scopeId: batch.id,
-            fingerprint: highRisk.fingerprint,
+            fingerprint: criticalRisk.fingerprint,
             message: renderSecurityNotification({
                 scopeLabel: 'batch',
                 scopeId: batch.id,
-                counts: highRisk.counts,
-                repositories: highRisk.byRepository,
-                truncated: highRisk.truncated,
+                counts: criticalRisk.counts,
+                repositories: criticalRisk.byRepository,
+                truncated: criticalRisk.truncated,
                 link,
-            }, locale),
+            }, locale, 'security_critical'),
             triggeredByUserId,
             settings,
         })
+    }
+
+    if (settings.severityThreshold === 'high') {
+        const highRisk = await queryUnfixedSecurityAlerts(runIds, 'security_high')
+        if (highRisk.counts.total > 0) {
+            await dispatchNotification({
+                category: 'security_high',
+                scopeType: 'batch',
+                scopeId: batch.id,
+                fingerprint: highRisk.fingerprint,
+                message: renderSecurityNotification({
+                    scopeLabel: 'batch',
+                    scopeId: batch.id,
+                    counts: highRisk.counts,
+                    repositories: highRisk.byRepository,
+                    truncated: highRisk.truncated,
+                    link,
+                }, locale, 'security_high'),
+                triggeredByUserId,
+                settings,
+            })
+        }
     }
 
     if (!settings.categories.runCompleted) {

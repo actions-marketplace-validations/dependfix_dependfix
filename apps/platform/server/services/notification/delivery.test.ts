@@ -103,6 +103,39 @@ describe('dispatchNotification', () => {
         expect(second.status).toBe('skipped_throttled')
     })
 
+    it('独立计数桶：其它类别的已发行不挤占 critical 额度', async () => {
+        const settings = { ...DEFAULT_NOTIFICATION_SETTINGS, maxPerHour: 1 }
+        await dispatchNotification({
+            category: 'run_failure', scopeType: 'run', scopeId: 'bucket-1', message, settings,
+        })
+        const critical = await dispatchNotification({
+            category: 'security_critical', scopeType: 'run', scopeId: 'bucket-2', fingerprint: 'fpc1', message, settings,
+        })
+        expect(critical.status).toBe('sent')
+    })
+
+    it('独立计数桶：critical 已发行不计入共享额度', async () => {
+        const settings = { ...DEFAULT_NOTIFICATION_SETTINGS, maxPerHour: 1 }
+        await dispatchNotification({
+            category: 'security_critical', scopeType: 'run', scopeId: 'bucket-3', fingerprint: 'fpc2', message, settings,
+        })
+        const failure = await dispatchNotification({
+            category: 'run_failure', scopeType: 'run', scopeId: 'bucket-4', message, settings,
+        })
+        expect(failure.status).toBe('sent')
+    })
+
+    it('独立计数桶：critical 自身仍受同一数值上限约束', async () => {
+        const settings = { ...DEFAULT_NOTIFICATION_SETTINGS, maxPerHour: 1 }
+        await dispatchNotification({
+            category: 'security_critical', scopeType: 'run', scopeId: 'bucket-5', fingerprint: 'fpc3', message, settings,
+        })
+        const second = await dispatchNotification({
+            category: 'security_critical', scopeType: 'run', scopeId: 'bucket-6', fingerprint: 'fpc4', message, settings,
+        })
+        expect(second.status).toBe('skipped_throttled')
+    })
+
     it('回收超过 10 分钟的 sending 占位后允许重新投递', async () => {
         const ds = await ensureDatabaseInitialized()
         const now = Date.now()

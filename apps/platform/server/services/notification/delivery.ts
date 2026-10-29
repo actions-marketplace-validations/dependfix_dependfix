@@ -1,4 +1,4 @@
-import { MoreThanOrEqual, Not } from 'typeorm'
+import { In, MoreThanOrEqual, Not } from 'typeorm'
 import { listNotificationChannels } from './registry'
 import type { NotificationChannel, RenderedNotification } from './channel'
 import { buildDigestDeliveryKey, buildNotificationDeliveryKey, buildPlatformDeliveryKey, isNotificationCooldownActive, isNotificationThrottled } from './dedupe'
@@ -241,12 +241,15 @@ export const dispatchNotification = async (input: DispatchNotificationInput): Pr
 
     // 周报豁免每小时上限（自身已有「每用户每渠道每周一次」上限，设计稿 §7.3）。
     if (!isDigest) {
+        // 独立计数桶（设计稿 §15 D4）：security_critical 只统计自身 sent 行，其余类别不统计它，
+        // 避免批量运行的常规通知把「必发」的 critical 挤成 skipped_throttled；数值上限仍共用 maxPerHour。
+        const criticalBucket = input.category === 'security_critical'
         const sentInLastHour = await logRepo.count({
             where: {
                 channel: channel.name,
                 status: 'sent',
                 // 周报逐封写入的 sent 行不占用共享上限，避免一次周报挤掉平台事件 / 安全告警
-                category: Not('weekly_digest'),
+                category: criticalBucket ? 'security_critical' : Not(In(['weekly_digest', 'security_critical'])),
                 createdAt: MoreThanOrEqual(new Date(now.getTime() - 3_600_000)),
             },
         })

@@ -1,7 +1,7 @@
 import 'reflect-metadata'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { setupMemoryDatabase, teardownMemoryDatabase } from '../../../tests/api-helper'
-import { queryActiveUnfixedHighRisk, queryUnfixedHighRisk } from './high-risk'
+import { queryActiveUnfixedHighRisk, queryUnfixedHighRisk, queryUnfixedSecurityAlerts } from './high-risk'
 import { ensureDatabaseInitialized } from '#server/database'
 import { Repository } from '#server/entities/repository'
 import { ScanResult } from '#server/entities/scan-result'
@@ -57,6 +57,16 @@ describe('queryUnfixedHighRisk', () => {
         const summary = await queryUnfixedHighRisk([runId], 'critical')
         expect(summary.rows.map((row) => row.upstreamId)).toEqual(['dependabot:1'])
         expect(summary.truncated).toEqual({ critical: 1, high: 0, total: 1 })
+    })
+
+    it('按通知类别拆分查询：critical 与 high 互不包含且指纹不同', async () => {
+        const critical = await queryUnfixedSecurityAlerts([runId], 'security_critical')
+        const high = await queryUnfixedSecurityAlerts([runId], 'security_high')
+        expect(critical.rows.map((row) => row.upstreamId)).toEqual(['dependabot:1'])
+        expect(critical.counts).toEqual({ critical: 1, high: 0, total: 1 })
+        expect(high.rows.map((row) => row.upstreamId)).toEqual(['dependabot:2'])
+        expect(high.counts).toEqual({ critical: 0, high: 1, total: 1 })
+        expect(critical.fingerprint).not.toBe(high.fingerprint)
     })
 
     it('空 run id / 无匹配 → 空摘要', async () => {

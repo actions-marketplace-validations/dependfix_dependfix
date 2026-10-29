@@ -1,5 +1,6 @@
 import { In, IsNull } from 'typeorm'
 import { computeNotificationFingerprint } from './dedupe'
+import { SECURITY_CATEGORY_SEVERITIES, type SecurityNotificationCategory } from './types'
 import { ensureDatabaseInitialized } from '#server/database'
 import { Repository } from '#server/entities/repository'
 import { ScanResult } from '#server/entities/scan-result'
@@ -80,13 +81,12 @@ const countSeverities = (rows: ReadonlyArray<{ severity: string }>): HighRiskCou
  * 调用方传入的 run 集合，全局快照用活跃行去重后的 `scanRunId`。
  */
 const queryHighRiskSummary = async (
-    severityThreshold: 'critical' | 'high',
+    severities: readonly ('critical' | 'high')[],
     scanRunIds: string[] | null,
 ): Promise<HighRiskSummary> => {
-    if (scanRunIds?.length === 0) {
+    if (scanRunIds?.length === 0 || severities.length === 0) {
         return emptySummary()
     }
-    const severities = severityThreshold === 'critical' ? ['critical'] : ['critical', 'high']
     const ds = await ensureDatabaseInitialized()
     const resultRepo = ds.getRepository(ScanResult)
     const scopeWhere = scanRunIds ? { scanRunId: In(scanRunIds) } : {}
@@ -187,7 +187,17 @@ const queryHighRiskSummary = async (
 export const queryUnfixedHighRisk = (
     scanRunIds: string[],
     severityThreshold: 'critical' | 'high',
-): Promise<HighRiskSummary> => queryHighRiskSummary(severityThreshold, scanRunIds)
+): Promise<HighRiskSummary> =>
+    queryHighRiskSummary(severityThreshold === 'critical' ? ['critical'] : ['critical', 'high'], scanRunIds)
+
+/**
+ * 按通知类别查询未修复告警（设计稿 §15 D4）：
+ * `security_critical` 只取 critical、`security_high` 只取 high——两类各发一封，避免同一 run 内互相掩盖。
+ */
+export const queryUnfixedSecurityAlerts = (
+    scanRunIds: string[],
+    category: SecurityNotificationCategory,
+): Promise<HighRiskSummary> => queryHighRiskSummary(SECURITY_CATEGORY_SEVERITIES[category], scanRunIds)
 
 /**
  * 查询全局活跃未修复高危快照（周报口径）：
@@ -196,4 +206,5 @@ export const queryUnfixedHighRisk = (
  */
 export const queryActiveUnfixedHighRisk = (
     severityThreshold: 'critical' | 'high',
-): Promise<HighRiskSummary> => queryHighRiskSummary(severityThreshold, null)
+): Promise<HighRiskSummary> =>
+    queryHighRiskSummary(severityThreshold === 'critical' ? ['critical'] : ['critical', 'high'], null)
