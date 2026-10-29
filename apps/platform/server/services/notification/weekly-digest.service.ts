@@ -40,7 +40,7 @@ export interface WeeklyDigestResult {
     failed: number
     /** 渠道不可用（noop）数量。 */
     noop: number
-    /** 其它跳过（并发占位 / 无收件人）数量。 */
+    /** 其它跳过数量；本路径（收件人非空）下只可能是逐用户投递键命中的重复跳过。 */
     skipped: number
 }
 
@@ -140,7 +140,8 @@ export const sendWeeklyDigest = async (now: Date = new Date()): Promise<WeeklyDi
             result.status = result.noop > 0 ? 'noop' : 'failed'
         }
     } else if (result.sent === 0) {
-        // 同周重复触发：逐用户投递键全部命中，未产生新邮件
+        // 同周重复触发：逐用户投递键全部命中，未产生新邮件。
+        // 收件人非空时每轮循环必落 sent / failed / noop / skipped 之一，故 'failed' 分支为防御性兜底。
         result.status = result.skipped > 0 ? 'skipped_duplicate' : 'failed'
     }
     logger.info(

@@ -7,7 +7,8 @@ import type { WeeklyDigestStatus } from './weekly-digest.service'
  * - 终态：`sent`（含部分收件人已发、其余仍失败后重试成功）与 `skipped_duplicate`（全部收件人本周已发）；
  * - 可重试：`partial` / `failed` / `noop`（计次 + 退避）、`skipped_no_recipient`（不计次，仅退避，
  *   因为「窗口内开启个人开关后当周补发」是明确要求，发信次数并非噪声源）；
- * - 配置关闭（`skipped_disabled` / `skipped_org_disabled`）：不占用本周，下一次节拍立即重查。
+ * - 配置关闭（`skipped_disabled` / `skipped_org_disabled`）：不占用本周，下一次节拍立即重查；
+ *   但**不清零**已发生的发信尝试计数（否则「关一下再开」可绕过单周尝试上界）。
  *
  * 真正的「每收件人每周一封」仍由逐用户投递键兜底（见 `dedupe.ts#buildDigestDeliveryKey`）。
  */
@@ -51,13 +52,15 @@ export const reduceWeeklyDigestAttempt = (
         return { ...state, done: true }
     }
     if (status === 'skipped_disabled' || status === 'skipped_org_disabled') {
-        return { ...state, sendAttempts: 0, nextAttemptAtMs: 0, done: false }
+        return { ...state, nextAttemptAtMs: 0, done: false }
     }
     const nextSendAttempts = RETRYABLE_SEND_STATUSES.includes(status) ? state.sendAttempts + 1 : state.sendAttempts
+    const done = nextSendAttempts >= WEEKLY_DIGEST_MAX_SEND_ATTEMPTS
     return {
         ...state,
         sendAttempts: nextSendAttempts,
-        nextAttemptAtMs: nowMs + WEEKLY_DIGEST_RETRY_BACKOFF_MS,
-        done: nextSendAttempts >= WEEKLY_DIGEST_MAX_SEND_ATTEMPTS,
+        // 终态时不再排定下一次尝试（`done` 优先于 `nextAttemptAtMs`，此处保持两者不自相矛盾）
+        nextAttemptAtMs: done ? 0 : nowMs + WEEKLY_DIGEST_RETRY_BACKOFF_MS,
+        done,
     }
 }

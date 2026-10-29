@@ -33,11 +33,12 @@ describe('周报尝试状态推进', () => {
         expect(next.done).toBe(false)
     })
 
-    it('配置关闭不占用本周：计次清零且下一次节拍立即重查', () => {
+    it('配置关闭不占用本周：下一次节拍立即重查，但不清零已发生的发信尝试', () => {
         const base = { ...createWeeklyDigestAttemptState('2026-W44'), sendAttempts: 4, nextAttemptAtMs: NOW + 1 }
         for (const status of ['skipped_disabled', 'skipped_org_disabled'] as const) {
             const next = reduceWeeklyDigestAttempt(base, status, NOW)
-            expect(next).toMatchObject({ sendAttempts: 0, nextAttemptAtMs: 0, done: false })
+            // 保留计数：避免「关一下再开」绕过单周尝试上界
+            expect(next).toMatchObject({ sendAttempts: 4, nextAttemptAtMs: 0, done: false })
         }
     })
 
@@ -47,6 +48,8 @@ describe('周报尝试状态推进', () => {
             state = reduceWeeklyDigestAttempt(state, 'failed', NOW)
             expect(state.sendAttempts).toBe(attempt)
             expect(state.done).toBe(attempt >= WEEKLY_DIGEST_MAX_SEND_ATTEMPTS)
+            // 终态不再排定下一次尝试
+            expect(state.nextAttemptAtMs).toBe(attempt >= WEEKLY_DIGEST_MAX_SEND_ATTEMPTS ? 0 : NOW + WEEKLY_DIGEST_RETRY_BACKOFF_MS)
         }
         // 触顶后再来「无收件人」也不会复活（状态已终态，由插件侧 done 拦截）
         const afterCap = reduceWeeklyDigestAttempt(state, 'skipped_no_recipient', NOW + 1)

@@ -44,8 +44,13 @@ export default defineNitroPlugin((nitroApp) => {
     }
     const hour = parsedHour.hour
     let state: WeeklyDigestAttemptState | null = null
+    /** 重入守卫：上一次发送未结束时跳过节拍（SMTP 挂起可跨过 15 分钟间隔）。 */
+    let running = false
 
     const tick = async (): Promise<void> => {
+        if (running) {
+            return
+        }
         const now = new Date()
         if (!isWeeklyDigestDue(now, hour)) {
             return
@@ -58,13 +63,17 @@ export default defineNitroPlugin((nitroApp) => {
         if (current.done || now.getTime() < current.nextAttemptAtMs) {
             return
         }
+        running = true
         try {
             const result = await sendWeeklyDigest(now)
-            state = reduceWeeklyDigestAttempt(current, result.status, now.getTime())
+            // 退避以上一次发送的**完成时刻**为基准，避免发送耗时吞掉退避窗口
+            state = reduceWeeklyDigestAttempt(current, result.status, Date.now())
         } catch (error) {
             // 意外异常按「失败」推进（计次 + 退避），不会在同一节拍内无限重试
-            state = reduceWeeklyDigestAttempt(current, 'failed', now.getTime())
+            state = reduceWeeklyDigestAttempt(current, 'failed', Date.now())
             logger.error('[weekly-digest] 周报发送失败', { error })
+        } finally {
+            running = false
         }
     }
 

@@ -309,9 +309,12 @@ describe('sendWeeklyDigest', () => {
         const round2 = await sendWeeklyDigest(new Date(MONDAY.getTime() + 30 * 60 * 1000))
         expect(round2).toMatchObject({ status: 'sent', recipients: 2, sent: 1, failed: 0, skipped: 1 })
         expect(sendMessage).toHaveBeenCalledTimes(3)
+        // 首轮失败的是首个收件人，次轮只补发它；另一位命中投递键不发。
+        // 用「按收件人计数」断言，避免依赖管理员查询顺序（顺序变化不应导致脆弱失败）。
         const deliveredTo = sendMessage.mock.calls.map((call) => (call as unknown as [unknown, string[]])[1][0])
-        // 首轮失败的是第一个收件人，次轮只补发它，另一位命中投递键不发
-        expect(deliveredTo).toEqual([first.email, second.email, first.email])
+        expect(deliveredTo).toHaveLength(3)
+        expect(deliveredTo.filter((email) => email === first.email)).toHaveLength(2)
+        expect(deliveredTo.filter((email) => email === second.email)).toHaveLength(1)
     })
 
     it('无收件人时同周同状态只落一行（重试不刷日志）', async () => {

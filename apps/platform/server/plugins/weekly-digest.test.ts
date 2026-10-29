@@ -172,6 +172,45 @@ describe('weekly-digest 插件触发', () => {
         expect(sendWeeklyDigestMock).toHaveBeenCalledTimes(10)
     })
 
+    it('发送未结束时跳过节拍（重入守卫：慢发送不并发进入）', async () => {
+        vi.setSystemTime(new Date(2026, 9, 26, 9, 1))
+        let resolveSend: ((value: unknown) => void) | null = null
+        sendWeeklyDigestMock.mockImplementationOnce(() => new Promise((resolve) => {
+            resolveSend = resolve
+        }))
+        runPlugin()
+        await vi.advanceTimersByTimeAsync(WEEKLY_DIGEST_FIRST_RUN_DELAY_MS)
+        expect(sendWeeklyDigestMock).toHaveBeenCalledTimes(1)
+
+        // 发送挂起期间跨过多个节拍：不并发进入，尝试计数不会被少计
+        await vi.advanceTimersByTimeAsync(WEEKLY_DIGEST_CHECK_INTERVAL_MS * 3)
+        expect(sendWeeklyDigestMock).toHaveBeenCalledTimes(1)
+
+        resolveSend?.(result())
+        await vi.advanceTimersByTimeAsync(0)
+        // 结束后按退避推进，下一次尝试在退避到期后发生
+        await vi.advanceTimersByTimeAsync(WEEKLY_DIGEST_RETRY_BACKOFF_MS)
+        expect(sendWeeklyDigestMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('无收件人后开启开关：退避内不发送，退避到期后当周补发', async () => {
+        vi.setSystemTime(new Date(2026, 9, 26, 9, 1))
+        sendWeeklyDigestMock.mockResolvedValueOnce({ ...result(), status: 'skipped_no_recipient', recipients: 0, sent: 0 })
+        runPlugin()
+        await vi.advanceTimersByTimeAsync(WEEKLY_DIGEST_FIRST_RUN_DELAY_MS)
+        expect(sendWeeklyDigestMock).toHaveBeenCalledTimes(1)
+
+        sendWeeklyDigestMock.mockResolvedValue({ ...result(), status: 'sent' })
+        // 第一个节拍（+15 分钟）仍在退避内 → 不发送
+        await vi.advanceTimersByTimeAsync(WEEKLY_DIGEST_CHECK_INTERVAL_MS)
+        expect(sendWeeklyDigestMock).toHaveBeenCalledTimes(1)
+        // 第二个节拍（+30 分钟）退避到期 → 补发并进入终态
+        await vi.advanceTimersByTimeAsync(WEEKLY_DIGEST_CHECK_INTERVAL_MS)
+        expect(sendWeeklyDigestMock).toHaveBeenCalledTimes(2)
+        await vi.advanceTimersByTimeAsync(WEEKLY_DIGEST_CHECK_INTERVAL_MS * 4)
+        expect(sendWeeklyDigestMock).toHaveBeenCalledTimes(2)
+    })
+
     it('发信尝试触顶后本周停止（不退化为整窗高频重试）', async () => {
         vi.setSystemTime(new Date(2026, 9, 26, 9, 1))
         sendWeeklyDigestMock.mockResolvedValue({ ...result(), status: 'failed', sent: 0, failed: 1 })
