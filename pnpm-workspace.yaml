@@ -42,6 +42,15 @@ overrides:
   body-parser: ^2.4.0
   handlebars: ^4.7.10
   devalue: ^5.9.3
+  # 安全补丁（GHSA-83rm-6c8r-g728 / GHSA-f86p-h4j2-7qgj / GHSA-9wx9-5pv9-3349）：
+  # overrides 是「解析上限」而非下限，故按 advisory 声明的最小修复版本线钉定；
+  # seroval 用 ~ 收在同一 minor，避免顺带引入未评估的 1.7.x。上游发布更高补丁时人工推进。
+  "vue-i18n": ^11.4.14
+  "@intlify/core": ^11.4.14
+  "@intlify/core-base": ^11.4.14
+  "@intlify/shared": ^11.4.14
+  "@intlify/message-compiler": ^11.4.14
+  seroval: ~1.6.11
 
 # 依赖审计豁免：advisory 声明的 patched 版本尚未发布，overrides / pnpm update 无法修复。
 # 机制与复核条件见 docs/standards/security.md §5.7；修复版本发布后必须移除对应条目。

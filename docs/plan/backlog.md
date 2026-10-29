@@ -422,6 +422,14 @@
 - **触发条件**：每周回归 / 依赖升级 / 上游发布修复版本时复查。
 - **可选增强**：以调度任务自动比对 `npm view node-forge version` 探测上游修复发布，避免豁免长期挂账（暂未实现）。
 
+### 依赖安全补丁的 overrides 钉定（vue-i18n 家族 / seroval，持续观察）
+
+- **背景（2026-10-29）**：prod 阻断审计因 `vue-i18n` 家族（`GHSA-83rm-6c8r-g728`，high）与 `seroval`（`GHSA-f86p-h4j2-7qgj` / `GHSA-9wx9-5pv9-3349`，moderate）失败；advisory 声明的最小修复版本为 `vue-i18n` 家族 11.4.14、`seroval` 1.6.11（`GHSA-f86p-h4j2-7qgj` 的 patched 是 1.6.11，`GHSA-9wx9-5pv9-3349` 为 1.6.10）。
+- **处置**：仅在 [pnpm-workspace.yaml](../../pnpm-workspace.yaml) `overrides` 按上述版本线钉定（`vue-i18n` 与 `@intlify/*` 用 `^11.4.14`，`seroval` 用 `~1.6.11` 收在同一 minor）；未使用 `audit.ignore` 豁免，未改动 `minimumReleaseAge`（该配置单位为分钟，本场景不构成解析障碍）。
+- **冻结事实**：`seroval` 当前钉在 1.6.x（latest 已到 1.7.x），`vue-i18n` 家族钉在 11.4.x；上游发布更高补丁时需要人工推进，不会被 `pnpm update` 自动带上（`overrides` 是解析上限）。
+- **复核条件**：上游在 `vue-i18n` 家族或 `seroval` 发布新的安全修复时，评估升至该版本并同步此条；连续两个发布周期无新 advisory 时可评估放宽为上游范围。
+- **触发条件**：周回归 / 依赖升级 / 审计失败定位到上述包时。
+
 ---
 
 ## 文档位置速查
