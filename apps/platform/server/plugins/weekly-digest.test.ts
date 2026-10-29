@@ -186,11 +186,13 @@ describe('weekly-digest 插件触发', () => {
         await vi.advanceTimersByTimeAsync(WEEKLY_DIGEST_CHECK_INTERVAL_MS * 3)
         expect(sendWeeklyDigestMock).toHaveBeenCalledTimes(1)
 
-        resolveSend?.(result())
+        // 以失败结束：结束后按「完成时刻 + 退避」推进，退避到期才允许下一次尝试
+        resolveSend?.({ ...result(), status: 'failed', sent: 0, failed: 1 })
         await vi.advanceTimersByTimeAsync(0)
-        // 结束后按退避推进，下一次尝试在退避到期后发生
-        await vi.advanceTimersByTimeAsync(WEEKLY_DIGEST_RETRY_BACKOFF_MS)
+        await vi.advanceTimersByTimeAsync(WEEKLY_DIGEST_CHECK_INTERVAL_MS)
         expect(sendWeeklyDigestMock).toHaveBeenCalledTimes(1)
+        await vi.advanceTimersByTimeAsync(WEEKLY_DIGEST_CHECK_INTERVAL_MS)
+        expect(sendWeeklyDigestMock).toHaveBeenCalledTimes(2)
     })
 
     it('无收件人后开启开关：退避内不发送，退避到期后当周补发', async () => {
