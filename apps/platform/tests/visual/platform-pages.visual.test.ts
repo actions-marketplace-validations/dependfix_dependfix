@@ -9,6 +9,7 @@ import {
     expectPageScreenshot,
     expectThemeApplied,
     expectViewportScreenshot,
+    openSelectPanel,
     waitForVisualStable,
 } from './helpers/visual'
 
@@ -173,9 +174,7 @@ test.describe('平台页面视觉基线', () => {
 
             const kindTrigger = dialog.locator('.caomei-select').first()
             await expect(kindTrigger).toBeEnabled()
-            await kindTrigger.click()
-            const panel = page.locator('.caomei-select__content')
-            await expect(panel).toBeVisible({ timeout: 10000 })
+            const panel = await openSelectPanel(page, kindTrigger)
             await expect(panel.locator('[role="option"]')).toHaveCount(2)
             await expect(panel).toContainText('定时批量扫描')
             /* 前置断言：面板确实门户挂载（不是弹窗后代）——否则面板未挂载时基线会被落成
@@ -282,19 +281,54 @@ test.describe('平台页面视觉基线', () => {
     })
 
     /* 通知管理员页：组织设置卡片 + 投递记录表；数据由真实 API 读取默认值。 */
-    test('notifications 管理员页（light）', async ({ page }) => {
-        await applyTheme(page, 'light')
-        await page.goto('/notifications')
-        await waitForHydration(page)
-        await expect(page.getByRole('heading', { name: '通知与邮件' })).toBeVisible()
-        await expect(page.getByText('事件类别')).toBeVisible()
-        await expect(page.getByText('投递策略')).toBeVisible()
-        await expect(page.getByText('最近投递记录')).toBeVisible()
+    for (const theme of VISUAL_THEMES) {
+        test(`notifications 管理员页（${theme}）`, async ({ page }) => {
+            await applyTheme(page, theme)
+            await page.goto('/notifications')
+            await waitForHydration(page)
+            await expect(page.getByRole('heading', { name: '通知与邮件' })).toBeVisible()
+            await expect(page.getByText('事件类别')).toBeVisible()
+            await expect(page.getByText('投递策略')).toBeVisible()
+            await expect(page.getByText('最近投递记录')).toBeVisible()
+            /* 前置断言（假绿防护）：必选 Critical 只读行、阈值术语与周汇总提示在位才截图，
+               文案退化 / 接口失败时先失败，而不是把缺块形态存成基线。 */
+            await expect(page.getByText('Critical 告警', { exact: true })).toBeVisible()
+            await expect(page.getByText('严重级别阈值')).toBeVisible()
+            await expect(page.getByText('高危阈值')).toHaveCount(0)
+            await expect(page.getByText(/默认每周一 09:00/)).toBeVisible()
 
-        await waitForVisualStable(page)
-        await expectThemeApplied(page, 'light')
-        await expectPageScreenshot(page, 'notifications-light.png')
-    })
+            await waitForVisualStable(page)
+            await expectThemeApplied(page, theme)
+            await expectPageScreenshot(page, `notifications-${theme}.png`)
+        })
+    }
+
+    /* 个人设置页：资料 / 密码 / 邮箱 / 绑定 / 语言 / 扫描偏好 / 通知偏好 / AI 研判（M50.4）。
+       前置断言锁定本页承载的通知语义（必选 Critical 只读行、周汇总提示）、「当前生效」派生行
+       与 AI 表单已加载，避免加载态把缺块形态截成基线。 */
+    for (const theme of VISUAL_THEMES) {
+        test(`settings 个人设置（${theme}）`, async ({ page }) => {
+            await applyTheme(page, theme)
+            await page.goto('/settings')
+            await waitForHydration(page)
+            await expect(page.getByRole('heading', { name: '个人设置' })).toBeVisible()
+            await expect(page.getByText('扫描偏好', { exact: true })).toBeVisible()
+            await expect(page.getByText('通知偏好', { exact: true })).toBeVisible()
+
+            const criticalRow = page.locator('#notification-security_critical')
+            await expect(criticalRow).toBeVisible()
+            await expect(criticalRow).toBeDisabled()
+            await expect(page.getByText(/默认每周一 09:00/)).toBeVisible()
+            // 设备级扫描偏好为空时走系统兜底（确定性），派生行必须已渲染
+            await expect(page.getByText(/当前生效：/)).toBeVisible()
+            // AI 研判配置由组织接口驱动，未加载完成时输入框为空
+            await expect(page.locator('#aiModel')).toHaveValue(/.+/)
+
+            await waitForVisualStable(page)
+            await expectThemeApplied(page, theme)
+            await expectPageScreenshot(page, `settings-${theme}.png`)
+        })
+    }
 
     /* alerts 页的运行抽屉（alert-run-sidebar 的 CaomeiDrawer，含遮罩与右侧滑入面板）。 */
     test('alerts 运行抽屉浮层（light）', async ({ page }) => {

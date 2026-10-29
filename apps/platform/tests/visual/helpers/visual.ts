@@ -89,3 +89,25 @@ export async function expectLocatorScreenshot(locator: Locator, name: string, ma
 export async function expectViewportScreenshot(page: Page, name: string): Promise<void> {
     await expect(page).toHaveScreenshot(name, { mask: dynamicMask(page) })
 }
+
+/**
+ * 打开 caomei `Select` 的门户面板并返回面板 locator。
+ *
+ * 本地实测：`Select` 首次点击偶发不挂载门户面板（约 1/6 轮次，现象为
+ * `.caomei-select__content` 一直不出现，重跑即绿）。这里的重试仅覆盖「打开」这一动作：
+ * 首次点击后短等 3 秒，未出现则按 `Escape` 复位再用默认超时点击一次；仍失败照常抛出，
+ * 不改断言、超时口径与像素阈值，避免掩盖真实的面板回归。
+ */
+export async function openSelectPanel(page: Page, trigger: Locator, timeout = 10000): Promise<Locator> {
+    const panel = page.locator('.caomei-select__content')
+    await trigger.click()
+    try {
+        await expect(panel).toBeVisible({ timeout: 3000 })
+        return panel
+    } catch {
+        await page.keyboard.press('Escape')
+        await trigger.click()
+        await expect(panel).toBeVisible({ timeout })
+        return panel
+    }
+}
