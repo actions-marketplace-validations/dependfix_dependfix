@@ -79,7 +79,9 @@
 - `alerts`：1440 视口下表格容器横向溢出（`clientWidth 1166 < scrollWidth 1318`），整页基线只覆盖可视区左端；最右 `链接` / `详情` 两列由 `alerts-right-<theme>.png` 覆盖（M33.5：容器横向滚到最右后的元素级补拍，仅改容器内部滚动位置，不动 viewport / 阈值 / 列宽）。
 - 弹窗内浮层（M34.3）：`dialog-select-open-<theme>.png` 覆盖弹窗内 Select **展开态**（light / dark 各一张）。用**视口级**截图而非元素级 / 整页——门户面板挂在 body、不在弹窗子树内（元素级取不到），整页截图又会把 fixed 定位的遮罩与面板混进拼接；截图前另断言「面板不是弹窗后代」，防止面板未挂载时基线被落成缺面板形态。
 - 三个页面仅取亮色（`pr-checks` / `dialog-import-repos` / `login`），明暗两态覆盖 `alerts` / `repos` / `notifications` / `settings` / `dialog-select-open`（后者因门户面板与遮罩存在叠色，分主题采基线）。
-- **`settings` / `notifications`（M50.4）**：个人设置页与通知管理员页各按整页截图覆盖明暗两态（`settings-<theme>.png` / `notifications-<theme>.png`）。前置断言锁定本页承载的通知语义（必选 `Critical` 只读行、周汇总提示、`严重级别阈值` 文案）与「当前生效」派生行、AI 表单已加载；设备级扫描偏好为空时走系统兜底（确定性），故不额外遮蔽。
+- **`settings` / `notifications`（M50.4）**：个人设置页与通知管理员页各按整页截图覆盖明暗两态（`settings-<theme>.png` / `notifications-<theme>.png`）。前置断言锁定本页承载的通知语义（必选 `Critical` 只读行、周汇总提示、`严重级别阈值` 文案）与「当前生效」完整兜底串、语言选值、AI 表单已加载；设备级扫描偏好为空时走系统兜底（确定性），故不额外遮蔽。
+  - **投递记录为「空态」**：视觉库不注入 `notification_log`，`最近投递记录` 卡片只覆盖空态与表头；行级状态 / 类别 / 时间列**无基线覆盖**（登记为盲区）。
+  - **纵向溢出**：`settings` 整页为 1440×1473（两张卡片位于 900 视口线以下），靠 `fullPage` 拼接覆盖；实测无粘性元素重复与懒加载区块，故不使用 `data-visual-mask`。与 `alerts` 的**横向**溢出边界（整页基线只覆盖左端 + `alerts-right-*` 补拍）是两类不同处理。
 - **浮层落点页（M45.5，light 4 张 + dark 1 张）**——均按视口级截图覆盖「页面 + 遮罩 + 浮层」的合成结果：
   - `schedules-form-layer-<theme>.png`：定时计划「新建计划」弹窗 + 业务类型 Select 的**门户面板展开态**。表单的 cron 预览是「当前时刻 + cron」派生值（逐日/逐周变化），已在 `schedules.vue` 标 `data-visual-mask`（遮蔽块入基线）；其余字段与提示文案静态。
   - `scans-run-detail-light.png`：`/scans?run=` 深链触发的 `repo-history-dialog`（`scans.vue` 唯一弹窗落点）。该视图**不渲染运行元信息块**（id / 时间 / 时长），内容主体是结果表——故运行 ID 与时间戳不是本基线的检查面，时间列由底图运行列表覆盖。
@@ -100,8 +102,20 @@
 | 瞬时时刻（cron 预览、`now()` 派生文案） | 随运行时刻变化 | 页面侧 `data-visual-mask` 遮蔽（加遮蔽必须重生成基线） |
 | 设置页「当前生效」派生行 | 读设备级 `localStorage`（`dependfix-scan-preferences`） | 新上下文为空 → 走系统兜底，基线取该兜底文案；若将来把「上次选择」写入存储，需在用例侧显式钉死 |
 | 设置页 AI 研判表单 | 组织接口返回的 provider / model / URL | 视觉库为默认组织，字段稳定；用例断言 `#aiModel` 非空，接口失败时先失败而非截成空表单 |
+| 设置页「界面语言」 | `useI18n().locale`（默认 `zh-CN`，受 cookie / 浏览器语言检测影响） | 视觉环境以固定 admin 上下文启动、无语言 cookie → 恒为 `zh-CN`；用例断言下拉含「简体中文」，避免语言偏好变化无声进入基线 |
 
 用例侧以 `pinnedRunId(index)` 读取钉死取值并 **fail-fast**：fixtures 被改动去掉 `id` 时用例直接失败，而不是静默产出一张不可复现的基线。
+
+### 反例标定记录（新增基线非恒真的证据）
+
+| 轮次 | 注入点（暗色档） | 受影响基线 | 差异像素 | 结论 |
+| :--- | :--- | :--- | :--- | :--- |
+| 1 | `--caomei-color-bg-elevated` → `#4b2e83` | `notifications-dark` / `settings-dark` | 33582 px（3%）/ 654 px | 两例均失败；654 px 说明该 token 在设置页只覆盖小块面积（卡片走 `--caomei-color-bg`），不是基线失敏 |
+| 2 | `--caomei-color-text` → `#334155` | `notifications-dark` / `settings-dark` | 8411 px / 15211 px | 两例均失败，正文色变更可被稳定检出 |
+
+- 阈值口径：`threshold 0.1`（maxDelta 352）+ `maxDiffPixels 100`（`playwright.visual.config.ts`）。
+- 两组注入均用**文件备份还原**（非 `git checkout`），还原后 `git diff` 为空并复跑全绿；标定不改变任何基线文件。
+- 后续若要验证「小面积 token」的灵敏度，应改用页面主表面 token（`--caomei-color-bg` / `--caomei-color-border`），`bg-elevated` 在设置页余量偏薄（6.5×）。
 
 ### 集合校验的已知边界
 
@@ -116,7 +130,9 @@
 - `scans` 的 Tabs 切换态（按仓库聚合视图）与 `schedules` 列表行（视觉库不注入定时计划 fixtures，仅覆盖空态 + 表单浮层）。
 - Toast 的其余 tone（success / danger）与「自动消失」时序。
 - 设置页交互态（保存成功 / 校验错误提示 / 禁用点击）与通知页发送测试邮件的提示条：本批只覆盖静态渲染态。
-- `Select` 门户面板「首次点击偶发不挂载」的根因未定位（本地实测约 1/6 轮次，重跑即绿）；用例侧以 `openSelectPanel` 做一次有界重试兜底，M50.4 连跑 6 轮全绿后仍保留该观察项。
+- `Select` 门户面板「首次点击偶发不挂载」的根因未定位（本地实测约 1/6 轮次，重跑即绿）；用例侧以 `openSelectPanel` 做**一次**有界重试兜底（首等 10 秒 + 再点一次等 15 秒，**不按 Escape**——面板未挂载时 Escape 会连带关闭宿主模态弹窗）。
+  - **兜底有效性标定**：注入「吞掉首次 pointerdown」后运行该 helper，面板最终可见且耗时 10.6 秒（≥ 首等窗口），证明首击失败后确实由第二次点击补开；标定脚本为一次性探针，未入库。
+  - 重试只覆盖「再点一次」，若面板选择器改名 / 结构回归，两次都会失败并照常抛错（fail loud，不产生假绿）。
 
 ## 顺序约束与 M45.6 连带重建记录（2026-10-19）
 
