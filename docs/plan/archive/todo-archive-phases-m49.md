@@ -22,7 +22,7 @@
 
 - **目标**：Dependabot 开放 critical / high（未被 §5.7 豁免）清零；全量审计 critical / high 归零。
 - **落地**：overrides 升级 `handlebars ^4.7.10` / `body-parser ^2.4.0` / `undici ^8.12.2`（锁 8.12.3）/ `launch-editor ^2.14.2` / `vitepress>vite ^6.4.4` / `qs ^6.16.1`；删除无消费者的 `vite@5` 死覆盖；braces 豁免随 advisory 撤回移除、node-forge 保持豁免；lockfile 仅目标包 + `qs` / `on-finished`。
-- **审计**：R1 Reject（`qs` 被压回 6.16.0——overrides 是解析上限而非下限）→ 全收口 → R2 quick Pass。
+- **审计**：R1 Reject（`qs` 被压回 6.16.0——overrides 替换解析范围，声明低于下游要求时会被压回；2026-10-30 订正口径见 [development.md §5.1.56](../../standards/development.md)）→ 全收口 → R2 quick Pass。
 - **证据**：audit 基线 2 critical + 5 high → 非豁免 0；推送后 Dependabot 6 条可修复项均 fixed（2026-10-26T11:32:57Z–11:33:01Z）；`--frozen-lockfile` 通过；证据 `artifacts/m49.2a/`。
 - **边界**：不用 `--ignore` / `--ignore-unfixable`；不跨大版本强升；platform moderate 归 2b。
 

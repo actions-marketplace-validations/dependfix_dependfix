@@ -1,6 +1,6 @@
 # 平台通知与邮件推送设计
 
-> 状态：✅ B1-B5 全部落地（B1-B4 2026-10-21；B5 周汇总随 M47.5，2026-10-24）；**M50 修订中**：D4 `security_critical` 必选已落地（M50.1），D5 术语收敛（M50.2）与 D6 周报重试（M50.3）已落地——见 [todo.md](../../plan/todo.md)；来源 [issue #190](https://github.com/dependfix/dependfix/issues/190)）
+> 状态：✅ B1-B5 全部落地（B1-B4 2026-10-21；B5 周汇总随 M47.5，2026-10-24）；**✅ 已落地（M50.1-M50.3，2026-10-30 归档）**：D4 `security_critical` 必选 / D5 术语收敛 / D6 周报重试——阶段正文见 [M50 归档分片](../../plan/archive/todo-archive-phases-m50.md)；来源 [issue #190](https://github.com/dependfix/dependfix/issues/190)）
 > 关联：[系统架构](./architecture-platform.md) · [定时扫描与批量处理设计](./platform-scheduled-batch.md) · [运行失败分类与筛选设计](./run-failure-taxonomy.md) · [平台规范](../../standards/platform.md) · [安全规范](../../standards/security.md)
 
 ## 1. 背景与现状
