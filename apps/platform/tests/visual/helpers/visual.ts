@@ -106,6 +106,10 @@ export async function openSelectPanel(page: Page, trigger: Locator, timeout = 15
         await expect(panel).toBeVisible({ timeout: 10000 })
         return panel
     } catch {
+        // 竞态守卫：首次等待「刚超时」而面板随后挂载时，直接复用，避免再点一次把面板收起
+        if (await panel.isVisible().catch(() => false)) {
+            return panel
+        }
         await trigger.click()
         await expect(panel).toBeVisible({ timeout })
         return panel
