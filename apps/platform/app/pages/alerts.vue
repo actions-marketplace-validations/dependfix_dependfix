@@ -241,7 +241,7 @@ const error = computed(() => {
  * - 分组连续性由**组排序键**保证（详见下方 multiSortMeta 注释），客户端不设分组字段次排序键
  */
 const onViewModeChange = () => {
-    // 仅严重级别降序；「按包」的组内相邻性由组排序键保证（见 multiSortMeta 注释）
+    // 排序键固定为严重级别降序；「按包」的组内相邻性由组排序键保证（见 multiSortMeta 注释）
     multiSortMeta.value = [{ field: '_severityRank', order: -1 }]
     expandedPackages.value = []
 }

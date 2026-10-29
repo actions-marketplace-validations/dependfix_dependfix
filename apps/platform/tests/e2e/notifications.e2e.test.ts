@@ -19,7 +19,7 @@ test.describe('/notifications 管理员页', () => {
         await waitForHydration(page)
         await expect(page.getByText('通知偏好')).toBeVisible()
         await expect(page.getByText('平台自身问题', { exact: true })).toBeVisible()
-        await expect(page.getByText('高危告警')).toBeVisible()
+        await expect(page.getByText('High 告警', { exact: true })).toBeVisible()
         // 必选 critical 行：只读且注明不可关闭（组织 / 个人开关均不生效）
         await expect(page.getByText('Critical 告警', { exact: true })).toBeVisible()
         const critical = page.locator('#notification-security_critical')
@@ -55,10 +55,13 @@ test.describe('/notifications 管理员页', () => {
         await waitForHydration(page)
         await expect(page.getByRole('heading', { name: '通知与邮件' })).toBeVisible()
         await expect(page.getByText('事件类别')).toBeVisible()
+        // 严重级别术语与扫描页同源：阈值字段统一为「严重级别阈值」，不再出现「高危阈值」
+        await expect(page.getByText('严重级别阈值')).toBeVisible()
+        await expect(page.getByText('高危阈值')).toHaveCount(0)
         await expect(page.getByText('最近投递记录')).toBeVisible()
         // 必选 critical 为只读行，组织级无开关可配
         await expect(page.getByText('Critical 告警', { exact: true })).toBeVisible()
-        await expect(page.getByText('Critical 告警为必选类别，始终发送给管理员，不可关闭。')).toBeVisible()
+        await expect(page.getByText('Critical 告警为必选类别，始终发送，不可关闭。')).toBeVisible()
         await expect(page.locator('#org-notify-critical')).toHaveCount(0)
         // 组织级周汇总开关可配置（回归：曾置灰并提示后续版本提供）
         const weekly = page.locator('#org-notify-weekly')

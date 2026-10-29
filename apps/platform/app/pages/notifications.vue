@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { DataTableColumn } from 'caomei-ui'
 import { RefreshCw, Save, Send } from '@lucide/vue'
+import { notificationSeverityThresholdOptions } from '~/utils/notification-options'
 
 definePageMeta({
     middleware: 'auth',
@@ -51,10 +52,7 @@ const testing = ref(false)
 const error = ref('')
 const success = ref('')
 
-const severityOptions = computed(() => [
-    { label: t('notifications.severityHigh'), value: 'high' },
-    { label: t('notifications.severityCritical'), value: 'critical' },
-])
+const severityOptions = computed(() => notificationSeverityThresholdOptions(t))
 
 const loadSettings = async () => {
     const data = await $fetch<{ settings: NotificationSettingsView, channelAvailable: boolean, deploymentEnabled: boolean }>('/api/organizations/current/notification-settings')
