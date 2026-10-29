@@ -5,6 +5,7 @@ import {
     normalizeNotificationRole,
     resolveAllNotificationPreferences,
     resolveEffectiveNotificationPreference,
+    resolveNotificationPreferenceRows,
 } from './preferences'
 
 const settings = DEFAULT_NOTIFICATION_SETTINGS
@@ -58,6 +59,36 @@ describe('通知生效优先级', () => {
     it('批量解析返回全部业务类别', () => {
         const rows = resolveAllNotificationPreferences({ role: 'admin', settings })
         expect(rows.map((row) => row.category)).toEqual(['security_high', 'run_failure', 'run_completed', 'weekly_digest'])
+    })
+
+    it('必选 critical 行置首且不可编辑（管理员 / viewer 两态）', () => {
+        const adminRows = resolveNotificationPreferenceRows({ role: 'admin', settings })
+        expect(adminRows.map((row) => row.category)).toEqual([
+            'security_critical',
+            'security_high',
+            'run_failure',
+            'run_completed',
+            'weekly_digest',
+        ])
+        const critical = adminRows[0]!
+        expect(critical.editable).toBe(false)
+        expect(critical.reason).toBe('mandatory')
+        expect(critical.enabled).toBe(true)
+
+        const viewerCritical = resolveNotificationPreferenceRows({ role: 'viewer', settings })[0]!
+        expect(viewerCritical.enabled).toBe(false)
+        expect(viewerCritical.reason).toBe('viewer')
+    })
+
+    it('必选 critical 行只受部署总开关影响', () => {
+        const rows = resolveNotificationPreferenceRows({
+            role: 'admin',
+            settings: { ...settings, categories: { ...settings.categories, securityHigh: false } },
+            deploymentEnabled: false,
+        })
+        expect(rows[0]?.category).toBe('security_critical')
+        expect(rows[0]?.enabled).toBe(false)
+        expect(rows[0]?.editable).toBe(false)
     })
 
     it('部署开关仅 false 熔断；角色归一化 fail-closed 为 viewer', () => {

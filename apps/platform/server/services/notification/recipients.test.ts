@@ -55,6 +55,45 @@ describe('resolveNotificationRecipients', () => {
         expect(recipients.map((r) => r.email)).not.toContain(viewer.email)
     })
 
+    it('必选 critical：组织开关关闭与个人偏好关闭均不影响收件人', async () => {
+        const admin = await makeUser('critical-admin', 'admin')
+        const other = await makeUser('critical-other', 'admin')
+        const viewer = await makeUser('critical-viewer', 'viewer')
+        const ds = await ensureDatabaseInitialized()
+        // 个人显式关闭 security_high 与 critical 无关；组织关闭 securityHigh 也不影响 critical
+        await ds.getRepository(NotificationPreference).save(ds.getRepository(NotificationPreference).create({
+            userId: other.id,
+            category: 'security_high',
+            channel: 'email',
+            enabled: false,
+        }))
+        const settings = {
+            ...DEFAULT_NOTIFICATION_SETTINGS,
+            categories: { ...DEFAULT_NOTIFICATION_SETTINGS.categories, securityHigh: false },
+            extraAdminRecipients: ['extra@x.com'],
+        }
+
+        const recipients = await resolveNotificationRecipients({
+            category: 'security_critical',
+            settings,
+            triggeredByUserId: admin.id,
+        })
+        const emails = recipients.map((r) => r.email)
+        expect(emails).toEqual(expect.arrayContaining([admin.email, other.email, 'extra@x.com']))
+        expect(emails).not.toContain(viewer.email)
+        // 去重：触发者本身就是管理员时不重复
+        expect(emails.filter((email) => email === admin.email)).toHaveLength(1)
+    })
+
+    it('必选 critical：部署总开关关闭 → 无收件人', async () => {
+        await makeUser('critical-off', 'admin')
+        expect(await resolveNotificationRecipients({
+            category: 'security_critical',
+            settings: DEFAULT_NOTIFICATION_SETTINGS,
+            deploymentEnabled: false,
+        })).toEqual([])
+    })
+
     it('run_completed 默认关闭；触发者显式开启后才接收', async () => {
         const admin = await makeUser('admin', 'admin')
         const other = await makeUser('other', 'admin')

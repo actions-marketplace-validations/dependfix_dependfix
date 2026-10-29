@@ -107,5 +107,43 @@ export const resolveAllNotificationPreferences = (input: {
     }),
 )
 
+/** 个人设置页行（比生效值多一个必选类别 `security_critical`，只读）。 */
+export interface NotificationPreferenceView extends Omit<EffectiveNotificationPreference, 'category'> {
+    category: BusinessNotificationCategory | 'security_critical'
+}
+
+/**
+ * 个人设置页行集合（设计稿 §15 D4）：必选 `security_critical` 置首且不可编辑，其后为四个可配置业务类别。
+ * 必选行只反映部署总开关（服务端投递侧忽略组织 / 个人开关）；viewer 不接收业务类与必选安全类邮件。
+ */
+export const resolveNotificationPreferenceRows = (input: {
+    role: NotificationRole
+    settings: NotificationSettings
+    overrides?: Partial<Record<BusinessNotificationCategory, boolean>>
+    deploymentEnabled?: boolean
+}): NotificationPreferenceView[] => {
+    const deploymentEnabled = input.deploymentEnabled ?? true
+    const critical: NotificationPreferenceView = input.role === 'viewer'
+        ? {
+            category: 'security_critical',
+            enabled: false,
+            orgEnabled: true,
+            userEnabled: false,
+            roleDefault: false,
+            editable: false,
+            reason: 'viewer',
+        }
+        : {
+            category: 'security_critical',
+            enabled: deploymentEnabled,
+            orgEnabled: true,
+            userEnabled: true,
+            roleDefault: true,
+            editable: false,
+            reason: 'mandatory',
+        }
+    return [critical, ...resolveAllNotificationPreferences(input)]
+}
+
 /** 必选类别：仅受部署总开关约束（组织 / 个人不可关闭）。 */
 export const isPlatformIncidentEnabled = (deploymentEnabled = true): boolean => deploymentEnabled

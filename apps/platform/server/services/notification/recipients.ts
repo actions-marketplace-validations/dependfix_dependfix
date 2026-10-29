@@ -118,8 +118,9 @@ export interface ResolveRecipientsInput {
 }
 
 /**
- * 收件人路由（设计稿 §5）：
+ * 收件人路由（设计稿 §5 / §15 D4）：
  * - platform_incident：env 覆盖优先；否则 admin / org_admin + extraAdminRecipients
+ * - security_critical：**必选**——忽略组织 / 个人开关与个人偏好，取触发者（有效时）+ 管理员 + extra
  * - security_high / run_failure：触发者（有效时）+ 管理员（个人生效）+ extra
  * - run_completed：触发者 + 管理员（个人开启，默认关）+ extra
  * - weekly_digest：管理员（个人开启）+ extra
@@ -136,6 +137,21 @@ export const resolveNotificationRecipients = async (input: ResolveRecipientsInpu
         }
         const admins = await loadAdminCandidates()
         const recipients = admins.map((user) => ({ userId: user.id, email: user.email, role: user.role }))
+        for (const email of normalizeEmails(input.settings.extraAdminRecipients)) {
+            recipients.push({ userId: '', email, role: 'admin' })
+        }
+        return truncate(dedupeRecipients(recipients))
+    }
+
+    if (input.category === 'security_critical') {
+        // 必选类别：不受组织类别开关与个人偏好约束（仅部署总开关，见函数首行）
+        const admins = await loadAdminCandidates()
+        const triggered = await loadTriggeredCandidate(input.triggeredByUserId)
+        const candidates = [...admins]
+        if (triggered && !candidates.some((user) => user.id === triggered.id)) {
+            candidates.push(triggered)
+        }
+        const recipients = candidates.map((user) => ({ userId: user.id, email: user.email, role: user.role }))
         for (const email of normalizeEmails(input.settings.extraAdminRecipients)) {
             recipients.push({ userId: '', email, role: 'admin' })
         }
