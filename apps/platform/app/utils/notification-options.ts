@@ -1,6 +1,4 @@
-import { scanSeverityLabel } from './scan-options'
-
-type Translator = (key: string, params?: Record<string, string | number>) => string
+import { scanSeverityLabel, type Translator } from './scan-options'
 
 /**
  * 通知页「严重级别阈值」选项（`severityThreshold`）。

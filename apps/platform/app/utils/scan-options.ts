@@ -1,6 +1,6 @@
 import type { ScanMode, ScanSeverity } from '~/composables/use-scan-preferences'
 
-type Translator = (key: string, params?: Record<string, string | number>) => string
+export type Translator = (key: string, params?: Record<string, string | number>) => string
 
 /**
  * 扫描参数下拉选项（单仓库扫描弹窗 / 批量扫描弹窗 / 设置页默认值三处共用）。

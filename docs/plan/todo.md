@@ -42,18 +42,18 @@
 - **交付物**：3 commits，每 commit 独立可验证 —— ① 类型与策略层（`types` / `preferences` / `settings` / `recipients` + 单测）：验收 = `pnpm run typecheck` 0 error + 策略层单测通过（必达判定 / `.strict()` 兼容 / 角色默认）；若 `delivery` 等下游未同步导致 typecheck 不过，则 ① 需与下游同时落地（提交顺序在 D 阶段按编译可行性调整，并在此留痕）。② 投递与触发面（`delivery` / `high-risk` / `run-notification` / `batch-notification` + 单测）：验收 = 上文验收 1-4 的用例全绿（必达 / 范围收窄 / 独立桶 / 熔断）。③ 前端只读必选行 + i18n 键 + 设计稿：验收 = 页面只读行断言 + 双语键齐备（`i18n:audit:missing` 0）+ 设计稿 §3/§4.4 同步。预估 16-20 文件 / 550-750 行。
 - **风险与缓解**：① 存量 `securityHigh=false` 的组织会**新增** `critical` 邮件 → 在 0.6.1/1.0 发布说明披露行为变化；② `security_critical` 不进个人偏好表 → 个人设置页需只读行（禁用态 + 「必选，不可关闭」说明）与平台自身问题行对齐，避免用户误以为漏配；③ 类别拆分波及 `ORG_CATEGORY_KEYS` 类型收窄 → 以 `pnpm run typecheck` 全包复验，禁止用 `as` 逃逸。
 
-### M50.2 [P2 🎨] 通知侧严重级别术语与阈值命名收敛
+### M50.2 [P2 🎨] 通知侧严重级别术语与阈值命名收敛（**已闭环** `059208ed` + `6c1001d2` + `96f4deed` + `0aed2cb7`）
 
 - **目标**：通知页、个人设置页、邮件主题正文与投递记录统一使用 `Critical` / `High` 专有名词，类别名与阈值名自解释，消除「严重 / 高危」并列歧义。
 - **范围**：`apps/platform/i18n/locales/{zh-CN,en-US}.json`（`settings.notifications.*` / `notifications.*`）、`apps/platform/app/pages/notifications.vue`（阈值选项改用 `app/utils/scan-options.ts` 派生的 `scanSeverityOptions` 标签）、`apps/platform/app/pages/settings.vue`、`apps/platform/server/services/notification/business-templates.ts`、`run-notification.service.ts`、对应 `*.test.ts`、设计稿 §10 与 §3 表。
 - **验收标准**：
   1. **术语归零**（应用文案面，测试目录除外——负向断言必须包含被禁字面量）：`rg -n "高危阈值|严重 \+ 高危|仅严重" apps/platform --glob '!**/CHANGELOG.md' --glob '!**/tests/**' --glob '!**/*.test.ts'` 0 命中；`rg -n "High-risk (threshold|alerts)" apps/platform --glob '!**/CHANGELOG.md' --glob '!**/tests/**' --glob '!**/*.test.ts'` 0 命中。
   2. **同源**：通知页阈值选项标签与 `scanSeverityOptions` 的 `critical` / `high` 标签逐字一致（单测断言 label 集合，禁止各写一份字面量）。
-  3. **邮件**：主题与正文的严重级别标签逐字为 `Critical` / `High`（模板用例断言，含周报标题的「N 个 Critical / M 个 High」形态）。
+  3. **邮件**：主题与正文的严重级别标签逐字为 `Critical` / `High`（模板用例断言，含周报标题的「Critical N / High M」形态）。
   4. **双语齐备**：类别名（`Critical 告警` / `High 告警`）与必选行说明 zh / en 均在位，`pnpm run i18n:check:anchor`、`i18n:audit:missing`、`lint:md:check` 通过。
 - **不做什么**：不改扫描页既有口径（`scanSeverityLabel` 已是权威）；不改 `severityThreshold` 枚举值与 API 字段名；不引入图标 / 色阶辅助（可作为后续候选）；不改邮件主题的 `[dependfix][告警]` 前缀。
 - **依赖**：M50.1（类别拆分与必选行结构先定，本原子只改文案值）；扫描页口径见 `apps/platform/app/utils/scan-options.ts`。
-- **交付物**：2 commits —— ① 服务端模板与用例（验收 = 邮件主题/正文标签断言逐字 `Critical` / `High`）；② 前端 + i18n + 设计稿 + 文档（验收 = 阈值选项与 `scanSeverityOptions` 同源断言 + 双语键齐备）。预估 8-12 文件 / 180-320 行。
+- **交付物**：2 commits 计划内 + 2 commits 随批收口（验收 = 阈值选项与 `scanSeverityOptions` 同源断言 + 双语键齐备）—— ① 服务端模板与用例（`059208ed`）；② 前端 + i18n + e2e（`6c1001d2`）；③ 视觉复跑暴露的浮层弹窗可见性 flaky 放宽（`96f4deed`，范围外来源：文案改动后的视觉连跑复现）；④ 设计稿 / todo / 基线（`0aed2cb7`）。预估 8-12 文件 / 180-320 行。
 - **风险与缓解**：① i18n 键改名会连带视觉基线文案变化 → 由 M50.4 在其后建立基线（顺序约束已在阶段头声明）；② 与 M50.1 的键结构改动重叠 → 明确分工：M50.1 负责键结构与必选语义，本原子只负责文案值，避免同批双改；③ 中文用户可读性下降 → 用类别说明行与阈值说明行补足（「含 Critical 与 High」）。
 
 ### M50.3 [P3 🚀] 周报投递重试与窗口锁

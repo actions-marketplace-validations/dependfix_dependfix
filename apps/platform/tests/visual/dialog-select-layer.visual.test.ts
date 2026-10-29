@@ -35,7 +35,7 @@ async function openRepoFormDialog(page: Page): Promise<Locator> {
     await page.getByRole('button', { name: '添加仓库' }).click()
     const dialog = page.locator('.caomei-dialog__content')
     // 冷启动（构建后首轮）时点击到弹窗挂载可能超出默认断言超时（本地观测约 1/5 轮次），
-    // 与同文件其余浮层断言一致放宽到 15s；不放宽像素阈值。
+    // 与兄弟文件 `platform-pages.visual.test.ts` 的弹窗断言同口径（15s）；不放宽像素阈值。
     await expect(dialog).toBeVisible({ timeout: 15000 })
     return dialog
 }

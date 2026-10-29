@@ -1,5 +1,14 @@
-import { describe, expect, it } from 'vitest'
-import { notificationSeverityThresholdOptions } from '../../app/utils/notification-options'
+import { describe, expect, it, vi } from 'vitest'
+
+/**
+ * 同源防线：把扫描侧标签替换为哨兵值，断言阈值选项标签确实由 `scanSeverityLabel` 产出。
+ * 若实现改回硬编码 `Critical` / `High` 字面量，本文件的用例会失败（mutation 可击杀）。
+ */
+vi.mock('../../app/utils/scan-options', () => ({
+    scanSeverityLabel: (value: string) => `SEV(${value})`,
+}))
+
+const { notificationSeverityThresholdOptions } = await import('../../app/utils/notification-options')
 
 /** 最小插值器：用占位模板断言拼接口径，不依赖 locale 文件。 */
 const messages: Record<string, string> = {
@@ -19,12 +28,11 @@ describe('utils/notification-options', () => {
         expect(notificationSeverityThresholdOptions(t).map((option) => option.value)).toEqual(['high', 'critical'])
     })
 
-    it('阈值标签复用扫描侧严重级别专有名词，不另写一套中文译名', () => {
+    it('阈值标签由扫描侧严重级别标签拼接（哨兵值替代后仍成立，禁止各写一套字面量）', () => {
         const labels = notificationSeverityThresholdOptions(t).map((option) => option.label)
-        expect(labels).toEqual(['Critical + High', '仅 Critical'])
-        // 关键断言：High 专有名词来自 scanSeverityLabel，而非本文件字面量
-        expect(labels[0]).toContain('High')
-        expect(labels[1]).not.toContain('High')
+        expect(labels).toEqual(['SEV(critical) + SEV(high)', '仅 SEV(critical)'])
+        // high 选项同时携带两个级别，critical 选项只携带 critical
+        expect(labels[1]).not.toContain('SEV(high)')
     })
 
     it('未命中的插值占位符不会被静默吞掉（模板缺 key 时暴露原文）', () => {

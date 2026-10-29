@@ -18,6 +18,7 @@ describe('业务通知模板', () => {
         const out = renderSecurityNotification(security)
         expect(out.subject).toContain('[dependfix][告警]')
         expect(out.subject).toContain('5 个 High 告警未修复')
+        expect(out.subject).not.toContain('Critical 告警未修复')
         expect(out.html).toContain('acme/app')
         expect(out.html).toContain('另有 5 条截断未纳入明细')
         expect(out.text).toContain('Critical: 2')
