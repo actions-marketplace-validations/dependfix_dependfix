@@ -291,10 +291,11 @@ AND scanRunId IN (<scope run ids>)
 | 类别 | 主题示例 | 正文要点 |
 |:---|:---|:---|
 | `platform_incident` | `[dependfix][平台] 执行器不可用 — owner/repo` | 既有环境事件字段 + 类别标签 + 建议动作 |
-| `security_high` | `[dependfix][告警] 3 个高危告警未修复 — 2 个仓库` | 严重级别计数、仓库分组表、告警链接、跳过原因提示 |
+| `security_critical` | `[dependfix][告警] 3 个 Critical 告警未修复 — 2 个仓库` | 严重级别计数、仓库分组表、告警链接、跳过原因提示 |
+| `security_high` | `[dependfix][告警] 3 个 High 告警未修复 — 2 个仓库` | 严重级别计数、仓库分组表、告警链接、跳过原因提示 |
 | `run_failure` | `[dependfix][运行] 批次运行失败 — 2/10 仓库` | 失败码 / 阶段 / 可重试判定、失败仓库清单、详情链接 |
 | `run_completed` | `[dependfix][摘要] 批次完成 — 修复 8 / 告警 12` | 仓库数、告警数、修复数、耗时、详情链接 |
-| `weekly_digest` | `[dependfix][周报] 5 个仓库存在未修复高危 — 严重 2 / 高危 3` | 按仓库分组的活跃未修复高危快照、截断 / 豁免计数、详情链接 |
+| `weekly_digest` | `[dependfix][周报] 5 个仓库存在未修复告警 — Critical 2 / High 3` | 按仓库分组的活跃未修复告警快照、截断 / 豁免计数、详情链接 |
 
 - 复用现有 `escapeHtml` / `escapeAttr`，所有动态字段必须转义；纯文本版本同步生成。
 - 链接使用公共基地址解析（`NUXT_PUBLIC_BETTER_AUTH_URL`，回退 `NUXT_PUBLIC_BASE_URL`），不写死域名。
@@ -350,5 +351,5 @@ AND scanRunId IN (<scope run ids>)
 - **D2 全局配置落点（2026-10-20 用户决策）**：新增管理员页 `/notifications`，承载组织设置、投递记录与测试发送；个人偏好保留在 `/settings`。
 - **D3 降噪策略（2026-10-20 用户决策）**：同一 scope + 类别 24 小时内最多发送一次；指纹变化才具备再次发送资格；内容未变化不重复发送；另提供可选的每周汇总（默认关闭）。
 - **D4 `critical` 必选（2026-10-24 用户决策 / 2026-10-29 细化 / M50.1 已实现）**：`critical` 级告警**豁免类别开关**——组织 `securityHigh` 与个人 `security_high` 均关闭时仍发送，仅受部署总开关熔断；**保留每小时上限**。实现口径（2026-10-29 用户决策）：新增必选类别 `security_critical`（与 `platform_incident` 同级，不入个人偏好表），`security_high` 收窄为仅 `high`；`severityThreshold` 枚举与语义不变（仅决定是否附加 `high`）；**独立计数桶**（`security_critical` 的 `sent` 行只计入自身上限，不计入共享桶，反之亦然）。冷却与内容指纹保持现状（不随类别开关豁免放开）。**已由 M50.1 落地并同步正文**（§3 表 / §4.2 / §4.4 / §5 / §6.2 / §6.3 / §7.1 / §7.3 / §13 AC1-AC3 + AC10）。
-- **D5 通知侧严重级别术语（2026-10-29 用户决策，待 M50.2 实现）**：通知页 / 邮件 / 投递记录统一保留 `Critical` / `High` 专有名词，与扫描侧 `scanSeverityLabel` 单一事实源一致；类别名改为 `Critical 告警` / `High 告警`，阈值标签改为「严重级别阈值」+ 选项 `Critical + High` / `Critical only`；邮件主题的 `[dependfix][告警]` 前缀保持不变（既有过滤契约）。**本条覆盖 §10 模板文案表，随 M50.2 落地时同步正文。**
+- **D5 通知侧严重级别术语（2026-10-29 用户决策 / M50.2 已实现）**：通知页 / 邮件 / 投递记录统一保留 `Critical` / `High` 专有名词，与扫描侧 `scanSeverityLabel` 单一事实源一致；类别名改为 `Critical 告警` / `High 告警`，阈值标签改为「严重级别阈值」+ 选项 `Critical + High` / `Critical only`；邮件主题的 `[dependfix][告警]` 前缀保持不变（既有过滤契约）。**已由 M50.2 落地并同步 §3 表 / §10 模板文案；阈值选项标签由扫描侧 `scan-options.ts` 的严重级别专有名词拼接（`notification-options.ts`），不再各写一套中文译名。**
 - **D6 周报重试与窗口锁（2026-10-29 规划，待 M50.3 实现）**：`partial` / `failed` 结果不再占满整周——进程内同周锁按结果分类（仅 `sent` 为终态），窗口内按退避（≥ 30 分钟）重试，已发收件人由逐用户投递键记 `skipped_duplicate`；`skipped_no_recipient` 不永久占锁，同周同状态在 `notification_log` 最多 1 条以控制噪声；窗口长度与触发小时不变。**本条覆盖 §6.5（同进程同周只尝试一次）与 §13 AC9，随 M50.3 落地时同步正文。**

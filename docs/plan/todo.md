@@ -47,7 +47,7 @@
 - **目标**：通知页、个人设置页、邮件主题正文与投递记录统一使用 `Critical` / `High` 专有名词，类别名与阈值名自解释，消除「严重 / 高危」并列歧义。
 - **范围**：`apps/platform/i18n/locales/{zh-CN,en-US}.json`（`settings.notifications.*` / `notifications.*`）、`apps/platform/app/pages/notifications.vue`（阈值选项改用 `app/utils/scan-options.ts` 派生的 `scanSeverityOptions` 标签）、`apps/platform/app/pages/settings.vue`、`apps/platform/server/services/notification/business-templates.ts`、`run-notification.service.ts`、对应 `*.test.ts`、设计稿 §10 与 §3 表。
 - **验收标准**：
-  1. **术语归零**：`rg -n "高危阈值|严重 \+ 高危|仅严重" apps/platform --glob '!**/CHANGELOG.md'` 0 命中；`rg -n "High-risk (threshold|alerts)" apps/platform --glob '!**/CHANGELOG.md'` 0 命中。
+  1. **术语归零**（应用文案面，测试目录除外——负向断言必须包含被禁字面量）：`rg -n "高危阈值|严重 \+ 高危|仅严重" apps/platform --glob '!**/CHANGELOG.md' --glob '!**/tests/**' --glob '!**/*.test.ts'` 0 命中；`rg -n "High-risk (threshold|alerts)" apps/platform --glob '!**/CHANGELOG.md' --glob '!**/tests/**' --glob '!**/*.test.ts'` 0 命中。
   2. **同源**：通知页阈值选项标签与 `scanSeverityOptions` 的 `critical` / `high` 标签逐字一致（单测断言 label 集合，禁止各写一份字面量）。
   3. **邮件**：主题与正文的严重级别标签逐字为 `Critical` / `High`（模板用例断言，含周报标题的「N 个 Critical / M 个 High」形态）。
   4. **双语齐备**：类别名（`Critical 告警` / `High 告警`）与必选行说明 zh / en 均在位，`pnpm run i18n:check:anchor`、`i18n:audit:missing`、`lint:md:check` 通过。
