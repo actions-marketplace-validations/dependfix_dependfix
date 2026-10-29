@@ -1,6 +1,6 @@
 # 平台通知与邮件推送设计
 
-> 状态：✅ B1-B5 全部落地（B1-B4 2026-10-21；B5 周汇总随 M47.5，2026-10-24）；**M50 修订中**：D4 `security_critical` 必选已落地（M50.1），D5 术语收敛（M50.2）与 D6 周报重试（M50.3）待实现——见 [todo.md](../../plan/todo.md)；来源 [issue #190](https://github.com/dependfix/dependfix/issues/190)）
+> 状态：✅ B1-B5 全部落地（B1-B4 2026-10-21；B5 周汇总随 M47.5，2026-10-24）；**M50 修订中**：D4 `security_critical` 必选已落地（M50.1），D5 术语收敛（M50.2）与 D6 周报重试（M50.3）已落地——见 [todo.md](../../plan/todo.md)；来源 [issue #190](https://github.com/dependfix/dependfix/issues/190)）
 > 关联：[系统架构](./architecture-platform.md) · [定时扫描与批量处理设计](./platform-scheduled-batch.md) · [运行失败分类与筛选设计](./run-failure-taxonomy.md) · [平台规范](../../standards/platform.md) · [安全规范](../../standards/security.md)
 
 ## 1. 背景与现状
@@ -214,7 +214,7 @@ interface NotificationLog {
 - 固定周期插件在每周一 09:00（`DEPENDFIX_WEEKLY_DIGEST_HOUR` 可覆盖，默认 9）触发；按进程角色只在一个进程运行（复用 M45.3 的 role 守卫），避免 HTTP / worker 双发。周报插件与 `stale-cleanup` 同列 HTTP-only——容器双进程形态下 HTTP 主进程恒存在，worker 跳过（清单见 [platform.md §10.6](../../standards/platform.md#_10-6-队列执行进程隔离-独立-worker-进程)）。
 - `weekKey` 按 ISO 8601 周（如 `2026-W43`）与服务器时区计算；同一用户同一 `weekKey` 只发一次（键见 §6.4 周报专用键）。
 - **触发窗口与补发**：本进程启动 30 秒后每 15 分钟检查一次；窗口为「本周一触发时刻起 24 小时」。窗口内重启会补发（周中晚些时候启动不会在工作日中途补发上周周报），窗口外等待下一周。
-- **窗口内自愈（2026-10-29 M50.3）**：本进程的同周状态按结果推进（`weekly-digest-attempt.ts`）——`sent` / 全部收件人本周已发（`skipped_duplicate`）为终态；`partial` / `failed` / `noop` 计次并退避 30 分钟重试，单周最多 6 次发信尝试；`skipped_no_recipient` 只退避不计次（窗口内开启个人开关仍可当周补发，且同周同状态在 `notification_log` 最多 1 行）；`skipped_disabled` / `skipped_org_disabled` 不占用本周，下一次节拍立即重查。跨进程 / 重启的「每收件人每周一封」仍由逐用户投递键兜底。
+- **窗口内自愈（2026-10-29 M50.3）**：本进程的同周状态按结果推进（`weekly-digest-attempt.ts`）——`sent` / 全部收件人本周已发（`skipped_duplicate`）为终态；`partial` / `failed` / `noop` 计次并退避 30 分钟重试，单周最多 6 次发信尝试；`skipped_no_recipient` 只退避不计次（窗口内开启个人开关仍可当周补发，且同周同状态在 `notification_log` 最多 1 行）；`skipped_disabled` / `skipped_org_disabled` 不占用本周，下一次节拍立即重查（**不清零**已发生的发信尝试，避免「关一下再开」绕过单周上界）；退避以上一次发送的完成时刻为基准，发送未结束时跳过节拍（重入守卫）。跨进程 / 重启的「每收件人每周一封」仍由逐用户投递键兜底。
 - **快照口径**：当前活跃未修复高危（与 §7.1 同口径，`supersededAt IS NULL` 即活跃，不限定 scanRunId），按仓库分组；截断计数取自快照内各告警所属运行（去重）的 `alertsTruncatedBySeverity`。`converged`（本地已满足）只存在于 `RunSummary.alertsConverged`（`ScanResult` 明细不标记），周报按快照运行汇总单列披露「引擎汇总另有 N 条本地已满足」，**不改明细计数**。内容未变化也按周发送，这是显式订阅的周期摘要。
 - **空快照也发送**：本周没有未修复告警时仍发送一封「本周无未修复告警」摘要——订阅方据此确认周期任务存活，避免把「零告警」误读为「周报停摆」。
 - 周报豁免 §6.4 ① 指纹 / ② 冷却 / ③ 每小时上限（自身已有「每用户每渠道每周一次」上限），但仍走 ④ 收件人检查与 ⑤ 渠道检查。
