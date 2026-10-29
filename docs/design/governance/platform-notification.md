@@ -1,6 +1,6 @@
 # 平台通知与邮件推送设计
 
-> 状态：✅ B1-B5 全部落地（B1-B4 2026-10-21；B5 周汇总随 M47.5，2026-10-24）；来源 [issue #190](https://github.com/dependfix/dependfix/issues/190)）
+> 状态：✅ B1-B5 全部落地（B1-B4 2026-10-21；B5 周汇总随 M47.5，2026-10-24）；**M50 修订中**（D4-D6：`critical` 必选 / 术语收敛 / 周报重试，2026-10-29 规划，落地见 [todo.md](../../plan/todo.md)）；来源 [issue #190](https://github.com/dependfix/dependfix/issues/190)）
 > 关联：[系统架构](./architecture-platform.md) · [定时扫描与批量处理设计](./platform-scheduled-batch.md) · [运行失败分类与筛选设计](./run-failure-taxonomy.md) · [平台规范](../../standards/platform.md) · [安全规范](../../standards/security.md)
 
 ## 1. 背景与现状
@@ -341,3 +341,6 @@ AND scanRunId IN (<scope run ids>)
 - **D1 收件人定向（2026-10-20 用户决策）**：新增 `ScanRun.triggeredByUserId` / `BatchRun.triggeredByUserId`，手动触发精确投递；定时任务无触发者时回退管理员集合。
 - **D2 全局配置落点（2026-10-20 用户决策）**：新增管理员页 `/notifications`，承载组织设置、投递记录与测试发送；个人偏好保留在 `/settings`。
 - **D3 降噪策略（2026-10-20 用户决策）**：同一 scope + 类别 24 小时内最多发送一次；指纹变化才具备再次发送资格；内容未变化不重复发送；另提供可选的每周汇总（默认关闭）。
+- **D4 `critical` 必选（2026-10-24 用户决策 / 2026-10-29 细化，待 M50.1 实现）**：`critical` 级告警**豁免类别开关**——组织 `securityHigh` 与个人 `security_high` 均关闭时仍发送，仅受部署总开关熔断；**保留每小时上限**。实现口径（2026-10-29 用户决策）：新增必选类别 `security_critical`（与 `platform_incident` 同级，不入个人偏好表），`security_high` 收窄为仅 `high`；`severityThreshold` 枚举与语义不变（仅决定是否附加 `high`）；**独立计数桶**（`security_critical` 的 `sent` 行只计入自身上限，不计入共享桶，反之亦然）。冷却与内容指纹保持现状（不随类别开关豁免放开）。**本条覆盖 §3 表（`security_high` 收窄为仅 `high`、新增必选 `security_critical`）、§4.4（`security_critical` 不入偏好表）与 §7.1 口径，随 M50.1 落地时同步正文。**
+- **D5 通知侧严重级别术语（2026-10-29 用户决策，待 M50.2 实现）**：通知页 / 邮件 / 投递记录统一保留 `Critical` / `High` 专有名词，与扫描侧 `scanSeverityLabel` 单一事实源一致；类别名改为 `Critical 告警` / `High 告警`，阈值标签改为「严重级别阈值」+ 选项 `Critical + High` / `Critical only`；邮件主题的 `[dependfix][告警]` 前缀保持不变（既有过滤契约）。**本条覆盖 §10 模板文案表，随 M50.2 落地时同步正文。**
+- **D6 周报重试与窗口锁（2026-10-29 规划，待 M50.3 实现）**：`partial` / `failed` 结果不再占满整周——进程内同周锁按结果分类（仅 `sent` 为终态），窗口内按退避（≥ 30 分钟）重试，已发收件人由逐用户投递键记 `skipped_duplicate`；`skipped_no_recipient` 不永久占锁，同周同状态在 `notification_log` 最多 1 条以控制噪声；窗口长度与触发小时不变。**本条覆盖 §6.5（同进程同周只尝试一次）与 §13 AC9，随 M50.3 落地时同步正文。**

@@ -57,7 +57,8 @@
 | M47: 交付判定可信与运行自证 | 验证链与目标仓库 CI 口径对齐 + 构建版本回执与安装日志语义 + 环境性失败归因收口 + pnpm store 持久化与提交卫生 + 通知周汇总（`weekly_digest`）+ 工程门禁与提交卫生收口 | P1-P3 | 已完成（2026-10-22 用户决策方案 A′ / 2026-10-24 已闭环归档，见 [M47 分片](archive/todo-archive-phases-m47.md#m47-交付判定可信与运行自证-2026-10-22-用户决策方案-a′-2026-10-24-归档)） |
 | M48: 对外 PR 交付闭环 | 兄弟包 / peer 家族锁步升级 + CI 独有脚本纳入验证链 + 同告警尝试指纹去重 + 提交面白名单与 YAML 定点编辑 + PR 创建后 CI 回环 + 外部作业归因与合并门禁 | P0-P1 | 已完成（2026-10-24 用户决策 D+E / 2026-10-25 已闭环归档，见 [M48 分片](archive/todo-archive-phases-m48.md#m48-对外-pr-交付闭环-2026-10-24-用户决策-d-e-2026-10-25-归档)） |
 | M49: 0.6.0 发版清障 | 自产 code scanning 告警清零 + 依赖漏洞清零 + Security 门禁转正 + 发版文档漂移收口 + 0.6.0 发布与发布后验证 | P0 | 已完成（2026-10-25 用户决策 / 2026-10-29 已闭环归档，见 [M49 详情分片](archive/roadmap-phases-m49.md#m49-0-6-0-发版清障-2026-10-25-用户决策-2026-10-29-已闭环-归档) + [M49 归档分片](archive/todo-archive-phases-m49.md#m49-0-6-0-发版清障-2026-10-25-用户决策-2026-10-29-归档)） |
-| 1.0: 发布门槛收口 | E 通知可信度 + F1 语义与数据 + F2 文档与验证 + G 发布工程（契约冻结 / 迁移指南 / 真实环境矩阵 / `@v1`） | P0-P1 | 已授权，待启动 P 阶段规划（台账见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)） |
+| M50: 通知可信度收口（1.0-E） | `critical` 告警必选不可关闭 + 通知严重级别术语与阈值命名收敛 + 周报投递重试与窗口锁 + `/settings` 与通知页 dark 视觉覆盖 | P1-P3 | 进行中（4 原子，见 [todo.md §M50](todo.md)） |
+| 1.0: 发布门槛收口 | E 通知可信度（= M50）+ F1 语义与数据（M51）+ F2 文档与验证（M52）+ G 发布工程（M53：契约冻结 / 迁移指南 / 真实环境矩阵 / `@v1`） | P0-P1 | 进行中（E 已规划为 M50；F1/F2/G 待规划；台账见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)） |
 
 > **本路线图定位**：按 [规划规范 §2.1](../standards/planning.md) 仅维护阶段概览（目标 / 优先级 / 状态）。详细实施记录 / commit 引用 / 关键决策 / 经验教训见对应归档段（详见下方"## 详细任务"索引）。
 
@@ -65,19 +66,19 @@
 
 > **M39-M49 阶段详情已迁出**：M39-M48 见 [archive/roadmap-phases-m39-m48.md](archive/roadmap-phases-m39-m48.md)（2026-10-26 文档治理批次迁出）；M49 见 [archive/roadmap-phases-m49.md](archive/roadmap-phases-m49.md)（2026-10-29 归档批次迁出）。主文档保留里程碑概述表与当前阶段状态。
 
-## 当前阶段：无活跃阶段（M49 已闭环归档）
+## 当前阶段：M50 通知可信度收口（1.0-E 批次）
 
-M49「0.6.0 发版清障」六原子 + 三批追加临时待办全部闭环，0.6.0 已发布（npm 5 包 + 7 个 tag + GitHub Release）；M49.5 验收 2 项达标 / 2 项待复核 / 1 项未完成，残余登记 backlog。阶段详情见 [M49 详情分片](archive/roadmap-phases-m49.md#m49-0-6-0-发版清障-2026-10-25-用户决策-2026-10-29-已闭环-归档)，任务正文与验收明细见 [M49 归档分片](archive/todo-archive-phases-m49.md#m49-0-6-0-发版清障-2026-10-25-用户决策-2026-10-29-归档)。
+M50 承接 1.0 台账批次 E 四项，规划于 2026-10-29（用户决策：M 编号 M50 / 术语保留 `Critical`·`High` 专有名词 / `critical` 独立计数桶）。四原子顺序为 M50.1（`critical` 必选不可关闭）→ M50.2（术语与阈值命名收敛）→ M50.3（周报重试与窗口锁）→ M50.4（dark 视觉覆盖，必须晚于文案改动）。任务正文（8 要素）见 [todo.md §M50](todo.md)。
 
-**后续（已授权，待规划）**：1.0 发布门槛收口（E → F1 → F2 → G 四批），台账见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)；真实环境验证所需凭据 / staging / AI 预算由用户提供。发布后残余（本地发布通道门禁缺口 / 0.6.0 `--version` 错误 / master 3 连绿窗口）已登记 [backlog.md](backlog.md)。
+**后续（已授权，待规划）**：1.0 发布门槛 F1 → F2 → G（对应 M51-M53），台账见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)；真实环境验证所需凭据 / staging / AI 预算由用户提供。0.6.0 发布残余（本地发布通道门禁缺口 / `--version` 0.6.1 / master 3 连绿窗口 / Docker `platform-0.4.0` tag 复核）已登记 [backlog.md](backlog.md)。
 
 ---
 
 ## 详细任务
 
-- 当前阶段任务：**无活跃阶段**（M49 已闭环归档，见 [M49 归档分片](archive/todo-archive-phases-m49.md#m49-0-6-0-发版清障-2026-10-25-用户决策-2026-10-29-归档)）
+- 当前阶段任务：**M50 通知可信度收口（1.0-E 批次）** —— 4 原子，见 [todo.md](todo.md)
 - 已归档阶段：[todo-archive.md](todo-archive.md)（阶段索引 + 分片；M0-M49 全部已归档；分片治理见 [archive/index.md](archive/index.md)）
-- 下一阶段（已授权，待规划）：**1.0 发布门槛收口**（E → F1 → F2 → G 四批；台账见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)；E 通知可信度 4 项为第一批）
+- 下一阶段（已授权，待规划）：**1.0 发布门槛收口 F1 → F2 → G**（M51-M53；台账见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)）
 - 后续阶段任务（延期项 + 未排期增强候选）：[backlog.md](backlog.md)
 
 ## 交付原则

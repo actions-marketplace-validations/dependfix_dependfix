@@ -54,9 +54,9 @@
 
 ### 候选评估中（待评估 / 本阶段延后项）
 
-> **候选池概览（2026-10-29 实测）**：本区 60 项；P 标签覆盖不全（未标注者评估时补 P 标签，不默认升级）；本文件不维护分档统计，1.0 分档只见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)；未标注候选评估时补 P 标签，不默认升级。
+> **候选池概览（2026-10-29 实测）**：本区 56 项；P 标签覆盖不全（未标注者评估时补 P 标签，不默认升级）；本文件不维护分档统计，1.0 分档只见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)；未标注候选评估时补 P 标签，不默认升级。
 > **1.0 门槛与分档**：P0 23 / P1 8 / 1.0 后 15 的分档、门槛判定与批次计划见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)；本区候选在未上收前保持候选状态，上收后按批次从本表移除。
-> **E 阶段候选（2026-10-24 用户决策 D+E）**：`critical` 必选不可关闭 / 通知严重级别术语与阈值命名 / 周报投递重试与窗口锁 / `/settings` 与通知页 dark 视觉 4 项已获授权作为 M48 归档后的下一阶段，当前保持候选状态（不含阶段编号）；M48 已归档，待启动 P 阶段。
+> **E 批次已上收（2026-10-29）**：原「`critical` 必选不可关闭 / 通知严重级别术语与阈值命名 / 周报投递重试与窗口锁 / `/settings` 与通知页 dark 视觉」4 项已上收为 **M50** 四原子（[todo.md §M50](todo.md)），本区对应候选已移除；同日用户决策见该阶段头部（M 编号 / `Critical`·`High` 专有名词 / `critical` 独立计数桶）。
 
 - **平台 PR Check 创建后回环**（M48.5 边界）—— 平台建 PR 后仍只有轮询 + 告警，不复用 CLI 的等待状态机 / 评论 / 关闭能力；触发：再次出现「PR 红了无人收」的用户反馈，或平台已具备 check 采集面时评估复用。
 - **pr-checks 页归因标签的渲染验证**（M48.6 W-A1）—— 归因标签的 `v-if` / 色调 / 文案由纯函数单测与 e2e fixture 字段覆盖，但无视觉基线用例；触发：下次修改 pr-checks 页或重建视觉基线时顺带补一条带 `attribution` 的失败信号。
@@ -225,22 +225,9 @@
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
 - **`ScanResult` 修复结果不回写（converged / success 状态缺失）（待评估，P2 🛠️）** —— 现象：per-alert 模型写入路径固定 `not-tried`，修复结果不回写，导致按明细聚合的通知（`security_high` / `weekly_digest`）无法剔除本地已满足告警，周报只能按 `RunSummary.alertsConverged` 单列披露（M47.5 审计 R1 实证）。**待评估点**：① 是否在 reconcile / 收尾链路回写 `fixStatus`（success / converged / failed）；② 回写后的历史数据兼容与迁移；③ 对告警列表「未修复」口径的影响。
-- **周报投递的重试与窗口锁语义（待评估，P3 🚀）** —— 现象：M47.5 同进程同周只尝试一次，部分收件人 `failed` 时本周内不重试；`skipped_no_recipient` 保留本周锁（避免 15 分钟级日志噪声），窗口内才开启个人开关需等下周。**待评估点**：① 按用户失败重试（不改逐用户键）；② 无收件人时是否降低检查频率或只在配置变更时重试；③ 崩溃遗留 `sending` 的回收前置。
-- **`/settings` 与通知页 dark 视觉覆盖（待评估，P3 🧪）** —— 现象：M47.5 只覆盖 `/notifications` light 基线，`/settings` 无视觉基线（改由 e2e 覆盖组织开启后个人开关可配置）；周汇总开关与提示文案的 dark 形态无像素守卫。
 - **alerts 原始列表的排序并列兜底（待评估，P2 🛠️）** —— 背景（2026-10-24）：CI `Visual Regression` 出现 flaky（`alerts 运行抽屉浮层（light）` 3284 px 差异，同 commit 重跑即绿）。根因：`GET /api/alerts` 的「原始列表」视图只按 `result.createdAt DESC` 排序、**无并列兜底**，而 `ScanResult.createdAt` 缺省为插入时刻 → 同批次插入落在同一毫秒形成并列 → 行序随数据库返回顺序漂移。视觉侧已用「fixtures 逐条钉死 `createdAt`」消除（见 `apps/platform/tests/visual/helpers/fixtures.ts` 与 [视觉 README](../../apps/platform/tests/visual/README.md)）；e2e 的原始列表用例经 `page.route` mock 单条告警，不依赖真实 tie 序，故无同类风险。
   - **待评估点**：默认排序是否补确定性兜底（`addOrderBy('result.id','DESC')` 或 `(createdAt, id)` 组合）；对现有视觉基线行序与未来分页 / 导出结果集边界的影响。
   - **触发条件**：真实告警同毫秒插入被报告顺序抖动；或列表分页 / 导出功能引入（届时并列顺序影响结果集边界）。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
-
-- **通知严重级别术语与阈值命名收敛（待评估，P2 🎨）** —— 现象（2026-10-24 用户反馈 + 截图）：通知页把 `critical` / `high` 译为「严重」/「高危」且同页并列，用户无法从字面判断哪个更危险；类别名「高危告警」看起来只覆盖 `high`，实际开关同时管 `critical`（关掉后 `apps/platform/server/services/notification/recipients.ts` 直接返回空收件人）；阈值标签「高危阈值」把 `critical` 也包含在内（选项「严重 + 高危」/「仅严重」，见 [zh-CN.json](../../apps/platform/i18n/locales/zh-CN.json) 与 [en-US.json](../../apps/platform/i18n/locales/en-US.json) 的 `High-risk threshold`），与同仓扫描侧口径冲突——`apps/platform/app/utils/scan-options.ts` 已明确把 Critical / High / Medium 定为**专有名词不走 i18n**，扫描配置页又写作「严重级别阈值」。邮件侧同样不统一：周报标题只写「N 个高危告警未修复」，正文才分列「严重 x / 高危 y」（`apps/platform/server/services/notification/business-templates.ts`）。
-  - **待评估点**：① 术语形态（直接保留 `Critical` / `High` 原文，还是「严重（critical）」括号注释，还是纯中文 + 图标 / 色阶辅助）；② 阈值字段改名（「风险等级阈值」/ 对齐扫描页「严重级别阈值」，同时调整 `severityThreshold` 的 UI 文案而非枚举值）；③ 选项文案（「严重及以上（critical + high）」/「仅严重（critical）」）；④ 统一范围（通知页 / 邮件标题与正文 / 周报 / 投递记录类别列 / 扫描页）；⑤ en-US 的 `High-risk alerts` / `High-risk threshold` 同步，避免中英各一套语义。
-  - **触发条件**：已由用户反馈触发；或下一次文案 / 国际化批次。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
-
-- **critical 告警必选不可关闭（待评估，P1 🛠️）** —— 现象（2026-10-24 用户反馈）：当前 `severityThreshold` 只决定 `high` 是否纳入（`critical` 恒在集合内，见 `apps/platform/server/services/notification/high-risk.ts`），但类别开关 `categories.securityHigh` 是 `critical` + `high` 共用的单一开关，关闭后组织与个人的安全类邮件全部停发（`resolveNotificationRecipients` 在类别关闭时返回空数组）；即「`critical` 必定发送」目前不成立，只有「平台自身问题」是真正的必选类别。用户预期 `critical` 与「平台自身问题」同级、不可关闭。
-  - **已决策（2026-10-24，用户）**：`critical` 豁免类别开关（`securityHigh` 关闭时 `critical` 仍发送），**保留每小时上限**。
-  - **待评估点**：① 拆分语义（新增必选的 `securityCritical` + 可选的 `securityHigh`）还是保留单开关但让 `critical` 走独立通道；② 阈值枚举如何演进（`critical | high` 改为「是否附加 high」的布尔或新增枚举）；③ 个人偏好是否允许关闭 `critical`（建议不允许，并与组织开关一致）；④ 存量迁移（现网 `securityHigh=false` 的组织是否自动改用新的 critical 通道 → 会新增邮件，需在发布说明中披露）；⑤ 每小时上限的计数口径——现为 channel 级共享桶（`delivery.ts` 统计近一小时全部非周报 `sent` 行），`critical` 若与其他类别共用同一额度会被 run 突发挤掉、与「必发」冲突，需在「单独计数但沿用同一数值上限」与「沿用共享桶」之间定口径；⑥ 冷却与指纹去重保持现状（不随类别开关豁免一起放开，除非另有决策）；⑦ UI 禁用态与「必选，不可关闭」说明是否对齐平台自身问题那一行。
-  - **触发条件**：用户确认按「`critical` 必选」实现；或出现 `critical` 告警因类别关闭而漏发的实例。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
 **2026-10-27 决策**：本地日志已上收 M49 追加临时待办（不占编号）；Sentry 官方 SaaS；Axiom 后续；其余 1.0 后。P 标签仅表优先级，新增 P1 未纳入 1.0 分档。
@@ -441,9 +428,9 @@
 
 | 内容类型 | 位置 |
 |:--|:--|
-| 当前阶段活跃任务 | **无活跃阶段**（M49 已闭环归档，见 [todo-archive.md §M49](archive/todo-archive-phases-m49.md#m49-0-6-0-发版清障-2026-10-25-用户决策-2026-10-29-归档)）；插队容量治理见 [planning.md §3.1.1](../standards/planning.md#_3-1-1-插队后的阶段容量再平衡-hard-requirement-2026-10-19) |
-| 下一阶段（已授权，待规划） | **1.0 发布门槛收口**（E → F1 → F2 → G；台账见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)） |
+| 当前阶段活跃任务 | **M50 通知可信度收口（1.0-E 批次）** —— 4 原子，见 [todo.md](todo.md)；插队容量治理见 [planning.md §3.1.1](../standards/planning.md#_3-1-1-插队后的阶段容量再平衡-hard-requirement-2026-10-19) |
+| 下一阶段（已授权，待规划） | **1.0 发布门槛收口 F1 → F2 → G**（M51-M53；台账见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)） |
 | 已完成阶段归档 | [todo-archive.md](todo-archive.md)（阶段索引 + [archive/](archive/) 分片） |
-| 里程碑与阶段交付 | [roadmap.md](roadmap.md)（M0-M49 已归档；1.0 门槛收口待规划） |
+| 里程碑与阶段交付 | [roadmap.md](roadmap.md)（M0-M49 已归档；M50 进行中；1.0 门槛 F1/F2/G 待规划） |
 | 长期主线 / 候选 / 待人工验收 / 已知边界 | 本文档（按四象限结构） |
 | 历史归档索引 | [archive/index.md](archive/index.md) |
