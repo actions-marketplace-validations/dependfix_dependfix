@@ -180,17 +180,6 @@ const queryHighRiskSummary = async (
 }
 
 /**
- * 查询指定 run / 批次范围内未修复高危告警（设计稿 §7.1）：
- * severity in [critical, high] + supersededAt null + fixStatus in [not-tried, failed, skipped]。
- * 同时读取 run summary 的截断计数，按组织阈值过滤严重级别。
- */
-export const queryUnfixedHighRisk = (
-    scanRunIds: string[],
-    severityThreshold: 'critical' | 'high',
-): Promise<HighRiskSummary> =>
-    queryHighRiskSummary(severityThreshold === 'critical' ? ['critical'] : ['critical', 'high'], scanRunIds)
-
-/**
  * 按通知类别查询未修复告警（设计稿 §15 D4）：
  * `security_critical` 只取 critical、`security_high` 只取 high——两类各发一封，避免同一 run 内互相掩盖。
  */

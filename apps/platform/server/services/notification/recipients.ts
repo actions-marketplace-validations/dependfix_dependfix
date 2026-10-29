@@ -144,11 +144,12 @@ export const resolveNotificationRecipients = async (input: ResolveRecipientsInpu
     }
 
     if (input.category === 'security_critical') {
-        // 必选类别：不受组织类别开关与个人偏好约束（仅部署总开关，见函数首行）
+        // 必选类别：不受组织类别开关与个人偏好约束（仅部署总开关，见函数首行）；
+        // 触发者若已降级为 viewer 则不计入（与「viewer 不接收业务类 / 安全类邮件」口径一致）
         const admins = await loadAdminCandidates()
         const triggered = await loadTriggeredCandidate(input.triggeredByUserId)
         const candidates = [...admins]
-        if (triggered && !candidates.some((user) => user.id === triggered.id)) {
+        if (triggered && triggered.role !== 'viewer' && !candidates.some((user) => user.id === triggered.id)) {
             candidates.push(triggered)
         }
         const recipients = candidates.map((user) => ({ userId: user.id, email: user.email, role: user.role }))

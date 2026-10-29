@@ -39,7 +39,9 @@ export type SecurityNotificationCategory = 'security_critical' | 'security_high'
 export const SECURITY_CATEGORY_SEVERITIES: Record<SecurityNotificationCategory, readonly ('critical' | 'high')[]> = {
     security_critical: ['critical'],
     security_high: ['high'],
-}/** 组织设置 JSON 的类别键（与个人偏好 category 值的映射单一事实源）。 */
+}
+
+/** 组织设置 JSON 的类别键（与个人偏好 category 值的映射单一事实源）。 */
 export const ORG_CATEGORY_KEYS: Record<BusinessNotificationCategory, 'securityHigh' | 'runFailure' | 'runCompleted' | 'weeklyDigest'> = {
     security_high: 'securityHigh',
     run_failure: 'runFailure',
