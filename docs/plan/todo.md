@@ -26,7 +26,7 @@
 > **2026-10-29 用户决策**：① E 批次落为 **M50** 独立阶段（F1/F2/G 顺延 M51-M53）；② 通知侧严重级别保留 `Critical` / `High` 专有名词，与扫描页 `scanSeverityLabel` 同源；③ `critical` 投递走**独立计数桶**，沿用同一 `maxPerHour` 数值。
 > **容量评估（§1.1「是否补足至 5 项」）**：不补足。E 批次由 1.0 台账分档固定为 4 项；跨批搬入 F1 项会破坏批次语义边界（通知可信度 vs 语义与数据）与既定的 E → F1 执行顺序。4 项在 §1.1 上限内，类型覆盖 🛠️ 1 + 🎨 1 + 🚀 1 + 🧪 1。
 
-### M50.1 [P1 🛠️] `critical` 告警必选不可关闭
+### M50.1 [P1 🛠️] `critical` 告警必选不可关闭（**已闭环** `374954b5` + `ffb60237` + `4748818d` + `3beb73d7` + `a3f320bd` + `56ad8fe3`）
 
 - **目标**：`critical` 级未修复告警在组织与个人类别开关均关闭时仍投递，仅受部署总开关熔断；每小时上限保留但计入独立桶，不再与其他类别争额度。
 - **范围**：`apps/platform/server/services/notification/{types,preferences,settings,recipients,delivery,high-risk}.ts`、`{run-notification,batch-notification}.service.ts`、`business-templates.ts`（类别文案键）、`apps/platform/app/pages/{settings,notifications}.vue`、`apps/platform/i18n/locales/{zh-CN,en-US}.json`、对应 `*.test.ts`、设计稿 [platform-notification.md](../design/governance/platform-notification.md) §3 / §4.2 / §4.3 / §4.4 / §5 / §7.1 / §7.3 / §13 / §15。
