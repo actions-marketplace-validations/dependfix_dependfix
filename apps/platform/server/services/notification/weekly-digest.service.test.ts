@@ -297,6 +297,54 @@ describe('sendWeeklyDigest', () => {
         expect(failed?.errorMessage).toContain('smtp down')
     })
 
+    it('部分失败后重试只补发失败收件人（已发者命中逐用户投递键）', async () => {
+        const first = await makeAdmin()
+        const second = await makeAdmin()
+        await setOrganizationSettings()
+        await seedSnapshot()
+        sendMessage.mockRejectedValueOnce(new Error('smtp down'))
+        const round1 = await sendWeeklyDigest(MONDAY)
+        expect(round1).toMatchObject({ status: 'partial', recipients: 2, sent: 1, failed: 1 })
+
+        const round2 = await sendWeeklyDigest(new Date(MONDAY.getTime() + 30 * 60 * 1000))
+        expect(round2).toMatchObject({ status: 'sent', recipients: 2, sent: 1, failed: 0, skipped: 1 })
+        expect(sendMessage).toHaveBeenCalledTimes(3)
+        const deliveredTo = sendMessage.mock.calls.map((call) => (call as unknown as [unknown, string[]])[1][0])
+        // 首轮失败的是第一个收件人，次轮只补发它，另一位命中投递键不发
+        expect(deliveredTo).toEqual([first.email, second.email, first.email])
+    })
+
+    it('无收件人时同周同状态只落一行（重试不刷日志）', async () => {
+        await makeAdmin(false)
+        await setOrganizationSettings()
+        const first = await sendWeeklyDigest(MONDAY)
+        const second = await sendWeeklyDigest(new Date(MONDAY.getTime() + 30 * 60 * 1000))
+        expect(first.status).toBe('skipped_no_recipient')
+        expect(second.status).toBe('skipped_no_recipient')
+        const ds = await ensureDatabaseInitialized()
+        const logs = await ds.getRepository(NotificationLog).find({ where: { status: 'skipped_no_recipient' } })
+        expect(logs).toHaveLength(1)
+        expect(sendMessage).not.toHaveBeenCalled()
+    })
+
+    it('无收件人后开启个人开关 → 同周窗口内补发', async () => {
+        const admin = await makeAdmin(false)
+        await setOrganizationSettings()
+        await seedSnapshot()
+        expect((await sendWeeklyDigest(MONDAY)).status).toBe('skipped_no_recipient')
+
+        const ds = await ensureDatabaseInitialized()
+        await ds.getRepository(NotificationPreference).save(ds.getRepository(NotificationPreference).create({
+            userId: admin.id,
+            category: 'weekly_digest',
+            channel: 'email',
+            enabled: true,
+        }))
+        const second = await sendWeeklyDigest(new Date(MONDAY.getTime() + 30 * 60 * 1000))
+        expect(second).toMatchObject({ status: 'sent', recipients: 1, sent: 1 })
+        expect(sendMessage).toHaveBeenCalledTimes(1)
+    })
+
     it('正文披露截断 / 豁免计数，主题带 [周报]', async () => {
         await makeAdmin()
         await setOrganizationSettings()

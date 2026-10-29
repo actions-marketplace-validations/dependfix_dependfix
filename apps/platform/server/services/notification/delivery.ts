@@ -106,6 +106,27 @@ export const updateNotificationLog = async (log: NotificationLog | null, patch: 
     }
 }
 
+/**
+ * 是否已存在同 scope / 类别 / 状态的投递记录。
+ * 用于「同周同状态只记一次」的幂等落库（如周报的 `skipped_no_recipient`，避免 15 分钟级重复行）。
+ * 查询失败按「未记录」处理（fail-open：宁可多写一行也不丢状态）。
+ */
+export const hasNotificationLog = async (input: {
+    category: string
+    scopeType: NotificationScopeType
+    scopeId: string
+    status: NotificationLog['status']
+}): Promise<boolean> => {
+    try {
+        const ds = await ensureDatabaseInitialized()
+        const row = await ds.getRepository(NotificationLog).findOne({ where: input })
+        return row !== null
+    } catch (error) {
+        logger.error('[notification:delivery] failed to query notification_log', { error })
+        return false
+    }
+}
+
 const resolveEmailChannel = (): NotificationChannel | null =>
     listNotificationChannels().find((channel) => channel.name === 'email' && typeof channel.sendMessage === 'function') ?? null
 

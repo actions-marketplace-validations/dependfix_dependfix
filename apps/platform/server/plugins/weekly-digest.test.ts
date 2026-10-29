@@ -25,6 +25,7 @@ import weeklyDigestPlugin, {
     WEEKLY_DIGEST_CHECK_INTERVAL_MS,
     WEEKLY_DIGEST_FIRST_RUN_DELAY_MS,
 } from './weekly-digest'
+import { WEEKLY_DIGEST_MAX_SEND_ATTEMPTS, WEEKLY_DIGEST_RETRY_BACKOFF_MS } from '#server/services/notification/weekly-digest-attempt'
 
 const makeNitroApp = () => ({ hooks: { hook: vi.fn() } })
 
@@ -119,7 +120,7 @@ describe('weekly-digest 插件触发', () => {
         expect(sendWeeklyDigestMock).toHaveBeenCalledTimes(2)
     })
 
-    it('失败后允许下一轮重试（异常不静默停用）', async () => {
+    it('失败后退避 30 分钟内不再尝试，超过退避后重试（异常不静默停用）', async () => {
         vi.setSystemTime(new Date(2026, 9, 26, 9, 1))
         sendWeeklyDigestMock.mockRejectedValueOnce(new Error('db down'))
         runPlugin()
@@ -127,8 +128,62 @@ describe('weekly-digest 插件触发', () => {
         expect(sendWeeklyDigestMock).toHaveBeenCalledTimes(1)
         expect(logErrorMock).toHaveBeenCalled()
 
+        // 退避 30 分钟 > 单次检查间隔 15 分钟：下一节拍应被跳过
+        await vi.advanceTimersByTimeAsync(WEEKLY_DIGEST_CHECK_INTERVAL_MS)
+        expect(sendWeeklyDigestMock).toHaveBeenCalledTimes(1)
+
         await vi.advanceTimersByTimeAsync(WEEKLY_DIGEST_CHECK_INTERVAL_MS)
         expect(sendWeeklyDigestMock).toHaveBeenCalledTimes(2)
+    })
+
+    it('部分失败 = partial：退避后重试，成功即终态不再尝试', async () => {
+        vi.setSystemTime(new Date(2026, 9, 26, 9, 1))
+        sendWeeklyDigestMock.mockResolvedValueOnce({ ...result(), status: 'partial', sent: 1, failed: 1, recipients: 2 })
+        runPlugin()
+        await vi.advanceTimersByTimeAsync(WEEKLY_DIGEST_FIRST_RUN_DELAY_MS)
+        expect(sendWeeklyDigestMock).toHaveBeenCalledTimes(1)
+
+        sendWeeklyDigestMock.mockResolvedValueOnce({ ...result(), status: 'sent', sent: 1, skipped: 1, recipients: 2 })
+        await vi.advanceTimersByTimeAsync(WEEKLY_DIGEST_RETRY_BACKOFF_MS)
+        expect(sendWeeklyDigestMock).toHaveBeenCalledTimes(2)
+
+        await vi.advanceTimersByTimeAsync(WEEKLY_DIGEST_CHECK_INTERVAL_MS * 8)
+        expect(sendWeeklyDigestMock).toHaveBeenCalledTimes(2)
+    })
+
+    it('无收件人只退避不计次：连续多轮仍可在窗口内补发', async () => {
+        vi.setSystemTime(new Date(2026, 9, 26, 9, 1))
+        sendWeeklyDigestMock.mockResolvedValue({ ...result(), status: 'skipped_no_recipient', recipients: 0, sent: 0 })
+        runPlugin()
+        await vi.advanceTimersByTimeAsync(WEEKLY_DIGEST_FIRST_RUN_DELAY_MS)
+        expect(sendWeeklyDigestMock).toHaveBeenCalledTimes(1)
+
+        // 连续 8 轮（超过发信尝试上界）仍会重查：证明「无收件人」不消耗发信额度
+        for (let attempt = 0; attempt < 8; attempt++) {
+            await vi.advanceTimersByTimeAsync(WEEKLY_DIGEST_RETRY_BACKOFF_MS)
+        }
+        expect(sendWeeklyDigestMock).toHaveBeenCalledTimes(9)
+
+        // 窗口内开启个人开关后补发成功，并进入终态
+        sendWeeklyDigestMock.mockResolvedValue({ ...result(), status: 'sent' })
+        await vi.advanceTimersByTimeAsync(WEEKLY_DIGEST_RETRY_BACKOFF_MS)
+        expect(sendWeeklyDigestMock).toHaveBeenCalledTimes(10)
+        await vi.advanceTimersByTimeAsync(WEEKLY_DIGEST_RETRY_BACKOFF_MS * 4)
+        expect(sendWeeklyDigestMock).toHaveBeenCalledTimes(10)
+    })
+
+    it('发信尝试触顶后本周停止（不退化为整窗高频重试）', async () => {
+        vi.setSystemTime(new Date(2026, 9, 26, 9, 1))
+        sendWeeklyDigestMock.mockResolvedValue({ ...result(), status: 'failed', sent: 0, failed: 1 })
+        runPlugin()
+        await vi.advanceTimersByTimeAsync(WEEKLY_DIGEST_FIRST_RUN_DELAY_MS)
+        for (let attempt = 1; attempt < WEEKLY_DIGEST_MAX_SEND_ATTEMPTS; attempt++) {
+            await vi.advanceTimersByTimeAsync(WEEKLY_DIGEST_RETRY_BACKOFF_MS)
+        }
+        expect(sendWeeklyDigestMock).toHaveBeenCalledTimes(WEEKLY_DIGEST_MAX_SEND_ATTEMPTS)
+
+        await vi.advanceTimersByTimeAsync(6 * 60 * 60 * 1000)
+        expect(sendWeeklyDigestMock).toHaveBeenCalledTimes(WEEKLY_DIGEST_MAX_SEND_ATTEMPTS)
     })
 
     it('组织开关关闭不锁定本周：窗口内开启后下一轮补发', async () => {

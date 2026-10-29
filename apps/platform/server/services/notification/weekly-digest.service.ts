@@ -9,7 +9,7 @@
  *
  * 失败语义：所有投递失败均落 `notification_log` 并计入返回值，不抛错、不影响平台其它任务。
  */
-import { dispatchNotification, loadOrganizationNotificationSettings, recordNotificationLog } from './delivery'
+import { dispatchNotification, hasNotificationLog, loadOrganizationNotificationSettings, recordNotificationLog } from './delivery'
 import { queryActiveUnfixedHighRisk } from './high-risk'
 import { renderWeeklyDigestNotification } from './business-templates'
 import { parseSupportedLocale } from './channel'
@@ -75,16 +75,25 @@ export const sendWeeklyDigest = async (now: Date = new Date()): Promise<WeeklyDi
 
     const recipients = await resolveNotificationRecipients({ category: 'weekly_digest', settings })
     if (recipients.length === 0) {
-        await recordNotificationLog({
-            deliveryKey: null,
+        // 同周同状态只落一行：窗口内会反复重查（退避 30 分钟），逐轮落库会刷出大量重复行
+        const alreadyRecorded = await hasNotificationLog({
             category: 'weekly_digest',
             scopeType: 'digest',
             scopeId: weekKey,
-            channel: 'email',
-            fingerprint: null,
-            recipients: [],
             status: 'skipped_no_recipient',
         })
+        if (!alreadyRecorded) {
+            await recordNotificationLog({
+                deliveryKey: null,
+                category: 'weekly_digest',
+                scopeType: 'digest',
+                scopeId: weekKey,
+                channel: 'email',
+                fingerprint: null,
+                recipients: [],
+                status: 'skipped_no_recipient',
+            })
+        }
         logger.info(`[weekly-digest] ${weekKey} no recipients enabled; skip`)
         return { ...base, status: 'skipped_no_recipient' }
     }
