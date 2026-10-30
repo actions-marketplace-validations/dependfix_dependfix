@@ -974,8 +974,8 @@ e2e 侧共改写 14 个 spec（`.p-dialog*` / `.p-select*` / `.p-drawer` / `.p-c
 | alerts-dark.png | 2104 / 2622 | 0.17% | 72 | (137,14)-(1164,236) | 仅控件边框（暗色 `-text` 与旧 `primary` 同值，文本零变化；边框含 §15.17 抬档） |
 | alerts-right-light.png | ≈3856 / 12621（估算，见下） | 1.47% | 85 | (0,101)-(798,719) | **元素级补拍只含 Tag / 文本角色**（该图内 `control-border` 颜色对 0 命中）：neutral / success / primary / warning 文本色 + 抗锯齿合成色 |
 | alerts-right-dark.png | 0 / 0 | 0.00% | 0 | — | 暗色元素级补拍无变化（`-text` 与旧值同源；无控件边框元素）；严格口径 0 ⇒ 门禁口径必为 0，非估算 |
-| repos-light.png | 17527 / 186108 | 14.36% | 245 | (120,249)-(1319,523) | **含 §15.17 选择栏的版面变化**（表格整体下移）+ 复选框 / 分页边框 + neutral / primary 文本色 |
-| repos-dark.png | 29071 / 188455 | 14.54% | 233 | (120,14)-(1319,523) | 同上 + 暗色控件边框抬档 |
+| repos-light.png | 17527 / 188426 | 14.54% | 245 | (120,14)-(1319,523) | **含 §15.17 选择栏的版面变化**（表格整体下移 36 px）+ 复选框 / 分页边框 + neutral / primary 文本色 |
+| repos-dark.png | 29071 / 188453 | 14.54% | 233 | (120,14)-(1319,523) | 同上 + 暗色控件边框抬档 |
 | pr-checks-light.png | 1870 / 6392 | 0.49% | 99 | (144,14)-(1295,844) | 控件边框 + 结论 Tag 文本角色 |
 | pr-checks-toast-light.png | 1494 / 6580 | 0.51% | 99 | (144,14)-(1295,691) | 同 pr-checks + **按钮 hover 反馈**（neutral 实底混合） |
 | dialog-import-repos-light.png | 4320 / 4548 | 1.39% | 99 | (16,79)-(743,268) | 弹窗内表单字段 / 复选框边框（`control-border`） |
@@ -991,8 +991,8 @@ e2e 侧共改写 14 个 spec（`.p-dialog*` / `.p-select*` / `.p-drawer` / `.p-c
 | alerts-run-drawer-light.png | 4559 / 14391 | 1.11% | 55 | (137,170)-(1073,741) | 抽屉内控件边框 + neutral 文本角色（含遮罩合成色） |
 | login-light.png | 1576 / 1728 | 0.13% | 99 | (527,431)-(912,544) | 登录表单字段边框 |
 
-  - **口径说明**：`alerts-right-*` 因用例在整页截图断言处即中止而未进入元素级断言，门禁口径取本批一次性脚本的 pixelmatch 复刻实现（同 `threshold: 0.1` / `includeAA: false`）；该实现与 Playwright 报数逐一核对 **18 张**（其中 13 张完全一致、5 张偏差 1-4 px），故估算值可信。
-  - **结论**：20 张基线中 **19 张变化 / 1 张（`alerts-right-dark`）零变化**；差异来源分三层且均已登记——① `control-border` 与 `-text` 角色迁移（全表）；② 按钮 hover 状态（`pr-checks-toast-light`）；③ **§15.17 新增选择栏的版面变化**（仅 `repos-*` 与 `dialog-select-open-*`，表格整体下移约一行）。图像尺寸全部为 1440×900，无越界布局。`schedules-form-layer-dark` 在抬档前（上游 `#67676a`）门禁 348、抬档后 6691——说明边框色差跨越了 `threshold`，颜色轴与面积轴的关系符合 [测试规范 §6.7](../../standards/testing.md#_6-7-视觉回归-截图识别层-apps-platform) 的既有结论。
+  - **口径说明**：**严格口径 / 门禁口径的对比基准统一为 0.7.0 基线**（上一次升级前的 `git` 版本），非 rc.1 首版重建。`alerts-right-*` 因用例在整页截图断言处即中止而未进入元素级断言，门禁口径取本批一次性脚本的 pixelmatch 复刻实现（同 `threshold: 0.1` / `includeAA: false`）；该实现与 Playwright 报数逐一核对 **18 张**（其中 13 张完全一致、5 张偏差 1-4 px），故估算值可信。
+  - **结论**：20 张基线中 **19 张变化 / 1 张（`alerts-right-dark`）零变化**；差异来源分三层且均已登记——① `control-border` 与 `-text` 角色迁移（全表）；② 按钮 hover 状态（`pr-checks-toast-light`）；③ **§15.17 新增选择栏的版面变化**（仅 `repos-*` 与 `dialog-select-open-*`，表格整体下移 36 px）。20 张图像尺寸与上一版逐张一致（无因位移导致的尺寸变化）。`schedules-form-layer-dark` 在抬档前（上游 `#67676a`）门禁 348、抬档后 6691——说明边框色差跨越了 `threshold`，颜色轴与面积轴的关系符合 [测试规范 §6.7](../../standards/testing.md#_6-7-视觉回归-截图识别层-apps-platform) 的既有结论。
 
 **4）回归验证矩阵（本批收口）**
 
@@ -1013,7 +1013,7 @@ e2e 侧共改写 14 个 spec（`.p-dialog*` / `.p-select*` / `.p-drawer` / `.p-c
 
 **5）观察与遗留**
 
-- **e2e flaky 与本升级无关，分属两条存量问题**：① **Select 首次点击族**（M50.4 残留，`tests/visual` 侧已用 `openSelectPanel` 兜底、e2e 侧未覆盖）——本轮出现 `scan-config`（扫描偏好 Select 面板项点击超时）与 `schedules`（计划类型选择器），`--repeat-each=2` 可复现；② **列表刷新时序**（M49.2a 登记的「平台 e2e 偶发等待超时」）——前一轮出现 `repos-crud`「删除后列表行未出现」。全部重试通过（207 passed / 0 failed），不随本批修复，避免混入主题。
+- **e2e flaky 与本升级无关，分属两条存量问题**：① **Select 首次点击族**（M50.4 残留，`tests/visual` 侧已用 `openSelectPanel` 兜底、e2e 侧未覆盖）——本轮出现 `scan-config`（扫描偏好 Select 面板项点击超时）与 `schedules`（计划类型选择器），`--repeat-each=2` 可复现；② **列表刷新时序**（M49.2a 登记的「平台 e2e 偶发等待超时」）——前一轮出现 `repos-crud`「删除后列表行未出现」。全部重试通过（首轮 207 / 收口 211，均 0 failed），不随本批修复，避免混入主题。
 - **暗色控件边界已抬档**：见 §15.17 第 2 条（`#7b8494`，elevated 3.88:1）；上游单值按自家暗面标定，属消费方面色差异，不构成上游缺陷。
 - **rc 通道风险与回滚**：`1.0.0-rc.1` 为预发布版本，精确钉定 + 单版本解析；回滚路径 `pnpm --filter @dependfix/platform add caomei-ui@0.7.0 --save-exact`（回滚后须按本节口径重建基线）。若仓内出现 rc.2，需重新过 `minimumReleaseAge` 窗口（口径见 [安全规范 §5.2](../../standards/security.md#_5-依赖与供应链安全-dependency-supply-chain-security) 与 [开发规范 §5.1.57](../../standards/development.md)），窗口内的精确豁免边界同源。
 - **表头全选语义已适配并加守卫**：表头保持上游「当前页」；跨页全选由选择栏承载，`repos-select-all.e2e.test.ts` 锁定（见 §15.17 第 1 条）。
@@ -1027,12 +1027,12 @@ e2e 侧共改写 14 个 spec（`.p-dialog*` / `.p-select*` / `.p-drawer` / `.p-c
 
 **1）全选语义适配（`repos` 页）**
 
-- **检查结论**：全站仅 `repos` 使用 `selection-mode="multiple"`（`rg` 实测 1 处）；其余表页或为单选 / 无选择（`alert-run-sidebar`、`run-detail-dialog`、`pr-checks`、`batch-runs`、`repos/[id]/runs`），或只有 `expander` 列。两处 `lazy` 表（`scans`、`repo-history-dialog`）无选择列，不受全选语义影响。
+- **检查结论**：全站仅 `repos` 使用 `selection-mode="multiple"`（`rg` 实测 1 处，无 `single` 用法）；其余表页均无选择列——`pr-checks` / `batch-runs` 含 `expander` 列，`scans` / `repo-history-dialog` 是 `lazy` 表（后者也无 `expander`），故都不受全选语义影响。另 `import-repos-dialog` 的「全选」是**自建 checkbox + 自建分页列表**（选 `selectableFilteredRepos` 全集合），不经 DataTable 语义，同样不受影响。
 - **功能缺口**：`repos` 是客户端分页（10 / 25 / 50），表头全选只覆盖当前页；「批量扫描全部筛选结果」需逐页点击（或先把每页调到 50）。受控 `selectedRows` 按 row id 跨页保持，故逐页勾选可用但成本随页数线性增长。
-- **适配（不改上游行为）**：表头保持 1.0 语义（当前页）；卡片内表格上方新增选择栏——`已选 {selected} 条，当前筛选 {total} 条` + `全选全部（N）` / `清空选择`。`selectAllFiltered` 以整集合替换（与 DataTable「回写当前过滤集合」的既有语义一致）；选中判定按 id 比对（`selectedRows` 可能含被筛选隐藏的行）。
+- **适配（不改上游行为）**：表头保持 1.0 语义（当前页）；卡片内表格上方新增选择栏——`已选 {selected} 条，当前筛选 {total} 条` + `全选全部（N）` / `清空选择`（按钮按状态显隐：已选 > 0 才显示「清空选择」，未全选才显示「全选全部」）。`selectAllFiltered` 以整集合替换（与 DataTable「回写当前过滤集合」的既有语义一致）；选中判定按 id 比对（`selectedRows` 可能含被筛选隐藏的行）。
 - **落地拆分**：选择栏为独立组件 `app/components/repo-selection-bar.vue`（纯展示 + 两个 emit），状态与动作抽到 `app/composables/use-repo-selection.ts`（纯函数 `isAllFilteredSelected` 按 id 判定 + 组合式），既避免 `repos.vue` 越过 `max-lines: 800`，也让判定可单测。
 - **守卫**：`tests/e2e/repos-select-all.e2e.test.ts` 自建 12 条仓库并清理——断言「表头全选 = 10 条」「第 2 页未被波及」「翻页保持已选」「全选全部（12）覆盖两页」「清空归零」，并加版面守卫（选择栏底边不高于表格顶边）；单测 `tests/unit/use-repo-selection.test.ts` 覆盖「按 id 判定 / 缺行 / 空集合 / 含隐藏行 / 全选替换与清空」5 例。**mutation 实测**：`selectAllFiltered` 改为只取首页 → e2e 失败（Expected 12 / Received 10）。
-- **视觉**：`repos-*` 与 `dialog-select-open-*` 基线因选择栏整体下移重建（§15.16 表内已标注）；纯版面差异 repos-light 14.36% / repos-dark 14.54% / dialog-select-open 7.64%–8.28%（含 token 差异）。
+- **视觉**：`repos-*` 与 `dialog-select-open-*` 基线因选择栏整体下移重建（§15.16 表内已标注）。隔离 token 变化、**只看版面位移**（对比 rc.1 首版基线）：repos-light 14.36% / repos-dark 14.54%、dialog-select-open light 7.64% / dark 8.28%（该用例在 `/repos` 打开弹窗，背景页随表格下移；dark 另含边框抬档）；**合计口径（基准 = 0.7.0 基线）见 §15.16 表**。
 
 **2）暗色控件边界微调**
 
