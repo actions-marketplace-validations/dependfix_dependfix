@@ -75,17 +75,18 @@
 - **交付物**：预估 3-4 commits / 6-8 文件（含 1-2 张基线）/ 200-350 行。
 - **风险与缓解**：非确定性可能源于门户渲染时序 → 先做 10 轮取证再决定「等待稳定帧 / 遮罩 / 夹具钉死」，不直接放宽容差；覆盖率为历史读数 → 以本次实测为准并注明时点。
 
-### 追加临时待办（2026-10-30 用户授权，不占阶段条目编号，P1 🛠️/🎨）：caomei-ui 1.0.0-rc.1 升级与视觉回归
+### 追加临时待办（2026-10-30 用户授权，不占阶段条目编号，P1 🛠️/🎨）：caomei-ui 1.0.0-rc.1 升级与视觉回归（已完成 2026-10-31）
 
 - **目标**：平台组件库由 `0.7.0` 升到 `1.0.0-rc.1`（`next` 通道），消费其主题 token 拆分与组件行为修复，并在视觉 / 行为门禁上留下可审计证据。
-- **已核事实（2026-10-30 实测）**：registry `dist-tags.next = 1.0.0-rc.1`（`next` 于 2026-10-30T07:18:39Z 发布；`latest` 仍 `0.7.0`，2026-10-20 发布；距发布已超 `minimumReleaseAge: 60` 分钟窗口）；`engines >=22`（本仓 `^22.23.4 || ^24.22.1` 满足）；`peerDependencies` / `dependencies` / `exports`（13 键）与 0.7.0 **完全一致**；官方 `check:api-surface` 预演为 **0 删除文件 / 0 删除导出**（additive）。变化集中在：① token——新增 `--caomei-color-{primary,success,warning,danger,neutral}-text` 与 `--caomei-color-control-border`（控件边界加深），`text-muted` 值微调；② 组件——button hover/active 反馈、DataTable 全选作用域 / lazy 页内状态 / 键盘横向滚动、badge / tag / message 样式；③ 新增 `sakura` / `forest` / `ink` 预设。
+- **已核事实（2026-10-30 实测）**：registry `dist-tags.next = 1.0.0-rc.1`（`next` 于 2026-10-30T07:18:39Z 发布；`latest` 仍 `0.7.0`，2026-10-20 发布；距发布已超 `minimumReleaseAge: 60` 分钟窗口）；`engines >=22`（本仓 `^22.23.4 || ^24.22.1` 满足）；`peerDependencies` / `dependencies` / `exports`（13 键）与 0.7.0 **键值一致**（仅 `peerDependencies` 键序不同）；官方 `check:api-surface` 预演为 **0 删除文件 / 0 删除导出**（additive）。变化集中在：① token——新增 `--caomei-color-{primary,success,warning,danger,neutral}-text` 与 `--caomei-color-control-border`（控件边界加深），`text-muted` 值微调；② 组件——button hover/active 反馈、DataTable 全选作用域 / lazy 页内状态 / 键盘横向滚动、badge / tag / message 样式；③ 新增 `sakura` / `forest` / `ink` 预设。
 - **范围**：`apps/platform/package.json` + `pnpm-lock.yaml`；`app/assets/styles/_caomei-tokens.scss`（新 token 的明暗档对齐 / 是否覆盖）；受影响的 e2e class 断言（排序图标 / 底色 / 选择状态）；`apps/platform/tests/visual/**`；`docs/design/governance/caomei-ui-migration.md` §15.16（升级实证 + 逐基线量化）；`docs/guide/tech-stack.md` 与 `docs/i18n/en-US/guide/tech-stack.md`（当前升级史只记到 0.6.0，需补 0.7.0 与 1.0.0-rc.1，zh / en 成对同步）。
 - **验收标准**：① `pnpm why caomei-ui` 单版本 `1.0.0-rc.1`，`pnpm i --frozen-lockfile` 通过；② build / typecheck / lint 全绿；③ e2e 全量通过（重点 DataTable 受控选择、lazy 分页、行展开）；④ 视觉：先 `--update-snapshots=all` 重建，再**不带 update 连跑两遍**幂等；每张变更基线给出「变更源 → token / 组件」对照与像素量化（门禁口径 + 严格口径，口径见迁移评估 §15.15）；⑤ 受影响契约断言逐条适配并注明守卫意图（不得直接改期望值凑绿）；⑥ 新文本角色 token 在明暗两档对比度 ≥4.5:1（控件边框仅记录值）；⑦ 未采纳新预设，页面外观变化可逐条归因；⑧ `tech-stack` zh / en 版本行成对一致。
 - **不做什么**：不改页面布局 / 交互语义；不把 `sakura` / `forest` / `ink` 设为默认预设；不改 caomei-ui 仓库；不升级其余传递依赖的显式钉定。
 - **依赖**：无（与 M52.4 有「pr-checks 基线先重建」的顺序关系）。
 - **容量评估结论（§3.1.1 记录②）**：本批占原子基线文件 45.5%-51.0%（上界触阈值 2）、commits 30.0%-41.7%、文本行 27.5%-28.0%；用户 2026-10-30 明确放行不移出，保留全部 4 原子。
 - **交付物**：预估 3-5 commits / 15-25 文件（含 10-18 张基线）/ 300-500 行文本；基线为生成物，文件数不代表逻辑面。
-- **风险与缓解**：rc 为预发布 → 精确钉定 + 回滚路径（`pnpm add caomei-ui@0.7.0`）记入升级实证；视觉「低色差 + 大面积」盲区 → 用严格口径统计并逐张归因，不用 `--update-snapshots` 默认行为当证据；DataTable 行为变化 → 先一次性 smoke 监听 `pageerror` / `console.error`，再跑全量 e2e；`minimumReleaseAge` → rc.1 已过窗口，若仓内出现 rc.2 需等待窗口或按 [security.md §5.7](../standards/security.md) 精确豁免。
+- **风险与缓解**：rc 为预发布 → 精确钉定 + 回滚路径（`pnpm add caomei-ui@0.7.0`）记入升级实证；视觉「低色差 + 大面积」盲区 → 用严格口径统计并逐张归因，不用 `--update-snapshots` 默认行为当证据；DataTable 行为变化 → 先一次性 smoke 监听 `pageerror` / `console.error`，再跑全量 e2e；`minimumReleaseAge` → rc.1 已过窗口，若仓内出现 rc.2 需等待窗口或按 [security.md §5](../standards/security.md) 与 [development.md §5.1.57](../standards/development.md) 的成熟窗口口径处理。
+- **闭环（2026-10-31）**：`fdbb4e57`（升级 + token 适配 + 19 张基线 + 守卫用例）、`858e4683`（[§15.16](../design/governance/caomei-ui-migration.md#_15-16-caomei-ui-1-0-0-rc-1-升级实证-2026-10-31) 实证与版本史）。证据：全量 e2e 207 passed / 0 failed（2 flaky 重试通过）、视觉 `=all` 重建 20 passed + 两轮 20 passed、定向 DataTable e2e 28 passed、`gates:docs` 16 项、审计 R1 → R2 Pass。残余：暗色 `control-border` 在 elevated 面 2.59:1、表头全选语义无自动守卫（均登记于 §15.16 第 5 条）。
 
 ---
 
