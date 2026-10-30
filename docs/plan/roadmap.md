@@ -58,26 +58,27 @@
 | M48: 对外 PR 交付闭环 | 兄弟包 / peer 家族锁步升级 + CI 独有脚本纳入验证链 + 同告警尝试指纹去重 + 提交面白名单与 YAML 定点编辑 + PR 创建后 CI 回环 + 外部作业归因与合并门禁 | P0-P1 | 已完成（2026-10-24 用户决策 D+E / 2026-10-25 已闭环归档，见 [M48 分片](archive/todo-archive-phases-m48.md#m48-对外-pr-交付闭环-2026-10-24-用户决策-d-e-2026-10-25-归档)） |
 | M49: 0.6.0 发版清障 | 自产 code scanning 告警清零 + 依赖漏洞清零 + Security 门禁转正 + 发版文档漂移收口 + 0.6.0 发布与发布后验证 | P0 | 已完成（2026-10-25 用户决策 / 2026-10-29 已闭环归档，见 [M49 详情分片](archive/roadmap-phases-m49.md#m49-0-6-0-发版清障-2026-10-25-用户决策-2026-10-29-已闭环-归档) + [M49 归档分片](archive/todo-archive-phases-m49.md#m49-0-6-0-发版清障-2026-10-25-用户决策-2026-10-29-归档)） |
 | M50: 通知可信度收口（1.0-E） | `critical` 告警必选不可关闭 + 通知严重级别术语与阈值命名收敛 + 周报投递重试与窗口锁 + `/settings` 与通知页 dark 视觉覆盖 | P1-P3 | 已完成（2026-10-29 用户决策 / 2026-10-30 已闭环归档，见 [M50 详情分片](archive/roadmap-phases-m50.md) + [M50 归档分片](archive/todo-archive-phases-m50.md)） |
-| 1.0: 发布门槛收口 | E 通知可信度（= M50，已归档）+ F1 语义与数据（M51，已规划）+ F2 文档与验证（M52）+ G 发布工程（M53：契约冻结 / 迁移指南 / 真实环境矩阵 / `@v1`） | P0-P1 | 进行中（E 已闭环；F1 已规划 M51〔2026-10-30〕；F2/G 待规划；台账见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)） |
+| M51: 语义与数据收口（1.0-F1） | 告警级修复结果回写 + PR Check 结论统一与同 ref 收敛 + 平台 PR 回环 + 基线红交付降级 + 取消面与单仓剩余预算 + 配置写入闸门与 alerts 排序兜底 | P0-P2 | 已完成（2026-10-30 用户决策 / 2026-10-30 已闭环归档，见 [M51 详情分片](archive/roadmap-phases-m51.md) + [M51 归档分片](archive/todo-archive-phases-m51.md)） |
+| 1.0: 发布门槛收口 | E 通知可信度（= M50，已归档）+ F1 语义与数据（= M51，已归档）+ F2 文档与验证（M52）+ G 发布工程（M53：契约冻结 / 迁移指南 / 真实环境矩阵 / `@v1`） | P0-P1 | 进行中（E / F1 已闭环；F2/G 待规划；台账见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)） |
 
 > **本路线图定位**：按 [规划规范 §2.1](../standards/planning.md) 仅维护阶段概览（目标 / 优先级 / 状态）。详细实施记录 / commit 引用 / 关键决策 / 经验教训见对应归档段（详见下方"## 详细任务"索引）。
 
 > **M0 - M38 阶段详情已迁出**：见 [archive/roadmap-phases-m0-m38.md](archive/roadmap-phases-m0-m38.md)（2026-10-15 M44.4 批次③ 迁出；主文档保留概述表与最近阶段）。
 
-> **M39-M50 阶段详情已迁出**：M39-M48 见 [archive/roadmap-phases-m39-m48.md](archive/roadmap-phases-m39-m48.md)（2026-10-26 文档治理批次迁出）；M49 见 [archive/roadmap-phases-m49.md](archive/roadmap-phases-m49.md)（2026-10-29 归档批次迁出）；M50 见 [archive/roadmap-phases-m50.md](archive/roadmap-phases-m50.md)（2026-10-30 归档批次迁出）。主文档保留里程碑概述表与当前阶段状态。
+> **M39-M51 阶段详情已迁出**：M39-M48 见 [archive/roadmap-phases-m39-m48.md](archive/roadmap-phases-m39-m48.md)（2026-10-26 文档治理批次迁出）；M49 见 [archive/roadmap-phases-m49.md](archive/roadmap-phases-m49.md)（2026-10-29 归档批次迁出）；M50 见 [archive/roadmap-phases-m50.md](archive/roadmap-phases-m50.md)（2026-10-30 归档批次迁出）；M51 见 [archive/roadmap-phases-m51.md](archive/roadmap-phases-m51.md)（2026-10-30 归档批次迁出）。主文档保留里程碑概述表与当前阶段状态。
 
-## 当前阶段：M51 语义与数据收口（1.0-F1 批次，2026-10-30 规划）
+## 当前阶段：无（M51 已归档；下一阶段 F2 / G 待规划）
 
-M51 承接 1.0 台账 F1 九项，按语义聚类为 6 原子：`ScanResult` 修复结果回写（converged / success / failed / skipped）+ PR Check 结论口径统一与同 ref 多轮收敛 + 平台 PR Check 创建后回环（评论 / 关闭 / 有界重试）+ 基线红交付降级（issue / draft / skip）+ 运行级取消面与单仓剩余预算 + 配置写入闸门与 alerts 排序兜底。任务正文、验收标准与交付顺序见 [todo.md](todo.md)；台账口径见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md) §3.1 F1。
+M51 语义与数据收口（1.0-F1）六原子已全部闭环并归档：告警级修复结果回写 + PR Check 结论统一与同 ref 收敛 + 平台 PR 回环 + 基线红交付降级 + 取消面与单仓剩余预算 + 配置写入闸门与 alerts 排序兜底。阶段正文见 [M51 归档分片](archive/todo-archive-phases-m51.md)，规划与收口口径见 [M51 详情分片](archive/roadmap-phases-m51.md)。
 
-**后续（已授权，待规划）**：F2 文档与验证 → G 发布工程（对应 M52-M53）；真实环境验证所需凭据 / staging / AI 预算由用户提供。0.6.0 发布残余（本地发布通道门禁缺口 / `--version` 0.6.1 / master 3 连绿窗口 / Docker `platform-0.4.0` tag 复核）已登记 [backlog.md](backlog.md)。
+**后续（已授权，待规划）**：F2 文档与验证（M52）→ G 发布工程（M53，契约冻结 / 迁移指南 / 真实环境矩阵 / `@v1`）；真实环境验证所需凭据 / staging / AI 预算由用户提供。0.6.0 发布残余（本地发布通道门禁缺口 / `--version` 0.6.1 / master 3 连绿窗口 / Docker `platform-0.4.0` tag 复核）与 M51 残余（平台交付载体 / 预算跳过可观测性 / 4 处列表查询并列次键 / 平台 typecheck 覆盖）已登记 [backlog.md](backlog.md)。
 
 ---
 
 ## 详细任务
 
-- 当前阶段任务：[M51 语义与数据收口（1.0-F1）](todo.md)（6 原子，2026-10-30 规划）
-- 已归档阶段：[todo-archive.md](todo-archive.md)（阶段索引 + 分片；M0-M50 全部已归档；分片治理见 [archive/index.md](archive/index.md)）
+- 当前阶段任务：无（M51 已归档，见 [todo-archive.md](todo-archive.md)）
+- 已归档阶段：[todo-archive.md](todo-archive.md)（阶段索引 + 分片；M0-M51 全部已归档；分片治理见 [archive/index.md](archive/index.md)）
 - 下一阶段（已授权，待规划）：**F2 文档与验证 → G 发布工程**（M52-M53；台账见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)）
 - 后续阶段任务（延期项 + 未排期增强候选）：[backlog.md](backlog.md)
 

@@ -9,6 +9,7 @@
 
 | 阶段 | 主题 | 归档文件 | 归档日期 |
 |:--|:--|:--|:--|
+| M51 | 语义与数据收口（1.0-F1 批次） | [M51](archive/todo-archive-phases-m51.md) | 2026-10-30 |
 | M50 | 通知可信度收口（1.0-E 批次） | [M50](archive/todo-archive-phases-m50.md) | 2026-10-30 |
 | M49 | 0.6.0 发版清障 | [M49](archive/todo-archive-phases-m49.md) | 2026-10-29 |
 | M48 | 对外 PR 交付闭环 | [M48](archive/todo-archive-phases-m48.md) | 2026-10-25 |
