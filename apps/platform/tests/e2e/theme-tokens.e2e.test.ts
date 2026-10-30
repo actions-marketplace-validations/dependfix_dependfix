@@ -49,11 +49,12 @@ async function readBorderContrast(page: import('@playwright/test').Page): Promis
     border: string
     surface: string
     ratio: number
+    triggerBorder: string | null
 }> {
     return page.evaluate(() => {
         const style = getComputedStyle(document.documentElement)
         const toRgb = (value: string): [number, number, number] => {
-            const match = value.trim().match(/^#([0-9a-f]{6})$/i)
+            const match = /^#([0-9a-f]{6})$/i.exec(value.trim())
             const hex = match?.[1]
             if (!hex) {
                 throw new Error(`unexpected color format: ${value}`)
@@ -73,8 +74,22 @@ async function readBorderContrast(page: import('@playwright/test').Page): Promis
         const surface = style.getPropertyValue('--caomei-color-bg-elevated').trim()
         const a = luminance(toRgb(border))
         const b = luminance(toRgb(surface))
-        return { border, surface, ratio: (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05) }
+        // 消费面：页面上真实控件的边框色，证明 token 真的生效（而不是只改了变量）
+        const trigger = document.querySelector('.caomei-select.caomei-field')
+        const triggerBorder = trigger ? getComputedStyle(trigger).borderTopColor : null
+        return {
+            border,
+            surface,
+            ratio: (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05),
+            triggerBorder,
+        }
     })
+}
+
+/** `#rrggbb` → `rgb(r, g, b)`（与 getComputedStyle 的返回格式对齐）。 */
+function hexToRgb(hex: string): string {
+    const n = Number.parseInt(hex.replace('#', ''), 16)
+    return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`
 }
 
 test.use({ storageState: 'tests/e2e/.auth/admin.json' })
@@ -120,6 +135,10 @@ test.describe('组件库文本角色 token（1.0 拆分防护）', () => {
         const result = await readBorderContrast(page)
         expect(result.surface).toBe('#f8fafc')
         expect(result.ratio).toBeGreaterThanOrEqual(3)
+        // 消费面：真实 Select 触发器边框 = token 值（证明字段边框确实走 control-border）；
+        // 用 poll 读，避开切主题时 border-color 过渡的中间态
+        await expect.poll(async () => (await readBorderContrast(page)).triggerBorder, { timeout: 5000 })
+            .toBe(hexToRgb(result.border))
     })
 
     test('暗色档控件边界在 elevated 面不低于 3:1（平台面比库默认面亮）', async ({ page, context }) => {
@@ -133,5 +152,8 @@ test.describe('组件库文本角色 token（1.0 拆分防护）', () => {
         // 平台 dark elevated = #1e293b；上游默认值 #67676a 在此面仅 2.59:1
         expect(result.surface).toBe('#1e293b')
         expect(result.ratio).toBeGreaterThanOrEqual(3)
+        // 消费面：真实 Select 触发器边框 = 抬档后的 token 值（同上用 poll 避开过渡中间态）
+        await expect.poll(async () => (await readBorderContrast(page)).triggerBorder, { timeout: 5000 })
+            .toBe(hexToRgb(result.border))
     })
 })
