@@ -68,6 +68,13 @@ export interface ScanExecutorResult {
     runUrl?: string
     /** B 模式：GitHub Actions run id（结果回填时下载 artifact 用） */
     runId?: number
+    /**
+     * `fix-and-pr` 交付创建的 PR 编号（新建或命中同内容 PR）。
+     *
+     * 非 PR 交付（fix / report-only / 无新 commit）缺省；落库到 `ScanRun.prNumber`，
+     * 供 PR 回环反馈判定「观察态」（见 docs/design/governance/pr-feedback-loop.md §3）。
+     */
+    prNumber?: number
     /** 执行日志（JSON 数组：[{timestamp, level, message, context}]） */
     logsJson?: string
     /** 执行窗口内存 / OOM 快照（容器执行器采集；缺省 = 未接入，落库为 NULL + 原因） */

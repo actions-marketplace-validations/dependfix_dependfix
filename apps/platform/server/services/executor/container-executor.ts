@@ -365,6 +365,7 @@ export class ContainerExecutor implements ScanExecutor {
             // 平台接管交付：仅当引擎 commit 产生新提交时触发（no-op 扫描不产生空 push）
             // 触发条件比原 `exitCode === 0` 更严格：exitCode 1 也算"有部分成功"，但只有真产生 commit 才推
             let runUrl: string | undefined
+            let prNumber: number | undefined
             if (needsPush && result && ctx.credential?.token) {
                 const hasNewCommit = await checkHasNewCommit(workDir, preRunHead)
                 if (!hasNewCommit) {
@@ -390,6 +391,7 @@ export class ContainerExecutor implements ScanExecutor {
                             octokit,
                         })
                         runUrl = delivery.runUrl
+                        prNumber = delivery.prNumber
                     } else {
                         // fix 模式（无 PR）：推当前分支（默认分支）即可
                         const branchName = await extractBranchName(workDir)
@@ -436,9 +438,10 @@ export class ContainerExecutor implements ScanExecutor {
             return {
                 exitCode,
                 result,
+                runUrl,
+                prNumber,
                 startedAt,
                 finishedAt: new Date().toISOString(),
-                runUrl,
                 logsJson: memLogger.toJson(),
             }
         } catch (error) {

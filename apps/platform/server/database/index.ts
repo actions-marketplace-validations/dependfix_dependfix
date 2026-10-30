@@ -26,6 +26,7 @@ import { AddScanRunOutcomeColumns2600000000000 } from './migrations/260000000000
 import { AddPlatformNotification2700000000000 } from './migrations/2700000000000-AddPlatformNotification'
 import { AddScanRunResourceColumns2800000000000 } from './migrations/2800000000000-AddScanRunResourceColumns'
 import { AddScanRunBuildColumns2900000000000 } from './migrations/2900000000000-AddScanRunBuildColumns'
+import { AddScanRunPrNumber2900000000001 } from './migrations/2900000000001-AddScanRunPrNumber'
 import { runStartupBackup } from './backup'
 import { Account } from '#server/entities/account'
 import { Session } from '#server/entities/session'
@@ -108,6 +109,7 @@ export const createDataSourceOptions = (): DataSourceOptions => {
             AddPlatformNotification2700000000000,
             AddScanRunResourceColumns2800000000000,
             AddScanRunBuildColumns2900000000000,
+            AddScanRunPrNumber2900000000001,
         ],
         migrationsRun,
         synchronize,

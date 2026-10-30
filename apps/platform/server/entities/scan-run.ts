@@ -187,6 +187,16 @@ export class ScanRun extends BaseEntity {
     @Column({ type: 'varchar', length: 500, nullable: true })
     runUrl!: string | null
 
+    /**
+     * `fix-and-pr` 交付创建的 PR 编号（新建或命中同内容 PR）。
+     *
+     * `null` = 非 PR 交付（fix / report-only / 无新 commit）或存量行。
+     * 非空即「PR 回环反馈」的观察态锚点（进程重启 / 多副本不丢观察），
+     * 口径见 [pr-feedback-loop.md](../design/governance/pr-feedback-loop.md) §3。
+     */
+    @Column({ type: 'integer', nullable: true, name: 'pr_number' })
+    prNumber!: number | null
+
     /** 所属批量运行 id（定时/批量触发时关联；单独手动触发为 null） */
     @Index()
     @Column({ type: 'varchar', length: 36, nullable: true })

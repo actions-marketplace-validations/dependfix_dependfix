@@ -53,16 +53,17 @@
 - **证据**：根全量 346 文件 / 5390 passed；`check-signals` 9 例（provider 归因 / 组键血缘 / kind 隔离 / 排序 / 不可比回退）、`build-signals` 54 例（含 status/deployment `roundAt` 与同环境部署收敛）、`polling-source` 19 例（`filter=all` 由 nock query 锁定）、`action-status-monitor` 18 例、`pr-check-watch` 43 例（含采集接线的重跑 / 双触发双例）、core 双缺血缘不合并 1 例；lint 0 error（3 存量 warning）；typecheck 7 包；`gates:docs` 16 项；mutation 9/9 击杀（null→skipped / 组键去血缘 / 组键去 kind / 缺 roundAt 视为最旧 / 采集层无去重 / 采集层无 `filter=all` / 关注面无去重 / CLI 无去重 / CLI 组键去 kind）。
 - **边界**：① **被新 workflow run 取代的旧失败不会自动消失**（同 SHA 上「重新触发 / 另一 event」的 run 与旧失败按血缘各自成组，`overallStatus` 维持 failure，ack 后下一轮会被重新点回）——有意选择「不掩蔽失败」，与 GitHub 页面「同名最新一轮」判定可能不一致，区分并发 run 与取代 run 需 `check_suite` / event 维度，登记为后续候选；② `filter: 'all'` 使分页成本随同 SHA 的 run 数上升（`per_page: 100` 下影响有限，属限流面额外开销）；③ 非 Actions check（无 run id）不收敛，重跑仍可能双报；④ 无 `environment` 的 deployment 以 `ref` 作 name、按 ref 合并；⑤ 平台未配置关注集时沿用采集层派生值（监控器只在关注面路径兜底）；⑥ 去重 × `capSignals` 的先后顺序由代码顺序保证，**无守卫用例**（若被移到截断之后，旧失败会占配额截掉最新轮）；⑦ 归因面仍不统一（平台无标签 / CLI 标 `unknown`）；⑧ `signalsJson` 不保留被覆盖轮次。
 
-### M51.3 [P0 🛠️] 平台 PR Check 创建后回环（台账 ①，拆 a/b）（**设计定稿；a/b 待实施；重试待用户裁定**）
+### M51.3 [P0 🛠️] 平台 PR Check 创建后回环（台账 ①，拆 a/b）（**设计定稿 + a 观察态已落地；b 待实施；重试按用户裁定延后**）
 
 - **目标**：平台创建的修复 PR 在 checks 失败时自动评论说明，并按配置关闭或触发有界重试，消除「PR 红了无人收」。
 - **设计（已定稿）**：[pr-feedback-loop.md](../design/governance/pr-feedback-loop.md)——观察态唯一事实源 = `ScanRun.prNumber` + `PRCheck`（进程重启 / 多副本不丢）；幂等键 `(repositoryId, prNumber, headSha)` + 评论 HTML marker；窗口默认 24h；评论默认开、关闭与重试默认关；动作失败只 warn 不改 run 结论；由监测器节拍驱动（不新增调度器、不阻塞 worker）。
-- **待裁定（retry）**：重试需「重新触发既有修复链」，平台当前无对外队列触发面，且 `ScanQueue.add` 的去重键是 `scan-<repositoryId>`（与「同 PR 重试」语义不等价）。设计定义 `FeedbackRetryDispatcher` 契约（§8），**a/b 不实现**，等用户决定是否本批补触发面。
+- **重试范围（用户 2026-10-30 裁定）**：本批只做 a/b，retry 延后；设计稿 §8 的 `FeedbackRetryDispatcher` 契约保留为后续候选（平台需先补「同 PR 重试」的触发面与配额）。
+- **a 观察态（已落地）**：`ScanRun.prNumber`（新列 + 幂等迁移 `2900000000001`，存量 NULL 不回填）由 `deliverFixAndPr` 回传并经 `runContainerExecutor` 写入；纯函数 `services/pr-feedback/observation.ts` 判定「是否仍在观察窗口」（交付时刻优先、缺失回退 PRCheck 创建时刻、`windowHours<=0` 关闭、参照时刻不可得 fail-safe 不动作）。
 - **范围**：`services/executor/platform-delivery.ts`（交付后写 `prNumber`）；新增 `services/pr-feedback/`（观察态判定 + 幂等评论 + 关闭决策）；`services/monitor/action-status-monitor.ts`（每轮末尾调用）；`entities/scan-run.ts`（`prNumber` 列）/ `entities/repository.ts`（`prFeedback` JSON 列）+ 迁移；审计事件 `pr_feedback_*`。
 - **验收标准**：① 平台建 PR 后进入观察态，结果落 `PRCheck` 且 run 详情可见；② 失败时按 `headSha` 幂等评论一次；③ `closeFailedPr` 开启时关闭 PR 并写审计；④ 观察有上限（PR 终态或配置窗口），不阻塞 worker / 不长时间持锁；⑤ 关闭与重试默认关，开启后行为逐条可测。
 - **不做什么**：不做自动二次修复（重试仅重新触发既有修复链，且需显式开启）；不改 CLI 交互式确认路径；不在平台侧做父提交比对（无 `self_caused`，关闭门槛已在设计稿 §5 登记）。
 - **依赖**：M51.2（已闭环，结论口径统一）；`pr-delivery-closure.md` 既有交付闭环语义。
-- **交付物**：3 commits（设计 / a 观察态 / b 评论与关闭）/ 12-15 files / 500-700 行（预估）→ 按 §1.1 拆 a、b 两个子任务各自独立验收与提交。
+- **交付物**：3 commits（设计 `08f0f4fc` / a 观察态 / b 评论与关闭）/ 12-15 files / 500-700 行（预估）→ a、b 各自独立验收与提交；a 实测 8 files（含迁移与其用例）。
 - **风险与缓解**：长轮询占队列与锁 → 由 monitor 节拍驱动（不阻塞 await）；关闭 PR 不可逆 → 默认关 + 审计 + 二次确认文案。
 
 ### M51.4 [P1 🎨] 基线红 / 安装失败的交付降级（台账 ④）

@@ -383,6 +383,8 @@ const runScanInternal = async (
             // A 模式（container）：fix / fix-and-pr 完成后 executor 端推送修复分支，
             // runUrl 指向 GitHub branch tree 页（参见 container-executor.pushFixBranch 后置）
             runUrl = execResult.runUrl
+            // PR 回环反馈的观察态锚点（fix-and-pr 交付时非空，见 pr-feedback-loop.md §3）
+            savedRun.prNumber = execResult.prNumber ?? null
             // 捕获执行日志（MemoryLogger 输出）
             logsJson = execResult.logsJson
         }
@@ -539,6 +541,7 @@ async function runContainerExecutor(
     error: { code: string, message: string } | undefined
     exitCode: number | undefined
     runUrl: string | null
+    prNumber: number | undefined
     logsJson: string | null
     resource: ExecutorResourceUsage | undefined
 }> {
@@ -551,6 +554,7 @@ async function runContainerExecutor(
             },
             exitCode: undefined,
             runUrl: null,
+            prNumber: undefined,
             logsJson: null,
             resource: undefined,
         }
@@ -561,6 +565,7 @@ async function runContainerExecutor(
         error: execResult.error,
         exitCode: execResult.exitCode,
         runUrl: execResult.runUrl ?? null,
+        prNumber: execResult.prNumber,
         logsJson: execResult.logsJson ?? null,
         resource: execResult.resource,
     }

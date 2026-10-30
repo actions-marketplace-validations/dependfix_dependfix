@@ -328,6 +328,8 @@ describe('ContainerExecutor.execute - fix-and-pr mode', () => {
 
         expect(result.exitCode).toBe(0)
         expect(result.runUrl).toBe('https://github.com/owner-a/repo-b/pull/42')
+        // PR 编号回传（落库 ScanRun.prNumber 供回环反馈判定观察态）
+        expect(result.prNumber).toBe(42)
         expect(platformDeliveryMock.createPlatformOctokit).toHaveBeenCalledWith('ghp_test')
         expect(platformDeliveryMock.planFixAndPrDelivery).toHaveBeenCalledWith(fakeOctokit, 'owner-a', 'repo-b', runResult)
         expect(engineMock.createFixBranch).toHaveBeenCalledWith('dependfix/auto-fix-test', expect.any(String))
