@@ -76,10 +76,10 @@ deliverFixAndPr（创建 / 命中同内容 PR）
 4. **关闭**：`closeFailed` 开启 ∧ 上述失败状 ∧ PR 仍 open → 关闭并写审计。
    **平台不使用 `self_caused` 判据**（无父提交比对），因此关闭门槛比 CLI 低——这是本设计的显式取舍：
    默认关闭、开启后审计可追溯、PR 正文与评论均标注「自动关闭」。要求用户在仓库级配置中显式开启。
-4. **重试**（待裁定）：`retryFailed` 开启 ∧ 失败 ∧ 同 `headSha` 未重试过 → 重新触发既有修复链一次。
+5. **重试**（用户已裁定本批不实施）：`retryFailed` 开启 ∧ 失败 ∧ 同 `headSha` 未重试过 → 重新触发既有修复链一次。
    需要平台对外暴露队列触发面（当前无 API），故 **a/b 不实现**，接口契约见 §8。
-5. `neutral` / `skipped` / `cancelled` **不触发**任何动作（与 M51.2 结论口径一致）。
-6. 窗口参照：`ScanRun.finishedAt`（查询已按 `>= now - windowHours` 过滤）；`PRCheck.createdAt` 回退在
+6. `neutral` / `skipped` / `cancelled` **不触发**任何动作（与 M51.2 结论口径一致）。
+7. 窗口参照：`ScanRun.finishedAt`（查询已按 `>= now - windowHours` 过滤）；`PRCheck.createdAt` 回退在
    当前查询下不可达，仅作为 `observation.ts` 的防御性能力保留。
 
 ## 6. 与监测器 / 通知的分工
@@ -137,4 +137,5 @@ export interface FeedbackRetryDispatcher {
 | 平台无 `self_caused` | 关闭门槛比 CLI 低，已在 §5 显式登记取舍 |
 | 历史行 | `ScanRun.prNumber` 为 `null` 的存量 run 不进入观察态（不回填） |
 | 多副本并发评论 | 单 worker 部署下不发生；多副本时存在 TOCTOU（§4 已知边界） |
+| 人工 reopen 后再次关闭 | 被自动关闭的 PR 若被人工重新打开，最新 `PRCheck` 仍是失败 → 下一节拍会再次关闭（每次一条审计）；属「状态对齐」的有意行为，如需豁免可后续引入「同 PR 已关闭过」判据 |
 | 查询成本 | 每轮每失败 PR 一次 `pulls.get` + 一次评论分页；PR 数极多时可按仓库限量（后续候选） |

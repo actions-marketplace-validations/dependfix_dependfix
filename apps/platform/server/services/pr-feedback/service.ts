@@ -16,6 +16,9 @@ import { PRCheck } from '#server/entities/pr-check'
 import { Repository } from '#server/entities/repository'
 import { ScanRun } from '#server/entities/scan-run'
 
+/** `retryFailed` 未实现的提醒：每仓库每进程只 warn 一次（避免按节拍刷日志）。 */
+const retryWarned = new Set<string>()
+
 /** 单仓库单轮的反馈结果（供调度层汇总日志）。 */
 export interface PrFeedbackRunResult {
     commented: number
@@ -95,7 +98,8 @@ export async function runPrFeedbackForRepository(params: {
         return result
     }
     const config = parsePrFeedbackConfig(repository.prFeedback)
-    if (config.retryFailed) {
+    if (config.retryFailed && !retryWarned.has(repositoryId)) {
+        retryWarned.add(repositoryId)
         logger?.warn(`[pr-feedback] ${repository.owner}/${repository.name}: retryFailed 已开启但本批未实现（仅解析），忽略`)
     }
     // 评论与关闭均关 / 窗口关闭 → 无需查询（省 DB 与 API）

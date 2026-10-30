@@ -173,6 +173,16 @@ describe('runPrFeedbackForRepository', () => {
         expect(h.createComment).not.toHaveBeenCalled()
     })
 
+    it('PR 状态查询失败 → 不动作但计入 errors（fail-safe，不影响轮询）', async () => {
+        const h = makeHarness({ prFeedback: '{"closeFailed":true}', run: defaultRun, prCheck: failedCheck })
+        h.getPull.mockRejectedValueOnce(new Error('404 Not Found'))
+        const logger = { info: vi.fn(), warn: vi.fn() }
+        const result = await runPrFeedbackForRepository({ ds: h.ds, octokit: h.octokit, repositoryId: 'repo-1', now, logger })
+        expect(result).toEqual({ commented: 0, closed: 0, errors: 1 })
+        expect(h.createComment).not.toHaveBeenCalled()
+        expect(h.closePull).not.toHaveBeenCalled()
+    })
+
     it('评论失败只记 errors 并 warn，不抛出', async () => {
         const h = makeHarness({ run: defaultRun, prCheck: failedCheck, commentError: new Error('boom') })
         const logger = { info: vi.fn(), warn: vi.fn() }

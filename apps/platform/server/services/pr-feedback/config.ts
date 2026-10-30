@@ -1,6 +1,6 @@
 // config.ts — 仓库级 PR 回环反馈配置（`Repository.prFeedback` JSON 列）。
 //
-// 解析原则（与平台其他 JSON 列同口径）：缺省 → 全默认；未知键忽略并 warn；非法值回退该键默认。
+// 解析原则（与平台其他 JSON 列同口径）：缺省 → 全默认；未知键忽略（不 warn）；非法值回退该键默认。
 // 口径见 docs/design/governance/pr-feedback-loop.md §7。
 
 /** 仓库级 PR 回环反馈配置。 */

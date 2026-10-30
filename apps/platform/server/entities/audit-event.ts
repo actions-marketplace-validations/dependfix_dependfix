@@ -10,13 +10,14 @@ import { Repository } from './repository'
 import { ScanRun } from './scan-run'
 
 /**
- * 环境/容器审计事件类型。
+ * 系统审计事件类型。
  *
- * **语义边界**（M39.6 D 阶段定稿）：本实体收录「执行器 / 执行环境健康」类信号，
- * 而非单次运行结果——后者归 `ScanRun.failure_code / failure_stage / failure_kind`
- * （见 run-failure-classify.ts）。判据：`execution_timeout` / `clone_timeout` /
+ * **语义边界**：本实体收录「需要留痕的系统事实」——执行器 / 执行环境健康、配置变更留痕、
+ * 以及 PR 回环副作用；**单次 run 结果**不在此列（归 `ScanRun.failure_code / failure_stage /
+ * failure_kind`，见 run-failure-classify.ts）。判据：`execution_timeout` / `clone_timeout` /
  * `execution_failed` / `push_failed` 等「单次 run 结果」只记失败分类，不额外记环境事件，
- * 避免同一现象双重记录；只有「执行器不可用 / 路径偏离」（可跨 run 反映环境健康）才落本表。
+ * 避免同一现象双重记录；只有「执行器不可用 / 路径偏离」（可跨 run 反映环境健康）与
+ * 「对外可见的副作用（配置写入 / PR 评论与关闭）」才落本表。
  *
  * 触发源：
  * - sandbox_unavailable：sandbox.execute 抛 errno（B 场景运行时失败）
@@ -26,9 +27,12 @@ import { ScanRun } from './scan-run'
  * - ai_config_update：Organization / Repository AI 研判配置更新（todo.md §M26.1 / [platform-ai-integration.md §8.3](../design/governance/platform-ai-integration-governance.md) 审计要求）
  * - verify_commands_update：Repository 自定义验证命令更新（todo.md §M32.1 / docs/standards/platform.md §3.8）——
  *   该字段等价于远程命令执行面，变更必须留痕
+ * - pr_feedback_commented / pr_feedback_closed：PR 回环对交付 PR 的评论与自动关闭
+ *   （[pr-feedback-loop.md](../design/governance/pr-feedback-loop.md)）——不可逆 / 对外可见，必须留痕
  *
  * 通知策略（见 notification/policy.ts）：仅「执行器不可用 / 降级」类发通知；
- * 配置留痕类（ai_config_update / verify_commands_update）仅落库、不发通知。
+ * 配置留痕类（ai_config_update / verify_commands_update）与 PR 回环类
+ * （pr_feedback_commented / pr_feedback_closed）仅落库、不发通知。
  *
  * 类型扩展点：未来可加 `cgroup_limit_hit` / `runtime_swap` 等
  * （保持小写 snake_case，便于 SQL 过滤与 i18n 键对齐）。

@@ -60,11 +60,11 @@
 - **重试范围（用户 2026-10-30 裁定）**：本批只做 a/b，retry 延后；设计稿 §8 的 `FeedbackRetryDispatcher` 契约保留为后续候选（平台需先补「同 PR 重试」的触发面与配额）。
 - **a 观察态（已落地）**：`ScanRun.prNumber`（新列 + 幂等迁移 `2900000000001`，存量 NULL 不回填）由 `deliverFixAndPr` 回传并经 `runContainerExecutor` 写入；纯函数 `services/pr-feedback/observation.ts` 判定「是否仍在观察窗口」（交付时刻优先、缺失回退 PRCheck 创建时刻、`windowHours<=0` 关闭、参照时刻不可得 fail-safe 不动作）。
 - **范围**：`services/executor/platform-delivery.ts`（交付后写 `prNumber`）；新增 `services/pr-feedback/`（观察态判定 + 幂等评论 + 关闭决策）；`services/monitor/action-status-monitor.ts`（每轮末尾调用）；`entities/scan-run.ts`（`prNumber` 列）/ `entities/repository.ts`（`prFeedback` JSON 列）+ 迁移；审计事件 `pr_feedback_*`。
-- **验收标准**：① 平台建 PR 后进入观察态，结果落 `PRCheck` 且 run 详情可见；② 失败时按 `headSha` 幂等评论一次；③ `closeFailedPr` 开启时关闭 PR 并写审计；④ 观察有上限（PR 终态或配置窗口），不阻塞 worker / 不长时间持锁；⑤ 关闭与重试默认关，开启后行为逐条可测。
+- **验收标准**：① 平台建 PR 后进入观察态，结果落 `PRCheck` 且 run 详情可见；② 失败时按 `headSha` 幂等评论一次；③ `closeFailed`（对应 CLI `--close-failed-pr`）开启时关闭 PR 并写审计；④ 观察有上限（PR 终态或配置窗口），不阻塞 worker / 不长时间持锁；⑤ 关闭与重试默认关，开启后行为逐条可测。
 - **不做什么**：不做自动二次修复（重试仅重新触发既有修复链，且需显式开启）；不改 CLI 交互式确认路径；不在平台侧做父提交比对（无 `self_caused`，关闭门槛已在设计稿 §5 登记）。
 - **依赖**：M51.2（已闭环，结论口径统一）；`pr-delivery-closure.md` 既有交付闭环语义。
 - **b 评论与关闭（已落地）**：`Repository.prFeedback` JSON 配置（缺省：评论开、关闭/重试关、窗口 24h）；`services/pr-feedback/` 的 `config` / `decision` / `service`（幂等评论 marker、关闭前 `pulls.get` 准入、审计 `pr_feedback_commented` / `pr_feedback_closed`）；接在 `scheduler.runPrCheckPoll` 每轮 poll 之后（同一节拍），失败只计入 `errors` 并 warn 汇总。
-- **交付物（实测）**：3 commits（设计 / a 观察态 / b 评论与关闭）/ 13 files（b）+ 11 files（a），合计约 +1030 行；超出条目自估 12-15 files：a/b 各含迁移与其用例。
+- **交付物（实测）**：3 commits（设计 `08f0f4fc` / a `2d0c9930` / b `d10748fe`）/ 27 files / +1337 −9（a 11 files、b 18 files，含前端 i18n 与设计/计划同步）；超出条目自估 12-15 files：a/b 各含迁移、服务、用例与文档。
 - **风险与缓解**：长轮询占队列与锁 → 由 monitor 节拍驱动（不阻塞 await）；关闭 PR 不可逆 → 默认关 + 审计 + 二次确认文案。
 
 ### M51.4 [P1 🎨] 基线红 / 安装失败的交付降级（台账 ④）
