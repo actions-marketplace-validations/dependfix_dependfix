@@ -280,7 +280,14 @@ scan-queue.add(jobId = scan-<repositoryId>)   [scan-queue.ts]
 - 不在默认命令上注入 `--child-concurrency` / 堆上限（见 §8.4 末条）。
 - 不改验证链条数与顺序、不改 `execution_timeout` 的状态机分类口径。
 - 不改锁文件修复策略链的语义（仅将其纳入统一超时与取消面）。
-- **覆盖边界**：本契约的"长命令"指安装 / 锁文件修复 / 验证三类；引擎内的**短命令**（如 `pnpm --version` 探测、`git diff --quiet` 之类仓库状态查询）与**交付类**同步调用（`git push` / `git commit`，见 `github/pr-creator.ts`）**不在本轮范围**——后者在弱网下仍会阻塞事件循环（与本次治理的阻塞面同族），登记为残余项（见 §8.6），后续按需立项。
+- **覆盖边界（2026-10-30 更新）**：本契约的"长命令"已覆盖安装 / 锁文件修复 / 验证三类 + **交付类 git 调用**（分支切换、提交、推送、整仓回滚、checkpoint 建立与恢复）——后者改经 `github/git-run.ts` 的受管异步执行（进程登记 / 进程树终止 / abort 前置守卫），弱网 push 与提交不再阻塞事件循环。仍保持同步的只有**短状态查询**（`git rev-parse --git-dir` / `git diff --quiet` / `git status`），它们通常毫秒级返回，且处在门禁判定路径上（改成异步需要把判定链整体异步化，收益不成比例）。
+
+**预算接口契约（M51.5 b）**
+
+- 预算由**上层计算**为绝对截止时间：平台执行器在构造引擎 config 时注入 `deadlineAt = now + timeoutMs`（`RuntimeConfig.deadlineAt`，epoch ms）；引擎只消费不解析，CLI 本地运行不设置 ⇒ 不限预算。
+- 引擎把 `deadlineAt` 暴露为 `AppContext.deadlineAt`，并在**启动新工作前**检查剩余预算：剩余 ≥ `MIN_STEP_BUDGET_MS`（1 分钟）才启动；命中即跳过并写一条 `BUDGET_EXHAUSTED` 审计（跳过类白名单，不影响 exit code）。
+- 检查点：修复前基线采样、lockfile repair、逐包 / 逐组成员与跨线升级、修复后验证。已通过验证的单元**仍允许交付**，未开始的不再启动（避免产出必然被超时打断的失败噪声）。
+- 取消与预算互不替代：预算只减少"启动新工作"，取消仍会终止在跑进程树；两者命中都不把仓库判为失败。
 
 ### 8.6 残余与观察项
 
@@ -288,4 +295,7 @@ scan-queue.add(jobId = scan-<repositoryId>)   [scan-queue.ts]
 - 取消发生时工作区可能残留**部分修复**（未提交，随运行目录清理消失；CLI 就地运行场景需人工 `git restore`）。
 - 宽限期内的引擎落定与否只写日志，未落库为结构化字段（如需按 run 统计"僵尸率"，需补信号）。
 - **宽限期结束后仍会清理工作目录**（`finally` 的 `rm`），此时引擎若仍在写盘存在"写 / 删并发"窗口——已用日志留痕区分，未做互斥。
-- 交付类同步调用（`git push` / `git commit`）未纳入可取消面：弱网下 `git push` 仍会阻塞事件循环（同族阻塞面，登记候选评估）。
+- 短状态查询（`git rev-parse` / `git diff --quiet` / `git status`）仍为同步调用：极慢的巨型仓库下仍可能造成秒级事件循环停顿（非分钟级）。
+- 取消态下的回滚被前置守卫拦下（不启动子进程）：工作区保持"部分修复"状态，由调用方清理（平台删运行目录；CLI 用户自行 `git restore` / `git reset`），日志显式说明且不记 `ROLLBACK_FAILED`。
+- 预算粒度是「步骤」而非「命令」：`MIN_STEP_BUDGET_MS` 只保证"启动时还有 1 分钟"，单条命令仍可能超出剩余预算并被平台超时中止（此时按 `execution_timeout` 收尾）。
+- 平台侧只注入 `deadlineAt`，未做仓库级 / 分阶段预算（登记为 backlog 候选，避免与执行器超时耦合）。

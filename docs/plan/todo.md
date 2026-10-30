@@ -84,16 +84,20 @@
 - **风险与缓解**：issue 噪声 → 失败指纹去重 + 关闭后不重开（100 条窗口，fail-open）；权限面扩大（issues 写）→ §16.3 与 `security.md §5.4` 标注 token scope；marker 可伪造 / 命令串可能带凭据 → §16.7 登记边界。
 - **审计**：R1 两分区均 **Reject**（A：diff 规模无拆分计划 + 7 warning；B：可见 UI 缺 V3 证据 + 6 warning）→ 收口：原子提交拆分、issue 落点改「首先命中的受影响仓库」、报告载体文案不再谎报「本 PR」、补边界用例（载体失败 / dry-run / 空仓库 / 草稿不等待 check）与三档 exitCode 断言、Action input、fixtures 放行新字段 + e2e case 9、文档 §10/§11 同步与边界登记 → R2 quick **两分区均 Pass**（A 0 blocker，RG-A1~A13 全 closed 或排版级 partial；B 0 blocker，RG-B1 + 8 warning 全 closed）。
 
-### M51.5 [P1 🛠️] 运行级取消面收口 + 单仓剩余预算（台账 ⑤+⑥，拆 a/b）
+### M51.5 [P1 🛠️] 运行级取消面收口 + 单仓剩余预算（台账 ⑤+⑥，拆 a/b）（**已闭环**）
 
 - **目标**：长命令与回滚不再阻塞超时定时器（实测 `6861fa22d4801ddf`：名义截止 14:15:29 → 实际 abort 14:21:01，延迟约 5.5 分钟，来源见该 run 日志时间戳）；引擎感知剩余预算，预算不足时停止启动新工作并留痕。
-- **范围**：`packages/engine/src/github/pr-creator.ts` 的 `execFileSync`（push / commit / 分支操作）改受管异步；`app/helpers.ts` 状态查询；`app/verification-checkpoint.ts` 的 `git read-tree --reset -u`；`apps/platform/server/services/executor/container-executor.ts` 透传 `deadlineAt`；引擎 `AppContext.deadlineAt` + 检查点（基线前 / 每次安装前 / 验证前）；报告条目。
-- **设计先行**：`executor-process-isolation.md` §8.5 覆盖边界更新（同步 → 异步 + budget 接口契约）。
-- **验收标准**：① 人为阻塞场景下 abort 在超时点 + 宽限内触发（无分钟级延迟）；② 剩余预算不足时跳过后续包并写 `budget_exhausted` 报告条目；③ 取消后无残留子进程（进程树断言）；④ 单测覆盖 deadline 边界、异步 push 失败、回滚期取消。
-- **不做什么**：不做仓库级超时配置（已单列 backlog 候选，避免耦合）；不改验证链条数与顺序。
-- **依赖**：无前置；`deadlineAt` 接口需与 backlog「仓库级执行预算」候选的解析面兼容（由上层计算，引擎只消费）。
-- **交付物**：3 commits（a 异步化与取消 / b deadline 检查 / 文档）/ 10-12 files / 400-600 行（预估）→ 拆 a、b 独立验收。
-- **风险与缓解**：异步化调用面广 → 逐调用点替换 + 定向测试；deadline 与「部分成功交付」冲突 → 明确「已通过验证的单元允许提交、未开始的跳过」并写报告。
+- **范围**：交付类 git 调用（分支切换 / 提交 / 推送 / 整仓回滚 / checkpoint 建立与恢复）改受管异步（新增 `github/git-run.ts`）；`apps/platform/.../container-executor.ts` 透传 `deadlineAt`；引擎 `AppContext.deadlineAt` + 预算检查点（基线前 / lockfile repair 前 / 逐包与逐组升级前 / 验证前）；`BUDGET_EXHAUSTED` 报告条目与平台分类映射。
+- **设计先行**：`executor-process-isolation.md` §8.5 覆盖边界更新（同步 → 异步 + 预算接口契约）、§8.6 残余项；`run-failure-taxonomy.md` 类别与映射同步。
+- **验收标准（实测）**：
+  - ① 人为阻塞场景下 abort 在超时点 + 宽限内触发：`git-run` 用例用 60s 空转进程模拟长交付命令，60ms 后请求取消 → 在 10s 内落定（实测远小于），旧同步实现会让定时器完全无法触发。
+  - ② 剩余预算不足时跳过后续工作并写 `BUDGET_EXHAUSTED`：`budget.test.ts` 覆盖 deadline 边界（=1 分钟允许 / -1ms 拒绝）、去重、成员升级跳过（不产出失败动作）；`verify-project` 用例断言不执行验证链。
+  - ③ 取消后无残留子进程：断言 `trackedChildProcessCount() === 0`（进程树终止）。
+  - ④ 单测覆盖 deadline 边界、异步 push 失败（`GitCommandError` 含子命令 / 退出码）、回滚期取消（`aborted` 拒绝 + 门禁只记 `VERIFICATION_FAILED`，不记 `ROLLBACK_FAILED`）。
+- **不做什么**：不做仓库级超时配置（已单列 backlog 候选）；不改验证链条数与顺序；短状态查询（`git rev-parse` / `git diff --quiet` / `git status`）保持同步。
+- **依赖**：无前置；`deadlineAt` 由上层计算（平台 = now + timeoutMs），引擎只消费，与「仓库级执行预算」候选的解析面解耦。
+- **交付物（实测）**：4 个主体提交（`860e275c` 交付类 git 受管异步 / `62d232fe` 回滚与 checkpoint 异步 + 取消期语义 / `4651f227` 预算检查 / `53916762` 平台透传 + 分类映射）+ 文档收口 / 33 files / +869 −225。
+- **风险与缓解**：异步化调用面广 → 逐调用点替换 + 定向用例（17 个受影响测试文件全部改 await 并复跑）；deadline 与「部分成功交付」冲突 → 已明确「已通过验证的单元允许提交、未开始的跳过」并写审计；取消期回滚被前置守卫拦下 → 工作区交由调用方清理且不误记 `ROLLBACK_FAILED`。
 
 ### M51.6 [P2 🛠️] 配置写入闸门 + alerts 原始列表排序兜底（台账 ⑦+⑧）
 
