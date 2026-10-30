@@ -42,7 +42,7 @@
 
 ### 3.2 P1 期望（8 项，可随批或 1.0.1）
 
-镜像脚本形态扩展（`pnpm --filter` / 递归 / env 前缀）、白名单内运行前改动归属、provider 原生日志富化、列表页筛选 / 分页共享抽取、`caomei-ui-migration.md` 保序拆分、`architecture.md` 未采用项清理、规范文件瘦身（#40：`ai-collaboration` / `platform` / `git`，含 #32 子项）、M44 蒸馏条款检查点挂接。
+镜像脚本形态扩展（`pnpm --filter` / 递归 / env 前缀）、白名单内运行前改动归属、provider 原生日志富化、列表页筛选 / 分页共享抽取、`caomei-ui-migration.md` 保序拆分、`architecture.md` 未采用项清理、规范文件瘦身（`ai-collaboration` / `platform` / `git`，含 `ai-collaboration` 健康上界子项）、M44 蒸馏条款检查点挂接。
 
 ### 3.3 1.0 后（候选 15 条 + 暂缓 / 远期 8 项；2026-10-25 用户初步确认）
 
