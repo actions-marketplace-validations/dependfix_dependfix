@@ -25,7 +25,10 @@ const { t } = useI18n()
 
 <template>
     <div class="repo-selection-bar">
-        <span class="repo-selection-bar__summary">
+        <span
+            class="repo-selection-bar__summary"
+            role="status"
+        >
             {{ t('repos.selectionSummary', {selected, total}) }}
         </span>
         <div class="repo-selection-bar__actions">

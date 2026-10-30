@@ -546,7 +546,7 @@ const columns = computed<DataTableColumn<RepoView>[]>(() => [
 
         <CaomeiCard v-if="!loading">
             <repo-selection-bar
-                v-if="filteredRepos.length"
+                v-if="filteredRepos.length || selectedRows.length"
                 :selected="selectedRows.length"
                 :total="filteredRepos.length"
                 :all-selected="allFilteredSelected"

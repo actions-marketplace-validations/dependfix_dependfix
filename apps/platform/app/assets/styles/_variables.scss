@@ -10,6 +10,9 @@ $color-text-dark: #f1f5f9;
 $color-text-muted: #94a3b8;
 $color-border: #e2e8f0;
 $color-border-dark: #334155;
+
+// 控件边界（表单 / 开关 / 复选框 / 次要按钮）：暗色面比库默认面亮，抬到满足 WCAG 1.4.11 的 3:1
+$color-control-border-dark: #7b8494;
 $color-danger: #ef4444;
 $color-warning: #f59e0b;
 $color-success: #22c55e;

@@ -111,11 +111,10 @@ test.describe('仓库列表跨页全选', () => {
             await expect(summary).toHaveText(`已选 0 条，当前筛选 ${PAGE_SIZE} 条`)
             await expect(selectedRows).toHaveCount(0)
         } finally {
-            for (const id of createdIds) {
-                await page.request.delete(`/api/repos/${id}`, {
-                    headers: { cookie: cookieHeader, origin: E2E_ORIGIN },
-                })
-            }
+            // 单条删除失败不阻断其余清理（共享 e2e 库不因一条残留而放大）
+            await Promise.allSettled(createdIds.map((id) => page.request.delete(`/api/repos/${id}`, {
+                headers: { cookie: cookieHeader, origin: E2E_ORIGIN },
+            })))
         }
     })
 })
