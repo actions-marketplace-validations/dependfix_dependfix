@@ -12,7 +12,8 @@ import { waitForHydration } from './helpers/hydration.helper'
  * 守卫点：
  * 1. 表头全选只选当前页（12 条筛选结果、每页 10 条 → 选中 10 条）；
  * 2. 翻页后上一页的选择仍然保留（受控 selection 按 row id 跨页保持）；
- * 3. `全选全部（N）` 一次覆盖全部筛选结果（含第 2 页），`清空选择` 归零。
+ * 3. `全选全部（N）` 一次覆盖全部筛选结果（含第 2 页）；编辑保存触发刷新后按 id 保住已选；
+ * 4. 筛选收窄不清空已选；筛选为 0 时只保留清空入口（不渲染「全选全部（0）」），清空后选择栏收起。
  *
  * 数据：本用例自建 12 个带唯一前缀的仓库并在结束时删除，不依赖库中其它数据。
  */
@@ -115,8 +116,7 @@ test.describe('仓库列表跨页全选', () => {
 
             // 清空选择
             await page.getByRole('button', { name: '清空选择' }).click()
-            await expect(selectedRows).toHaveCount(0)
-            // 已选与筛选结果都为 0 时选择栏整体收起（不显示空计数）
+            // 判别力在 summary 消失（父级 v-if 依赖 selectedRows 归零）；0 行时行选中数恒为 0，不作为证据
             await expect(summary).toHaveCount(0)
         } finally {
             // 单条删除失败不阻断其余清理（共享 e2e 库不因一条残留而放大）
