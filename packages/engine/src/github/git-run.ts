@@ -69,15 +69,26 @@ export interface GitCommandResult {
     aborted: boolean
     /** 是否真正启动过子进程（`false` = 取消前置守卫拦下） */
     started: boolean
+    /** 输出是否触顶被截断（超过捕获上限；调用方不得把结果当成完整输出） */
+    truncated: boolean
 }
 
 /** 失败原因的一句话描述（超时 / 取消前置守卫 / 退出码）。 */
-function describeFailure(params: { code: number | null, timedOut: boolean, aborted: boolean }): string {
+function describeFailure(params: {
+    code: number | null
+    timedOut: boolean
+    aborted: boolean
+    started: boolean
+}): string {
     if (params.timedOut) {
         return 'timed out'
     }
-    if (params.aborted && params.code === null) {
+    if (params.aborted && !params.started) {
         return 'aborted before start'
+    }
+    if (params.aborted) {
+        // 已启动后被 abort 终止（进程树被杀），与「前置守卫拦下」区分，便于审计判断
+        return 'terminated by abort'
     }
     return `exit code ${params.code}`
 }
@@ -132,6 +143,7 @@ export async function runGit(args: readonly string[], options: RunGitOptions): P
         timedOut: outcome.timedOut,
         aborted: outcome.aborted,
         started: outcome.started,
+        truncated: outcome.outputTruncated === true,
     }
 }
 

@@ -151,6 +151,9 @@ export interface RepositoryResult {
      * 与 `verificationPassed`（修复后是否**全部**命令通过，原始口径）分工：
      * `verificationPassed === false && verificationBlocking === false` 表示
      * 「链路未全绿，但失败均为既有基线，未归因本次改动」。
+     *
+     * 预算跳过终验时置 `true` 但**不回滚**（门禁据 `verificationSkipped` 分流）：
+     * 语义是「不能确认可交付」，不是「存在本次引入的失败」。
      */
     verificationBlocking?: boolean
     /**

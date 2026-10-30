@@ -120,6 +120,23 @@ describe('runGitOrThrow', () => {
         expect(gitError.timedOut).toBe(false)
     })
 
+    it('执行中被取消 → 错误文案区分「已启动后被终止」', async () => {
+        const promise = runGitOrThrow(['-e', 'setTimeout(() => {}, 60_000)'], {
+            cwd: dir,
+            binary: process.execPath,
+            timeoutMs: 120_000,
+            what: 'long delivery command',
+        })
+        setTimeout(() => requestAbort('unit test abort'), 60)
+        const error = await promise.catch((err: unknown) => err) as GitCommandError
+
+        expect(error).toBeInstanceOf(GitCommandError)
+        expect(error.started).toBe(true)
+        expect(error.aborted).toBe(true)
+        expect(error.message).toContain('terminated by abort')
+        expect(error.message).not.toContain('aborted before start')
+    }, 20_000)
+
     it('取消前置守卫拦下时按 aborted 抛错', async () => {
         requestAbort('unit test abort')
         const error = await runGitOrThrow(['--version'], { cwd: dir, what: 'probe git' })
