@@ -75,6 +75,7 @@ import { findInstallBlockedReposWithFixes, hasDeliverableFixes } from './deliver
 import { prepareDeliveryHygiene } from './git-exclude'
 import { runPrCheckWatch } from './pr-check-watch-run'
 import { rollbackForSkippedDelivery, skipDeliveryForInstallFailure } from './skipped-delivery'
+import { logPartialSourceFailureSummary } from './source-failure-summary'
 import { pullRequestCreationHint } from './token-hints'
 import { handleDuplicatePRs } from './duplicate-prs'
 
@@ -118,59 +119,7 @@ export interface DependfixRunResult {
     exitCode: number
 }
 
-// ---------------------------------------------------------------------------
-// Per-source 错误隔离汇总（todo.md §M19.5 C8）
-// ---------------------------------------------------------------------------
-
-/**
- * 输出"部分源拉取失败"汇总（todo.md §M19.5 C8 per-source 错误隔离）。
- *
- * 触发条件（必须全部满足，避免与"仓库失败"（无任何成功源）语义重叠）：
- * 1. allErrors 至少包含一个 `stage='fetch' + category='FETCH_FAILED'` 错误（per-source 失败）
- * 2. **至少一个仓库成功拉取了部分告警**（isAnyRepoSuccessful = true）——
- *    否则该仓库已按失败处理（无任何成功源），由 processRepoForReport catch + logger.error 单独处理，
- *    本函数聚焦"warn + 保留成功源"场景的汇总输出，避免重复提示。
- *
- * 汇总按 source 分组（'dependabot' / 'code-scanning' / 'code-quality' / 'pnpm-audit'），
- * 列出每个源失败的仓库数 + 示例错误消息，便于用户快速定位是 token 权限还是网络问题。
- */
-export function logPartialSourceFailureSummary(
-    allErrors: FixError[],
-    logger: Logger,
-    isAnyRepoSuccessful: boolean,
-): void {
-    const fetchErrors = allErrors.filter((e) => e.stage === 'fetch' && e.category === 'FETCH_FAILED')
-    if (fetchErrors.length === 0) {
-        return
-    }
-    if (!isAnyRepoSuccessful) {
-        // 无成功仓库（仓库失败）：避免与 fetchRepoAlerts 抛错路径的 logger.error 重复提示
-        return
-    }
-
-    // 按 source 分组
-    const bySource = new Map<string, { repos: Set<string>, sampleMessage: string }>()
-    for (const err of fetchErrors) {
-        const source = err.source ?? 'unknown'
-        const existing = bySource.get(source)
-        if (existing) {
-            existing.repos.add(err.repository)
-        } else {
-            bySource.set(source, {
-                repos: new Set([err.repository]),
-                sampleMessage: err.message,
-            })
-        }
-    }
-
-    const summary = [...bySource.entries()]
-        .map(([source, { repos, sampleMessage }]) => `${source}（${repos.size} 个仓库: ${[...repos].slice(0, 3).join(', ')}${repos.size > 3 ? '...' : ''}）: ${sampleMessage}`)
-        .join('\n  - ')
-
-    logger.warn(
-        `[alerts] 部分源拉取失败（M19.5 per-source 错误隔离）— 成功源已保留继续处理，详细如下：\n  - ${summary}`,
-    )
-}
+export { logPartialSourceFailureSummary } from './source-failure-summary'
 
 // ---------------------------------------------------------------------------
 // DependfixApp
