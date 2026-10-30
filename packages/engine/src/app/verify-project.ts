@@ -26,6 +26,7 @@ import {
 } from '../runners/verification-runner'
 import { validateVerifyCommands } from '../verification/validate-commands'
 import { isInstallCommand } from './delivery'
+import { budgetAllows } from './budget'
 import type { AppContext } from './helpers'
 
 /**
@@ -355,7 +356,7 @@ function resolvePreExistingReason(
 }
 
 export async function verifyProject(
-    ctx: Pick<AppContext, 'config' | 'customCommands' | 'logger' | 'workDir' | 'allErrors' | 'ciAlignment'>,
+    ctx: Pick<AppContext, 'config' | 'customCommands' | 'logger' | 'workDir' | 'allErrors' | 'ciAlignment' | 'deadlineAt' | 'budgetSkips'>,
     repo: string,
     options: VerifyProjectOptions = {},
 ): Promise<FixAction[]> {
@@ -365,6 +366,10 @@ export async function verifyProject(
 
     if (plan.commands.length === 0) {
         logger.info(`No verification commands to run for ${repo}`)
+        return []
+    }
+
+    if (!budgetAllows(ctx, { repository: repo, stage: 'verify', work: 'post-fix verification' })) {
         return []
     }
 

@@ -45,6 +45,7 @@ import { markEnvironmentalInstallFailure } from './environmental-failure'
 import { recordConvergedAlerts, recordSkippedAlerts } from './alert-outcomes'
 import { recordUpgradeFailure } from './upgrade-failure'
 import { ensureVerificationBaseline, finalizeRepoFix, recordInstallBaselineFailure } from './repo-fix-finalize'
+import { budgetAllows } from './budget'
 import { recordVerificationCheckpoint, type VerificationCheckpoint } from './verification-checkpoint'
 import { applyAutoMajorUpgrades } from './repo-fix-major'
 import { applyRepeatedFailureSkips } from './repeated-failure'
@@ -328,9 +329,9 @@ async function applyLockfileFixes(
     repo: string,
     sets: LockfileAlertSets,
     progress: RepoFixProgress,
-): Promise<{ singleVersionAlerts: NormalizedSecurityAlert[], stopReason?: 'environmental' | 'aborted' }> {
+): Promise<{ singleVersionAlerts: NormalizedSecurityAlert[], stopReason?: 'environmental' | 'aborted' | 'budget' }> {
     const { rootManifestAlerts, lockfilePath } = sets
-    let stopReason: 'environmental' | 'aborted' | undefined
+    let stopReason: 'environmental' | 'aborted' | 'budget' | undefined
 
     const lockfileManifestAlerts = rootManifestAlerts.filter(
         (a) => a.source !== 'code-scanning' && a.manifestPath.trim().replace(/\\/g, '/') === 'pnpm-lock.yaml'
@@ -456,6 +457,10 @@ async function applyLockfileFixes(
             stopReason = 'aborted'
             break
         }
+        if (!budgetAllows(ctx, { repository: repo, stage: 'fix', work: `versioned override for ${alert.packageName}` })) {
+            stopReason = 'budget'
+            break
+        }
         const snapshot = snapshotTrackedFiles(ctx.workDir)
         await recordVerificationCheckpoint(ctx, repo, progress, `versioned-override:${alert.packageName}`)
         ctx.logger.info(`[multi-version] ${alert.packageName}: applying versioned overrides`, { overrides: versionedOverrides })
@@ -575,6 +580,9 @@ async function applyGroupUpgrades(
     let snapshot: ReturnType<typeof snapshotTrackedFiles>
 
     for (const group of groups) {
+        if (!budgetAllows(ctx, { repository: repo, stage: 'fix', work: `group upgrade "${group.name}"` })) {
+            return
+        }
         snapshot = snapshotTrackedFiles(ctx.workDir)
         await recordVerificationCheckpoint(ctx, repo, progress, `group:${group.name}`)
 
@@ -707,6 +715,9 @@ async function applyGroupUpgrades(
         }
 
         for (const alert of upgradedInGroup) {
+            if (!budgetAllows(ctx, { repository: repo, stage: 'fix', work: `package upgrade ${alert.packageName} (group "${group.name}")` })) {
+                return
+            }
             await recordVerificationCheckpoint(ctx, repo, progress, `group:${group.name}:${alert.packageName}`)
             const action = await upgradeAlert(ctx, alert, { familyTargets })
             ctx.allActions.push(action)

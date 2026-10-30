@@ -128,8 +128,7 @@ export interface RuntimeConfig {
      */
     allowMajorUpgrade: boolean
     /**
-     * 验证失败回滚粒度：`unit`（默认）回退最近一个已通过 probe 的变更单元并重验一次；
-     * `repo` 保持既有整仓 `git reset --hard` 逃生语义。
+     * 验证失败回滚粒度：`unit`（默认）回退最近一个已通过 probe 的变更单元并重验一次；`repo` 保持整仓回滚。
      */
     rollbackGranularity?: RollbackGranularity
     /**
@@ -154,8 +153,8 @@ export interface RuntimeConfig {
     retryFailed?: boolean
     /**
      * 基线红（修复后安装仍既有失败）时的交付降级档位（`DEPENDFIX_ON_BASELINE_RED`，默认 `skip`）：
-     * `skip` 回滚并留痕 / `issue` 按失败指纹开 issue / `draft` 不回滚、创建**草稿** PR；仅 `fix-and-pr`
-     * 生效（平台执行链只记录 `summary.deliverySkipped`）。口径见 [§16](../../../../docs/design/governance/pr-delivery-closure.md)。
+     * `skip` 回滚并留痕 / `issue` 按失败指纹开 issue / `draft` 不回滚、创建**草稿** PR（仅 fix-and-pr；
+     * 平台只记录 summary）。口径见 [§16](../../../../docs/design/governance/pr-delivery-closure.md)。
      */
     onBaselineRed?: BaselineRedDelivery
     /** PR 创建后等待 check 终态（`--wait-pr-checks` / `DEPENDFIX_WAIT_PR_CHECKS`，默认 false；仅 fix-and-pr，口径见 [§8](../../../../docs/design/governance/pr-delivery-closure.md)） */
@@ -168,10 +167,9 @@ export interface RuntimeConfig {
     prCheckRunBudgetMs?: number
     /** job 总预算基线（毫秒；`DEPENDFIX_JOB_BUDGET_MS`）。缺省仅在 `GITHUB_ACTIONS=true` 按 25 分钟套用 */
     jobBudgetMs?: number
-    /**
-     * 执行宿主的构建版本回执（平台容器注入；与 `/api/health`、平台启动 `[build]` 行同源）。
-     * 未提供时引擎回退自身 `package.json` 版本（CLI / MCP 本地执行场景），最终回退 `unknown`。
-     */
+    /** 运行截止时间（epoch ms；平台计算、引擎消费）：预算不足时停止启动新工作并写 `BUDGET_EXHAUSTED` 审计。 */
+    deadlineAt?: number
+    /** 执行宿主的构建版本回执（平台注入；缺省回退引擎包版本，最终 `unknown`；与 `/api/health` 同源）。 */
     buildVersion?: string
     /**
      * 执行宿主的构建 commit（平台容器注入）。只有宿主构建期能提供；

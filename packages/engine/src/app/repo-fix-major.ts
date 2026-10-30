@@ -17,6 +17,7 @@ import { attemptFamilyUpgrade, familyVersionsOf } from './family-upgrade'
 import { markEnvironmentalInstallFailure } from './environmental-failure'
 import { mergeAiUsage } from './helpers'
 import { recordUpgradeFailure } from './upgrade-failure'
+import { budgetAllows } from './budget'
 import { recordVerificationCheckpoint } from './verification-checkpoint'
 import { verifyProject } from './verify-project'
 import type { RepoFixCtx, RepoFixProgress } from './repo-fix'
@@ -61,6 +62,9 @@ export async function applyAutoMajorUpgrades(
         }
     }
     for (const alert of autoMajorRepresentatives) {
+        if (!budgetAllows(ctx, { repository: repo, stage: 'fix', work: `major upgrade ${alert.packageName}` })) {
+            return
+        }
         if (ctx.config.dryRun) {
             // dry-run 不写盘：仅记录计划动作（与 2.0.1 dry-run 语义一致）
             ctx.logger.info(`[dry-run] Would apply major upgrade for ${alert.packageName} → ${alert.recommendedVersion}`)

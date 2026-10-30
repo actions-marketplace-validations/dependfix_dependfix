@@ -193,6 +193,7 @@ const SKIPPED_AUDIT_CATEGORIES = new Set<string>([
     'PRE_EXISTING_FAILURE', // 既有基线失败（本次改动前即为红），不归因本次运行
     'ENVIRONMENT_ERROR', // 环境性安装失败（无法归因目标仓库），不归因本次运行
     'ROLLBACK_GRANULARITY_DEGRADED', // 单元回滚不可用，显式降级为整仓回滚（审计性，不归因失败）
+    'BUDGET_EXHAUSTED', // 运行预算不足，主动跳过未开始的工作（不归因目标仓库）
 ])
 
 /**

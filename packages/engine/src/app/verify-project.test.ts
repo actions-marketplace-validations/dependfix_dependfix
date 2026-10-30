@@ -65,6 +65,19 @@ describe('verifyProject', () => {
         }
     }
 
+    it('剩余预算不足 → 不执行验证链，写一条 BUDGET_EXHAUSTED（不归因本次改动）', async () => {
+        const ctx = {
+            ...makeVerifyCtx(),
+            deadlineAt: Date.now() - 1,
+            budgetSkips: new Set<string>(),
+        }
+        const actions = await verifyProject(ctx as never, 'foo/bar')
+
+        expect(actions).toEqual([])
+        expect(verificationRunnerMock.runVerification).not.toHaveBeenCalled()
+        expect(ctx.allErrors.map((error) => error.category)).toEqual(['BUDGET_EXHAUSTED'])
+    })
+
     it('replaces install command with corepack when toolchain version is set', async () => {
         await verifyProject(makeVerifyCtx('10.5.2'), 'foo/bar')
 

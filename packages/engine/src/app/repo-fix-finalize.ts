@@ -8,6 +8,7 @@ import type { Octokit } from '@octokit/rest'
 import { formatVerificationError, type CommandResult } from '../runners/verification-runner'
 import { tryLockfileRepair } from './helpers'
 import type { RepoFixCtx, RepoFixProgress } from './repo-fix'
+import { budgetAllows } from './budget'
 import { findInstallBaselineFailure, sampleVerificationBaseline, verifyProject } from './verify-project'
 import { attemptSelectiveUnitRollback } from './verification-checkpoint'
 
@@ -27,6 +28,10 @@ export async function ensureVerificationBaseline(
     options: { hasWork: boolean },
 ): Promise<{ exemptAttribution: boolean, baseline?: CommandResult[] }> {
     if (ctx.config.dryRun || !ctx.verificationBaseline) {
+        return { exemptAttribution: false }
+    }
+    if (!budgetAllows(ctx, { repository: repo, stage: 'verify', work: 'pre-fix baseline sampling' })) {
+        // 预算不足不采样：不豁免归因（保守），后续验证同样会被预算检查挡下
         return { exemptAttribution: false }
     }
     if (ctx.verificationBaseline.value) {
@@ -105,7 +110,8 @@ export async function finalizeRepoFix(
     // 归因豁免（`exemptAttribution`）的前提是「本次没有写过任何文件」——因此零工作仓库
     // 连 lockfile repair 也不跑：repair 若真改了文件，`noChanges` 豁免就不再成立，
     // repair 引起的失败会被误标为既有失败（修复器尝试前缀的归因评审项）。
-    if (progress.alertsCount > 0 && options.exemptAttribution !== true) {
+    if (progress.alertsCount > 0 && options.exemptAttribution !== true
+        && budgetAllows(ctx, { repository: repo, stage: 'repair', work: 'lockfile repair' })) {
         const repairAction = await tryLockfileRepair(ctx, repo)
         ctx.allActions.push(repairAction)
         lockfileRepairFailed = !repairAction.success && !repairAction.noOp

@@ -183,6 +183,13 @@ export interface AppContext {
      * 缺省（测试直接构造 ctx）⇒ 不记录，summary 计数保持 0。
      */
     deliverySkips?: DeliverySkipRecord[]
+    /**
+     * 运行截止时间（epoch ms；来自 `RuntimeConfig.deadlineAt`）。
+     * 缺省 ⇒ 不限预算（CLI 本地运行），所有预算检查放行。
+     */
+    deadlineAt?: number
+    /** 已记录的预算跳过（`stage:work`；避免同一跳过来回刷审计）。缺省 ⇒ 不去重。 */
+    budgetSkips?: Set<string>
 }
 
 // ---------------------------------------------------------------------------

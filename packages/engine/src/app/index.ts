@@ -170,6 +170,8 @@ export class DependfixApp {
     private readonly prCheckWatchReport: PrCheckWatchReport = { attempts: [], runBudgetExhausted: false }
     /** 交付跳过记录（基线红；`computeSummary` 据此派生 summary 计数） */
     private readonly deliverySkips: NonNullable<AppContext['deliverySkips']> = []
+    /** 已记录的预算跳过（`stage:work`；逐包命中不刷审计） */
+    private readonly budgetSkips = new Set<string>()
     /** `draft` 档的跳过记录（sanity: PR 创建后回填载体编号） */
     private baselineRedDraft?: DeliverySkipRecord
     private readonly alertOutcomes: NonNullable<AppContext['alertOutcomes']> = new Map()
@@ -262,6 +264,8 @@ export class DependfixApp {
             prCheckWatch: this.prCheckWatchReport,
             alertOutcomes: this.alertOutcomes,
             deliverySkips: this.deliverySkips,
+            deadlineAt: this.config.deadlineAt,
+            budgetSkips: this.budgetSkips,
         }
     }
 

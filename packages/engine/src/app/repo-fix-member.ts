@@ -8,6 +8,7 @@ import { isAbortRequested } from '../runners/process-control'
 import type { LockfileAlertSets, RepoFixCtx, RepoFixProgress } from './repo-fix'
 import { attemptFamilyUpgrade, familyVersionsOf } from './family-upgrade'
 import { markEnvironmentalInstallFailure } from './environmental-failure'
+import { budgetAllows } from './budget'
 import { recordVerificationCheckpoint } from './verification-checkpoint'
 import { recordUpgradeFailure } from './upgrade-failure'
 
@@ -61,6 +62,9 @@ export async function applyMemberUpgrades(
     }
     for (const item of [...memberByPackageAndDir.values()]) {
         const { alert, manifestDir } = item
+        if (!budgetAllows(ctx, { repository: repo, stage: 'fix', work: `member upgrade ${alert.packageName}` })) {
+            return false
+        }
         const memberManifestPath = `${manifestDir}/package.json`
         if (ctx.config.dryRun) {
             ctx.logger.info(`[dry-run] Would upgrade ${alert.packageName} in ${memberManifestPath} → ${alert.recommendedVersion}`)

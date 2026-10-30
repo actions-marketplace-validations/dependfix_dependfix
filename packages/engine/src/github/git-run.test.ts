@@ -1,6 +1,6 @@
 // git-run.test.ts — 交付类 git 命令的受管异步执行契约。
 //
-// 关注三件事（M51.5 a）：
+// 关注三件事：
 // 1. 非 0 退出不抛错（`runGit`）/ 抛 `GitCommandError`（`runGitOrThrow`，含子命令与 stderr 尾部）
 // 2. 取消前置守卫：已请求 abort 时不启动新子进程
 // 3. 超时映射：超时被终止时 `timedOut=true`，并要求成功时抛错
