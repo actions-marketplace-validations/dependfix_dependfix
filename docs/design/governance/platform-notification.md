@@ -215,7 +215,7 @@ interface NotificationLog {
 - `weekKey` 按 ISO 8601 周（如 `2026-W43`）与服务器时区计算；同一用户同一 `weekKey` 只发一次（键见 §6.4 周报专用键）。
 - **触发窗口与补发**：本进程启动 30 秒后每 15 分钟检查一次；窗口为「本周一触发时刻起 24 小时」。窗口内重启会补发（周中晚些时候启动不会在工作日中途补发上周周报），窗口外等待下一周。
 - **窗口内自愈（2026-10-29 M50.3）**：本进程的同周状态按结果推进（`weekly-digest-attempt.ts`）——`sent` / 全部收件人本周已发（`skipped_duplicate`）为终态；`partial` / `failed` / `noop` 计次并退避 30 分钟重试，单周最多 6 次发信尝试；`skipped_no_recipient` 只退避不计次（窗口内开启个人开关仍可当周补发，且同周同状态在 `notification_log` 最多 1 行）；`skipped_disabled` / `skipped_org_disabled` 不占用本周，下一次节拍立即重查（**不清零**已发生的发信尝试，避免「关一下再开」绕过单周上界）；退避以上一次发送的完成时刻为基准，发送未结束时跳过节拍（重入守卫）。跨进程 / 重启的「每收件人每周一封」仍由逐用户投递键兜底。
-- **快照口径**：当前活跃未修复高危（与 §7.1 同口径，`supersededAt IS NULL` 即活跃，不限定 scanRunId），按仓库分组；截断计数取自快照内各告警所属运行（去重）的 `alertsTruncatedBySeverity`。`converged`（本地已满足）只存在于 `RunSummary.alertsConverged`（`ScanResult` 明细不标记），周报按快照运行汇总单列披露「引擎汇总另有 N 条本地已满足」，**不改明细计数**。内容未变化也按周发送，这是显式订阅的周期摘要。
+- **快照口径**：当前活跃未修复高危（与 §7.1 同口径，`supersededAt IS NULL` 即活跃，不限定 scanRunId），按仓库分组；截断计数取自快照内各告警所属运行（去重）的 `alertsTruncatedBySeverity`。`converged`（本地已满足）随 M51.1 起由 `ScanResult.fixStatus` 承载、不再出现在未修复明细；周报按快照运行汇总单列披露「引擎汇总另有 N 条本地已满足」（同一批告警，一致性披露而非重复计数），**不改明细计数**。披露的取数是「快照中仍有未修复行时，这些行所属运行的 `alertsConverged` 之和」——若某 run 的告警全部已收敛（或快照无未修复行），该 run 的已满足数不单列（既有实现，不虚构来源）。内容未变化也按周发送，这是显式订阅的周期摘要。
 - **空快照也发送**：本周没有未修复告警时仍发送一封「本周无未修复告警」摘要——订阅方据此确认周期任务存活，避免把「零告警」误读为「周报停摆」。
 - 周报豁免 §6.4 ① 指纹 / ② 冷却 / ③ 每小时上限（自身已有「每用户每渠道每周一次」上限），但仍走 ④ 收件人检查与 ⑤ 渠道检查。
 - 组织开启 `weeklyDigest` 后，管理员仍需个人开启才会收到；任一层关闭即不发送。组织关闭时不查询快照、不写投递记录。
@@ -233,7 +233,10 @@ AND fixStatus IN ('not-tried', 'failed', 'skipped')
 AND scanRunId IN (<scope run ids>)
 ```
 
-- 「未修复」包含 `not-tried` / `failed` / `skipped`（覆盖跨 major 跳过与交付跳过）；`converged` 表示「本地已满足、无需升级」，不计入引擎的 `alertsUnfixed` 口径。**平台明细边界**：`ScanResult` 行不携带 converged 标记（写入路径固定 `not-tried`，修复结果不回写），因此按明细聚合的通知（`security_critical` / `security_high` / `weekly_digest`）仍会把 converged 告警计入活跃明细；周报仅按 `RunSummary.alertsConverged` 单列披露该数量。
+- 「未修复」包含 `not-tried` / `failed` / `skipped`（覆盖跨 major 跳过与交付跳过）；`converged` 表示「本地已满足、无需升级」，不计入引擎的 `alertsUnfixed` 口径。**明细与汇总同源（M51.1）**：引擎报告的 `alertOutcomes` 会按同一键回写 `ScanResult.fixStatus`，因此按明细聚合的通知（`security_critical` / `security_high` / `weekly_digest`）不再把 converged 告警计入活跃明细；回写规则见 [data-model.md §告警级修复结果回写](../modules/data-model.md#告警级修复结果回写m511)。
+  - **触发前提**：`success` / `converged` / `failed` 只在修复链路（`fix` / `fix-and-pr`）产生；`report-only` 运行无修复动作，其告警仍按既有口径计入明细（不可修复的会落 `skipped`，与 `not-tried` 同属未修复集合），故默认 `schedule.mode` 为 `report-only` 的部署不受本口径影响（此前已有 `success` 结论的行保持原值，不被 `report-only` 重置）。
+  - **`success` 口径首次真正生效**：此前生产路径恒写 `not-tried`，「已修复不计入」形同虚设；回写落地后 `fix` / `fix-and-pr` 运行一旦产出修复，该告警即退出未修复明细（即使上游尚未关闭），后续运行给出新结论时按最新结论重新判定。这是本契约的**行为变更**，发布说明需披露。
+  - 存量 run（回写前落库）行仍为 `not-tried`，不回填。
 - 已修复（`success`）与已关闭（`supersededAt` 非空）不计入，避免与 GitHub 的已关闭通知重复。
 - **截断告警不在 `ScanResult` 中**：引擎只持久化 `limited` 集合。扫描结果需同时读取 `summary.alertsTruncatedBySeverity`（M46.2 新增）的 critical / high 计数，在邮件正文以「另有 N 条截断未纳入明细」披露；无身份信息，不伪造逐条列表。
 - 严重级别阈值由组织设置 `severityThreshold` 控制：`high`（默认，通知覆盖 critical + high）或 `critical`（仅 critical）。**类别拆分后**（§15 D4）：`security_critical` 恒查 `critical` 且不受阈值影响；`security_high` 只在阈值为 `high` 时查 `high`，因此阈值语义保持「是否附加 high」，枚举与存储不变。

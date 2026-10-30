@@ -202,7 +202,8 @@ const runScanInternal = async (
         // summaryJson 来自上一次执行，重置以避免新执行的 summaryJson 与旧 finishedAt 时间戳错位）
         if (options.reuse) {
             // per-alert 模型下不再需要清空该 run 的 ScanResult：reconcile 函数
-            // 会按 upstreamId 复用现有行（保留 fixStatus='success' 的修复记录，决策 1）；
+            // 会按 upstreamId 复用现有行（上游消失时 fixStatus='success' 不被 supersede，决策 1；
+            // 告警仍活跃时按本次结论覆盖）；
             // 而新出现的告警会 INSERT；上游消失的告警会 supersede。
             // 旧 ScanResult 行无需删除 —— 让 reconcile 自然处理。
             // 注意：per-alert 模型之前 `resultRepo.delete({ scanRunId })` 是为避免"按 scanRunId JOIN
@@ -467,26 +468,14 @@ const runScanInternal = async (
             if (result) {
                 savedRun.summaryJson = JSON.stringify(result.summary)
                 savedRun.runUrl = runUrl
-                // reconcile 写结果明细（todo.md §M20.3 决策 1-4）：
-                // 新告警 → INSERT；已存在 + 上游还有 → UPDATE 活跃；上游消失 + fixStatus≠success → supersede
-                await reconcileAlerts({
-                    repositoryId: repository.id,
-                    newRunId: savedRun.id,
-                    newAlerts: (result as RunResult).alerts,
-                })
+                await reconcileRunResult(repository, savedRun.id, result as RunResult)
             }
         } else if (result) {
             savedRun.status = 'completed'
             savedRun.finishedAt = new Date()
             savedRun.summaryJson = JSON.stringify(result.summary)
             savedRun.runUrl = runUrl
-            // reconcile 写结果明细（todo.md §M20.3 决策 1-4）：
-            // 新告警 → INSERT；已存在 + 上游还有 → UPDATE 活跃；上游消失 + fixStatus≠success → supersede
-            await reconcileAlerts({
-                repositoryId: repository.id,
-                newRunId: savedRun.id,
-                newAlerts: (result as RunResult).alerts,
-            })
+            await reconcileRunResult(repository, savedRun.id, result as RunResult)
         }
 
         // 回填仓库最近扫描时间
@@ -673,5 +662,32 @@ async function recordEnvAuditEvent(
         })
     } catch (e) {
         logger.error('[scan-orchestrator] failed to record env audit event', { error: e })
+    }
+}
+
+/**
+ * 落库本次运行的告警明细（reconcile）并回写告警级结果。
+ *
+ * 单一入口：新增调用点不会漏传 `outcomes` / `dryRun`（口径见 docs/design/modules/data-model.md）。
+ * 未匹配条目只在日志披露，不阻断落库——正常流水线结构上恒为 0，非 0 说明报告与告警列表键漂移。
+ */
+async function reconcileRunResult(
+    repository: { id: string, owner: string, name: string },
+    newRunId: string,
+    result: RunResult,
+): Promise<void> {
+    const stats = await reconcileAlerts({
+        repositoryId: repository.id,
+        newRunId,
+        newAlerts: result.alerts,
+        outcomes: result.alertOutcomes,
+        // JSON 外部输入：config 理论上必有，运行时防御性判空
+        dryRun: result.config?.dryRun === true,
+    })
+    if (stats.outcomesUnmatched > 0) {
+        logger.warn(
+            `[reconcile] ${repository.owner}/${repository.name}: `
+            + `${stats.outcomesUnmatched} alert outcome(s) were not applied (键漂移或状态非法)`,
+        )
     }
 }

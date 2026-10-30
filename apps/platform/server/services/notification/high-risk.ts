@@ -36,7 +36,11 @@ export interface HighRiskSummary {
     truncated: HighRiskCounts
     /**
      * 快照运行汇总里的本地已满足（`converged`）告警数，供周报披露「豁免」。
-     * 注意：`ScanResult` 不标记 converged（明细行按活跃告警全量统计），该数只来自 `RunSummary`。
+     *
+     * 注意：`ScanResult.fixStatus` 也会携带 `converged`（引擎结果已回写，明细行已剔除该批告警），
+     * 本字段仍取 `RunSummary.alertsConverged`——两者是同一批告警，本字段只作汇总披露。
+     * 取数是「快照中仍有未修复行时，这些行所属运行的已满足数之和」：某 run 的告警全部收敛
+     * （或快照无未修复行）时该 run 不单列，不虚构来源。
      */
     exempted: number
     fingerprint: string
@@ -74,8 +78,11 @@ const countSeverities = (rows: ReadonlyArray<{ severity: string }>): HighRiskCou
  * - `scanRunIds = [...]` → 限定单个 run / 批次内子 run。
  *
  * 未修复口径（设计稿 §7.1）：severity in [critical, high] + supersededAt null +
- * fixStatus in [not-tried, failed, skipped]。`ScanResult` 不标记 converged，周报的「豁免」
- * 取自快照运行的 `RunSummary.alertsConverged`（仅披露，不改明细计数）。
+ * fixStatus in [not-tried, failed, skipped]。`converged` / `success` 由引擎结果回写进
+ * `ScanResult`（见 docs/design/modules/data-model.md 告警级修复结果回写），因此本地已满足 /
+ * 已产出修复的告警不会进入明细。注意：`success` / `converged` / `failed` 只由修复链路
+ * （`fix` / `fix-and-pr`）产出，`report-only` run 的告警仍按未修复口径计入明细；周报的「豁免」仍取快照运行的
+ * `RunSummary.alertsConverged`（同一批告警的汇总披露，不改明细计数）。
  *
  * 截断计数来自产出快照的扫描运行（`RunSummary.alertsTruncatedBySeverity`）——run 限定查询用
  * 调用方传入的 run 集合，全局快照用活跃行去重后的 `scanRunId`。

@@ -38,6 +38,10 @@ interface RunResult {
     /** 所有错误记录 */
     errors: FixError[]
 }
+
+// 本表只列必填字段；可选段（ciAlignment / attemptTracking / prCheckWatch /
+// alertOutcomes / supplyChainWarnings / alertsDisabled）见
+// [data-model.md](data-model.md) 与 packages/core/src/report/types.ts。
 ```
 
 ### 2.2 RunReportConfig（配置子集，脱敏）

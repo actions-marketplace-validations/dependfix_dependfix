@@ -1,5 +1,5 @@
 import { IsNull, type EntityManager, type Repository } from 'typeorm'
-import type { NormalizedSecurityAlert } from '@dependfix/core'
+import { alertOutcomeKey, isAlertOutcomeStatus, type AlertFixOutcome, type NormalizedSecurityAlert } from '@dependfix/core'
 import { ScanResult } from '#server/entities/scan-result'
 import { ensureDatabaseInitialized } from '#server/database'
 
@@ -9,7 +9,7 @@ import { ensureDatabaseInitialized } from '#server/database'
  * | 情况 | upstreamId | 现有行 fixStatus | 当前是否在上游 | 操作 |
  * |---|---|---|---|---|
  * | 新告警 | 不存在 | — | — | INSERT（新行） |
- * | 活跃告警 | 存在 | 任意 | 在 | UPDATE lastSeenAt / occurrenceCount++ / scanRunId / severity |
+ * | 活跃告警 | 存在 | 任意 | 在 | UPDATE lastSeenAt / occurrenceCount++ / scanRunId / severity；`fixStatus` 按本次结论回写（缺结论保留原值） |
  * | 消失告警 + 未修复 | 存在 | ≠ 'success' | 不在 | UPDATE supersededAt = NOW() |
  * | 消失告警 + 已修复 | 存在 | = 'success' | 不在 | **不操作**（决策 1：fixStatus='success' 永不被 supersede，保留修复记录） |
  *
@@ -37,6 +37,23 @@ export interface ReconcileAlertsParams {
     manager?: EntityManager
     /** 当前 reconcile 时间（backfill 复用需要传入固定时间便于幂等测试） */
     now?: Date
+    /**
+     * 本次运行是否为 dry-run（计划模式）。
+     *
+     * dry-run 的动作 `success` 只是「计划执行」，磁盘 / PR 未真实交付——此时忽略 `outcomes`，
+     * 保持既有写入口径（新行 `not-tried`、活跃行保留原值）。平台当前不产生 dry-run run，
+     * 该参数为防御性开关。
+     */
+    dryRun?: boolean
+    /**
+     * 本次运行的告警级处置结果（`RunResult.alertOutcomes`）。
+     *
+     * 缺省 / 空数组 ⇒ 不改写 `fixStatus`（存量行为：新行 `not-tried`、活跃行保留原值）。
+     * 匹配键 `(repository, source, upstreamId, manifestPath)` 与引擎同源（`alertOutcomeKey`）；
+     * 写入规则见 [data-model.md 告警级修复结果回写](../../../../docs/design/modules/data-model.md)
+     * 与 [alert-outcome-writeback.md](../../../../docs/design/governance/alert-outcome-writeback.md)。
+     */
+    outcomes?: readonly AlertFixOutcome[]
 }
 
 /** reconcile 操作的统计结果（便于上层 audit_event 记录 + 测试断言） */
@@ -46,6 +63,16 @@ export interface ReconcileStats {
     superseded: number
     preservedSuccess: number
     unchanged: number
+    /** 本次写入 `fixStatus` 的行数（新行带结论 + 活跃行改写） */
+    outcomesApplied: number
+    /**
+     * 未生效的结果条目数 = 键漂移（有结论但无对应告警）**键数** + 非法条目数；
+     * 同键重复条目后者覆盖、不计入。>0 时上层 warn。
+     *
+     * 正常流水线结构上恒为 0：引擎只对送入链路的告警下结论，平台用同一 `result.alerts` 落库；
+     * 非 0 说明报告与告警列表出现键漂移（上游 API 语义变化 / 平台开始过滤 alerts），需排查。
+     */
+    outcomesUnmatched: number
 }
 
 /**
@@ -57,12 +84,21 @@ export interface ReconcileStats {
  * 3. 按 upstreamId 分桶：existingMap vs newMap
  * 4. 遍历 newAlerts：
  *    - 不存在 → INSERT（occurrenceCount=1 / firstSeenAt=now / lastSeenAt=now）
- *    - 存在 → UPDATE lastSeenAt / occurrenceCount++ / scanRunId / severity（fixStatus 保留）
+ *    - 存在 → UPDATE lastSeenAt / occurrenceCount++ / scanRunId / severity；`fixStatus` 按 `outcomes` 回写
  * 5. 遍历 existingMap 中"未在新告警列表中"的行：
  *    - fixStatus='success' → 不操作（决策 1：永不被 supersede）
  *    - 其他 → UPDATE supersededAt = now
  *
- * @returns reconcile 统计（inserted / refreshed / superseded / preservedSuccess / unchanged）
+ * 告警级结果回写（`outcomes` 提供时）：
+ * - INSERT：`fixStatus` 取本次结论，缺键 `not-tried`（与引入前一致）
+ * - UPDATE：有结论即改写（含 `success` → `failed`）——`fixStatus` 反映**本次运行**的结论；
+ *   决策 1 的「修复成就保留」由 supersede 路径承担（上游消失的 success 行仍不 supersede）
+ * - 缺键保持原值（本次运行未对该告警下结论 ≠ 回到 `not-tried`）
+ * - 状态值按 `ALERT_OUTCOME_STATUSES` 白名单过滤（报告来自 JSON；未知值 / `not-tried` 不写库——
+ *   缺键已表示 `not-tried`，显式回退无意义）
+ * - 已 supersede 的行不参与（本函数只读 `supersededAt IS NULL`）；重新激活语义仍未实现
+ *
+ * @returns reconcile 统计（inserted / refreshed / superseded / preservedSuccess / unchanged / 结果回写计数）
  */
 export const reconcileAlerts = async (params: ReconcileAlertsParams): Promise<ReconcileStats> => {
     const { repositoryId, newRunId, newAlerts } = params
@@ -96,12 +132,35 @@ export const reconcileAlerts = async (params: ReconcileAlertsParams): Promise<Re
         superseded: 0,
         preservedSuccess: 0,
         unchanged: 0,
+        outcomesApplied: 0,
+        outcomesUnmatched: 0,
     }
+
+    // 告警级结果：按引擎同一键索引；同一键重复出现时后者覆盖（引擎侧已按 Map 去重）。
+    // 1) dry-run 一律忽略——计划态结果不得落成修复记录（平台当前不产生 dry-run run，此处为防御参数）
+    // 2) 脏条目（缺 repository / upstreamId / source，或状态不在结论白名单）跳过：
+    //    未知状态一旦写库会落在「未修复」集合之外，静默退出通知明细；`not-tried` 同理拒绝
+    //    （缺键即 not-tried，显式回退会抹掉既有结论）
+    const outcomeByKey = new Map<string, AlertFixOutcome>()
+    let invalidOutcomes = 0
+    for (const outcome of params.dryRun ? [] : (params.outcomes ?? [])) {
+        if (!outcome?.repository || !outcome.upstreamId || !outcome.source || !isAlertOutcomeStatus(outcome.status)) {
+            invalidOutcomes++
+            continue
+        }
+        outcomeByKey.set(alertOutcomeKey(outcome), outcome)
+    }
+    const matchedOutcomeKeys = new Set<string>()
 
     // 1. 处理 newAlerts（INSERT / UPDATE 活跃）
     for (const alert of newAlerts) {
         const upstreamId = alert.upstreamId
         const existing = existingByUpstreamId.get(upstreamId)
+        const outcomeKey = alertOutcomeKey(alert)
+        const outcome = outcomeByKey.get(outcomeKey)
+        if (outcome) {
+            matchedOutcomeKeys.add(outcomeKey)
+        }
 
         if (!existing) {
             // 新告警 → INSERT（occurrenceCount=1, firstSeenAt=now, lastSeenAt=now）
@@ -122,8 +181,8 @@ export const reconcileAlerts = async (params: ReconcileAlertsParams): Promise<Re
                 // 透传 GitHub Advisory ID + CVE 列表（JSON 序列化）
                 ghsaId: alert.ghsaId ?? null,
                 cveIds: alert.cveIds && alert.cveIds.length > 0 ? JSON.stringify(alert.cveIds) : null,
-                fixStatus: 'not-tried',
-                errorMessage: null,
+                fixStatus: outcome?.status ?? 'not-tried',
+                errorMessage: outcome?.status === 'failed' ? (outcome.reason ?? null) : null,
                 firstSeenAt: now,
                 lastSeenAt: now,
                 occurrenceCount: 1,
@@ -131,17 +190,20 @@ export const reconcileAlerts = async (params: ReconcileAlertsParams): Promise<Re
             })
             await resultRepo.save(created)
             stats.inserted++
+            if (outcome) {
+                stats.outcomesApplied++
+            }
             continue
         }
 
-        // 已存在 → UPDATE 活跃（决策：fixStatus 保留；lastSeenAt / occurrenceCount++ / scanRunId / severity 刷新）
+        // 已存在 → UPDATE 活跃（lastSeenAt / occurrenceCount++ / scanRunId / severity 刷新；fixStatus 按本次结论回写）
         // 注：若 existing.supersededAt 非 NULL（前次被 supersede）且 fixStatus≠success，重新激活：
         // 上游又出现了该告警，语义应是"重新打开"。但本批次决策仅 supersede（不重新打开）：
         // 重新打开属 audit suggest backlog（见 M20.3 待迁移经验），本批次不实现
         if (existing.fixStatus === 'success' && existing.supersededAt !== null) {
-            // 边缘 case：之前被 supersede 但 fixStatus=success 的告警又重新出现
-            // 决策 1：fixStatus='success' 永不被 supersede（preserveSuccess 计数）
-            // 但 fixStatus='success' + supersededAt 非 NULL 是矛盾状态，不应该 reconcile 重新激活
+            // 不可达分支（查询已按 `supersededAt IS NULL` 过滤，含上方的行恒为活跃）：
+            // 保留这段历史语义以便未来实现「重新激活」时不会误改 success 记录（决策 1）。
+            // 重新激活当前未实现：supersede 行不会被读出，同一 upstreamId 再现会撞唯一索引。
             stats.preservedSuccess++
             continue
         }
@@ -166,8 +228,15 @@ export const reconcileAlerts = async (params: ReconcileAlertsParams): Promise<Re
         // firstSeenAt 不变（首次发现时间固定）
         existing.lastSeenAt = now
         existing.occurrenceCount += 1
-        // fixStatus 保留（不在 reconcile 内改）
-        // errorMessage 保留（不在 reconcile 内改）
+        // fixStatus / errorMessage：本次运行有结论时回写。该行仍在上游告警列表中，故本次结论是
+        // 该实例的最新事实（`success` 也可被后续 `failed` / `converged` 覆盖）——决策 1 的
+        // 「修复成就保留」只作用于上游消失时的 supersede 判定，不阻止活跃行更新。
+        // 缺键保持原值（本次运行未对该告警下结论 ≠ 回到 not-tried）
+        if (outcome) {
+            existing.fixStatus = outcome.status
+            existing.errorMessage = outcome.status === 'failed' ? (outcome.reason ?? null) : null
+            stats.outcomesApplied++
+        }
 
         await resultRepo.save(existing)
         // 同一 run 内同 upstreamId 出现多次（如 executor mock 重复 alert）—— 仍按"刷新"计
@@ -197,6 +266,9 @@ export const reconcileAlerts = async (params: ReconcileAlertsParams): Promise<Re
         await resultRepo.save(existing)
         stats.superseded++
     }
+
+    // 未生效 = 键漂移（有结论但无对应告警）+ 条目非法（缺字段 / 状态不在白名单）
+    stats.outcomesUnmatched = (outcomeByKey.size - matchedOutcomeKeys.size) + invalidOutcomes
 
     return stats
 }
