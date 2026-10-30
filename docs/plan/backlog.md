@@ -54,7 +54,7 @@
 
 ### 候选评估中（待评估 / 本阶段延后项）
 
-> **候选池概览（2026-10-29 实测）**：本区 58 项（含 M50.2 / M50.3 复审衍生候选）；P 标签覆盖不全（未标注者评估时补 P 标签，不默认升级）；本文件不维护分档统计，1.0 分档只见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)；未标注候选评估时补 P 标签，不默认升级。
+> **候选池概览（2026-10-30 实测）**：本区 62 项（含 M50.2 / M50.3 复审衍生候选 + 2026-10-29 批量运行超时复盘派生 4 项；另 1 项设计定稿后按用户裁定转入 §延期 / 暂缓项）；P 标签覆盖不全（未标注者评估时补 P 标签，不默认升级）；本文件不维护分档统计，1.0 分档只见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)；未标注候选评估时补 P 标签，不默认升级。
 > **1.0 门槛与分档**：P0 23 / P1 8 / 1.0 后 15 的分档、门槛判定与批次计划见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)；本区候选在未上收前保持候选状态，上收后按批次从本表移除。
 
 - **平台 PR Check 创建后回环**（M48.5 边界）—— 平台建 PR 后仍只有轮询 + 告警，不复用 CLI 的等待状态机 / 评论 / 关闭能力；触发：再次出现「PR 红了无人收」的用户反馈，或平台已具备 check 采集面时评估复用。
@@ -188,7 +188,8 @@
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
 - **交付类同步调用未纳入运行级取消面（待评估，P2 🛠️）** —— 现象（2026-10-17 审计派生）：本轮把安装 / 锁文件修复 / 验证三类长命令迁到受管异步执行并纳入取消面，但 `github/pr-creator.ts` 的 `git push` / `git commit` 与 `app/helpers.ts` 的仓库状态查询仍是同步子进程调用 —— 弱网下 `git push` 会持续阻塞事件循环（平台执行超时定时器、队列锁续期与 HTTP 同族阻塞面的残留），且不受取消守卫覆盖（[executor-process-isolation.md §8.5](../design/governance/executor-process-isolation.md#_8-执行超时与运行级取消-2026-10-17) 已声明覆盖边界）。
-  - **待评估点**：① 交付类调用是否迁移到受管异步执行（含 push 的进度输出与错误证据面）；② 短命令（版本探测 / 仓库状态查询）是否顺带收敛或维持豁免并写明理由；③ 与「推送失败留痕 / 恢复」既有链路的交互。
+  - **待评估点**：① 交付类调用是否迁移到受管异步执行（含 push 的进度输出与错误证据面）；② 短命令（版本探测 / 仓库状态查询）是否顺带收敛或维持豁免并写明理由；③ 与「推送失败留痕 / 恢复」既有链路的交互；④ 回滚 / checkpoint 类 git 操作（`app/verification-checkpoint.ts:112` 的 `git read-tree --reset -u`）是否一并纳入异步 + 取消面。
+  - **补记（2026-10-30 实测）**：rss-impact-server 运行 `6861fa22d4801ddf` 名义 30 分钟上限（13:45:26 启动 → 14:15:29 截止）实际在 14:21:01 才 abort、整轮 35m38s，即超时定时器本身被延迟约 5.5 分钟；同轮超时阶段的后验证与回滚均为同步工作树操作，与该机制同源。**含义**：当前 30 分钟不是硬墙，`stale-cleanup` 的 30+5 分钟宽限与实际执行窗口可能重叠，需一并复核。
   - **触发条件**：弱网 / 大仓场景下再次出现「超时定时器延迟触发」或推送期间平台无响应。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
@@ -197,7 +198,7 @@
   - **触发条件**：镜像体积 / 安全评审要求收敛编译面；或再次出现「预编译包下载失败 + 缺 headers / 工具链」的原生构建失败。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
-- **单仓通用执行预算 / deadline 检查（待评估，P2 🛠️ 可靠性）** —— 现象：2026-10-18 已用「修复前基线安装失败即跳过依赖链 + 合批环境性失败跳过逐包 + 逐包环境性中断」覆盖已观测的超时形态；但当基线安装成功、多个单包安装各自以**非环境性**失败结束时，仍可能把单仓 30 分钟预算耗在多次安装上。引擎目前只感知运行级 abort，不感知「剩余预算」。
+- **单仓通用执行预算 / deadline 检查（待评估，P2 🛠️ 可靠性）** —— 现象：2026-10-18 已用「修复前基线安装失败即跳过依赖链 + 合批环境性失败跳过逐包 + 逐包环境性中断」覆盖已观测的超时形态；但当基线安装成功、多个单包安装各自以**非环境性**失败结束时，仍可能把单仓 30 分钟预算耗在多次安装上。引擎目前只感知运行级 abort，不感知「剩余预算」。**补记（2026-10-30 批量日志复盘）**：「基线自身耗时」形态也已出现两例——momei 基线 20m14s（占 67%）、rss-impact-server 基线 18m36s（占 52%），两者都在基线阶段就已注定超时；deadline 检查的挂点因此应覆盖基线采样入口与后验证入口，而非仅逐包安装前。
   - **待评估点**：① 平台是否把 `deadlineAt`（或剩余毫秒）透传给引擎，在每次安装 / 验证前检查；② 或在编排层以「连续 N 次安装失败即停止本仓」的保守阈值兜底；③ 与「部分成功交付」的交互（停止前已完成的修复是否允许提交 / 验证）。
   - **触发条件**：再次出现「基线成功但逐包安装耗尽 30 分钟」的运行；或平台执行预算调整时。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
@@ -262,6 +263,17 @@
 - **邮件传输超时与周报节拍约束显式化（待评估，P2 🛠️）** —— 现象：`apps/platform/server/services/mailer/transport.ts` 的 `SMTPTransport.Options` 未声明 `connectionTimeout` / `socketTimeout` / `greetingTimeout`，当前靠 nodemailer 默认值（socket≈10 分钟）与周报 15 分钟检查间隔的隐式大小关系兜底；M50.3 引入重入守卫后，若某次发送永不 settle 且默认值或节拍被改动，周报会永久停摆（旧行为只是噪声）。**待评估点**：① 是否显式声明三个超时并在注释里锁定「必须小于周报检查间隔」；② 是否在启动期做一次配置断言（超时 < 节拍），失败 warn；③ 与平台请求超时 / 队列预算的口径是否统一。**触发条件**：调整周报节拍 / nodemailer 升级 / 再次出现周报停摆。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
+**2026-10-30 批量运行超时复盘派生**（来源：`runs-logs-20261030-000646.txt` 第 1 页 10 条运行，2 条 `execution_timeout` + 1 条无日志失败；不占阶段编号）：
+
+- **修复前基线与修复后验证的双跑成本收敛（待评估，P2 🚀）** —— 现象：momei 单仓 30m04s（基线 20m14s → 合批验证 5m10s → 逐包 4m31s 后 abort）、rss-impact-server 单仓 35m38s（基线 18m36s → 后验证 16m53s），**两次运行的修复产出均为 0**（一次合批回滚、一次跨 major 跳过 + lockfile 已合规）。根因候选三条：① `ensureVerificationBaseline` 以「有告警」判 `hasWork`（`packages/engine/src/app/repo-fix-finalize.ts:37`），「有告警但修不了 / 跨 major 跳过」仍采样基线并跑完整后验证；② `quickVerifyProject` 不接收基线（`packages/engine/src/helpers/index.ts:93`），对基线已红的命令逐包重跑；③ 后验证链对 0 写入运行无短路。**待评估点**：① `hasWork` 是否改判「本次实际产生写操作 / 待执行修复数 > 0」；② quick-verify 与后验证是否按基线跳过「已知红」命令（只留痕不阻断）及由此丢失的「该命令新失败」检出如何披露；③ `noChanges` 豁免目前只覆盖「无告警」形态，是否扩展到「0 写入」。**验收标准（草案）**：构造「有告警但 0 写入」仓库 → 日志不再出现基线采样与后验证全链；构造「基线 lint 红」仓库 → 逐包验证不再执行该命令、且不因它回滚正确升级；两次运行耗时下降有前后对照数据（同一仓库同规模告警）。**不做**：不降低验证链覆盖面（跳过仅限基线已红命令，且必须在报告单列）。**触发条件**：批量运行再次出现「0 修复但耗尽单仓预算」；或调整验证链预算口径时。
+  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
+
+- **Nuxt / 框架类仓库默认验证链缺 `prepare` 前置（待评估，P2 🛠️）** —— 现象：momei 的 `quick-verify` 执行默认 `pnpm lint` 时 ESLint OOM（`Mark-Compact` 至约 1.95GB 后 `FATAL ERROR: Ineffective mark-compacts near heap limit`，GC 挣扎约 4 分钟才退出），与 `packages/engine/src/helpers/index.ts:86-90` 注释已记录的形态一致：默认链 `install → lint → build → typecheck → test` 中 lint 早于 build，`.nuxt/tsconfig.json` 尚未生成。平台侧该仓库未配置 `verifyCommands`，故走默认链。**待评估点**：① 引擎默认链是否在探测到 `nuxt.config.*` 时插入 `nuxt prepare`（影响全部仓库链口径）；② 或平台在新建 / 导入仓库时按框架写入 `verifyCommands` 模板（不污染默认链）；③ monorepo 根脚本形态（`pnpm -r --filter "./packages/*" lint`）下 prepare 应落在根还是各成员；④ OOM 的子进程退出应否作为独立诊断信号（当前只表现为 `exit code 1`）。**验收标准（草案）**：Nuxt 仓库在无自定义配置下 lint 不再 OOM；prepare 步骤失败有独立日志与报告条目。**不做**：不为单个仓库硬编码框架判断（探测失败须安全回退默认链）。**触发条件**：再次出现框架前置步骤缺失导致的 OOM / 假红。
+
+- **验证 checkpoint 创建失败静默降级（待评估，P2 🛡️）** —— 现象：momei 运行中 `[rollback] failed to create verification checkpoint for CaoMeiYouRen/momei (versioned-override:moment): Command failed: git stash create ...`，引擎仅 `warn` 后继续应用 `moment` override（`packages/engine/src/app/verification-checkpoint.ts:96-104`）。影响：后续所有逐包升级在**无回退基线**状态下进行，失败后无法回到干净工作区；既有 `ROLLBACK_GRANULARITY_DEGRADED` 类别在该路径未发射。**待评估点**：① 失败原因分类（`git stash create` 写失败 / `index.lock` 残留 / 非 git / 磁盘或权限）并区分「可继续」与「应中止」；② 是否发射 `ROLLBACK_GRANULARITY_DEGRADED` 审计并计入报告；③ checkpoint 不可用时是否禁止后续写操作（fail-closed）还是仅降级并持续告警。**验收标准（草案）**：人为制造 `git stash create` 失败 → 报告出现粒度降级条目且不静默继续；正常路径仍每单元一个 checkpoint。**触发条件**：再次出现 checkpoint 创建失败，或运行结束留有半截工作区。
+
+- **运行日志导出缺失败归因字段（待评估，P3 🛠️）** —— 现象：`api/runs/logs-export.get.ts` 只导出 `logsJson`，失败运行无日志时仅输出「（无执行日志）」；`errorJson.code`（`orphan_run` / `container_unavailable` / `orchestration_failed` / `execution_timeout`）、`failureStage` / `failureKind`、`resourceJson`（`oomKilled` / `peakRss`）与 build 回执均未导出，离线复盘无法归因（本次 push-all-in-cloud 失败即无法判定）。**待评估点**：① 是否在每个 run 小节标题下追加 error / failure 三列（无则省略）；② 无日志时是否追加 `resourceJson` 摘要与 build 回执；③ 与 `MAX_EXPORT_BYTES` 上限的关系（增量远小于日志正文）。**验收标准（草案）**：导出含一条 `execution_timeout` 运行 → 文件里可见其错误码与阶段；无日志运行 → 可见失败归因而非空白。**触发条件**：下次离线复盘失败运行。
+
 ### 待上收候选（评估完成，等待用户决策）
 
 > 本节为「评估完成、等待用户决策」候选的暂存区；候选**不含 `M\d+` 阶段编号**（[规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement)）。
@@ -290,6 +302,8 @@
 - **C30 Publish Docker build job 失败排查** —— 2026-08-18 用户决策暂缓（双平台构建 23m 2s 成功证明当前 docker.yml 可稳定工作）；恢复条件：① master 分支 push 频率显著提升；② 镜像实际发布成为强需求（v1.0.0 正式发布前）；③ 用户明确恢复
 - **caomei-ui 0.x → 1.0 升级回归** —— 库处于 0.x（平台当前 `0.6.0`，2026-10-11 由 dependabot 升级、2026-10-12 完成升级回归，见 [caomei-ui-migration.md §15.15](../design/governance/caomei-ui-migration.md#1515-caomei-ui-060-升级回归实证插队热修2026-10-12)）。**剩余观察**：`1.0.0` 发布后的正式升级回归与「平台需跟进新组件能力」「用户明确恢复」两条触发条件。届时按 M31 迁移期实证索引（[caomei-ui-migration.md §15](../design/governance/caomei-ui-migration.md)）做回归；**升级回归的像素兜底已就位**（视觉回归基线 `apps/platform/tests/visual/`，覆盖 alerts / repos / pr-checks / dialog-import-repos / login，口径见 [测试规范 §6.7](../standards/testing.md)）
 - **ScanResult 数据层去重（upsert 唯一索引）** —— 决策暂缓：应用层去重（fingerprint + occurrenceCount / firstSeenAt / lastSeenAt / affectedRunIds）已实施且满足当前业务需求；恢复条件：出现"fix 复用同一 `scan_run_id` 跨次刷新"或"历史 fixStatus 跨次保留"需求时迁移到数据层 upsert
+
+- **仓库级执行预算与超时配置**（P2 🚀🛠️，1.0 门槛批次暂缓）—— 2026-10-30 用户裁定 **B：不在本批上收，随 1.0 门槛批次一起排期**。设计稿已定稿（D1 封顶默认 60 分钟且可配置 / D2 权限沿用 `admin/org_admin` / D3 与 PUT partial 修复同批，AC1-AC9 与批 1-2 文件清单齐备）：[仓库级执行预算与超时配置设计](../design/governance/repo-execution-limits.md)。恢复条件：1.0 门槛批次启动，或用户明确授权上收；上收前不得进入 D 阶段。
 
 ### 远期登记 / 未排期增强候选
 
