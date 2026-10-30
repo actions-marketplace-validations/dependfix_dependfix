@@ -305,3 +305,43 @@
 - **现象**：周报插件用 `setInterval` 触发异步发送且不等待上一轮；SMTP 挂起时可跨过 15 分钟间隔并发进入，导致「单周 6 次尝试」上界被突破、`skipped_no_recipient` 幂等落库出现竞态多行。
 - **手法**：周期任务用「`running` 守卫 + 状态机（终态 / 可重试 / 退避 / 上界）」显式建模；退避以上一次执行**完成时刻**为基准；配置关闭只清退避、不清计数，避免「关一下再开」绕过上界。
 - **落点**：[development.md §5.1.59](../../standards/development.md)（周期任务口径）+ 检查点矩阵 5.1.59 行 + `weekly-digest-attempt.ts` + 设计稿 §6.5。
+
+## 七十七、M51 归档批次经验沉淀（异步化关 shell / 空集合假绿 / 跳过语义 / 归一同源 / 列表次键 / 时间边界用例）
+
+> **批次**：M51 语义与数据收口（2026-10-30，六原子 + 1 批 CI 插队）。**准入依据**：④ 工具 / 环境陷阱（`spawn` 的 `shell:true` 只按空格拼接 argv、`every()` 对空数组恒真、真实时钟边界抖动）+ ② 决策需溯源（预算跳过为什么「不交付也不回滚」、列表次键为何选主键）。落点见各条目末行。
+
+### 1. 同步 → 异步迁移的第一步是关 shell（argv 直传）
+
+- **现象**：交付类 git 调用从 `execFileSync` 迁到受管异步 `spawn` 后，`runTrackedCommand` 按平台默认给 Windows 走 `shell:true`（为 `.cmd` 包裹的 pnpm 设计）；Node 对 `shell:true + args[]` **不做引号化**，只按空格拼接——提交信息里的空格、`:(literal)` 路径里的括号会被 cmd 拆词（交付失败），并形成命令注入面。
+- **手法**：`git.exe` 这类原生可执行文件一律显式 `shell: false`，引号化交给 libuv；只有 `.cmd` 包裹的工具链才允许 shell。迁移时逐个调用点确认二进制形态，并用「含空格 / 括号的参数往返」用例锁住，不靠平台默认值。
+- **落点**：[development.md §5.1.44](../../standards/development.md)（规则扩到交付类命令 + shell 口径）+ 检查点矩阵 5.1.44 行 + `packages/engine/src/github/git-run.ts` / `git-run.test.ts`。
+
+### 2. 空集合 `every()` 恒真：跳过 / 未验证必须显式字段
+
+- **现象**：预算跳过终验时 `verifyProject` 返回 `[]`，下游 `actions.every(a => a.success)` 对空数组恒真 → 记为「验证通过」→ 门禁放行交付。跑得越省（预算耗尽恰在终验前）越容易出错，且报告显示全绿。
+- **手法**：任何 `every` / `some` / 聚合判定都要问「空集合代表什么」；「未执行」必须与「通过」分开表达——入口回调（`onSkip`）+ 结果字段（`verificationSkipped`）+ 门禁分流三件套，空集合不得再作为通过信号。
+- **落点**：[development.md §5.1.41](../../standards/development.md)（跳过不许折叠为通过）+ 检查点矩阵 5.1.41 行 + `packages/engine/src/app/repo-fix-finalize.ts` / `packages/engine/src/runners/verification-gate.ts`。
+
+### 3. 「跳过类」与「失败类」是两回事：跳过不交付，但也不回滚、不误记失败
+
+- **现象**：预算不足属于主动取舍，不是目标仓库失败；若按失败处理会回滚已通过验证的单元、把仓库判红；若按通过处理则交付未经完整验证的改动。两种错法都出现过（后者即上一条）。
+- **手法**：跳过类审计（`BUDGET_EXHAUSTED`）不参与 exit code 与仓库失败判定；**未验证不放行交付**，但保留工作区不回滚（供人工复核）；取消另按 `ABORTED` 运行级上报，两者都不伪装成 `ENVIRONMENT_ERROR`。混合运行（预算跳过 + 真实失败）按真实失败整仓回滚。
+- **落点**：[executor-process-isolation.md §8.5/§8.6](./executor-process-isolation.md)（预算接口契约与交付口径）+ [run-failure-taxonomy.md](./run-failure-taxonomy.md)（`BUDGET_EXHAUSTED` 类别与防御性映射）+ `packages/engine/src/app/budget.ts`。
+
+### 4. 写入归一与读取解析必须同源（JSON 配置列）
+
+- **现象**：`tags` 写入侧经 Zod trim / 去重，读取侧只过滤非字符串：同一行 `'[" prod ","prod"]'` 读回是重复且带空格的集合，而按合法输入重写会得到 `['prod']`——「写入什么 ≠ 读回什么」，UI 展示重复、按标签筛选漏命中。
+- **手法**：把归一抽成纯函数作单一事实源，写入 side 用它做 transform、读取 side 用它做 parse；容量 / 上限只在写入把关，读取保持宽容（不截断存量行）；写入先去重再判容量，避免重复项白占额度。
+- **落点**：[development.md §5.1.45](../../standards/development.md) + 检查点矩阵 5.1.45 行 + `apps/platform/server/utils/repository-tags.ts` / `entities/repository.ts#parseTags`。
+
+### 5. 列表查询必须显式唯一列次键
+
+- **现象**：`ORDER BY createdAt DESC` 在批量插入 / 同类事件同毫秒时并列，行序由数据库返回顺序决定——同一查询两次可能不同；视觉基线与 `take(500)` 截断集合随之抖动，且测试只能写「集合包含」这种弱断言。
+- **手法**：主排序键可并列的列表查询统一追加唯一列（通常主键）DESC 作次键；次键只保证**确定性**，不承担业务意图顺序（意图顺序仍由 fixtures 钉死时间戳）。用例用同键多行断言「两次查询一致 + 按主键 DESC」，而不是只断言集合。
+- **落点**：[api.md §4 排序确定性](../../standards/api.md)（严格约束）+ 检查点矩阵 api.md §4 行 + `apps/platform/server/api/alerts/index.get.ts` / `index.get.test.ts`。
+
+### 6. 时间敏感用例不要拿真实时钟的「恰好等于阈值」
+
+- **现象**：`deadlineAt = Date.now() + MIN_STEP_BUDGET_MS` 在构造时算、`budgetAllows` 的 `now` 在调用时取，间隔 ≥1ms 就把余量吃到 59999ms，全量并发下偶发失败（单文件连跑多轮才复现）。
+- **手法**：优先给被测函数注入 `now`；无法注入时边界值留明确余量（阈值 + 足够大的常数），并另用显式常量断言边界（`= 阈值` 允许 / `阈值 - 1` 拒绝），不要让真实时钟充当边界。
+- **落点**：[testing.md §6.14](../../standards/testing.md) + 检查点矩阵 testing §6.14 行 + `packages/engine/src/app/budget.test.ts`。
