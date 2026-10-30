@@ -1005,7 +1005,7 @@ e2e 侧共改写 14 个 spec（`.p-dialog*` / `.p-select*` / `.p-drawer` / `.p-c
 | 全量 e2e | `TMPDIR=/dev/shm pnpm test:e2e` | **211 passed / 0 failed**（含新增 3 例），1-2 flaky 均重试通过（见第 5 条） |
 | 视觉回归 | `pnpm test:visual:update --update-snapshots=all` + 两轮 `pnpm test:visual` | 20 passed → 20 passed ×2（门禁口径无失败、无超预算；`.last-run` 与基线落盘同批自洽） |
 | 定向 e2e（DataTable 重点面） | `playwright test repos-crud / table-filters / scans / pr-checks --workers=1` | **28 passed**（受控多选 / 客户端分页 / 两处 `lazy` 翻页 / 行展开 / 运行详情） |
-| 新增守卫 | `playwright test tests/e2e/theme-tokens.e2e.test.ts` | 4 passed（文本角色 2 + 控件边界对比度 2）；**mutation 实测**：亮色 `primary-text` 改回 `#1d4ed8` → 失败；删除暗色 `control-border` 覆盖 → 2.59:1 → 失败 |
+| 新增守卫 | `playwright test tests/e2e/theme-tokens.e2e.test.ts` | 4 passed（文本角色 2 + 控件边界对比度 2）；**mutation 实测**：亮色 `primary-text` 改回 `#1d4ed8` → 失败（暗色边框的 mutation 属后续抬档批次，见 §15.17 第 2 条） |
 | 全选适配守卫 | `playwright test tests/e2e/repos-select-all.e2e.test.ts` | 1 passed（含刷新一致性与筛选不变量）；**mutation 实测**：`selectAllFiltered` 改为只取首页 → 失败（Expected 12 / Received 10）；删除刷新后重映射 → 失败（Expected 10 / Received 0） |
 | 文档值核验 | 一致性 / 对比度脚本 | 新文本角色：亮 `#0f766e` 在 8% teal soft 底 4.97:1、白底 5.47:1；暗 `#5eead4` 在 8% soft 底 10.19:1 / 深底 12.07:1 |
 
@@ -1029,11 +1029,11 @@ e2e 侧共改写 14 个 spec（`.p-dialog*` / `.p-select*` / `.p-drawer` / `.p-c
 
 - **检查结论**：全站仅 `repos` 使用 `selection-mode="multiple"`（`rg` 实测 1 处，无 `single` 用法）；其余表页均无选择列——`pr-checks` / `batch-runs` 含 `expander` 列，`scans` / `repo-history-dialog` 是 `lazy` 表（后者也无 `expander`），故都不受全选语义影响。另 `import-repos-dialog` 的「全选」是**自建 checkbox + 自建分页列表**（选 `selectableFilteredRepos` 全集合），不经 DataTable 语义，同样不受影响。
 - **功能缺口**：`repos` 是客户端分页（10 / 25 / 50），表头全选只覆盖当前页；「批量扫描全部筛选结果」需逐页点击（或先把每页调到 50）。受控 `selectedRows` 按 row id 跨页保持，故逐页勾选可用但成本随页数线性增长。
-- **适配（不改上游行为）**：表头保持 1.0 语义（当前页）；卡片内表格上方新增选择栏——`已选 {selected} 条，当前筛选 {total} 条` + `全选全部（N）` / `清空选择`（按钮按状态显隐：已选 > 0 才显示「清空选择」，未全选才显示「全选全部」）。`selectAllFiltered` 以整集合替换（与 DataTable「回写当前过滤集合」的既有语义一致）；选中判定按 id 比对（`selectedRows` 可能含被筛选隐藏的行）。
+- **适配（不改上游行为）**：表头保持 1.0 语义（当前页）；卡片内表格上方新增选择栏——`已选 {selected} 条，当前筛选 {total} 条`（`role="status"`，计数变化对读屏可感知）+ `全选全部（N）` / `清空选择`（按钮按状态显隐：已选 > 0 才显示「清空选择」，未全选且总数 > 0 才显示「全选全部」；筛选结果为 0 但仍有已选时只保留清空入口，避免出现误导性的「全选全部（0）」）。`selectAllFiltered` 以整集合替换（与 DataTable「回写当前过滤集合」的既有语义一致）；选中判定按 id 比对（`selectedRows` 可能含被筛选隐藏的行）。
 - **落地拆分**：选择栏为独立组件 `app/components/repo-selection-bar.vue`（纯展示 + 两个 emit），状态与动作抽到 `app/composables/use-repo-selection.ts`（`isAllFilteredSelected` 按 id 判定、`remapSelectionById` 刷新重映射、`useRepoSelection` 组合式），既避免 `repos.vue` 越过 `max-lines: 800`，也让判定可单测。
 - **刷新一致性（审计衍生）**：库内受控选择按**对象引用**解析，而保存 / 删除后的 `fetchData()` 会换新对象 → 原先会出现「已选 N 条但无行勾选」。现于刷新后按 id 重映射已选集合（已删除行自然移出），选择栏计数与勾选态保持一致。
 - **守卫**：`tests/e2e/repos-select-all.e2e.test.ts` 自建 12 条仓库并清理——断言「表头全选 = 10 条」「第 2 页未被波及」「翻页保持已选」「全选全部（12）覆盖两页」「编辑保存触发刷新后计数与勾选态一致」「筛选收窄不清空已选」「清空归零」，并加版面守卫（选择栏底边不高于表格顶边）；单测 `tests/unit/use-repo-selection.test.ts` 8 例（按 id 判定 / 缺行 / 空集合 / 含隐藏行 / 全选替换与清空 / 刷新重映射三种）。**mutation 实测**：`selectAllFiltered` 改为只取首页 → e2e 失败（Expected 12 / Received 10）；删除刷新后重映射 → e2e 失败（Expected 10 / Received 0）。
-- **视觉**：`repos-*` 与 `dialog-select-open-*` 基线因选择栏整体下移重建（§15.16 表内已标注）。隔离 token 变化、**只看版面位移**（对比 rc.1 首版基线）：repos-light 14.36% / repos-dark 14.54%、dialog-select-open light 7.64% / dark 8.28%（该用例在 `/repos` 打开弹窗，背景页随表格下移；dark 另含边框抬档）；**合计口径（基准 = 0.7.0 基线）见 §15.16 表**。
+- **视觉**：`repos-*` 与 `dialog-select-open-*` 基线因选择栏整体下移重建（§15.16 表内已标注）。隔离 token 变化、**只看版面位移**（对比 rc.1 首版基线）：repos-light **14.36%**（纯位移）/ repos-dark 14.54%、dialog-select-open light **7.64%**（纯位移）/ dark 8.28%——**暗色档两项 = 位移 + 第 2 条的边框抬档**（rc.1 首版不含该覆盖），故恒高于同页亮色档；**合计口径（基准 = 0.7.0 基线）见 §15.16 表**。
 
 **2）暗色控件边界微调**
 
