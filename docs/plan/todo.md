@@ -100,15 +100,21 @@
 - **风险与缓解**：异步化调用面广 → 逐调用点替换 + 定向用例（17 个受影响测试文件全部改 await 并复跑）；deadline 与「部分成功交付」冲突 → 已明确「预算只跳过未开始的工作；**终验被跳过视为未验证**（不交付、不回滚、留 `verificationSkipped`）」；取消期回滚被前置守卫拦下 → 工作区交由调用方清理且不误记 `ROLLBACK_FAILED`（已启动中被取消按真实失败留痕）。
 - **审计**：R1 两分区均 **Reject**（A：Windows 交付链被 shell 拼接 + 预算跳过终验记「验证通过」；B：同一验证假绿 + 文档口径）→ 收口：`shell: false` + `started` 语义、预算跳过按未验证处理（不交付不回滚）、预算检查补组合批 / 分组逐包 / 重做 repair、去重键含 repository、StringDecoder 与截断标记、checkpoint 失败 warn、文档与数字订正 → R2 quick **两分区均 Pass**（A 0 blocker：RG-A1/A3/A4/A5/A7/A8/A10/A11/A12/A13 closed、A2 功能闭环、A6 截断标记已透出；B 0 blocker：RG-B1/B3/B4/B5/B7 closed、B2/B6 文档与字段清单已补齐）。
 
-### M51.6 [P2 🛠️] 配置写入闸门 + alerts 原始列表排序兜底（台账 ⑦+⑧）
+### M51.6 [P2 🛠️] 配置写入闸门 + alerts 原始列表排序兜底（台账 ⑦+⑧）（**已闭环**）
 
-- **目标**：`sandboxLimits` / `tags` 的写入与读取口径单一可判；alerts 原始列表在 `createdAt` 并列时行序确定（消除视觉 flaky 根因）。
-- **范围**：`apps/platform/server/schemas/repository.ts`（`sandboxLimits` 加 `.strict()`、`tags` 上限常量同源）、`entities/repository.ts`（`parseTags` trim / 去重与常量对齐）、`api/alerts/index.get.ts`（补 `addOrderBy('result.id','DESC')`）、`docs/standards/development.md §5.1.45` 对齐说明、单测与视觉基线核验。
-- **验收标准**：① `sandboxLimits` 含未知键（如 `gpu`）→ 400；② `tags` 超限 / 重复的写入与读取结果一致；③ 同一 `createdAt` 的多行两次查询顺序一致；④ 视觉基线若因行序变化失配，逐张重标并在 README 记录。
-- **不做什么**：不改 `sandboxLimits` 数值上下限；不改告警列表主排序字段（仍 `createdAt DESC`，仅补次键）。
+- **目标**：`sandboxLimits` / `tags` 的写入与读取口径单一可判；alerts 原始列表在 `createdAt` 并列时行序确定。
+- **范围**：`apps/platform/server/utils/repository-tags.ts`（新增：标签上限常量 + 归一函数）、`schemas/repository.ts`（共用写入闸门 `repositoryTagsSchema`、`sandboxLimits` 加 `.strict()`）、`entities/repository.ts`（`parseTags` 复用同一归一函数）、`api/e2e/fixtures.post.ts`（改用共享 schema，删除重复字面量）、`api/alerts/index.get.ts`（三种模式补 `result.id DESC` 次键）、`docs/standards/development.md §5.1.45` 措辞对齐、单测与视觉基线核验。
+- **验收标准（实测）**：
+  - ① `sandboxLimits` 含未知键（`gpu`）→ 400：schema 层断言 `unrecognized_keys` + API 层 PUT 断言 400。
+  - ② `tags` 归一 / 容量写入与读取一致：写入先去重再判容量（20 unique + 1 dup 通过、21 unique 拒绝），读取 `parseTags` 复用同一归一函数（存量脏数据读回即重写结果）；容量只在写入把关，超限存量行仍可读。用例覆盖 trim、去重保序、空白 / 超长拒绝、写入即读回一致、`tags` 缺省不清空既有值。
+  - ③ 同一 `createdAt` 多行两次查询顺序一致：独立仓库 3 条同毫秒同包告警，默认 / `groupBy=package` / `groupBy=repository` 三模式均断言「两次一致 + 按主键 DESC」（改前 `ORDER BY createdAt DESC` 返回插入序，断言可区分）。
+  - ④ 视觉基线：platform build 后 `test:visual` 20/20 通过（fixtures 的 `createdAt` 互不相同 → 未失配），无需重标、README 未改。
+- **不做什么**：不改 `sandboxLimits` 数值上下限；不改告警列表主排序字段（仍 `createdAt DESC` / `packageName ASC`，仅补次键）；不处理同 pattern 的其余列表查询（登记 backlog）。
 - **依赖**：无。
-- **交付物**：2 commits / 5-7 files / 150-250 行（预估）。
-- **风险与缓解**：存量脏数据被 `.strict()` 拒绝 → 仅收紧写入侧、读取保持宽容；视觉行序变化 → 先跑视觉套件，必要时重建并登记。
+- **交付物（实测）**：2 个主体提交（`2d702cdd` 配置写入闸门 / `962c610c` alerts 并列兜底）+ 文档收口；11 files / +287 −16（超估计 5-7 files / 150-250 行：新增 6 条用例与 utils 单测，以及 `.strict()` 后「未知键 400 / 缺省不修改」的 API 回归）。
+- **风险与缓解**：存量脏数据被 `.strict()` 拒绝 → 只收紧写入侧，读取与 `parseSandboxLimits` 保持裁剪式宽容；视觉行序变化 → 先 build 再跑视觉套件（实测全绿）；API 契约收紧 → 未知键原本也落不了库（Zod 剥离），改为显式 400 属「暴露既有误解」而非破坏可用路径。
+- **审计**：R1 两分区均 **Pass**（A：standard，0 blocker / 2 warning 已收口——按 2 提交拆分、补 `undefined=不修改` API 用例、注释路径与测试命名订正；B：quick，0 blocker，建议项已收口——补 `groupBy=repository` 并列用例、订正两处旧「同毫秒不稳定」注释、收紧头注释归因、同 pattern 与 typecheck 缺口登记 backlog）。
+- **残余**：① 同 pattern 仍有 4 处列表查询缺并列次键（`runs/[id].get` / `audit-events` / `pr-checks` / `notifications`，已登记 backlog）；② 平台 `typecheck` 未覆盖 `.nuxt/tsconfig.json` 的 node 项目（`nuxt.config.ts` 2 个既有类型错误，已登记 backlog）。
 
 ---
 
