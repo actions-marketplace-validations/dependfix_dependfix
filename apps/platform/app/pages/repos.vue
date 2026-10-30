@@ -345,6 +345,9 @@ const resetRepoFilters = () => {
  * 「批量扫描」计数可能大于当前可见行数——筛选是视图态，不改变集合本身。
  *
  * 页码：`:data` 变化（搜索 / 筛选）时由 DataTable 内部（`@tanstack` autoResetPageIndex）回到第 1 页。
+ *
+ * 跨页全选：表头全选用上游 1.0.0 语义（当前页）；「全选全部筛选结果」由表格上方的选择栏承载，
+ * 单次点击覆盖所有筛选结果（含跨页），并显示「已选 / 筛选总数」。
  */
 const filteredRepos = computed(() => {
     const keyword = searchQuery.value.trim().toLowerCase()
@@ -377,6 +380,9 @@ const filteredRepos = computed(() => {
 const reposEmptyText = computed(() => (
     hasActiveRepoFilter.value ? t('repos.emptyFiltered') : t('repos.empty')
 ))
+
+// 跨页全选：表头保持上游「当前页」语义，「全部筛选结果」由选择栏承载（状态与动作见组合式）
+const { allFilteredSelected, selectAllFiltered, clearSelection } = useRepoSelection(selectedRows, () => filteredRepos.value)
 
 /**
  * 列定义（caomei DataTable 用 `columns` 数组 + `#cell-{key}` 插槽替代迁移前的 `<Column>`）。
@@ -534,6 +540,14 @@ const columns = computed<DataTableColumn<RepoView>[]>(() => [
         </CaomeiMessage>
 
         <CaomeiCard v-if="!loading">
+            <repo-selection-bar
+                v-if="filteredRepos.length"
+                :selected="selectedRows.length"
+                :total="filteredRepos.length"
+                :all-selected="allFilteredSelected"
+                @select-all="selectAllFiltered"
+                @clear="clearSelection"
+            />
             <CaomeiDataTable
                 :data="filteredRepos"
                 :columns="columns"

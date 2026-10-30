@@ -60,6 +60,11 @@
     --caomei-color-text-muted: #{$color-text-muted};
     --caomei-color-border: #{$color-border-dark};
 
+    // 控件边界（1.0.0 新增 token）：上游单值 #67676a 按自家暗底标定（bg #0b0b0d 3.49:1 / elevated #17171a 3.17:1），
+    // 平台暗色面更亮（page #0f172a / elevated #1e293b）→ 原值在 elevated 只有 2.59:1，低于 WCAG 1.4.11 的 3:1。
+    // 故暗色档抬到 #7b8494（page 4.74:1 / elevated 3.88:1）；亮色档保持上游值（白底 3.41:1 / elevated 3.26:1）。
+    --caomei-color-control-border: #7b8494;
+
     // 文本角色随暗色主色走（亮青）：库内暗色档本就用 `var(--caomei-color-primary)` 动态解析，
     // 此处显式引用同一 token，避免未来上游改回静态值时静默错配（暗色 8% soft 底上 10.19:1）。
     --caomei-color-primary-text: var(--caomei-color-primary);
