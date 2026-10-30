@@ -83,8 +83,19 @@ export interface UnifiedBuildSignal {
     logUrl: string | null
     /** 摘要（`check_run.output.text` / status description / deployment description，已截断） */
     summary: string | null
-    /** 观测时刻 */
+    /**
+     * 观测时刻（轮询 wall clock，同批信号相同）。
+     */
     observedAt: Date
+    /**
+     * 该轮次的时间戳（ISO 8601；用于同名多轮去重，见 `dedupeSignalsByLatestRound`）。
+     *
+     * 取值：check `started_at ?? completed_at`、commit status `updated_at ?? created_at`、
+     * deployment `created_at`（不用 `updated_at`：迟到的 status 会刷新它，把旧部署排到新部署之后）。
+     * 缺失 / 非法一律 `null`（排序时回退数值 `sourceId`）。
+     * 可选：历史 `signalsJson` 行无该字段（读取后为 `undefined`，按「不可比」处理）。
+     */
+    roundAt?: string | null
     /**
      * 失败归因（与 CLI 报告同一纯函数 `classifyCheckFailure`；未完成信号为 `undefined`）。
      *

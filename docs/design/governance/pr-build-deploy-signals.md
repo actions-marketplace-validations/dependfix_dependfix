@@ -97,6 +97,7 @@ interface UnifiedBuildSignal {
     logUrl: string | null      // deployment status.log_url（如有）
     summary: string | null     // check_run.output.text（截断，避免单条过大）
     observedAt: Date
+    roundAt?: string | null    // 轮次时间戳（§3.10 同名多轮收敛用；历史 signalsJson 行无此字段）
     attribution?: 'self_caused' | 'pre_existing' | 'external_noise' | 'cancelled' | 'unknown'  // §3.9
 }
 ```
@@ -106,6 +107,7 @@ interface UnifiedBuildSignal {
 - 复用现有 `PollingSource` 的 `pulls.list` + 目标作者过滤（`TARGET_PR_AUTHOR_LOGINS`），仅替换「单 check 名过滤」为三源聚合。
 - 每个目标 PR head SHA 调 3 组 API：check runs、combined status、deployments（+ 每个 deployment 的 statuses）。
 - 映射到 `PRBuildStatus`：`overall = failed` 当存在任一 `failure | error | timed_out | action_required`；`pending` 当存在非终态；否则 `success`。
+- **同名多轮只取最新一轮**（§3.10）：按 §3.10 定义的组键（check 含 workflow run id 血缘）先收敛再聚合，避免 re-run / 后发 status / 新 deployment 的旧失败被当成当前结果。
 
 ### 3.4 聚合与告警
 
@@ -178,11 +180,61 @@ interface UnifiedBuildSignal {
 - **fail-closed（三源）**：check conclusion 未识别（GitHub 新增枚举）→ `state='failure'`（不再静默
   `skipped`）、归因 `unknown`；`startup_failure` 显式映射 `failure`；commit status / deployment 的
   未识别原始状态同样回落 `failure`（缺失值仍为 `pending` / `skipped`）。
-- **已知差异（已裁定）**：`completed` + `conclusion=null` 在平台维持 `skipped`（GitHub 历史怪态，
-  不判失败），而 CLI 回环按 fail-closed 计为失败（`unknown` 结论）；平台侧不产出该形态的归因标签，
-  CLI 侧仍在报告与失败评论中标「未判定（unknown）」。暂不统一，登记为后续候选。
+- **结论口径已统一（M51.2，2026-10-30）**：`completed` + `conclusion=null` 平台与 CLI 一致判**失败**
+  （CLI 归一为 `unknown` 且 `isFailedConclusion` 判失败，平台 `resolveCheckRunState` 直接判 `failure`）。
+  归因面仍有差异（既有）：平台不产出标签（`rawState=null` 视为未完成），CLI 仍标 `unknown`。
 - **只解释、不放行**：归因不参与 `overallStatus` / 告警状态机 / mergify `check-success` 判定；
   UI 仅在非成功信号上展示标签，历史 `signalsJson` 行无该字段时直接不渲染。
+
+### 3.10 结论口径统一与同 ref 多轮收敛（M51.2，2026-10-30）
+
+两条规则在**平台与 CLI 同口径**落地（`@dependfix/core` 的 `check-signals.ts` 为单一事实源），
+避免「同一个 PR 在页面报红、在 CLI 报告里报绿」：
+
+1. **`completed` + `conclusion=null` → 失败（fail-closed）**
+   - CLI：`normalizeCheckRunConclusion` 归一为 `unknown`，`isFailedConclusion('unknown')` 为真。
+   - 平台：`resolveCheckRunState` 在 `status === 'completed'` 且 `conclusion === null` 时返回 `failure`
+     （原为 `skipped`，属「历史怪态不判失败」的旧口径，本批撤销）。
+   - 方向说明：GitHub 已收尾却没给结论 → **无法证明通过**，故按失败处理；`neutral` / `skipped` /
+     `cancelled` / `stale` 仍不计失败（不得因本规则放宽）。
+   - 归因面仍有差异（既有）：平台对 `rawState=null` 不产出标签（`resolveAttributionConclusion` 视为未完成），
+     CLI 侧仍在报告与失败评论中标「未判定（unknown）」——本批只统一**结论**，不改归因产出条件。
+
+2. **同 ref 同名多轮 → 只取最新一轮**
+   - 触发场景：同一 workflow run 的重跑（同名新 check run attempt）、同一 commit status context 的
+     后发状态、同一 environment 的新 deployment。
+   - **血缘边界（关键）**：check 的组键是 `(app, name, workflow run id)`——run id 从 `details_url`
+     的 `/actions/runs/{id}/` 提取。理由：「push 触发」与「pull_request 触发」是**两个不同的 workflow
+     run**，job 名相同但失败/通过相互独立；合并后启动较晚的一方会掩蔽另一方的失败（fail-open）。
+     取不到 run id 的非 Actions check **不收敛**（各自成组，维持「任一失败即失败」）。
+   - 其余组键：status 按 `(provider, context)`、deployment 按 `(provider, environment)`——同一目标
+     的状态机 / 当前状态，取最新即正确。
+   - 排序（`dedupeByLatestRound`）：两侧 `roundAt` 都可比 → 比时间（相等再比数值 id）；**任一侧不可比
+     → 比数值 `sourceId`**；都不可比 → 保留先出现者。`roundAt` 取 check `started_at ?? completed_at`、
+     status `updated_at ?? created_at`、deployment `created_at`。不能只看 `completed_at`：重跑进行中的
+     新一轮 `completed_at` 为空，按它取「最新」会取回旧失败；也不能把「无 `roundAt`」一律视为最旧，
+     否则 queued 的新一轮永远不胜出（旧 `success` 会被判终态并触发 30 分钟静默窗口）。
+   - **采集参数**：check runs 显式传 `filter: 'all'`（API 默认 `latest` 可能拿不到历史 attempt，
+     收敛将失效）；同名收敛由本规则负责，不依赖 API 默认语义。
+   - 落点：平台 `PollingSource` 采集后（`capSignals` 截断前）+ 监控器**关注面**过滤后（兜底未来
+     SyncSource 未收敛）；未配置关注集时沿用快照派生值（逐字节等价护栏）。CLI `evaluateCheckTerminal`
+     入口（`dedupeObservedChecksByLatestRound`）。
+   - **落库口径**：`signalsJson` 保存**收敛后**的信号（每个组键最新一轮）——被覆盖的旧轮次不保留
+     （此前的「全量留存」方案未采用：UI 未渲染轮次，重复行会与「一个 job 一行」的观感冲突）。
+     历史 `signalsJson` 行无 `roundAt` 时按「不可比」处理（不报错）。
+   - 父提交侧（CLI 归因输入）**保持失败优先折叠**：它只用于 `pre_existing` 判定、不参与 `overallStatus`，
+     保守折叠避免把「父提交同 job 曾绿」误判为本次自致。
+   - 已知边界：
+     1. **被新 run 取代的旧失败不会自动消失**——同一 SHA 上「重新触发的 run / 另一 event 的 run」与旧失败
+        并存时按血缘各自成组，`overallStatus` 维持 `failure`（含 `on: [push, pull_request]` 双触发的另一
+        方失败）。这是**有意选择**（不掩蔽失败）；代价是与 GitHub 页面「同名最新一轮」判定可能不一致，
+        且用户 ack 后下一轮会被重新点回。要区分「并发 run（应保留）」与「同 event 取代 run（宜取代）」
+        需引入 `check_suite` / event 维度信息，登记为后续候选。
+     2. **`filter: 'all'` 的分页成本**：同一 SHA 的 run 越多（push + PR + 多次重跑），`paginate` 页数上升；
+        `per_page: 100` 下影响有限，属 §6「限流」面的额外开销。
+     3. 无 `environment` 的 deployment 以 `ref` 作 name，会按 ref 合并为「该 ref 的当前部署状态」。
+     4. 非 Actions check（无 run id）不收敛，重跑仍可能双报（保守方向，不掩蔽失败）。
+     5. 平台未配置关注集时不重新收敛（沿用采集层派生值）——监控器只在**关注面**路径兜底。
 
 ## 4. 数据模型（两个选项）
 
@@ -235,6 +287,7 @@ interface UnifiedBuildSignal {
 - [x] 轮询幂等：同 `headSha` 重跑不重复入库（M43.2b：`(repositoryId, prNumber, headSha)` 唯一索引 + 幂等 UPDATE 用例）。
 - [x] 无 Deployments / 无 status 的仓库不报错（fail-open）（M43.2a）。
 - [x] 未配置关注集时行为与现状完全一致；已配置时只有命中信号进入告警面，未命中信号仍全量落库并可在 UI 查看（M45.6，§9）。
+- [x] **结论口径统一**：同一 fixture（`completed + conclusion=null`）平台与 CLI 同判失败；**同一 workflow run 的重跑**「旧 failure + 新 success」两侧均聚合 `success`，而**同名不同 run**（push 与 pull_request 触发）两侧均保留并判失败；`neutral` / `skipped` 仍不计失败；关注集外的信号仍不参与 `overallStatus`（M51.2，§3.10）。
 
 ## 9. 告警关注集（M45.6，2026-10-19）
 

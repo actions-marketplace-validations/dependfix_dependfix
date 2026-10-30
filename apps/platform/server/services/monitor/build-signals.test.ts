@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
     aggregateOverallStatus,
     capSignals,
+    dedupeSignalsByLatestRound,
     deriveWorstConclusion,
     isTerminalOverallStatus,
     isWithinUpdatedWindow,
@@ -83,10 +84,52 @@ describe('monitor/build-signals 归一化', () => {
         expect(pending.rawState).toBe(null)
     })
 
-    it('check run：completed 但 conclusion=null → skipped（与既有映射一致）', () => {
-        const skipped = normalizeCheckRun({ id: 3, name: 'Test', status: 'completed', conclusion: null }, observedAt)
-        expect(skipped.state).toBe('skipped')
-        expect(skipped.rawState).toBe(null)
+    it('check run：completed 但 conclusion=null → failure（fail-closed，与 CLI 回环同口径）', () => {
+        const signal = normalizeCheckRun({ id: 3, name: 'Test', status: 'completed', conclusion: null }, observedAt)
+        expect(signal.state).toBe('failure')
+        expect(signal.rawState).toBe(null)
+        // 聚合 / 结论派生同向：不静默为通过或跳过
+        expect(aggregateOverallStatus([signal])).toBe('failure')
+        expect(deriveWorstConclusion([signal])).toBe('failure')
+    })
+
+    it('commit status / deployment 的 roundAt 取值', () => {
+        const status = normalizeCommitStatus(
+            { id: 1, context: 'Vercel – web', state: 'success', updated_at: '2026-10-12T00:05:00Z', created_at: '2026-10-12T00:01:00Z' },
+            observedAt,
+        )
+        expect(status.roundAt).toBe('2026-10-12T00:05:00Z')
+        const legacyStatus = normalizeCommitStatus({ id: 2, context: 'ci/build', state: 'pending' }, observedAt)
+        expect(legacyStatus.roundAt).toBeNull()
+
+        // 传入 updated_at 也不得参与排序（入参类型已不含该字段；此处以 as 绕过类型守卫验证运行时口径）
+        const deployment = normalizeDeployment(
+            { id: 3, environment: 'Production', created_at: '2026-10-12T00:02:00Z', updated_at: '2026-10-12T00:20:00Z' } as Parameters<typeof normalizeDeployment>[0],
+            { state: 'success' },
+            observedAt,
+        )
+        // 只用 created_at：updated_at 会因迟到 status 刷新而把旧部署排到新部署之后
+        expect(deployment.roundAt).toBe('2026-10-12T00:02:00Z')
+    })
+
+    it('check run：roundAt 取 started_at 优先（re-run 未完成时 completed_at 为空）', () => {
+        const running = normalizeCheckRun(
+            { id: 9, name: 'Test', status: 'in_progress', conclusion: null, started_at: '2026-10-12T01:00:00Z' },
+            observedAt,
+        )
+        expect(running.roundAt).toBe('2026-10-12T01:00:00Z')
+        const done = normalizeCheckRun(
+            {
+                id: 8,
+                name: 'Test',
+                status: 'completed',
+                conclusion: 'success',
+                started_at: '2026-10-12T00:00:00Z',
+                completed_at: '2026-10-12T00:05:00Z',
+            },
+            observedAt,
+        )
+        expect(done.roundAt).toBe('2026-10-12T00:00:00Z')
     })
 
     it('check run：URL 超限置 null（截断会产出无效链接）', () => {
@@ -448,5 +491,90 @@ describe('monitor/build-signals 归因', () => {
         expect(failed.attribution).toBe('unknown')
         const pending = normalizeDeployment({ id: 2, environment: 'Preview' }, null, observedAt)
         expect(pending.attribution).toBeUndefined()
+    })
+})
+
+describe('monitor/build-signals 同名多轮收敛', () => {
+    const runUrl = (runId: number) => `https://github.com/acme/app/actions/runs/${runId}/job/1`
+
+    it('同一 workflow run 的重跑：旧 failure + 新 success → 聚合 success', () => {
+        const signals = [
+            makeSignal({ name: 'Test', sourceId: '100', state: 'failure', rawState: 'failure', targetUrl: runUrl(1000), roundAt: '2026-10-12T00:01:00Z' }),
+            makeSignal({ name: 'Test', sourceId: '200', state: 'success', rawState: 'success', targetUrl: runUrl(1000), roundAt: '2026-10-12T00:09:00Z' }),
+        ]
+        const deduped = dedupeSignalsByLatestRound(signals)
+        expect(deduped).toHaveLength(1)
+        expect(deduped[0]!.state).toBe('success')
+        expect(aggregateOverallStatus(deduped)).toBe('success')
+        expect(deriveWorstConclusion(deduped)).toBe('success')
+    })
+
+    it('同名但不同 workflow run（push 与 pull_request 触发）不合并：任一失败即失败', () => {
+        const signals = [
+            makeSignal({ name: 'Test', sourceId: '100', state: 'failure', rawState: 'failure', targetUrl: runUrl(1000), roundAt: '2026-10-12T00:01:00Z' }),
+            makeSignal({ name: 'Test', sourceId: '200', state: 'success', rawState: 'success', targetUrl: runUrl(2000), roundAt: '2026-10-12T00:09:00Z' }),
+        ]
+        const deduped = dedupeSignalsByLatestRound(signals)
+        expect(deduped).toHaveLength(2)
+        expect(aggregateOverallStatus(deduped)).toBe('failure')
+    })
+
+    it('无 Actions run id 的 check 各自成组（宁可不合并也不掩蔽失败）', () => {
+        const signals = [
+            makeSignal({ name: 'Workers Builds', sourceId: '100', state: 'failure', rawState: 'failure', targetUrl: null }),
+            makeSignal({ name: 'Workers Builds', sourceId: '200', state: 'success', rawState: 'success', targetUrl: null }),
+        ]
+        expect(dedupeSignalsByLatestRound(signals)).toHaveLength(2)
+    })
+
+    it('同一 workflow run 的重跑：旧 failure + 新 pending（re-run 进行中）→ pending', () => {
+        const signals = [
+            makeSignal({ name: 'Test', sourceId: '100', state: 'failure', rawState: 'failure', targetUrl: runUrl(1000), roundAt: '2026-10-12T00:01:00Z' }),
+            makeSignal({ name: 'Test', sourceId: '200', state: 'pending', rawState: null, targetUrl: runUrl(1000), roundAt: '2026-10-12T00:10:00Z' }),
+        ]
+        expect(dedupeSignalsByLatestRound(signals)[0]!.state).toBe('pending')
+    })
+
+    it('新一轮尚无 roundAt（queued）时按 sourceId 判定为最新，不被旧轮压住', () => {
+        const signals = [
+            makeSignal({ name: 'Test', sourceId: '100', state: 'success', rawState: 'success', targetUrl: runUrl(1000), roundAt: '2026-10-12T00:09:00Z' }),
+            makeSignal({ name: 'Test', sourceId: '200', state: 'pending', rawState: null, targetUrl: runUrl(1000), roundAt: null }),
+        ]
+        expect(dedupeSignalsByLatestRound(signals)[0]!.state).toBe('pending')
+    })
+
+    it('commit status 同 context 取最新（状态机语义）；不同 context 不合并', () => {
+        const signals = [
+            makeSignal({ kind: 'status', provider: 'vercel', name: 'Vercel – web', sourceId: '1', state: 'pending', rawState: 'pending', roundAt: '2026-10-12T00:01:00Z' }),
+            makeSignal({ kind: 'status', provider: 'vercel', name: 'Vercel – web', sourceId: '2', state: 'success', rawState: 'success', roundAt: '2026-10-12T00:05:00Z' }),
+            makeSignal({ kind: 'status', provider: 'vercel', name: 'Vercel – docs', sourceId: '3', state: 'failure', rawState: 'failure', roundAt: '2026-10-12T00:02:00Z' }),
+        ]
+        const deduped = dedupeSignalsByLatestRound(signals)
+        expect(deduped).toHaveLength(2)
+        expect(deduped.map((signal) => signal.name)).toEqual(['Vercel – web', 'Vercel – docs'])
+        expect(deduped[0]!.state).toBe('success')
+    })
+
+    it('同 environment 的多次部署只取最新一次（当前状态语义）', () => {
+        const signals = [
+            makeSignal({ kind: 'deployment', provider: 'vercel', name: 'Production', sourceId: '1', state: 'failure', rawState: 'failure', roundAt: '2026-10-12T00:01:00Z' }),
+            makeSignal({ kind: 'deployment', provider: 'vercel', name: 'Production', sourceId: '2', state: 'success', rawState: 'success', roundAt: '2026-10-12T00:09:00Z' }),
+        ]
+        expect(dedupeSignalsByLatestRound(signals)[0]!.state).toBe('success')
+    })
+
+    it('组键含 kind / provider：不同 provider / 不同 kind 不合并', () => {
+        const signals = [
+            makeSignal({ kind: 'check', provider: 'github-actions', name: 'Test', state: 'failure', rawState: 'failure', targetUrl: runUrl(1000), roundAt: '2026-10-12T00:01:00Z' }),
+            makeSignal({ kind: 'check', provider: 'cloudflare', name: 'Test', state: 'success', rawState: 'success', targetUrl: null, roundAt: '2026-10-12T00:09:00Z' }),
+            makeSignal({ kind: 'status', provider: 'github-actions', name: 'Test', state: 'success', rawState: 'success', roundAt: '2026-10-12T00:09:00Z' }),
+        ]
+        expect(dedupeSignalsByLatestRound(signals)).toHaveLength(3)
+    })
+
+    it('历史 signalsJson 行（无 roundAt 字段）不报错，按不可比处理', () => {
+        const legacy = { ...makeSignal({ sourceId: '7', state: 'success' }) } as UnifiedBuildSignal
+        delete (legacy as { roundAt?: string | null }).roundAt
+        expect(dedupeSignalsByLatestRound([legacy])).toHaveLength(1)
     })
 })

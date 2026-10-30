@@ -1,7 +1,9 @@
 import type { Octokit } from '@octokit/rest'
+import type { CheckConclusion } from '@dependfix/core'
 import { describe, expect, it, vi } from 'vitest'
 import {
     JOB_BUDGET_MAX_SHARE,
+    type ObservedCheck,
     evaluateCheckTerminal,
     PR_CHECK_GRACE_MS,
     buildCheckFailureComment,
@@ -200,22 +202,71 @@ describe('sanitizeCheckUrl', () => {
 })
 
 describe('evaluateCheckTerminal（终态判定纯逻辑）', () => {
+    const runUrl = (runId: number) => `https://github.com/foo/bar/actions/runs/${runId}/job/1`
+    const obs = (
+        name: string,
+        conclusion: CheckConclusion,
+        extra: Partial<ObservedCheck> = {},
+    ): ObservedCheck => ({ kind: 'check', provider: 'github-actions', name, conclusion, ...extra })
+
     it('空观测 / 存在未完成 → 未到终态（绝不判 passed）', async () => {
         const params = baseParams()
         expect(await evaluateCheckTerminal(params, [])).toBeUndefined()
         expect(await evaluateCheckTerminal(params, [
-            { name: 'Test', conclusion: 'pending' },
-            { name: 'Coverage', conclusion: 'success' },
+            obs('Test', 'pending'),
+            obs('Coverage', 'success'),
         ])).toBeUndefined()
+    })
+
+    it('completed + conclusion=null → 归一 unknown → 失败（fail-closed，与平台同口径）', async () => {
+        expect(normalizeCheckRunConclusion('completed', null)).toBe('unknown')
+        const params = baseParams()
+        const terminal = await evaluateCheckTerminal(params, [obs('Test', 'unknown')])
+        expect(terminal?.state).toBe('failed')
+    })
+
+    it('同名同 run 的重跑：旧 failure + 新 success → passed；新 pending → 未到终态', async () => {
+        const params = baseParams()
+        expect(await evaluateCheckTerminal(params, [
+            obs('Test', 'failure', { id: '100', roundAt: '2026-10-25T00:01:00Z', url: runUrl(1000) }),
+            obs('Test', 'success', { id: '200', roundAt: '2026-10-25T00:09:00Z', url: runUrl(1000) }),
+        ])).toEqual({ state: 'passed' })
+
+        expect(await evaluateCheckTerminal(params, [
+            obs('Test', 'failure', { id: '100', roundAt: '2026-10-25T00:01:00Z', url: runUrl(1000) }),
+            obs('Test', 'pending', { id: '200', roundAt: '2026-10-25T00:10:00Z', url: runUrl(1000) }),
+        ])).toBeUndefined()
+
+        // 不同作业名各自保留（不误合并）
+        expect(await evaluateCheckTerminal(params, [
+            obs('Test', 'success', { id: '200', roundAt: '2026-10-25T00:09:00Z', url: runUrl(1000) }),
+            obs('Lint', 'failure', { id: '101', roundAt: '2026-10-25T00:01:00Z', url: runUrl(1000) }),
+        ])).toMatchObject({ state: 'failed' })
+    })
+
+    it('同名不同 workflow run（push 与 pull_request 触发）不合并：任一失败即失败', async () => {
+        const params = baseParams()
+        expect(await evaluateCheckTerminal(params, [
+            obs('Test', 'failure', { id: '100', roundAt: '2026-10-25T00:01:00Z', url: runUrl(1000) }),
+            obs('Test', 'success', { id: '200', roundAt: '2026-10-25T00:09:00Z', url: runUrl(2000) }),
+        ])).toMatchObject({ state: 'failed' })
+    })
+
+    it('同名但来源不同（check run vs commit status）不合并：任一失败即失败', async () => {
+        const params = baseParams()
+        expect(await evaluateCheckTerminal(params, [
+            obs('Test', 'failure', { id: '100', roundAt: '2026-10-25T00:01:00Z', url: runUrl(1000) }),
+            { kind: 'status', provider: 'vercel', name: 'Test', conclusion: 'success', id: '200', roundAt: '2026-10-25T00:09:00Z' },
+        ])).toMatchObject({ state: 'failed' })
     })
 
     it('全部完成且有成功 → passed；全部 cancelled / skipped → cancelled', async () => {
         const params = baseParams()
-        expect(await evaluateCheckTerminal(params, [{ name: 'Test', conclusion: 'success' }]))
+        expect(await evaluateCheckTerminal(params, [obs('Test', 'success')]))
             .toEqual({ state: 'passed' })
         expect(await evaluateCheckTerminal(params, [
-            { name: 'Test', conclusion: 'cancelled' },
-            { name: 'Coverage', conclusion: 'skipped' },
+            obs('Test', 'cancelled'),
+            obs('Coverage', 'skipped'),
         ])).toEqual({ state: 'cancelled' })
     })
 })
@@ -231,6 +282,48 @@ describe('watchPullRequestChecks', () => {
         expect(result).toMatchObject({ state: 'passed', closed: false, commented: false, polls: 1 })
         expect(spies.createComment).not.toHaveBeenCalled()
         expect(spies.updatePull).not.toHaveBeenCalled()
+    })
+
+    it('采集接线：同一 workflow run 的重跑按 started_at 收敛后判 passed', async () => {
+        const { octokit } = makeOctokit({
+            checks: () => [
+                checkRun('Test', 'failure', {
+                    id: 9101,
+                    started_at: '2026-10-25T00:01:00Z',
+                    completed_at: '2026-10-25T00:05:00Z',
+                    details_url: 'https://github.com/foo/bar/actions/runs/777/job/1',
+                }),
+                checkRun('Test', 'success', {
+                    id: 9102,
+                    started_at: '2026-10-25T00:10:00Z',
+                    completed_at: '2026-10-25T00:14:00Z',
+                    details_url: 'https://github.com/foo/bar/actions/runs/777/job/2',
+                }),
+            ],
+        })
+
+        const result = await watchPullRequestChecks(baseParams({ octokit }))
+        expect(result).toMatchObject({ state: 'passed', closed: false })
+    })
+
+    it('采集接线：同名不同 workflow run（push 与 pull_request）仍判失败', async () => {
+        const { octokit } = makeOctokit({
+            checks: () => [
+                checkRun('Test', 'failure', {
+                    id: 9201,
+                    started_at: '2026-10-25T00:01:00Z',
+                    details_url: 'https://github.com/foo/bar/actions/runs/111/job/1',
+                }),
+                checkRun('Test', 'success', {
+                    id: 9202,
+                    started_at: '2026-10-25T00:10:00Z',
+                    details_url: 'https://github.com/foo/bar/actions/runs/222/job/1',
+                }),
+            ],
+        })
+
+        const result = await watchPullRequestChecks(baseParams({ octokit }))
+        expect(result.state).toBe('failed')
     })
 
     it('commit status 计入终态（Vercel 风格 context）', async () => {

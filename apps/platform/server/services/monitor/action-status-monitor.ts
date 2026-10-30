@@ -6,6 +6,7 @@ import {
 } from './types'
 import {
     aggregateOverallStatus,
+    dedupeSignalsByLatestRound,
     deriveWorstConclusion,
     pickCheckRunId,
     pickErrorSummary,
@@ -153,6 +154,7 @@ export class ActionStatusMonitor {
      *
      * **关注集**：`focus` 非空时，只有命中关注集的信号参与聚合与告警判定
      * （`overallStatus` / `conclusion` / `failureSources` / `checkRunId` / `errorMessage` / `alertFiring`）；
+     * 未命中信号仍**全量**写入 `signalsJson`（同名收敛已在采集层完成，此处不再折叠）；
      * `signalsJson` 仍写入**全量信号**（审计面，未命中的信号不丢弃）。命中集合为空时按空集聚合口径
      * 视为 `success`（关注面没有任何需要告警的信号），但整行照常落库。
      *
@@ -179,7 +181,8 @@ export class ActionStatusMonitor {
         const repo = this.ds.getRepository(PRCheck)
         // 关注面信号：未配置（null）时沿用快照原值（与改动前逐字节一致）；已配置时只保留命中项并重新派生。
         // 无论哪条路径，`signalsJson` 都写入**全量信号**（审计面，未命中的信号不丢弃）。
-        const focusedSignals = focus ? filterSignalsByFocus(snapshot.signals, focus) : null
+        // 关注面内同名多轮收敛：只保留最新一轮（与采集层 `PollingSource` 同口径，见设计稿 §3.10）
+        const focusedSignals = focus ? dedupeSignalsByLatestRound(filterSignalsByFocus(snapshot.signals, focus)) : null
         const overallStatus = focusedSignals ? aggregateOverallStatus(focusedSignals) : snapshot.overallStatus
         const conclusion = focusedSignals ? deriveWorstConclusion(focusedSignals) : snapshot.conclusion
         const inferredAlertFiring = isFailureConclusion(conclusion)

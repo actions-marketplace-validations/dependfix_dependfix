@@ -320,6 +320,43 @@ describe('ActionStatusMonitor', () => {
             ])
         })
 
+        it('关注面内同名多轮收敛：旧 failure + 新 success 取最新一轮（不误报）', async () => {
+            withFocus({ names: ['Test'] })
+            vi.mocked(mockSource.fetchSnapshots).mockResolvedValue([
+                makeSnapshot({
+                    // 快照侧（假设来自未做收敛的 SyncSource）仍报 failure
+                    conclusion: 'failure',
+                    overallStatus: 'failure',
+                    signals: [
+                        makeSignal({
+                            name: 'Test',
+                            state: 'failure',
+                            rawState: 'failure',
+                            sourceId: '9001',
+                            targetUrl: 'https://github.com/octocat/hello-world/actions/runs/777/job/1',
+                            roundAt: '2026-09-03T00:01:00Z',
+                        }),
+                        makeSignal({
+                            name: 'Test',
+                            state: 'success',
+                            rawState: 'success',
+                            sourceId: '9002',
+                            targetUrl: 'https://github.com/octocat/hello-world/actions/runs/777/job/2',
+                            roundAt: '2026-09-03T00:09:00Z',
+                        }),
+                    ],
+                }),
+            ])
+
+            await monitor.pollOnce({ organizationId: 'org-1' })
+            const saved = prCheckSave.mock.calls[0]?.[0]
+            expect(saved.overallStatus).toBe('success')
+            expect(saved.conclusion).toBe('success')
+            expect(saved.alertFiring).toBe(false)
+            // 快照 signals 原样落库（本用例由 mock 提供、未经采集层收敛；生产 PollingSource 已在采集层收敛）
+            expect(JSON.parse(saved.signalsJson)).toHaveLength(2)
+        })
+
         it('命中项全为 success：未关注的 failure 不触发告警，但全量信号仍落库', async () => {
             withFocus({ names: ['Test'] })
             vi.mocked(mockSource.fetchSnapshots).mockResolvedValue([

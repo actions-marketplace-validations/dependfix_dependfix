@@ -1,7 +1,11 @@
 import {
+    checkRoundKey,
     classifyCheckFailure,
+    dedupeByLatestRound,
     isCancelledConclusion,
     isFailedConclusion,
+    resolveCheckProvider,
+    resolveStatusProvider,
     type CheckAttribution,
     type CheckConclusion,
 } from '@dependfix/core'
@@ -120,8 +124,9 @@ function resolveAttributionConclusion(
 /**
  * 信号归因（同一纯函数 `classifyCheckFailure`；平台不采集父提交 → `parentConclusion` 恒缺省）。
  *
- * 只对**失败 / 取消**类结论产出归因（core 函数的前置条件）：成功 / 中性 / 未完成 / `completed`
- * 但无 conclusion（历史怪态）一律 `undefined`——避免通过项在 `signals_json` 里留下「未判定」噪音。
+ * 只对**失败 / 取消**类结论产出归因（core 函数的前置条件）：成功 / 中性 / 未完成一律 `undefined`。
+ * `completed` + `conclusion=null` 已按 fail-closed 判失败（状态 `failure`），但归因输入 `rawState=null`
+ * 视为「未完成」→ 不产出标签（不臆造结论；CLI 侧对该形态仍标 `unknown`，属既有差异）。
  * 平台侧只可能产出 `external_noise` / `cancelled` / `unknown`（`pre_existing` / `self_caused` 需父提交比对）。
  */
 function resolveSignalAttribution(
@@ -188,29 +193,12 @@ const truncate = (text: string | null | undefined, max: number): string | null =
 }
 
 /**
- * provider 归因：check run 取 `app.slug`（如 `github-actions` / Cloudflare 的 check 名）。
- * 无 app（如 fork / 第三方未注册 app）时回退 `unknown`——不臆造 provider（设计稿非目标）。
+ * provider 归因：check 取 `app.slug`、commit status 取 `context` 前缀。
+ *
+ * 实现与 CLI 回环共用 `@dependfix/core` 的 `resolveCheckProvider` / `resolveStatusProvider`
+ * （同名多轮组键要求两端同口径），此处 re-export 保持既有调用点与测试不变。
  */
-export const resolveCheckProvider = (appSlug: string | null | undefined): string => {
-    const slug = appSlug?.trim().toLowerCase()
-    return slug && slug.length > 0 ? slug : 'unknown'
-}
-
-/**
- * provider 归因：commit status 取 `context` 前缀（如 `Vercel – web` → `vercel`；`ci/circleci: build` → `ci`）。
- * 分隔符取 `/`、`–`（en dash）、`:`、空格中最先出现者——**不含 `-`**：连字符是 context 标识符的常见组成
- * （如 `continuous-integration/travis-ci/push` 应归 `continuous-integration`）。
- * 前缀为空时回退 `unknown`。
- */
-export const resolveStatusProvider = (context: string | null | undefined): string => {
-    const raw = context?.trim()
-    if (!raw) {
-        return 'unknown'
-    }
-    const match = /^[^/–:\s]+/u.exec(raw)
-    const prefix = match?.[0]?.trim().toLowerCase()
-    return prefix && prefix.length > 0 ? prefix : 'unknown'
-}
+export { resolveCheckProvider, resolveStatusProvider }
 
 /**
  * provider 归因：deployment 取创建者 login，并**归一化机器人形态**——去掉 GitHub App 的
@@ -230,7 +218,8 @@ export const resolveDeploymentProvider = (creatorLogin: string | null | undefine
 /**
  * check run 状态推导（fail-closed）：
  * - 未完成 → `pending`
- * - `completed` 但无 conclusion（历史怪态）→ `skipped`（既有口径，不判失败）
+ * - `completed` 但无 conclusion（历史怪态 / GitHub 侧异常）→ `failure`，与 CLI 回环同口径
+ *   （CLI 把该形态归一为 `unknown` 结论，`isFailedConclusion` 判失败；见设计稿 §3.10）
  * - 未识别的 conclusion（GitHub 新增枚举）→ `failure`，绝不静默为跳过 / 成功
  */
 function resolveCheckRunState(status: string | null | undefined, conclusion: string | null): UnifiedBuildSignalState {
@@ -238,7 +227,7 @@ function resolveCheckRunState(status: string | null | undefined, conclusion: str
         return PENDING_SIGNAL_STATE
     }
     if (conclusion === null) {
-        return 'skipped'
+        return 'failure'
     }
     return CHECK_CONCLUSION_STATE[conclusion] ?? 'failure'
 }
@@ -250,6 +239,8 @@ export const normalizeCheckRun = (
         name?: string | null
         status?: string | null
         conclusion?: string | null
+        started_at?: string | null
+        completed_at?: string | null
         details_url?: string | null
         html_url?: string | null
         output?: { title?: string | null, summary?: string | null, text?: string | null } | null
@@ -272,6 +263,8 @@ export const normalizeCheckRun = (
         logUrl: null,
         summary,
         observedAt,
+        // 轮次时间：started_at 优先（re-run 未完成时 completed_at 为空）
+        roundAt: checkRun.started_at ?? checkRun.completed_at ?? null,
         attribution: resolveSignalAttribution('check', name, rawConclusion, composeAttributionDetail(checkRun.output)),
     }
 }
@@ -284,6 +277,8 @@ export const normalizeCommitStatus = (
         state?: string | null
         description?: string | null
         target_url?: string | null
+        created_at?: string | null
+        updated_at?: string | null
     },
     observedAt: Date,
 ): UnifiedBuildSignal => {
@@ -303,6 +298,8 @@ export const normalizeCommitStatus = (
         logUrl: null,
         summary,
         observedAt,
+        // 轮次时间：updated_at 优先（同一 context 后发的状态覆盖前一条）
+        roundAt: status.updated_at ?? status.created_at ?? null,
         attribution: resolveSignalAttribution('status', name, rawState, summary),
     }
 }
@@ -320,6 +317,7 @@ export const normalizeDeployment = (
         environment?: string | null
         creator?: { login?: string | null } | null
         ref?: string | null
+        created_at?: string | null
     },
     latestStatus: {
         state?: string | null
@@ -346,9 +344,32 @@ export const normalizeDeployment = (
         logUrl: capUrl(latestStatus?.log_url),
         summary,
         observedAt,
+        // 轮次时间：只用 created_at——updated_at 会因迟到的 status 刷新，把旧部署排到新部署之后
+        roundAt: deployment.created_at ?? null,
         attribution: resolveSignalAttribution('deployment', name, rawState, summary),
     }
 }
+
+/**
+ * 同名多轮收敛：同一「组键」只保留**最新一轮**信号（设计稿 §3.10）。
+ *
+ * 背景：同一 ref 上「重跑 / 重试」会产生同名多条记录（check run re-run、同 context 的后发 commit
+ * status、同环境的新 deployment）。逐条参与聚合会把**已被覆盖的旧失败**当成当前结果（re-run 全绿仍报红）。
+ *
+ * 组键与排序由 `@dependfix/core` 的 `checkRoundKey` / `dedupeByLatestRound` 提供（与 CLI 同源）：
+ * - check 以 **workflow run id** 为血缘边界——「push 触发」与「pull_request 触发」是同名但**不同 run**，
+ *   不合并（合并后启动较晚的一方会掩蔽另一方的失败）；取不到 run id 时各自成组
+ * - status 按 context、deployment 按 environment 分组（同一目标的状态机 / 当前状态）
+ */
+export const dedupeSignalsByLatestRound = (
+    signals: readonly UnifiedBuildSignal[],
+): UnifiedBuildSignal[] => dedupeByLatestRound(signals, (signal, index) => checkRoundKey({
+    kind: signal.kind,
+    provider: signal.provider,
+    name: signal.name,
+    url: signal.targetUrl,
+    sourceId: signal.sourceId,
+}, String(index)))
 
 /**
  * 聚合判定（设计稿 §3.3）：

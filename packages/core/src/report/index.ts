@@ -21,6 +21,7 @@ export function createEmptyExecutionSummary(): ExecutionSummary {
 
 export * from './types'
 export * from './alert-outcomes'
+export * from './check-signals'
 export * from './ci-alignment'
 export * from './check-attribution'
 export * from './summary-counters'

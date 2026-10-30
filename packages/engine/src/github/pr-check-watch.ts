@@ -12,8 +12,12 @@
 import type { Octokit } from '@octokit/rest'
 import {
     aggregateCheckAttribution,
+    checkRoundKey,
     classifyCheckFailure,
+    dedupeByLatestRound,
     isFailedConclusion,
+    resolveCheckProvider,
+    resolveStatusProvider,
     type CheckAttribution,
     type CheckConclusion,
     type Logger,
@@ -61,12 +65,20 @@ export const PR_CHECK_MAX_POLLS = 200
 
 /** 归一化观测到的一条 check（check run 或 commit status）。 */
 export interface ObservedCheck {
+    /** 来源：check run / commit status（同名多轮组键的一部分） */
+    kind: 'check' | 'status'
+    /** provider 归因（check `app.slug` / status `context` 前缀；与平台同源） */
+    provider: string
     name: string
     conclusion: CheckConclusion
-    /** 详情页 URL */
+    /** 详情页 URL（check 用它提取 Actions run id 作为重跑血缘） */
     url?: string
     /** 失败详情文本（用于 external_noise 文本签名） */
     detail?: string
+    /** 源侧 id（同名多轮收敛的确定性兜底，见 {@link dedupeObservedChecksByLatestRound}） */
+    id?: string | null
+    /** 轮次时间戳（check `started_at ?? completed_at` / status `updated_at ?? created_at`） */
+    roundAt?: string | null
 }
 
 /** 单次采集结果（`ok=false` 表示至少一个 API 源失败，本轮不参与终态判定）。 */
@@ -251,16 +263,22 @@ async function collectObservedChecks(
             repo,
             ref,
             per_page: 100,
+            // 显式取「全部轮次」（默认 `latest` 可能拿不到重跑的历史尝试），收敛见 dedupeObservedChecksByLatestRound
+            filter: 'all',
         })
         for (const run of checkRuns) {
             if (run?.id === undefined || run?.id === null) {
                 continue
             }
             checks.push({
+                kind: 'check',
+                provider: resolveCheckProvider(run.app?.slug),
                 name: sanitizeCheckName(run.name),
                 conclusion: normalizeCheckRunConclusion(run.status, run.conclusion),
                 url: sanitizeCheckUrl(run.details_url ?? run.html_url),
                 detail: truncateDetail([run.output?.title, run.output?.summary].filter(Boolean).join(' — ')),
+                id: String(run.id),
+                roundAt: run.started_at ?? run.completed_at ?? null,
             })
         }
     } catch (error: unknown) {
@@ -279,10 +297,14 @@ async function collectObservedChecks(
                 continue
             }
             checks.push({
+                kind: 'status',
+                provider: resolveStatusProvider(status.context),
                 name: sanitizeCheckName(status.context),
                 conclusion: normalizeCommitStatusConclusion(status.state),
                 url: sanitizeCheckUrl(status.target_url),
                 detail: truncateDetail(status.description),
+                id: String(status.id),
+                roundAt: status.updated_at ?? status.created_at ?? null,
             })
         }
     } catch (error: unknown) {
@@ -381,17 +403,41 @@ interface TerminalEvaluation {
 }
 
 /**
+ * 同名多轮收敛：同一「组键」只保留**最新一轮**（与平台 `dedupeSignalsByLatestRound` 同源，
+ * 组键与排序均由 `@dependfix/core` 的 `checkRoundKey` / `dedupeByLatestRound` 提供）。
+ *
+ * 触发场景：check run re-run（同一 workflow run 的同名新尝试）、同一 commit status context 的后发状态。
+ * 组键含 `kind` / `provider`：check run 与 commit status 同名、或同名 job 由不同 App 上报时**不合并**；
+ * check 还要求能证明同一条 workflow run（`details_url` 里的 run id），否则各自成组——
+ * 「push 触发」与「pull_request 触发」是同名不同 run，合并会掩蔽另一方的失败。
+ * 口径见 docs/design/governance/pr-build-deploy-signals.md §3.10。
+ */
+export function dedupeObservedChecksByLatestRound(checks: readonly ObservedCheck[]): ObservedCheck[] {
+    return dedupeByLatestRound(checks, (check, index) => checkRoundKey({
+        kind: check.kind,
+        provider: check.provider,
+        name: check.name,
+        url: check.url,
+        sourceId: check.id,
+    }, String(index)))
+}
+
+/**
  * 判定终态；未到终态返回 `undefined`（继续轮询）。
  *
  * 终态条件：已观测到至少一条 check，且全部 check 已完成（无 `pending`）。
+ * `completed + conclusion=null` 归一为 `unknown` 结论（`isFailedConclusion` 判失败，fail-closed），
+ * 与平台侧 `resolveCheckRunState` 同口径（docs/design/governance/pr-build-deploy-signals.md §3.10）。
  * - 存在失败 → `failed`（逐条归因后聚合；混合归因 → `unknown`）
  * - 无失败且有成功 → `passed`
  * - 无失败且无成功（全是 cancelled / skipped / neutral）→ `cancelled`
  */
 export async function evaluateCheckTerminal(
     params: WatchPrChecksParams,
-    observed: readonly ObservedCheck[],
+    observedChecks: readonly ObservedCheck[],
 ): Promise<TerminalEvaluation | undefined> {
+    // 同名多轮先收敛（只留最新一轮），再做终态判定与归因
+    const observed = dedupeObservedChecksByLatestRound(observedChecks)
     if (observed.length === 0) {
         return undefined
     }

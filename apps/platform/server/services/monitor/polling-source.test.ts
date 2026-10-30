@@ -44,7 +44,8 @@ const mockSources = (options: {
     } = options
 
     nock(API).get('/repos/acme/web-app/pulls').query(true).reply(200, pulls)
-    nock(API).get(`/repos/acme/web-app/commits/${HEAD_SHA}/check-runs`).query(true).reply(200, { total_count: checkRuns.length, check_runs: checkRuns })
+    // check runs 显式要求 `filter=all`（重跑的历史尝试可见）；缺失该参数该请求不匹配 → 采集侧 fail-open 暴露
+    nock(API).get(`/repos/acme/web-app/commits/${HEAD_SHA}/check-runs`).query({ filter: 'all', per_page: 100 }).reply(200, { total_count: checkRuns.length, check_runs: checkRuns })
     nock(API).get(`/repos/acme/web-app/commits/${HEAD_SHA}/statuses`).query(true).reply(200, statuses)
     nock(API).get('/repos/acme/web-app/deployments').query(true).reply(200, deployments)
     for (const [id, list] of Object.entries(deploymentStatuses)) {
@@ -289,6 +290,48 @@ describe('monitor/polling-source 三源采集', () => {
         expect(snapshots).toHaveLength(1)
         expect(snapshots[0]!.signals).toHaveLength(1)
         expect(snapshots[0]!.signals[0]!.kind).toBe('status')
+    })
+
+    it('同名同 run 的重跑：旧 failure + 新 success → 只留最新一轮，聚合 success', async () => {
+        mockSources({
+            checkRuns: [
+                {
+                    id: 9101,
+                    name: 'Test',
+                    status: 'completed',
+                    conclusion: 'failure',
+                    started_at: '2026-10-22T00:01:00Z',
+                    completed_at: '2026-10-22T00:05:00Z',
+                    details_url: 'https://github.com/acme/web-app/actions/runs/555/job/1',
+                    app: { slug: 'github-actions' },
+                },
+                {
+                    id: 9102,
+                    name: 'Test',
+                    status: 'completed',
+                    conclusion: 'success',
+                    started_at: '2026-10-22T00:10:00Z',
+                    completed_at: '2026-10-22T00:14:00Z',
+                    details_url: 'https://github.com/acme/web-app/actions/runs/555/job/2',
+                    app: { slug: 'github-actions' },
+                },
+            ],
+        })
+        const snapshots = await source().fetchSnapshots({ owner: 'acme', repo: 'web-app', repositoryId: 'repo-1' })
+        expect(snapshots[0]!.signals).toHaveLength(1)
+        expect(snapshots[0]!.overallStatus).toBe('success')
+        expect(isFailureConclusion(snapshots[0]!.conclusion)).toBe(false)
+    })
+
+    it('completed + conclusion=null → 聚合 failure（fail-closed，与 CLI 同口径）', async () => {
+        mockSources({
+            checkRuns: [
+                { id: 9201, name: 'Test', status: 'completed', conclusion: null, app: { slug: 'github-actions' } },
+            ],
+        })
+        const snapshots = await source().fetchSnapshots({ owner: 'acme', repo: 'web-app', repositoryId: 'repo-1' })
+        expect(snapshots[0]!.overallStatus).toBe('failure')
+        expect(snapshots[0]!.conclusion).toBe('failure')
     })
 
     it('未完成的 check run → 信号 pending → 聚合 pending（非失败不 firing）', async () => {

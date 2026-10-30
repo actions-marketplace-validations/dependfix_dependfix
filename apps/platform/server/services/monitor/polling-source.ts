@@ -8,6 +8,7 @@ import type {
 import {
     aggregateOverallStatus,
     capSignals,
+    dedupeSignalsByLatestRound,
     deriveWorstConclusion,
     isWithinUpdatedWindow,
     normalizeCheckRun,
@@ -95,7 +96,10 @@ export class PollingSource implements PRCheckSyncSource {
             }
 
             // 4. 三源采集 + 归一化（各源 fail-open）
-            const signals = capSignals(await this.fetchSignals({ owner, repo, ref: headSha, observedAt }))
+            // 同名多轮先收敛（re-run / 后发 status / 新 deployment 只留最新一轮），再做截断
+            const signals = capSignals(dedupeSignalsByLatestRound(
+                await this.fetchSignals({ owner, repo, ref: headSha, observedAt }),
+            ))
             if (signals.length === 0) {
                 continue
             }
@@ -140,6 +144,9 @@ export class PollingSource implements PRCheckSyncSource {
                 repo,
                 ref,
                 per_page: 100,
+                // 显式取「全部轮次」：API 默认 `latest` 只回最近一次，重跑的历史尝试可能不可见；
+                // 同名多轮收敛由 `dedupeSignalsByLatestRound` 负责（设计稿 §3.10）
+                filter: 'all',
             })
             // 形态守卫：仅接受带 id 的条目。Octokit `paginate` 在响应缺少 `total_count`（非标准形态，
             // 如代理 / 兼容层返回）时会把**整个 body 当作单个元素**返回，若不守卫会产出无 id 的伪信号。
