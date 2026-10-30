@@ -28,7 +28,9 @@ import type { AppContext } from './helpers'
  * （升级链路四条消费点见 docs/design/modules/dependency-fixer-records.md §12.16）。
  */
 export function computeSummary(
-    ctx: Pick<AppContext, 'allActions' | 'allAlerts' | 'allErrors' | 'alertsDisabled' | 'repoResults' | 'summary'>,
+    ctx: Pick<AppContext, 'allActions' | 'allAlerts' | 'allErrors' | 'alertsDisabled' | 'repoResults' | 'summary'> & {
+        deliverySkips?: AppContext['deliverySkips']
+    },
 ): void {
     const { allActions, allAlerts, allErrors, alertsDisabled, repoResults, summary } = ctx
 
@@ -92,12 +94,17 @@ export function computeSummary(
     summary.lockfileRepairs = lockfileRepairs
     summary.verificationsPassed = verificationsPassed
     summary.verificationsFailed = verificationsFailed
+    // 交付跳过（基线红）：按去重后的仓库集计数；载体计数按 run 级记录派生（幂等，可重复调用）
+    const deliverySkips = ctx.deliverySkips ?? []
+    summary.deliverySkipped = new Set(deliverySkips.flatMap((record) => record.repositories)).size
+    summary.deliverySkipIssues = deliverySkips.filter((record) => record.carrier.issue?.created === true).length
+    summary.deliverySkipDraftPrs = deliverySkips.filter((record) => Boolean(record.carrier.draftPr)).length
     // PR 交付计数器由编排层在事件点累加（此处不重置，避免 computeSummary 多次调用清零）：
     // prsOpened / prsSkippedByFingerprint / prsClosedAfterFailure / checksTimedOut
 }
 
 export function buildRunResult(
-    ctx: Pick<AppContext, 'config' | 'runId' | 'startedAt' | 'finishedAt' | 'summary' | 'repoResults' | 'allAlerts' | 'allActions' | 'allErrors' | 'alertsDisabled' | 'ciAlignment' | 'attemptTracking' | 'prCheckWatch' | 'alertOutcomes'>,
+    ctx: Pick<AppContext, 'config' | 'runId' | 'startedAt' | 'finishedAt' | 'summary' | 'repoResults' | 'allAlerts' | 'allActions' | 'allErrors' | 'alertsDisabled' | 'ciAlignment' | 'attemptTracking' | 'prCheckWatch' | 'alertOutcomes' | 'deliverySkips'>,
     aiUsage?: AiUsageAggregate, supplyChainWarnings?: SupplyChainWarning[],
 ): RunResult {
     const reportConfig: RunReportConfig = {
@@ -131,6 +138,7 @@ export function buildRunResult(
         attemptTracking: ctx.attemptTracking && ctx.attemptTracking.length > 0 ? ctx.attemptTracking : undefined,
         alertOutcomes: alertOutcomes.length > 0 ? alertOutcomes : undefined,
         prCheckWatch: ctx.prCheckWatch && ctx.prCheckWatch.attempts.length > 0 ? ctx.prCheckWatch : undefined,
+        deliverySkips: ctx.deliverySkips && ctx.deliverySkips.length > 0 ? ctx.deliverySkips : undefined,
     }
 }
 

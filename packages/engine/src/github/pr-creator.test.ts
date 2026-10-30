@@ -21,6 +21,7 @@ import {
     deleteRemoteBranch,
     isConfirmAnswer,
     stageAndCommit,
+    createPullRequest,
     type DependfixOpenPR,
 } from './pr-creator'
 import { CommitScopeError } from './commit-scope'
@@ -1747,5 +1748,47 @@ describe('generatePRBody family lockstep', () => {
 
         expect(body).toContain('| `vite` | 5.4.20 | 6.4.3 | direct | No |')
         expect(body).not.toContain('Family Lockstep')
+    })
+})
+
+// ---------------------------------------------------------------------------
+// createPullRequest（draft 档）
+// ---------------------------------------------------------------------------
+
+describe('createPullRequest', () => {
+    const makeClient = () => {
+        const create = vi.fn().mockResolvedValue({
+            data: { number: 5, html_url: 'https://github.com/o/r/pull/5', head: { sha: 'abc' } },
+        })
+        return { octokit: { rest: { pulls: { create } } } as unknown as Octokit, create }
+    }
+
+    const params = {
+        owner: 'o',
+        repo: 'r',
+        headBranch: 'dependfix/auto-fix-deadbeef',
+        baseBranch: 'main',
+        title: 'title',
+        body: 'body',
+    }
+
+    it('默认请求体不带 draft（既有行为逐字不变）', async () => {
+        const { octokit, create } = makeClient()
+        const result = await createPullRequest({ octokit, ...params })
+        expect(create.mock.calls[0]![0]).toEqual({
+            owner: 'o',
+            repo: 'r',
+            title: 'title',
+            body: 'body',
+            head: params.headBranch,
+            base: 'main',
+        })
+        expect(result).toEqual({ number: 5, htmlUrl: 'https://github.com/o/r/pull/5', headSha: 'abc' })
+    })
+
+    it('draft 档显式置 true（基线红的草稿交付）', async () => {
+        const { octokit, create } = makeClient()
+        await createPullRequest({ octokit, ...params, draft: true })
+        expect(create.mock.calls[0]![0]).toMatchObject({ draft: true })
     })
 })

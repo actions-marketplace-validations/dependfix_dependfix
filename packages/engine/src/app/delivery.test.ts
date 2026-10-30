@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import type { FixAction } from '@dependfix/core'
 import {
+    collectFailingInstallCommands,
     findInstallBlockedReposWithFixes,
     hasDeliverableFixes,
     hasPreExistingInstallFailure,
     isInstallCommand,
+    recordDeliverySkip,
 } from './delivery'
 
 function action(overrides: Partial<FixAction>): FixAction {
@@ -100,5 +102,44 @@ describe('findInstallBlockedReposWithFixes', () => {
         expect(findInstallBlockedReposWithFixes([
             installFailure('a/b'),
         ])).toEqual([])
+    })
+})
+
+describe('collectFailingInstallCommands', () => {
+    const installFailure = (repository: string, target = 'pnpm install --frozen-lockfile') => action({
+        repository,
+        type: 'verification',
+        target,
+        success: false,
+        preExisting: true,
+    })
+
+    it('只收集目标仓库的既有失败安装命令，并去重保序', () => {
+        expect(collectFailingInstallCommands([
+            installFailure('a/b', 'pnpm install --frozen-lockfile'),
+            installFailure('a/b', 'pnpm install --frozen-lockfile'),
+            installFailure('a/b', 'corepack pnpm@10.5.2 install --frozen-lockfile'),
+            installFailure('c/d'),
+            action({ repository: 'a/b', type: 'verification', target: 'pnpm lint', success: false, preExisting: true }),
+            action({ repository: 'a/b', type: 'verification', target: 'pnpm install', success: false }),
+        ], ['a/b'])).toEqual(['pnpm install --frozen-lockfile', 'corepack pnpm@10.5.2 install --frozen-lockfile'])
+    })
+
+    it('无命中 → 空数组', () => {
+        expect(collectFailingInstallCommands([action({ repository: 'a/b' })], ['a/b'])).toEqual([])
+    })
+})
+
+describe('recordDeliverySkip', () => {
+    it('惰性创建记录数组并返回同一条记录引用（载体可回填）', () => {
+        const target: { deliverySkips?: ReturnType<typeof recordDeliverySkip>[] } = {}
+        const record = recordDeliverySkip(target, {
+            repositories: ['a/b'],
+            failingCommands: ['pnpm install --frozen-lockfile'],
+            carrier: { mode: 'draft' },
+        })
+        expect(target.deliverySkips).toHaveLength(1)
+        record.carrier.draftPr = { number: 3, htmlUrl: 'https://github.com/a/b/pull/3' }
+        expect(target.deliverySkips?.[0]?.carrier.draftPr).toEqual({ number: 3, htmlUrl: 'https://github.com/a/b/pull/3' })
     })
 })

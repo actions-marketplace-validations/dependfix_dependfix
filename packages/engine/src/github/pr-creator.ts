@@ -16,6 +16,7 @@ import {
 } from '@dependfix/core'
 import { GIT_PUSH_HOOKS_ISOLATION_ARGS, GIT_PUSH_SIGNING_ISOLATION_ARGS } from './git-signing'
 import { commitStaged, stageScopedChanges, type StageAndCommitOptions, type StageAndCommitResult } from './commit-scope'
+import { buildDraftDeliveryNotice } from './delivery-issue'
 import { formatAttemptMarker, type AttemptMarker } from './fix-fingerprint'
 import { branchExists, ensureGitConfig, PAT_DEFAULT_COMMIT_AUTHOR } from './git-config'
 import { escapeTableCell } from './markdown-table'
@@ -39,6 +40,13 @@ export interface CreatePullRequestParams {
     title: string
     /** PR 内容（Markdown） */
     body: string
+    /**
+     * 创建为草稿 PR（基线红的交付降级 `draft` 档使用）。
+     *
+     * 草稿态让目标仓库 CI 仍会按既有失败为红，但不会触发人工 review 队列；
+     * 缺省 / `false` 时请求体不带 `draft`，与既有行为逐字一致。
+     */
+    draft?: boolean
 }
 
 export interface PullRequestResult {
@@ -332,10 +340,10 @@ export async function addLabelToPullRequest(
 }
 
 /**
- * 通过 GitHub API 创建 Pull Request。
+ * 通过 GitHub API 创建 Pull Request（`draft: true` 创建草稿 PR：基线红的交付降级档）。
  */
 export async function createPullRequest(params: CreatePullRequestParams): Promise<PullRequestResult> {
-    const { octokit, owner, repo, headBranch, baseBranch, title, body } = params
+    const { octokit, owner, repo, headBranch, baseBranch, title, body, draft } = params
 
     const { data } = await octokit.rest.pulls.create({
         owner,
@@ -344,6 +352,8 @@ export async function createPullRequest(params: CreatePullRequestParams): Promis
         body,
         head: headBranch,
         base: baseBranch,
+        // 缺省不带该字段（既有请求体逐字不变）；`draft` 档显式置 true
+        ...(draft ? { draft: true } : {}),
     })
 
     return {
@@ -559,6 +569,12 @@ export function generatePRBody(
         `**Mode**: ${result.config.mode}`,
         `**Time**: ${result.startedAt}`,
         '',
+    )
+
+    // 基线红：草稿交付说明（放在最前，避免被读成「CI 会绿」；非草稿档返回空数组）
+    lines.push(...buildDraftDeliveryNotice(result))
+
+    lines.push(
         '### 📊 Summary',
         '',
         '| Metric | Value |',

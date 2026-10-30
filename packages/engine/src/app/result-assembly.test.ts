@@ -3,7 +3,7 @@ import { createEmptyRunSummary } from '@dependfix/core'
 import { computeSummary } from './result-assembly'
 import type { AppContext } from './helpers'
 
-function makeCtx(overrides: Partial<Pick<AppContext, 'allActions' | 'allAlerts' | 'allErrors' | 'alertsDisabled' | 'repoResults'>> = {}): Pick<AppContext, 'allActions' | 'allAlerts' | 'allErrors' | 'alertsDisabled' | 'repoResults' | 'summary'> {
+function makeCtx(overrides: Partial<Pick<AppContext, 'allActions' | 'allAlerts' | 'allErrors' | 'alertsDisabled' | 'repoResults' | 'deliverySkips'>> = {}): Pick<AppContext, 'allActions' | 'allAlerts' | 'allErrors' | 'alertsDisabled' | 'repoResults' | 'summary'> & Pick<AppContext, 'deliverySkips'> {
     return {
         allActions: [],
         allAlerts: [],
@@ -140,5 +140,46 @@ describe('computeSummary', () => {
         const ctx = makeCtx()
         computeSummary(ctx)
         expect(ctx.summary.environmentalFailures).toBe(0)
+    })
+})
+
+describe('computeSummary — delivery skip', () => {
+    it('按去重仓库集计数，载体计数按 run 级记录派生（幂等）', () => {
+        const ctx = makeCtx({
+            deliverySkips: [
+                {
+                    repositories: ['a/b', 'c/d'],
+                    failingCommands: ['pnpm install --frozen-lockfile'],
+                    carrier: { mode: 'issue', issue: { number: 1, htmlUrl: 'x', created: true, fingerprint: 'f' } },
+                },
+                {
+                    repositories: ['a/b'],
+                    failingCommands: ['pnpm install --frozen-lockfile'],
+                    carrier: { mode: 'draft', draftPr: { number: 2, htmlUrl: 'y' } },
+                },
+                {
+                    repositories: ['e/f'],
+                    failingCommands: [],
+                    carrier: { mode: 'issue', issue: { number: 3, htmlUrl: 'z', created: false, fingerprint: 'g' } },
+                },
+            ],
+        })
+        computeSummary(ctx)
+        expect(ctx.summary.deliverySkipped).toBe(3)
+        expect(ctx.summary.deliverySkipIssues).toBe(1)
+        expect(ctx.summary.deliverySkipDraftPrs).toBe(1)
+
+        // 幂等：重复调用不清零 / 不翻倍
+        computeSummary(ctx)
+        expect(ctx.summary.deliverySkipped).toBe(3)
+        expect(ctx.summary.deliverySkipIssues).toBe(1)
+    })
+
+    it('无记录 → 0（行为与引入前一致）', () => {
+        const ctx = makeCtx()
+        computeSummary(ctx)
+        expect(ctx.summary.deliverySkipped).toBe(0)
+        expect(ctx.summary.deliverySkipIssues).toBe(0)
+        expect(ctx.summary.deliverySkipDraftPrs).toBe(0)
     })
 })

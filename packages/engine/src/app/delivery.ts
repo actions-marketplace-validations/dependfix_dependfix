@@ -6,7 +6,7 @@
 // - 基线安装失败（如 lockfile 损坏）会被标为 `PRE_EXISTING_FAILURE`，门禁不阻断；但修复后
 //   安装仍失败时，PR 的 CI 必然以同一错误失败，普通 PR 不应创建。
 // 本模块只做纯判定，不依赖 AppContext，避免 helpers / index 之间的循环依赖。
-import type { FixAction } from '@dependfix/core'
+import type { DeliverySkipRecord, FixAction } from '@dependfix/core'
 
 /**
  * 安装类命令判定（与 `verify-project.ts` 的基线安装失败识别同口径）。
@@ -78,4 +78,39 @@ export function findInstallBlockedReposWithFixes(actions: FixAction[]): string[]
             .map((action) => action.repository)
             .filter((repo) => fixRepos.has(repo)),
     )]
+}
+
+/**
+ * 收集给定仓库上「既有失败的安装命令」（去重，保持执行顺序）。
+ *
+ * 报告与交付降级 issue 正文只引用命令本身：错误文本可能含凭据 / 路径，且会让
+ * 失败指纹随日志抖动漂移（见 [pr-delivery-closure.md §16]）。
+ */
+export function collectFailingInstallCommands(actions: FixAction[], repositories: string[]): string[] {
+    const scoped = new Set(repositories)
+    const commands: string[] = []
+    for (const action of actions) {
+        if (!scoped.has(action.repository) || !isPreExistingInstallFailure(action)) {
+            continue
+        }
+        if (!commands.includes(action.target)) {
+            commands.push(action.target)
+        }
+    }
+    return commands
+}
+
+/**
+ * 记录一次交付跳过（run 级；`summary.deliverySkipped*` 由 `computeSummary` 据此派生）。
+ *
+ * 入参用结构化最小面（而非 `AppContext`）以避免 `helpers.ts ↔ delivery.ts` 循环依赖；
+ * 返回同一条记录引用，便于调用方创建载体后回填编号。
+ */
+export function recordDeliverySkip(
+    target: { deliverySkips?: DeliverySkipRecord[] },
+    record: DeliverySkipRecord,
+): DeliverySkipRecord {
+    const list = target.deliverySkips ?? (target.deliverySkips = [])
+    list.push(record)
+    return record
 }

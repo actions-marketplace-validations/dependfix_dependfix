@@ -17,6 +17,7 @@ import {
     type PrCheckWatchReport,
     type RunSummary,
     type AlertFixOutcome,
+    type DeliverySkipRecord,
 } from '@dependfix/core'
 import { stageAndCommit } from '../github/pr-creator'
 import { collectDeclaredPaths } from '../github/commit-scope'
@@ -33,7 +34,7 @@ import { applyCodeScanningFix, restoreSourceFile, snapshotSourceFile } from '../
 import { inferRepoFromGitRemote, type RuntimeConfig } from '../config'
 
 import { quickVerifyProject } from '../helpers'
-import { findInstallBlockedReposWithFixes, hasDeliverableFixes } from './delivery'
+import { collectFailingInstallCommands, findInstallBlockedReposWithFixes, hasDeliverableFixes, recordDeliverySkip } from './delivery'
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -177,6 +178,11 @@ export interface AppContext {
      * 缺省 ⇒ 不等待（行为与引入前一致）。
      */
     prCheckWatch?: PrCheckWatchReport
+    /**
+     * 交付跳过记录（修复后安装仍为既有失败 → 有修复但不交付）。
+     * 缺省（测试直接构造 ctx）⇒ 不记录，summary 计数保持 0。
+     */
+    deliverySkips?: DeliverySkipRecord[]
 }
 
 // ---------------------------------------------------------------------------
@@ -585,7 +591,7 @@ export async function tryLockfileRepair(
  *   `CommitScopeError('UNEXPECTED_CHANGES')`，仅供生成物 / 未跟踪文件时抛 `NO_CHANGES`
  */
 export function commitLocalChanges(
-    ctx: Pick<AppContext, 'logger' | 'workDir' | 'allActions' | 'authProvider'>,
+    ctx: Pick<AppContext, 'logger' | 'workDir' | 'allActions' | 'authProvider' | 'deliverySkips'>,
 ): void {
     const { logger, workDir, allActions, authProvider } = ctx
 
@@ -607,6 +613,13 @@ export function commitLocalChanges(
     // 放在 hasGitChanges 之后：无改动的运行仍保留原有「No changes」日志。
     const installBlockedRepos = findInstallBlockedReposWithFixes(allActions)
     if (installBlockedRepos.length > 0) {
+        // run 标记：平台执行链（fix + commit）不经引擎 PR 面 → 只记录跳过，供平台展示「交付跳过」
+        // （载体恒为 `skip`：该路径不产出 issue / draft PR，不能在报告里谎报载体）
+        recordDeliverySkip(ctx, {
+            repositories: installBlockedRepos,
+            failingCommands: collectFailingInstallCommands(allActions, installBlockedRepos),
+            carrier: { mode: 'skip' },
+        })
         logger.warn(
             `Install verification is still failing (pre-existing) after the fix for ${installBlockedRepos.join(', ')} `
             + '— skipping local commit; fix the execution environment or target repository lockfile first',

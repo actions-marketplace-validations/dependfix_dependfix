@@ -17,6 +17,7 @@ import {
     type FixError,
     type RepeatedAttemptRecord,
     type PrCheckWatchReport,
+    type DeliverySkipRecord,
 } from '@dependfix/core'
 import { fromApp, type AuthProvider } from '../auth'
 import {
@@ -74,7 +75,7 @@ import {
 import { findInstallBlockedReposWithFixes, hasDeliverableFixes } from './delivery'
 import { prepareDeliveryHygiene } from './git-exclude'
 import { runPrCheckWatch } from './pr-check-watch-run'
-import { rollbackForSkippedDelivery, skipDeliveryForInstallFailure } from './skipped-delivery'
+import { handleBaselineRedDelivery, rollbackForSkippedDelivery } from './skipped-delivery'
 import { logPartialSourceFailureSummary } from './source-failure-summary'
 import { pullRequestCreationHint } from './token-hints'
 import { handleDuplicatePRs } from './duplicate-prs'
@@ -167,6 +168,10 @@ export class DependfixApp {
     private attemptRepo: string | undefined
     /** PR check 回环结果（run 级；仅在 `--wait-pr-checks` 且创建 PR 时递增） */
     private readonly prCheckWatchReport: PrCheckWatchReport = { attempts: [], runBudgetExhausted: false }
+    /** 交付跳过记录（基线红；`computeSummary` 据此派生 summary 计数） */
+    private readonly deliverySkips: NonNullable<AppContext['deliverySkips']> = []
+    /** `draft` 档的跳过记录（sanity: PR 创建后回填载体编号） */
+    private baselineRedDraft?: DeliverySkipRecord
     private readonly alertOutcomes: NonNullable<AppContext['alertOutcomes']> = new Map()
 
     constructor(options: DependfixAppOptions) {
@@ -256,6 +261,7 @@ export class DependfixApp {
             attemptRepo: this.attemptRepo,
             prCheckWatch: this.prCheckWatchReport,
             alertOutcomes: this.alertOutcomes,
+            deliverySkips: this.deliverySkips,
         }
     }
 
@@ -508,14 +514,19 @@ export class DependfixApp {
         // 放在门禁之后：先让「本次新引入」的失败按原语义回滚，再处理非归因的安装红与零修复。
         const installBlockedRepos = findInstallBlockedReposWithFixes(this.allActions)
         if (installBlockedRepos.length > 0) {
-            skipDeliveryForInstallFailure({
-                logger: this.logger,
+            const outcome = await handleBaselineRedDelivery({
+                ctx: this.ctx,
+                config: this.config,
+                client,
+                repositories,
+                installBlockedRepos,
                 workDir: this.workDir,
                 preExistingDirty: this.preExistingDirty,
-                allErrors: this.allErrors,
-                repos: installBlockedRepos,
             })
-            return
+            if (!outcome.continueAsDraft) {
+                return
+            }
+            this.baselineRedDraft = outcome.record
         }
         if (!hasDeliverableFixes(this.allActions)) {
             this.logger.info('No deliverable fixes produced — skipping PR creation')
@@ -638,10 +649,19 @@ export class DependfixApp {
                 baseBranch: defaultBranch,
                 title: prTitle,
                 body: prBody,
+                // 基线红：草稿 PR（CI 会以既有失败为红，先不进人工 review 队列）
+                draft: this.baselineRedDraft !== undefined,
             })
 
             this.logger.info(`PR created: ${pr.htmlUrl}`)
             this.summary.prsOpened += 1
+            if (this.baselineRedDraft) {
+                this.baselineRedDraft.carrier.draftPr = { number: pr.number, htmlUrl: pr.htmlUrl }
+                this.logger.warn(
+                    `Draft PR created for pre-existing install failure: ${pr.htmlUrl} `
+                    + '— fix the repository install chain, then mark it ready for review',
+                )
+            }
 
             // Record PR as a fix action before closing superseded PRs,
             // so a close failure never hides the successfully created PR
@@ -671,7 +691,11 @@ export class DependfixApp {
             // 7. Close superseded PRs only after new PR created successfully
             await closeSupersededPRs(this.ctx, client, owner, repo, plan.supersedePRs)
 
-            if (this.config.waitPrChecks) {
+            if (this.config.waitPrChecks && this.baselineRedDraft) {
+                this.logger.info(
+                    'Skipping PR check watch: draft delivery is expected to fail on the pre-existing install failure',
+                )
+            } else if (this.config.waitPrChecks) {
                 await runPrCheckWatch({ ctx: this.ctx, octokit: client, owner, repo, pr, branchName })
             }
         } catch (error: unknown) {
