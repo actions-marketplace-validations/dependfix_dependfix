@@ -54,9 +54,11 @@
 
 ### 候选评估中（待评估 / 本阶段延后项）
 
-> **候选池概览（2026-10-30 实测）**：本区 59 项（2026-10-30 上收 M51 九项后实测；含 M50.2 / M50.3 复审衍生候选 + 2026-10-29 批量运行超时复盘派生 4 项 + 2026-10-30 用户实测派生 2 项（PR 正文 `From` 恒空、扫描页排序与时间区间）；另 1 项设计定稿后按用户裁定转入 §延期 / 暂缓项）；P 标签覆盖不全（未标注者评估时补 P 标签，不默认升级）；本文件不维护分档统计，1.0 分档只见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)；未标注候选评估时补 P 标签，不默认升级。
+> **候选池概览（2026-10-30 实测）**：本区 61 项（2026-10-30 上收 M51 九项后实测；含 M50.2 / M50.3 复审衍生候选 + 2026-10-29 批量运行超时复盘派生 4 项 + 2026-10-30 用户实测派生 2 项（PR 正文 `From` 恒空、扫描页排序与时间区间）；另 1 项设计定稿后按用户裁定转入 §延期 / 暂缓项）；P 标签覆盖不全（未标注者评估时补 P 标签，不默认升级）；本文件不维护分档统计，1.0 分档只见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)；未标注候选评估时补 P 标签，不默认升级。
 > **1.0 门槛与分档**：P0 23 / P1 8 / 1.0 后 15 的分档、门槛判定与批次计划见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)；本区候选在未上收前保持候选状态，上收后按批次从本表移除。
 
+- **PR 回环有界重试（P2 🚀，2026-10-30 M51.3 用户裁定延后）** —— 设计稿 `pr-feedback-loop.md` §8 保留 `FeedbackRetryDispatcher` 契约（同 PR 失败后重新触发既有修复链，需配额与触发面）；平台当前无「同 PR 重试」入口，`retryFailed` 开启时每仓库每进程只 warn 一次。待评估：补触发面（API / UI）+ 配额后再实施。触发：出现「PR 红后无人处理、需自动重试」的实际需求时。
+- **1.0 G8 产品指标采集脚本（P1 🛠️，2026-10-30 M51 收口登记）** —— 台账 G8（近 30 个 PR 的 CI 绿率 / 人工介入率 / 误关率）原归属「F1 采集实现 + G 引用」，但 M51 六原子未产出统计脚本，F1 已闭环后该前置悬空。待评估：在 F2 或 G 前补统计脚本 + 证据口径（取数来源 `ScanRun` / `PRCheck` / 关闭原因字段）。触发：F2/G 规划时。
 - **列表查询缺并列次键（P2 🛠️，2026-10-30 同 pattern 扫描）** —— alerts 原始列表已补 `result.id DESC` 次键（M51.6）；同一 pattern 仍有 4 处：`api/runs/[id].get.ts`（`order: { severity }`，扫描详情弹窗有视觉基线）、`api/audit-events/index.get.ts`（`createdAt DESC` + `take(500)`）、`api/pr-checks/index.get.ts`、`api/notifications/index.get.ts`。影响：主排序键并列时行序取决于数据库返回顺序，同一查询两次可能不同（视觉基线 / 截断集合抖动，当前未暴露属潜伏）。待评估：统一口径「列表查询必须显式次键（唯一列 DESC）」并逐处补齐。触发：任一列表页出现视觉抖动或分页重复 / 丢失时。
 - **平台 typecheck 未覆盖 `.nuxt/tsconfig.node.json`（P2 🛠️，2026-10-30 审计发现）** —— `pnpm --filter @dependfix/platform typecheck`（`nuxt typecheck`）静默 exit 0，未覆盖 `.nuxt/tsconfig.json` 引用的 node 项目；实测该路径下 `nuxt.config.ts` 有 2 个既有类型错误（icon `rel: 'alternate icon'` 不在允许联合、i18n `locales` 声明为 readonly 与可变 `LocaleObject[]` 不兼容），另有 `.nuxt/tsconfig.node.json` 自身的 `emitDecoratorMetadata` / `experimentalDecorators` 组合告警。影响：`nuxt.config.ts` 一类配置错误长期不在门禁内。待评估：修掉 2 个错误后把该 project 纳入 typecheck 脚本（`vue-tsc -p .nuxt/tsconfig.json`）。触发：下次修改 `nuxt.config.ts` 或平台门禁治理批次。
 - **预算跳过的交付可观测性（P2 🎨）** —— 运行预算不足导致终验跳过时，引擎已写 `BUDGET_EXHAUSTED` 审计并置 `RepositoryResult.verificationSkipped='budget'`，但 Markdown 报告不单独渲染该字段、平台运行详情也不展示；「修了 N 条、交付 0 条」只能从 Errors 表追溯。待评估：报告与平台展示「验证跳过（预算）」并在 `deliverySkips` 家族里登记该跳过原因。触发：出现「预算耗尽但用户不知道为何没交付」的反馈时。
@@ -444,9 +446,9 @@
 
 | 内容类型 | 位置 |
 |:--|:--|
-| 当前阶段活跃任务 | **M51 语义与数据收口（1.0-F1）** — 6 原子，见 [todo.md](todo.md)；插队容量治理见 [planning.md §3.1.1](../standards/planning.md#_3-1-1-插队后的阶段容量再平衡-hard-requirement-2026-10-19) |
+| 当前阶段活跃任务 | **无活跃阶段**（M51 已闭环归档，见 [todo.md](todo.md) / [M51 分片](archive/todo-archive-phases-m51.md)）；插队容量治理见 [planning.md §3.1.1](../standards/planning.md#_3-1-1-插队后的阶段容量再平衡-hard-requirement-2026-10-19) |
 | 下一阶段（已授权，待规划） | **F2 文档与验证 → G 发布工程**（M52-M53；台账见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)） |
 | 已完成阶段归档 | [todo-archive.md](todo-archive.md)（阶段索引 + [archive/](archive/) 分片） |
-| 里程碑与阶段交付 | [roadmap.md](roadmap.md)（M0-M50 已归档；M51 进行中；F2/G 待规划） |
+| 里程碑与阶段交付 | [roadmap.md](roadmap.md)（M0-M51 已归档；F2/G 待规划） |
 | 长期主线 / 候选 / 待人工验收 / 已知边界 | 本文档（按四象限结构） |
 | 历史归档索引 | [archive/index.md](archive/index.md) |

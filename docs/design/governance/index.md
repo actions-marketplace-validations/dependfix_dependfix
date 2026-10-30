@@ -32,17 +32,17 @@
 | [规范与经验管理体系重构设计](./standards-experience-refactor.md) | 专项设计（规范方法论层化 + 经验三层收敛 + 导航分层 + 阈值/门禁统一；承接 spec-and-doc-governance v2） | ✅ 已落地（2026-10-10：M41.1~M41.5 全部闭环归档，见 [M41](../../plan/archive/todo-archive-phases-m41.md#m41-规范与经验管理体系重构m411m415-全部已闭环--2026-10-10-归档)） |
 | [运行失败分类与筛选设计](./run-failure-taxonomy.md) | 专项设计（运行失败阶段分类 + 可重试判定 + 筛选 / 重试入口） | ✅ 已落地（2026-10-07：分类 + 落库回填 + 筛选 + 展示；2026-10-16 补受约束重试入口） |
 | [扫描偏好（设备级）设计](./scan-preferences.md) | 专项设计（设备级 localStorage 偏好：优先级 / 写入时机 / SSR 与可测性） | ✅ 已落地（2026-10-07，M37.2） |
-| [平台执行模型隔离设计](./executor-process-isolation.md) | 专项设计（M38 设计先行：BullMQ 锁续期失败根因 + 三方案选型） | ✅ 已落地（2026-10-09 M38 闭环归档，选型 ①′ 独立 worker 进程） |
-| [PR 构建与部署信号采集设计](./pr-build-deploy-signals.md) | 专项设计（PR 构建 / 部署多源聚合：GitHub Checks + Commit Statuses + Deployments，可选 provider 日志富化） | 🔶 设计先行稿（backlog 候选，2026-10-10） |
+| [平台执行模型隔离设计](./executor-process-isolation.md) | 专项设计（M38 设计先行：BullMQ 锁续期失败根因 + 三方案选型） | ✅ 已落地（2026-10-09 M38 闭环归档，选型 ①′ 独立 worker 进程；2026-10-30 M51.5 增量：交付类 git 异步化 + 运行预算契约 §8.5/§8.6） |
+| [PR 构建与部署信号采集设计](./pr-build-deploy-signals.md) | 专项设计（PR 构建 / 部署多源聚合：GitHub Checks + Commit Statuses + Deployments，可选 provider 日志富化） | ✅ 已实施（M43.2a/b 采集与持久化 + M45.6 关注集；2026-10-30 M51.2 增量：结论口径统一与同 ref 收敛 §3.10） |
 | [队列僵尸任务终结与去重键释放设计](./queue-stale-recovery.md) | 专项设计（宿主机重启后 pending/running 收敛 + BullMQ 去重键释放 + 触发自愈 + worker 慢重试） | ✅ 已落地（2026-10-18，Review Gate R2 Pass） |
 | [平台通知与邮件推送设计](./platform-notification.md) | 专项设计（事件分层 + 组织 / 个人配置 + 收件人分流 + 合并降噪；issue #190） | ✅ 已落地（2026-10-22 M46 归档；B1-B4 闭环，B5 已随 M47.5 进入规划） |
 | [验证链与目标仓库 CI 口径对齐设计](./verification-ci-alignment.md) | 专项设计（M47.1：workflow 命令口径解析 / 差异披露 / 默认分支健康预检） | ✅ 已落地（2026-10-23，M47.1；Review Gate R2 Pass） |
 | [平台本地日志通道统一设计](./platform-logging.md) | 专项设计（进程级日志统一 + 本地文件轮转 + 致命错误落盘） | ✅ 已实施（2026-10-28，M49 追加临时待办；Review Gate R3 Pass） |
 | [1.0 发布门槛与就绪度台账](./release-1.0-readiness.md) | 发布治理（G1-G8 门槛 / P0-P1 分档 / 真实环境矩阵 / 批次计划） | 🔶 进行中（2026-10-25 立项；目标 1.0.0） |
 | [发布前安全告警门禁设计](./release-security-gate.md) | 发布治理（Dependabot + Code Scanning 发布级阻断 / 豁免台账 / fail-closed 决策） | ✅ 已落地（2026-10-29，`release.yml` 接线 + 单测） |
-| [对外 PR 交付闭环设计](./pr-delivery-closure.md) | 专项设计（M48：家族锁步 / CI 独有脚本 / 失败指纹 / 提交面 / PR 回环 / 归因） | ✅ 已落地（2026-10-25，M48.1-M48.6 六原子闭环；Review Gate 逐条 Pass） |
-| [告警级修复结果回写设计](./alert-outcome-writeback.md) | 专项设计（1.0-F1：`ScanResult.fixStatus` 回写契约 / 产出优先级 / 通知口径） | ✅ 已实施（2026-10-30，M51.1；Review Gate R2 Pass） |
-| [平台 PR 回环反馈设计](./pr-feedback-loop.md) | 专项设计（1.0-F1：观察态 / 幂等评论 / 关闭与重试边界 / 与监测器分工） | 🔶 设计定稿（2026-10-30，M51.3；a/b 实施中） |
+| [对外 PR 交付闭环设计](./pr-delivery-closure.md) | 专项设计（M48：家族锁步 / CI 独有脚本 / 失败指纹 / 提交面 / PR 回环 / 归因） | ✅ 已落地（2026-10-25，M48.1-M48.6 六原子闭环；2026-10-30 M51.4 增量：基线红交付降级 §16） |
+| [告警级修复结果回写设计](./alert-outcome-writeback.md) | 专项设计（1.0-F1：`ScanResult.fixStatus` 回写契约 / 产出优先级 / 通知口径） | ✅ 已实施（2026-10-30，M51.1；Review Gate R1 两分区 Reject → R2 A Reject / B Pass → R3 A Pass） |
+| [平台 PR 回环反馈设计](./pr-feedback-loop.md) | 专项设计（1.0-F1：观察态 / 幂等评论 / 关闭与重试边界 / 与监测器分工） | ✅ 已实施（2026-10-30，M51.3 a/b；retry 按用户裁定延后，契约保留在 §8） |
 | [仓库级执行预算与超时配置设计](./repo-execution-limits.md) | 专项设计（四个超时仓库级覆盖 + 平台封顶 + Worker 锁 / 孤儿阈值同源 + 前端设置面） | 🔶 设计定稿（2026-10-30，D1-D3 已裁定；待上收） |
 
 ## 使用约定
