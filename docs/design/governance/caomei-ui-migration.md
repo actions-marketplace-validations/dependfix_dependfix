@@ -1006,7 +1006,7 @@ e2e 侧共改写 14 个 spec（`.p-dialog*` / `.p-select*` / `.p-drawer` / `.p-c
 | 视觉回归 | `pnpm test:visual:update --update-snapshots=all` + 两轮 `pnpm test:visual` | 20 passed → 20 passed ×2（门禁口径无失败、无超预算；`.last-run` 与基线落盘同批自洽） |
 | 定向 e2e（DataTable 重点面） | `playwright test repos-crud / table-filters / scans / pr-checks --workers=1` | **28 passed**（受控多选 / 客户端分页 / 两处 `lazy` 翻页 / 行展开 / 运行详情） |
 | 新增守卫 | `playwright test tests/e2e/theme-tokens.e2e.test.ts` | 4 passed（文本角色 2 + 控件边界对比度 2）；**mutation 实测**：亮色 `primary-text` 改回 `#1d4ed8` → 失败；删除暗色 `control-border` 覆盖 → 2.59:1 → 失败 |
-| 全选适配守卫 | `playwright test tests/e2e/repos-select-all.e2e.test.ts` | 1 passed；**mutation 实测**：`selectAllFiltered` 改为只取首页 → 失败（Expected 12 / Received 10） |
+| 全选适配守卫 | `playwright test tests/e2e/repos-select-all.e2e.test.ts` | 1 passed（含刷新一致性与筛选不变量）；**mutation 实测**：`selectAllFiltered` 改为只取首页 → 失败（Expected 12 / Received 10）；删除刷新后重映射 → 失败（Expected 10 / Received 0） |
 | 文档值核验 | 一致性 / 对比度脚本 | 新文本角色：亮 `#0f766e` 在 8% teal soft 底 4.97:1、白底 5.47:1；暗 `#5eead4` 在 8% soft 底 10.19:1 / 深底 12.07:1 |
 
 - **断言未凑绿**：本轮 e2e 无一处需改期望值；新增的 `tests/e2e/theme-tokens.e2e.test.ts` 断言的是「文本角色跟随平台主色」这一**契约**（token 值 + `/scans` 激活 Tab 的实际计算色），而非像素快照。
@@ -1030,8 +1030,9 @@ e2e 侧共改写 14 个 spec（`.p-dialog*` / `.p-select*` / `.p-drawer` / `.p-c
 - **检查结论**：全站仅 `repos` 使用 `selection-mode="multiple"`（`rg` 实测 1 处，无 `single` 用法）；其余表页均无选择列——`pr-checks` / `batch-runs` 含 `expander` 列，`scans` / `repo-history-dialog` 是 `lazy` 表（后者也无 `expander`），故都不受全选语义影响。另 `import-repos-dialog` 的「全选」是**自建 checkbox + 自建分页列表**（选 `selectableFilteredRepos` 全集合），不经 DataTable 语义，同样不受影响。
 - **功能缺口**：`repos` 是客户端分页（10 / 25 / 50），表头全选只覆盖当前页；「批量扫描全部筛选结果」需逐页点击（或先把每页调到 50）。受控 `selectedRows` 按 row id 跨页保持，故逐页勾选可用但成本随页数线性增长。
 - **适配（不改上游行为）**：表头保持 1.0 语义（当前页）；卡片内表格上方新增选择栏——`已选 {selected} 条，当前筛选 {total} 条` + `全选全部（N）` / `清空选择`（按钮按状态显隐：已选 > 0 才显示「清空选择」，未全选才显示「全选全部」）。`selectAllFiltered` 以整集合替换（与 DataTable「回写当前过滤集合」的既有语义一致）；选中判定按 id 比对（`selectedRows` 可能含被筛选隐藏的行）。
-- **落地拆分**：选择栏为独立组件 `app/components/repo-selection-bar.vue`（纯展示 + 两个 emit），状态与动作抽到 `app/composables/use-repo-selection.ts`（纯函数 `isAllFilteredSelected` 按 id 判定 + 组合式），既避免 `repos.vue` 越过 `max-lines: 800`，也让判定可单测。
-- **守卫**：`tests/e2e/repos-select-all.e2e.test.ts` 自建 12 条仓库并清理——断言「表头全选 = 10 条」「第 2 页未被波及」「翻页保持已选」「全选全部（12）覆盖两页」「清空归零」，并加版面守卫（选择栏底边不高于表格顶边）；单测 `tests/unit/use-repo-selection.test.ts` 覆盖「按 id 判定 / 缺行 / 空集合 / 含隐藏行 / 全选替换与清空」5 例。**mutation 实测**：`selectAllFiltered` 改为只取首页 → e2e 失败（Expected 12 / Received 10）。
+- **落地拆分**：选择栏为独立组件 `app/components/repo-selection-bar.vue`（纯展示 + 两个 emit），状态与动作抽到 `app/composables/use-repo-selection.ts`（`isAllFilteredSelected` 按 id 判定、`remapSelectionById` 刷新重映射、`useRepoSelection` 组合式），既避免 `repos.vue` 越过 `max-lines: 800`，也让判定可单测。
+- **刷新一致性（审计衍生）**：库内受控选择按**对象引用**解析，而保存 / 删除后的 `fetchData()` 会换新对象 → 原先会出现「已选 N 条但无行勾选」。现于刷新后按 id 重映射已选集合（已删除行自然移出），选择栏计数与勾选态保持一致。
+- **守卫**：`tests/e2e/repos-select-all.e2e.test.ts` 自建 12 条仓库并清理——断言「表头全选 = 10 条」「第 2 页未被波及」「翻页保持已选」「全选全部（12）覆盖两页」「编辑保存触发刷新后计数与勾选态一致」「筛选收窄不清空已选」「清空归零」，并加版面守卫（选择栏底边不高于表格顶边）；单测 `tests/unit/use-repo-selection.test.ts` 8 例（按 id 判定 / 缺行 / 空集合 / 含隐藏行 / 全选替换与清空 / 刷新重映射三种）。**mutation 实测**：`selectAllFiltered` 改为只取首页 → e2e 失败（Expected 12 / Received 10）；删除刷新后重映射 → e2e 失败（Expected 10 / Received 0）。
 - **视觉**：`repos-*` 与 `dialog-select-open-*` 基线因选择栏整体下移重建（§15.16 表内已标注）。隔离 token 变化、**只看版面位移**（对比 rc.1 首版基线）：repos-light 14.36% / repos-dark 14.54%、dialog-select-open light 7.64% / dark 8.28%（该用例在 `/repos` 打开弹窗，背景页随表格下移；dark 另含边框抬档）；**合计口径（基准 = 0.7.0 基线）见 §15.16 表**。
 
 **2）暗色控件边界微调**
@@ -1048,9 +1049,9 @@ e2e 侧共改写 14 个 spec（`.p-dialog*` / `.p-select*` / `.p-drawer` / `.p-c
 | :--- | :--- | :--- |
 | 构建 / typecheck / lint | `pnpm -r build` / `pnpm typecheck` / `pnpm lint` | 全绿 / 7 包 0 error / 0 error（3 存量 warning） |
 | 全量 e2e | `TMPDIR=/dev/shm pnpm test:e2e` | **211 passed / 0 failed**，1-2 flaky 重试通过（`repos-crud` 创建、`scan-config` Select） |
-| 定向 | `repos-select-all` / `theme-tokens` / `use-repo-selection` 单测 / `repos-crud` ×3 | 1 passed / 4 passed / 5 passed（181 文件 2378 passed）/ 30 passed（flaky 未复现） |
+| 定向 | `repos-select-all` / `theme-tokens` / `use-repo-selection` 单测 / `repos-crud` ×3 | 1 passed / 4 passed / 8 passed（181 文件 2381 passed）/ 30 passed（flaky 未复现） |
 | 视觉 | `=all` 重建 + 两轮 `test:visual` | 20 passed ×3；相对 rc.1 首版重建 8 张（repos ×2、dialog-select ×2、4 张暗色边框） |
-| mutation | 2 项 | 2/2 击杀（全选作用域、暗色边框对比度） |
+| mutation | 3 项 | 3/3 击杀（全选作用域、刷新重映射、暗色边框对比度） |
 | 文档 | `pnpm gates:docs` | 16 项 OK |
 
 **4）剩余边界**
