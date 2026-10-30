@@ -289,6 +289,7 @@ scan-queue.add(jobId = scan-<repositoryId>)   [scan-queue.ts]
 - 检查点：修复前基线采样、lockfile repair（含选择性回滚后的重做）、合批版本化 overrides、逐包（多版本 / 分组内 / 成员 / 跨线）、修复后验证。
 - **交付口径**：预算只跳过**未开始**的工作；已经跑完并全绿的终验按结果交付。若**终验本身**被预算跳过，则视为「未验证」——`verificationPassed` 保持 `undefined`、`RepositoryResult.verificationSkipped = 'budget'`，门禁**不交付**且**不回滚**（保留已通过单元供人工复核），不写 `VERIFICATION_FAILED`。
 - 预算与取消互不替代：预算只减少"启动新工作"，取消仍会终止在跑进程树。预算跳过属跳过类白名单（不参与 exit code / 不驱动仓库失败）；取消以 `ABORTED` 记录并可计入非零退出码（运行级，不归因具体仓库）。
+- **破坏性变更（0.x 内部 API）**：交付链导出的 `createFixBranch` / `stageAndCommit` / `pushBranch` / `commitStaged` / `stageScopedChanges` / `listChangedPaths` / `computeCommitScope` / `ensureGitConfig` / `branchExists` / `rollbackChanges` / `enforceVerificationGate` / `recordVerificationCheckpoint` / `commitLocalChanges` / `skipDeliveryForInstallFailure` / `rollbackForSkippedDelivery` 由同步改为异步；外部消费者必须 `await`（未 await 时 `Promise` 恒真，TypeScript 不报错）。发布说明需标注该项。
 - 时钟与窗口：预算按**墙钟** epoch ms 计算（依赖宿主时钟单调性，NTP 回跳会让引擎晚于平台超时停手）；窗口只覆盖引擎 `run()`（clone 与平台交付的 push / PR 不在其中），单次总墙钟上限约为 `timeoutMs + clone + delivery`。
 
 ### 8.6 残余与观察项
