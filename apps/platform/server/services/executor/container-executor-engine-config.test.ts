@@ -96,7 +96,7 @@ afterEach(async () => {
 
 /** 取 DependfixApp 构造参数里的引擎 config */
 const engineConfig = () => (dependfixAppMock.mock.calls[0]![0] as {
-    config: { mode: string, commit: boolean, createPullRequest: boolean }
+    config: { mode: string, commit: boolean, createPullRequest: boolean, deadlineAt?: number }
 }).config
 
 describe('ContainerExecutor 引擎 config 覆写口径', () => {
@@ -131,5 +131,19 @@ describe('ContainerExecutor 引擎 config 覆写口径', () => {
         expect(engineConfig().mode).toBe('fix')
         expect(engineConfig().commit).toBe(true)
         expect(engineConfig().createPullRequest).toBe(false)
+    })
+})
+
+describe('ContainerExecutor → 引擎预算截止时间', () => {
+    it('透传 deadlineAt ≈ 开始时刻 + timeoutMs（上层计算，引擎只消费）', async () => {
+        const executor = new ContainerExecutor({ workRoot: tempRoot, timeoutMs: 60_000 })
+        const before = Date.now()
+
+        await executor.execute(makeCtx('fix'))
+
+        const deadlineAt = engineConfig().deadlineAt
+        expect(typeof deadlineAt).toBe('number')
+        expect(deadlineAt).toBeGreaterThanOrEqual(before + 60_000)
+        expect(deadlineAt).toBeLessThanOrEqual(Date.now() + 60_000)
     })
 })

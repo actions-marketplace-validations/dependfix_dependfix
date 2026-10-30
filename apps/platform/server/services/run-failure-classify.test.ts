@@ -46,6 +46,7 @@ const EXPECTED_MAPPINGS: Record<string, { stage: RunFailureStage, kind: RunFailu
     VERIFICATION_FAILED: { stage: 'verify', kind: 'deterministic' },
     PRE_EXISTING_FAILURE: { stage: 'verify', kind: 'deterministic' },
     ROLLBACK_GRANULARITY_DEGRADED: { stage: 'verify', kind: 'deterministic' },
+    BUDGET_EXHAUSTED: { stage: 'runtime', kind: 'transient' },
     SCRIPT_NOT_FOUND: { stage: 'verify', kind: 'deterministic' },
     network_violation: { stage: 'verify', kind: 'deterministic' },
     // deliver

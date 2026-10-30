@@ -336,6 +336,8 @@ export class ContainerExecutor implements ScanExecutor {
                 alertsToken: ctx.credential?.token ?? ctx.config.alertsToken,
                 commit: !isReportOnly,
                 createPullRequest: false,
+                // 运行截止时间（上层计算、引擎只消费）：预算不足时引擎停止启动新工作
+                deadlineAt: Date.now() + this.timeoutMs,
             }
 
             const app = new DependfixApp({
