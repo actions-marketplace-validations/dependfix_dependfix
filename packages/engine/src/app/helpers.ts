@@ -16,6 +16,7 @@ import {
     type RepositoryResult,
     type PrCheckWatchReport,
     type RunSummary,
+    type AlertFixOutcome,
 } from '@dependfix/core'
 import { stageAndCommit } from '../github/pr-creator'
 import { collectDeclaredPaths } from '../github/commit-scope'
@@ -165,6 +166,12 @@ export interface AppContext {
      * 不做跳过判定（避免「在 A 仓计 B 仓的尝试」造成永久跳过）。
      */
     attemptRepo?: string
+    /**
+     * 告警级修复结果收集器（run 级；修复管线在无法由 actions 反推的判定点写入，
+     * 报告 `alertOutcomes` 与平台 `ScanResult.fixStatus` 回写消费）。
+     * 缺省（测试直接构造 ctx）⇒ 报告只按 actions 与告警属性推导，不含收敛 / 跳过等显式判定。
+     */
+    alertOutcomes?: Map<string, AlertFixOutcome>
     /**
      * PR check 回环结果（仅 `--wait-pr-checks` 且实际创建 PR 时存在）。
      * 缺省 ⇒ 不等待（行为与引入前一致）。

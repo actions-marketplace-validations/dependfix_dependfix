@@ -18,6 +18,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
     addSkipped,
+    type AlertFixOutcome,
     type FixAction,
     type FixActionFamily,
     type FixError,
@@ -42,12 +43,15 @@ import {
 } from '../fixers/dependency/families'
 import { getFamilyVersionResolver, resolveRegistryBaseUrl } from '../fixers/dependency/family-versions'
 import { matchesOverrideProtect } from '../github/repo-policy'
+import { recordSkippedAlerts } from './alert-outcomes'
 import { markEnvironmentalInstallFailure } from './environmental-failure'
 
 /** 家族锁步编排所需的最小上下文（与 AppContext 的结构兼容）。 */
 export interface FamilyUpgradeContext {
     config: Pick<RuntimeConfig, 'dryRun' | 'overrideProtect'>
     logger: Logger
+    /** 告警级结果收集器（缺省 ⇒ 不写显式记录，仅靠动作推导） */
+    alertOutcomes?: Map<string, AlertFixOutcome>
     workDir: string
     allErrors: FixError[]
     summary: Pick<RunSummary, 'alertsSkipped' | 'alertsSkippedByReason'>
@@ -348,6 +352,7 @@ function blockedAttempt(
         message: reason,
     })
     addSkipped(ctx.summary, 'override-protected')
+    recordSkippedAlerts(ctx, [alert], 'override-protected')
     return {
         status: 'blocked',
         plan,

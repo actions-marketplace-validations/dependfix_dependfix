@@ -1,6 +1,7 @@
 import type { NormalizedSecurityAlert, AlertSeverity } from '../alerts'
 import type { CiAlignmentRecord } from './ci-alignment'
 import type { CheckAttribution } from './check-attribution'
+import type { AlertFixOutcome } from './alert-outcomes'
 
 /**
  * 跳过原因枚举（`alertsSkippedByReason` 的 key）。
@@ -298,6 +299,16 @@ export interface RunResult {
      */
     ciAlignment?: CiAlignmentRecord[]
     /**
+     * 告警级修复结果（按告警逐条；仅本次运行有结论时存在）。
+     *
+     * 消费方是平台 `ScanResult.fixStatus` 回写：`converged` 使本地已满足的告警退出
+     * 「未修复」明细（`security_critical` / `security_high` / 周报），`success` / `failed` /
+     * `skipped` 同样可回写。只列出有结论的告警——**缺键即 `not-tried`**（存量 run 无该字段，
+     * 行为与引入前一致）。匹配键与推导优先级见
+     * [data-model.md](../../../../docs/design/modules/data-model.md)。
+     */
+    alertOutcomes?: AlertFixOutcome[]
+    /**
      * 同告警尝试记录（按告警逐条；仅 fix-and-pr 模式且参与尝试计数时存在）。
      *
      * 记录「本次运行对该尝试键的处置」：正常尝试 / 达到上限跳过 / `--retry-failed` 人工强制。
@@ -481,7 +492,7 @@ export function aggregateSeverity(
  */
 export function isAlertFixedByActions(
     alert: NormalizedSecurityAlert,
-    actions: FixAction[],
+    actions: readonly FixAction[],
 ): boolean {
     // Code Scanning：实例维度
     if (alert.source === 'code-scanning') {

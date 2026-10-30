@@ -42,6 +42,7 @@ import { tryBatchVersionedOverrides, type VersionedOverrideBatchItem } from './r
 import { fetchDefaultBranch, fetchRepoAlerts, truncatedWarning } from './repo-alerts'
 import { alertsFetchTokenHint } from './token-hints'
 import { markEnvironmentalInstallFailure } from './environmental-failure'
+import { recordConvergedAlerts, recordSkippedAlerts } from './alert-outcomes'
 import { recordUpgradeFailure } from './upgrade-failure'
 import { ensureVerificationBaseline, finalizeRepoFix, recordInstallBaselineFailure } from './repo-fix-finalize'
 import { recordVerificationCheckpoint, type VerificationCheckpoint } from './verification-checkpoint'
@@ -297,12 +298,15 @@ async function prepareRepoFixSets(
             `[alerts] ${submanifestAlerts.length} alert(s) from sub-directory / root-direct-dep manifest(s) skipped — manual review required: ${submanifestAlerts.map((a) => `${a.packageName} (${a.manifestPath})`).join(', ')}`,
         )
         addSkipped(ctx.summary, 'subdirectory-manifest', submanifestAlerts.length)
+        recordSkippedAlerts(ctx, submanifestAlerts, 'subdirectory-manifest')
     }
 
     // 不可自动修复残差按告警逐条统计（忽略 dedupeFixableAlerts 合并差额：被合并告警仍可能由代表
     // action 修复）；放在分区处一次算净，使「整段跳过升级链」的路径也覆盖
-    const notFixableCount = rootManifestAlerts.filter((alert) => !alert.fixable || !alert.recommendedVersion).length
-    addSkipped(ctx.summary, 'not-fixable', notFixableCount)
+    const notFixableAlerts = rootManifestAlerts.filter((alert) => !alert.fixable || !alert.recommendedVersion)
+    addSkipped(ctx.summary, 'not-fixable', notFixableAlerts.length)
+    // 明细只记真正不可修复的实例：fixable=true 但暂无推荐版本属「等上游」，保持 not-tried
+    recordSkippedAlerts(ctx, notFixableAlerts.filter((alert) => !alert.fixable), 'not-fixable')
 
     return {
         rootManifestAlerts,
@@ -347,6 +351,7 @@ async function applyLockfileFixes(
             `[alerts] ${manualCrossMajorAlerts.length} alert(s) require a cross-major upgrade (no fix within the installed major line) — manual review required: ${manualCrossMajorAlerts.map((a) => `${a.packageName} → ${a.recommendedVersion}`).join(', ')}`,
         )
         addSkipped(ctx.summary, 'cross-major', manualCrossMajorAlerts.length)
+        recordSkippedAlerts(ctx, manualCrossMajorAlerts, 'cross-major')
     }
     const autoMajorAlerts = lockfileManifestAlerts.filter((a) => autoMajorAlertIds.has(a.id))
     const fixableLockfileAlerts = lockfileManifestAlerts.filter(
@@ -394,6 +399,8 @@ async function applyLockfileFixes(
         })
         if (protectedAction) {
             ctx.allActions.push(protectedAction)
+            // 显式记录：被保护名单跳过的实例不能被同包其他实例的包级成功覆盖
+            recordSkippedAlerts(ctx, [alert], 'override-protected')
             continue
         }
         const versionedOverrides = versionedOverridesByPackage.get(alert.packageName) ?? {}
@@ -421,7 +428,10 @@ async function applyLockfileFixes(
         if (Object.keys(versionedOverrides).length === 0) {
             ctx.logger.info(`Skipping ${alert.packageName}: no vulnerable instances below targets`)
             // 告警级计数：同包多告警共用一次包级判定，不能只 +1
-            ctx.summary.alertsConverged += multiVersionAlerts.filter((a) => a.packageName === alert.packageName).length
+            const convergedAlerts = multiVersionAlerts.filter((a) => a.packageName === alert.packageName)
+            ctx.summary.alertsConverged += convergedAlerts.length
+            // 防御性对齐：该分支当前不可达（已按 overrides 非空过滤），记录点无独立用例
+            recordConvergedAlerts(ctx, convergedAlerts, 'no vulnerable instances below targets')
             continue
         }
         batchItems.push({ alert, versionedOverrides, targets })
@@ -594,9 +604,11 @@ async function applyGroupUpgrades(
                         `Skipping ${alert.packageName}: all locked versions ${lockedVersions.join(', ')} >= target ${alert.recommendedVersion} (no upgrade needed)`,
                     )
                     // 告警级计数：dedupeFixableAlerts 后仍有代表告警，但同包全部告警都已收敛
-                    ctx.summary.alertsConverged += singleVersionAlerts.filter(
+                    const convergedAlerts = singleVersionAlerts.filter(
                         (a) => a.packageName === alert.packageName && a.fixable && a.recommendedVersion,
-                    ).length
+                    )
+                    ctx.summary.alertsConverged += convergedAlerts.length
+                    recordConvergedAlerts(ctx, convergedAlerts, 'all locked versions >= target')
                     continue
                 }
                 ctx.logger.warn(
@@ -604,6 +616,10 @@ async function applyGroupUpgrades(
                     + '(lower-major / different manifest instance; cross-major upgrade or manual review required)',
                 )
                 addSkipped(ctx.summary, 'cross-major')
+                // 同包多告警逐条展开（与收敛分支口径一致：明细是实例级事实，summary 仍是 action 级计数）
+                recordSkippedAlerts(ctx, singleVersionAlerts.filter(
+                    (a) => a.packageName === alert.packageName && a.fixable && a.recommendedVersion,
+                ), 'cross-major')
                 continue
             }
             if (lockedVersions.length === 0) {

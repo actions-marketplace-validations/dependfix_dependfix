@@ -218,6 +218,7 @@ export class DependfixApp {
     private attemptRepo: string | undefined
     /** PR check 回环结果（run 级；仅在 `--wait-pr-checks` 且创建 PR 时递增） */
     private readonly prCheckWatchReport: PrCheckWatchReport = { attempts: [], runBudgetExhausted: false }
+    private readonly alertOutcomes: NonNullable<AppContext['alertOutcomes']> = new Map()
 
     constructor(options: DependfixAppOptions) {
         this.workDir = options.workDir ?? process.cwd()
@@ -233,10 +234,9 @@ export class DependfixApp {
             minLevel: this.verbose ? 'debug' : 'info',
         })
 
-        // 目标仓库专属配置（`.github/dependfix.yml`）：workDir 即目标仓库检出（平台在 clone
-        // 之后才构造本 app），读取后按「中央配置优先」合并（当前仅 overrideProtect）。
-        // 需在 logger 之后（降级 / 生效告警走 logger），且合并结果作为**唯一 config 来源**
-        // 单次赋值（保持 readonly 不可变语义）；非法配置一律降级不中断运行。
+        // 目标仓库专属配置（`.github/dependfix.yml`）：workDir 即目标仓库检出（平台在 clone 之后才构造本 app），
+        // 读取后按「中央配置优先」合并（当前仅 overrideProtect）。需在 logger 之后（降级 / 生效告警走 logger），
+        // 且合并结果作为**唯一 config 来源**单次赋值（保持 readonly 不可变语义）；非法配置一律降级不中断运行。
         this.config = applyRepoConfig(options.config, this.workDir, this.logger)
         // 构建版本回执：平台注入值（容器镜像构建期）优先，本地执行回退引擎包版本
         this.buildInfo = resolveRunBuildInfo(this.config)
@@ -254,9 +254,8 @@ export class DependfixApp {
         // 均降级默认（向后兼容）。错误信息已由 loadRulesConfigFromEnv 写入 stderr，
         // 此处不重复（避免双写）。
         //
-        // 进程级状态生命周期：active config 是模块级单例，每次构造 DependfixApp
-        // 先 reset 再按需 set，避免前一个 app 残留配置污染当前 run
-        // （同一进程多次 new DependfixApp 场景，如 cli 测试 / 多 batch 调度）。
+        // 进程级状态生命周期：active config 是模块级单例，每次构造 DependfixApp 先 reset 再按需 set，
+        // 避免前一个 app 残留配置污染当前 run（同一进程多次 new DependfixApp 场景，如 cli 测试 / 多 batch 调度）。
         resetActiveRulesConfig()
         const ruleConfig = loadRulesConfigFromEnv(process.env)
         if (ruleConfig) {
@@ -307,6 +306,7 @@ export class DependfixApp {
             attemptIndex: this.attemptIndex,
             attemptRepo: this.attemptRepo,
             prCheckWatch: this.prCheckWatchReport,
+            alertOutcomes: this.alertOutcomes,
         }
     }
 

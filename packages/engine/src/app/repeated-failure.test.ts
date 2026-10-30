@@ -47,6 +47,7 @@ function makeHarness(options: { closedCount?: number, retryFailed?: boolean, mod
         summary: { alertsSkipped: 0, alertsSkippedByReason: {} },
         allActions: [],
         attemptTracking: [],
+        alertOutcomes: new Map(),
     }
     const countCalls = vi.fn(async () => options.closedCount ?? 0)
     const index = { closedAttemptCount: countCalls } as unknown as ClosedAttemptIndex
@@ -158,6 +159,15 @@ describe('applyRepeatedFailureSkips', () => {
         expect(grouped).toBe(h.ctx.summary.alertsSkipped)
         expect(h.ctx.attemptTracking?.[0]?.status).toBe('skipped')
         expect(h.ctx.logger.warn).toHaveBeenCalledWith(expect.stringContaining('--retry-failed'))
+        // 显式结论：跳过不能被同包其他实例的包级成功覆盖
+        expect([...h.ctx.alertOutcomes!.values()]).toEqual([{
+            repository: REPO,
+            source: 'dependabot',
+            upstreamId: 'dependabot:1',
+            manifestPath: 'package.json',
+            status: 'skipped',
+            reason: 'repeated-failure',
+        }])
     })
 
     it('--retry-failed 忽略命中：仍执行并标注人工强制', async () => {

@@ -9,6 +9,7 @@ import {
     type DependencyFixResult,
 } from '../fixers/dependency'
 import { attemptFamilyUpgrade } from './family-upgrade'
+import { recordSkippedAlerts } from './alert-outcomes'
 import { markEnvironmentalInstallFailure } from './environmental-failure'
 import type { AppContext } from './helpers'
 import { handleOverrideProtection } from './override-protect'
@@ -85,6 +86,7 @@ export async function upgradeAlert(
                 scope: 'override',
             })
             if (protectedAction) {
+                recordSkippedAlerts(ctx, [alert], 'override-protected')
                 return protectedAction
             }
             strategy = 'override'

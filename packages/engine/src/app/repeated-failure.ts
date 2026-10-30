@@ -12,6 +12,7 @@
 import type { Octokit } from '@octokit/rest'
 import {
     addSkipped,
+    type AlertFixOutcome,
     type FixAction,
     type Logger,
     type NormalizedSecurityAlert,
@@ -23,6 +24,7 @@ import { resolveFamily } from '../fixers/dependency/families'
 import type { ClosedAttemptIndex } from '../github/attempt-history'
 import { computeAttemptKey, type PlanStrategy } from '../github/fix-fingerprint'
 import type { MemberManifestAlert } from '../helpers'
+import { recordSkippedAlerts } from './alert-outcomes'
 
 /** 同键允许的已关闭尝试次数：第 1 / 2 次执行，第 3 次起跳过。 */
 export const REPEATED_FAILURE_ATTEMPT_LIMIT = 2
@@ -37,6 +39,8 @@ export interface RepeatedFailureConfig {
 export interface RepeatedFailureContext {
     config: RepeatedFailureConfig
     logger: Logger
+    /** 告警级结果收集器（缺省 ⇒ 不写显式记录，仅靠动作推导） */
+    alertOutcomes?: Map<string, AlertFixOutcome>
     summary: Pick<RunSummary, 'alertsSkipped' | 'alertsSkippedByReason'>
     allActions: FixAction[]
     /** run 级尝试记录（缺省时不记录，仅保留跳过动作与计数） */
@@ -141,6 +145,8 @@ export async function applyRepeatedFailureSkips(
             skippedIds.add(alert.id)
             ctx.allActions.push(createSkippedAction(alert))
             addSkipped(ctx.summary, 'repeated-failure')
+            // 显式记录：跳过是「本轮未尝试」的权威结论，不能被同包其它实例的包级成功覆盖
+            recordSkippedAlerts(ctx, [alert], 'repeated-failure')
             ctx.logger.warn(
                 `[repeated-failure] ${alert.repository}: ${alert.packageName} → ${alert.recommendedVersion} `
                 + `already failed ${attempt - 1} time(s) (attempt ${attempt}/${REPEATED_FAILURE_ATTEMPT_LIMIT}) — skipped; `

@@ -292,6 +292,17 @@ describe('DependfixApp cross-major upgrade (--allow-major-upgrade)', () => {
         expect(result.summary.alertsFixed).toBe(0)
         const majorActions = result.actions.filter((a) => a.strategy === 'major-upgrade')
         expect(majorActions).toHaveLength(0)
+        // 逐条结果与计数同源：跨线跳过落 skipped（平台据此展示「已跳过」而非「待处理」）
+        expect(result.alertOutcomes).toEqual([
+            {
+                repository: 'foo/bar',
+                source: 'dependabot',
+                upstreamId: 'dependabot:1',
+                manifestPath: 'pnpm-lock.yaml',
+                status: 'skipped',
+                reason: 'cross-major',
+            },
+        ])
     })
 
     it('marks environmental install failures on the cross-major path and stops remaining chains', async () => {

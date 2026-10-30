@@ -329,6 +329,17 @@ describe('DependfixApp converged alert counting', () => {
 
         expect(result.summary.alertsConverged).toBe(1)
         expect(result.summary.alertsSkipped).toBe(0)
+        // 报告中「已收敛」明细与计数可对账（平台据此回写 ScanResult.fixStatus=converged）
+        expect(result.alertOutcomes).toEqual([
+            {
+                repository: 'foo/bar',
+                source: 'dependabot',
+                upstreamId: 'dependabot:1',
+                manifestPath: 'pnpm-lock.yaml',
+                status: 'converged',
+                reason: 'all locked versions >= target',
+            },
+        ])
     })
 
     it('counts all same-package converged alerts at alert level', async () => {
@@ -367,6 +378,10 @@ describe('DependfixApp converged alert counting', () => {
         expect(result.summary.alertsConverged).toBe(2)
         expect(result.summary.alertsUnfixed).toBe(0)
         expect(result.summary.alertsSkipped).toBe(0)
+        // 同包多告警逐条落结果：明细条数 = alertsConverged（提醒口径可对账）
+        expect(result.alertOutcomes?.map((outcome) => outcome.upstreamId).sort())
+            .toEqual(['dependabot:1', 'dependabot:2'])
+        expect(result.alertOutcomes?.filter((outcome) => outcome.status === 'converged')).toHaveLength(2)
     })
 
     it('does not count lower-major instances as converged', async () => {
@@ -414,6 +429,17 @@ describe('DependfixApp converged alert counting', () => {
 
         expect(result.summary.alertsConverged).toBe(0)
         expect(result.summary.alertsSkipped).toBe(1)
+        // 低版本实例残留 → 不是已收敛，明细记 skipped（系统内仍计未修复）
+        expect(result.alertOutcomes).toEqual([
+            {
+                repository: 'foo/bar',
+                source: 'dependabot',
+                upstreamId: 'dependabot:1',
+                manifestPath: 'pnpm-lock.yaml',
+                status: 'skipped',
+                reason: 'cross-major',
+            },
+        ])
     })
 
     it('still upgrades when the highest locked instance is below target', async () => {

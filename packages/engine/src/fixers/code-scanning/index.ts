@@ -40,7 +40,13 @@ export function applyCodeScanningFix(params: ApplyCodeScanningFixParams): FixAct
     }
     const startMs = Date.now()
 
-    /** 无法安全处理（陈旧告警/缺模板/歧义）→ noOp 标记，不计 failed（避免永久 exit 1/2） */
+    /**
+     * 无法安全处理（陈旧告警/缺模板/歧义）→ noOp 标记，不计 failed（避免永久 exit 1/2）。
+     *
+     * ⚠️ 与 `packages/core/src/report/alert-outcomes.ts#isAlreadyCompliant` 成对：该函数把
+     * 「`success + noOp` 且**无 `error`**」判为已收敛，因此本函数产出的每个 skip 都必须带 `error`
+     * （compliant 分支不设 `error`）。新增 skip 分支漏写 `error` 会把「无法处理」写成 `converged`。
+     */
     const skip = (reason: string): FixAction => ({
         type: 'code-scanning-fix',
         repository: alert.repository,

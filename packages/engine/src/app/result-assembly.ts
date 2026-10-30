@@ -2,6 +2,7 @@
 // 控制 app/helpers.ts 行数（max-lines 800），保持向后兼容：原 helpers.ts 通过
 // re-export 透出以下函数，内部消费者无需调整 import。
 import {
+    buildAlertOutcomes,
     isAlertFixedByActions,
     type RunReportConfig,
     type RunResult,
@@ -96,7 +97,7 @@ export function computeSummary(
 }
 
 export function buildRunResult(
-    ctx: Pick<AppContext, 'config' | 'runId' | 'startedAt' | 'finishedAt' | 'summary' | 'repoResults' | 'allAlerts' | 'allActions' | 'allErrors' | 'alertsDisabled' | 'ciAlignment' | 'attemptTracking' | 'prCheckWatch'>,
+    ctx: Pick<AppContext, 'config' | 'runId' | 'startedAt' | 'finishedAt' | 'summary' | 'repoResults' | 'allAlerts' | 'allActions' | 'allErrors' | 'alertsDisabled' | 'ciAlignment' | 'attemptTracking' | 'prCheckWatch' | 'alertOutcomes'>,
     aiUsage?: AiUsageAggregate, supplyChainWarnings?: SupplyChainWarning[],
 ): RunResult {
     const reportConfig: RunReportConfig = {
@@ -110,6 +111,8 @@ export function buildRunResult(
         codeScanningEnabled: ctx.config.codeScanningEnabled,
         codeQualityEnabled: ctx.config.codeQualityEnabled,
     }
+
+    const alertOutcomes = buildAlertOutcomes(ctx.allAlerts, ctx.allActions, ctx.alertOutcomes)
 
     return {
         runId: ctx.runId,
@@ -126,6 +129,7 @@ export function buildRunResult(
         alertsDisabled: ctx.alertsDisabled.length > 0 ? ctx.alertsDisabled : undefined,
         ciAlignment: ctx.ciAlignment && ctx.ciAlignment.length > 0 ? ctx.ciAlignment : undefined,
         attemptTracking: ctx.attemptTracking && ctx.attemptTracking.length > 0 ? ctx.attemptTracking : undefined,
+        alertOutcomes: alertOutcomes.length > 0 ? alertOutcomes : undefined,
         prCheckWatch: ctx.prCheckWatch && ctx.prCheckWatch.attempts.length > 0 ? ctx.prCheckWatch : undefined,
     }
 }
