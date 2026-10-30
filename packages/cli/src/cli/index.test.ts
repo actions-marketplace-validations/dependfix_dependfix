@@ -92,6 +92,7 @@ describe('parseCliArgs', () => {
             rollbackGranularity: 'unit',
             mirrorCiScripts: false,
             retryFailed: false,
+            onBaselineRed: 'skip',
             waitPrChecks: false,
             closeFailedPr: false,
             prCheckTimeoutMs: 900000,

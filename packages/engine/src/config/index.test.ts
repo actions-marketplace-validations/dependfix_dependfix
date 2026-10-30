@@ -31,6 +31,7 @@ describe('resolveRuntimeConfig', () => {
             rollbackGranularity: 'unit',
             mirrorCiScripts: false,
             retryFailed: false,
+            onBaselineRed: 'skip',
             waitPrChecks: false,
             closeFailedPr: false,
             prCheckTimeoutMs: 900000,
@@ -380,6 +381,7 @@ describe('resolveRuntimeConfig', () => {
             },
         }).rollbackGranularity).toBe('repo')
     })
+
 
     it('rejects invalid rollbackGranularity', () => {
         expect(() => resolveRuntimeConfig({

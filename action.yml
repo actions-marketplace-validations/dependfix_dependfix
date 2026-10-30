@@ -132,6 +132,10 @@ inputs:
     description: "check 失败且归因 self_caused 时关闭 PR 并删除分支（默认 false；需同时开启 wait-pr-checks。unknown / external_noise / pre_existing 只评论不关闭）"
     required: false
     default: "false"
+  on-baseline-red:
+    description: "修复后安装验证仍为既有失败（基线红）时的交付降级：skip（默认，回滚 + 留痕）/ issue（按失败指纹开 issue，需 issues: write；同一指纹只开一次）/ draft（不回滚，创建草稿 PR，CI 会以同一既有失败为红）。仅 fix-and-pr 生效，不改变 exit code"
+    required: false
+    default: "skip"
 
 outputs:
   report-artifact:
@@ -239,6 +243,8 @@ runs:
         DEPENDFIX_AI_BASE_URL: ${{ inputs.ai-base-url }}
         DEPENDFIX_AI_API_URL: ${{ inputs.ai-api-url }}
         DEPENDFIX_AI_TRIGGER: ${{ inputs.ai-trigger }}
+        # 基线红交付降级（skip / issue / draft）
+        DEPENDFIX_ON_BASELINE_RED: ${{ inputs.on-baseline-red }}
 
     - name: Upload report artifact
       id: upload-report

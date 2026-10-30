@@ -1,4 +1,4 @@
-import { AppError, isValidRepoIdentifier } from '@dependfix/core'
+import { AppError, isValidRepoIdentifier, type BaselineRedDelivery } from '@dependfix/core'
 import { isValidPnpmVersion } from '../fixers/pnpm'
 import { isValidConcurrency } from '../multirepo/scheduler'
 import type { GitHubAppConfig, RuntimeConfig } from './index'
@@ -224,4 +224,22 @@ function validateGitHubAppConfig(config: GitHubAppConfig): void {
             'GitHub App config requires appId, privateKey, and installationId',
         )
     }
+}
+
+const BASELINE_RED_DELIVERIES: readonly BaselineRedDelivery[] = ['skip', 'issue', 'draft']
+
+/**
+ * 解析 `DEPENDFIX_ON_BASELINE_RED`（`skip` / `issue` / `draft`）。
+ *
+ * 未设置 / 空串 → `undefined`（由默认值补 `skip`）；非法值 fail-fast。
+ */
+export function readBaselineRedDelivery(value: string | undefined, fieldName: string): BaselineRedDelivery | undefined {
+    if (value === undefined || value.trim() === '') {
+        return undefined
+    }
+    const normalized = value.trim().toLowerCase()
+    if (!BASELINE_RED_DELIVERIES.includes(normalized as BaselineRedDelivery)) {
+        throw new AppError('CONFIG_VALIDATION_ERROR', `${fieldName} must be one of: ${BASELINE_RED_DELIVERIES.join(', ')}`)
+    }
+    return normalized as BaselineRedDelivery
 }

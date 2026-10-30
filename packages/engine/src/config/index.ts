@@ -1,8 +1,8 @@
 import { execSync } from 'node:child_process'
-import { AppError, type SeverityThreshold, type AlertSourceKind } from '@dependfix/core'
+import { AppError, type BaselineRedDelivery, type SeverityThreshold, type AlertSourceKind } from '@dependfix/core'
 import { parseOverrideProtectEntries } from '../github/repo-policy'
 import { resolveRepoList } from '../github/repo-selector'
-import { validateRuntimeConfig } from './validation'
+import { readBaselineRedDelivery, validateRuntimeConfig } from './validation'
 
 export const RUNTIME_MODES = ['report-only', 'fix', 'fix-and-pr', 'cleanup-branches'] as const
 export const SEVERITY_THRESHOLDS = ['critical', 'high', 'medium', 'all'] as const
@@ -152,6 +152,12 @@ export interface RuntimeConfig {
      * [pr-delivery-closure.md §6](../../../../docs/design/governance/pr-delivery-closure.md)。
      */
     retryFailed?: boolean
+    /**
+     * 基线红（修复后安装仍既有失败）时的交付降级档位（`DEPENDFIX_ON_BASELINE_RED`，默认 `skip`）：
+     * `skip` 回滚并留痕 / `issue` 按失败指纹开 issue / `draft` 不回滚、创建**草稿** PR；仅 `fix-and-pr`
+     * 生效（平台执行链只记录 `summary.deliverySkipped`）。口径见 [§16](../../../../docs/design/governance/pr-delivery-closure.md)。
+     */
+    onBaselineRed?: BaselineRedDelivery
     /** PR 创建后等待 check 终态（`--wait-pr-checks` / `DEPENDFIX_WAIT_PR_CHECKS`，默认 false；仅 fix-and-pr，口径见 [§8](../../../../docs/design/governance/pr-delivery-closure.md)） */
     waitPrChecks?: boolean
     /** check 失败且归因 self_caused 时关闭 PR 并删分支（`--close-failed-pr`，默认 false；需同时等待，其余归因只评论） */
@@ -301,6 +307,8 @@ export interface CliConfigOverrides {
     mirrorCiScripts?: boolean
     /** 忽略同告警尝试上限并强制再试（`--retry-failed`；默认关闭，仅 fix-and-pr 生效） */
     retryFailed?: boolean
+    /** 基线红的交付降级档位（`DEPENDFIX_ON_BASELINE_RED`；默认 `skip`，仅 fix-and-pr 生效） */
+    onBaselineRed?: BaselineRedDelivery
     /** 等待本次 PR 的 check 终态（`--wait-pr-checks`；默认关闭，仅 fix-and-pr 生效） */
     waitPrChecks?: boolean
     /** check 失败且归因 self_caused 时关闭 PR（`--close-failed-pr`；默认关闭，需同时等待） */
@@ -376,6 +384,7 @@ export const DEFAULT_RUNTIME_CONFIG: Omit<RuntimeConfig, 'githubToken' | 'reposi
     rollbackGranularity: 'unit',
     mirrorCiScripts: false,
     retryFailed: false,
+    onBaselineRed: 'skip',
     waitPrChecks: false,
     closeFailedPr: false,
     prCheckTimeoutMs: 900_000,
@@ -628,6 +637,7 @@ export function readEnvConfig(env: NodeJS.ProcessEnv = process.env): CliConfigOv
         rollbackGranularity: readRollbackGranularity(readEnv(env, 'ROLLBACK_GRANULARITY'), `${ENV_PREFIX}ROLLBACK_GRANULARITY`),
         mirrorCiScripts: normalizeBoolean(readEnv(env, 'MIRROR_CI_SCRIPTS'), `${ENV_PREFIX}MIRROR_CI_SCRIPTS`),
         retryFailed: normalizeBoolean(readEnv(env, 'RETRY_FAILED'), `${ENV_PREFIX}RETRY_FAILED`),
+        onBaselineRed: readBaselineRedDelivery(readEnv(env, 'ON_BASELINE_RED'), `${ENV_PREFIX}ON_BASELINE_RED`),
         waitPrChecks: normalizeBoolean(readEnv(env, 'WAIT_PR_CHECKS'), `${ENV_PREFIX}WAIT_PR_CHECKS`),
         closeFailedPr: normalizeBoolean(readEnv(env, 'CLOSE_FAILED_PR'), `${ENV_PREFIX}CLOSE_FAILED_PR`),
         prCheckTimeoutMs: normalizeInteger(readEnv(env, 'PR_CHECK_TIMEOUT_MS'), `${ENV_PREFIX}PR_CHECK_TIMEOUT_MS`),
@@ -802,6 +812,7 @@ export function resolveRuntimeConfig(options: ResolveRuntimeConfigOptions = {}):
         rollbackGranularity: cliOverrides.rollbackGranularity ?? envConfig.rollbackGranularity ?? DEFAULT_RUNTIME_CONFIG.rollbackGranularity,
         mirrorCiScripts: cliOverrides.mirrorCiScripts ?? envConfig.mirrorCiScripts ?? DEFAULT_RUNTIME_CONFIG.mirrorCiScripts,
         retryFailed: cliOverrides.retryFailed ?? envConfig.retryFailed ?? DEFAULT_RUNTIME_CONFIG.retryFailed,
+        onBaselineRed: cliOverrides.onBaselineRed ?? envConfig.onBaselineRed ?? DEFAULT_RUNTIME_CONFIG.onBaselineRed,
         waitPrChecks: cliOverrides.waitPrChecks ?? envConfig.waitPrChecks ?? DEFAULT_RUNTIME_CONFIG.waitPrChecks,
         closeFailedPr: cliOverrides.closeFailedPr ?? envConfig.closeFailedPr ?? DEFAULT_RUNTIME_CONFIG.closeFailedPr,
         prCheckTimeoutMs: cliOverrides.prCheckTimeoutMs ?? envConfig.prCheckTimeoutMs ?? DEFAULT_RUNTIME_CONFIG.prCheckTimeoutMs,
