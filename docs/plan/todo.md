@@ -8,9 +8,91 @@
 
 | 内容类型 | 位置 |
 |:--|:--|
-| 当前阶段任务 | **无活跃阶段**（M51 已闭环归档，见 [M51 分片](archive/todo-archive-phases-m51.md)） |
-| 下一阶段（已授权，未规划） | **1.0 发布门槛收口 F2 → G**（M52-M53；台账见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)） |
+| 当前阶段任务 | **M52 文档平价与验证收口（1.0-F2 批次）** — 4 原子 + 1 批追加临时待办（2026-10-30 规划） |
+| 下一阶段（已授权，待规划） | **G 发布工程（M53）**（契约冻结 / 迁移指南 / 真实环境矩阵 / `@v1`；台账见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)） |
 | 已完成阶段归档 | [todo-archive.md](todo-archive.md)（阶段索引 + [archive/](archive/) 分片；M0-M51 全部已归档） |
-| 里程碑与阶段交付 | [roadmap.md](roadmap.md)（M0-M51 已归档；1.0 门槛 F2/G 待规划） |
+| 里程碑与阶段交付 | [roadmap.md](roadmap.md)（M0-M51 已归档；M52 进行中；G 待规划） |
 | 未排期 / 延期 / 远期 / 长期主线 / 已知边界 | [backlog.md](backlog.md) |
 | 历史归档索引 | [archive/index.md](archive/index.md) |
+
+---
+
+## M52: 文档平价与验证收口（1.0-F2 批次，2026-10-30 规划）
+
+> **阶段目标**：把 1.0 的「文档与验证」欠账收口——双语指南与设计镜像可判、站内锚点真能跳转、视觉基线与覆盖率证据可复现。
+> **来源**：[release-1.0-readiness.md](../design/governance/release-1.0-readiness.md) §3.1 F2 六项（① en-US 配置指南漂移 ② quick-start en-US 裁剪漂移 ③ 设计镜像结构漂移 ④ 归档双连字符死锚 ⑤ pr-checks 归因标签渲染验证 ⑥ 视觉基线运行间非确定性）+ §3 G5 覆盖率复测；另有 **1 批追加临时待办**（用户 2026-10-30 授权）：`caomei-ui` 升级到 `1.0.0-rc.1`（不占阶段条目编号，见文末）。
+> **用户决策（2026-10-30）**：① `caomei-ui` 升级按 [规划规范 §3.1](../standards/planning.md)「追加临时待办（不占阶段条目编号）」处理——依赖升级不在插队例外清单内，用户授权只改变「可否进入当前阶段」，不改标记口径；② 设计镜像按「结构映射 + 索引补全」收口，**不重译 60+ 篇 zh 设计文档**（全量镜像已登记 backlog，1.0 后评估）。
+> **阶段启动交叉核验（§3.4，2026-10-30 执行角色实测）**：
+> - 归档表扫描（`rg` `todo-archive.md` + `archive/*.md`）：F2 六主题 0 命中（仅 `archive-log.md` / M45 分片的候选登记记录，非闭环记录）。
+> - `git log --since 2026-10-01`：无对应闭环提交（`7701cc1a` 为 0.6.0→0.7.0 升级，非 1.0.0-rc；`36601ce1` 只钉死告警 fixtures 的 `createdAt`，未解决 dialog-select 基线非确定性）。
+> - 文档 / 代码 anchor 逐项确认缺口仍在：两条指南的 en 镜像（`configuration` 缺「环境变量」整节，zh 该节 20 条 `export`，en 0 条；已复核 `retryFailed` / `waitPrChecks` / `closeFailedPr` / `onBaselineRed` 四键 en 侧 0 命中；`quick-start` zh 417 行 / 参数表 26 行 vs en 133 / 11）；en 设计镜像 4 篇 vs zh 67 篇；`--` 形态锚点 **306 处 / 54 文件**（`rg -o '\]\([^)]*#[^)]*--[^)]*\)' docs -g '*.md'` 实测；`check:docs` 的 `normAnchor` 剥离 `-` 故不报）；`pr-checks-light` 基线无归因行；`dialog-select-open-dark` 非确定性候选仍开放。
+> **容量评估（§1.1）**：F2 六项 + G5 按「文档平价 / 验证证据」聚类为 **4 原子**（在 5-6 项上限内）；另有 1 批追加临时待办（依赖升级，不占编号）。原子类型分布 📚 2 + 🧪 2（🛠️ / 🎨 缺口由追加批次承担——其性质为依赖升级 + 视觉基线，按 §3.1 不计入本批类型平衡）。**原子总量预估**：33-49 文件 / 1070-1820 行文本 / 10-12 commits；**追加批次预估**：15-25 文件（含 10-18 张视觉基线）/ 300-500 行文本 / 3-5 commits；**阶段总量（含追加）**：48-74 文件 / 1370-2320 行文本 / 13-17 commits（基线上界由逐原子相加得出，不另取整）。
+> **§3.1.1 容量再平衡记录**：插队 1 批（用户授权追加，依赖升级），分母取阶段启动原子基线 **33-49 文件 / 1070-1820 行 / 10-12 commits**——插队占文件 **45.5%-51.0%**（上界触阈值 2）、行 27.5%-28.0%、commits 30.0%-41.7%（区间为同档配对；保守配对下文件最高约 76%）。处置：**用户 2026-10-30 明确放行不移出**（保留 M52.4，阈值 2 按上界命中记录；属用户裁定偏离，非 §3.1.1 暂缓通道）；再平衡移出 **0 项**；若执行期追加批次超预估（>25 文件 / >500 行 / >5 commits）则重新评估。
+> **原子间依赖**：M52.1（锚点门禁先收紧）→ M52.2 / M52.3（新增链接必须用新形态）；M52.4 ← 追加批次（升级会重建 pr-checks 基线）。
+> **交付顺序**：追加批次（caomei-ui 升级）→ M52.1 → M52.2 → M52.3 → M52.4。
+
+### M52.1 [P1 🧪] 归档锚点按产物 id 迁移 + 门禁归一化补强
+
+- **目标**：站内锚点真正可跳转——把文档侧 `--` / 数字前缀写法迁移为 VitePress 产物 id，并让门禁能拦住旧形态。
+- **已核缺口（2026-10-30 实测）**：`docs/**` 中 `--` 形态锚点 **306 处 / 54 文件**（`rg -o` 实测）；VitePress 产物侧非词字符收敛为单连字符、数字开头章节带 `_` 前缀；`scripts/check-docs.mjs` 的 `normAnchor` 剥离全部标点（含 `-`）→ 门禁不报；本项合并原 backlog 两条候选（`--` 死锚家族 + M0-M48 存量锚点与产物 id 失配）。
+- **范围**：`docs/plan/**`（含 `archive/` 分片）与 `docs/design/**` 的跨文档锚点；`scripts/check-docs.mjs`（新增「产物 id 形态」校验或修正归一化）+ 单测负例；`docs/standards/documentation.md` 锚点书写口径（以 `docs:build` 产物 id 为权威的条款补执行方式）。
+- **验收标准**：① 迁移脚本生成改写清单，逐文件 diff 可审计（不手改 300+ 处）；② `docs:build` 后抽样 ≥20 个锚点在 dist HTML 中命中（脚本比对 id）；③ 新增门禁负例（写入旧形态 → exit 1，跑后还原）；④ 全部门禁绿。
+- **不做什么**：不改 heading 文本（避免影响其他链接）；不改归档正文语义；不打开 `ignoreDeadLinks`。
+- **依赖**：无（应先于 M52.2 / M52.3 完成）。
+- **交付物**：预估 3 commits / 15-25 文件 / 120-220 行（含脚本约 80 行）；**拆分依据**：文件数由「54 个文件各改若干链接」的机械迁移决定，单文件改动通常 <10 行，不构成逻辑耦合。
+- **风险与缓解**：产物 id 规则随 VitePress 升级变化 → 门禁以「构建产物实测 id」为权威而非硬编码规则；迁移面广 → 脚本 + 抽样实证 + 逐文件 diff，分 plan / design 两批提交。
+
+### M52.2 [P1 📚] en-US 指南平价（配置指南 + quick-start）+ 平价机检
+
+- **目标**：两篇英文指南与 zh 事实源同源（章节结构 + 配置键 / 参数键位），并加 L1 机检防止再次漂移。
+- **已核缺口（2026-10-30 实测）**：`configuration.md` zh 6 节 / en 5 节（en 缺「环境变量」整节；zh 该节 20 条 `export`）；已复核 `retryFailed` / `waitPrChecks` / `closeFailedPr` / `onBaselineRed` 四键 en 侧 0 命中（backlog 2026-10-26 口径记 16 行漂移，实测以脚本首次运行为准）；`quick-start.md` zh 417 行 / 参数表 26 行 vs en 133 行 / 11 行（缺 `--commands` / `--history` / `--verbose` / `--commit` 等）。
+- **范围**：`docs/i18n/en-US/guide/{configuration,quick-start}.md`；新增 `scripts/docs/check-guide-parity.mjs` + 自测（负例直接改写临时副本断言 exit 1）；`package.json` 与 `DOC_GATES`（`gates:docs` 集合）接线；`docs/standards/documentation.md` 补「指南平价」机检口径。
+- **验收标准**：① 两篇 en 镜像覆盖 zh 的全部 H2 与「配置键 / CLI 参数 / env 变量」键位（脚本 0 差异）；② 脚本负例可复现（删一条键位 → exit 1）；③ `gates:docs` 全绿、`docs:build` 无死链；④ 平价清单的豁免项（如 zh 专有历史叙事）逐条登记理由。
+- **不做什么**：不改 zh 事实源内容（除必要锚点）；不翻译与运行无关的历史叙事；不覆盖设计文档镜像（M52.3）。
+- **依赖**：M52.1（锚点形态门禁先收紧，新增链接按新形态书写）。
+- **交付物**：预估 2-3 commits / 6-8 文件 / 500-800 行（翻译为主）。
+- **风险与缓解**：翻译引入语义偏差 → 键位以配置 / CLI 代码为权威，只译说明不改事实；机检首跑存量豁免 → 清单显式登记并注明移除条件。
+
+### M52.3 [P1 📚] 设计镜像与台账平价（结构映射 + 索引补全）
+
+- **目标**：zh 设计文档拆分后，en 镜像不再是「过期全量」——已有 4 篇镜像与 zh 结构可映射，治理索引与 1.0 台账入口在 en 侧可达；未重译部分有显式映射清单。
+- **已核缺口（2026-10-30 实测）**：en design 仅 4 篇（`architecture` 212 / `index` 41 / `platform-ai-integration` 386 / `spec-and-doc-governance` 137），zh design 67 篇（含 M44.4 拆分分片；`spec-and-doc-governance` zh 已 332 行并拆出 `doc-governance`）；en 治理索引无 `release-1.0-readiness` 台账行。
+- **范围**：`docs/i18n/en-US/design/governance/{index,architecture,spec-and-doc-governance,platform-ai-integration}.md`（4 篇全在面内）；新增 `docs/i18n/en-US/design/mirror-manifest.md`（zh 结构 → en 落点的映射与「未翻译」登记）；`docs/standards/documentation.md` i18n 段补「结构映射」口径；`release-1.0-readiness.md` 的 en 入口行。
+- **验收标准**：① 4 篇镜像的 H2 与 zh 事实源可映射（多出的分片以映射表指向 zh，不强行重译）；② en 治理索引新增 readiness 台账行且链接可用；③ 未重译的 zh 分片在 `mirror-manifest.md` 逐条登记（无静默缺口）；④ `check:docs` / `docs:build` / `gates:docs` 全绿。
+- **不做什么**：不新译 60+ 篇 zh 设计文档（全量镜像登记 backlog）；不改 zh 拆分结构；不承诺 en 与 zh 逐字等价（只承诺结构与入口）。
+- **依赖**：M52.2（平价脚本可扩展为 design 结构检查）；M52.1（锚点形态）。
+- **交付物**：预估 2 commits / 6-8 文件 / 250-450 行。
+- **风险与缓解**：镜像对齐成本失控 → 交付物是「映射清单 + 入口可达」，逐项判定「对齐 / 登记」；不复制 zh 分片以免双维护。
+
+### M52.4 [P2 🧪] 视觉确定性与归因证据补强 + G5 覆盖率复测
+
+- **目标**：消除 `dialog-select-open-dark` 基线运行间非确定性；pr-checks 归因标签获得像素守卫；复测四维覆盖率与 mutation，回填 1.0 台账 G5。
+- **已核缺口（2026-10-30 实测）**：backlog「`dialog-select-open-dark` 视觉基线运行间非确定性」仍开放（2026-10-12~13 三次复现约 28px 差异，集中在弹窗内 Select 面板）；`pr-checks-light.png` 基线存在但无带 `attribution` 的失败信号行（视觉面 `attribution` 0 命中）；G5 最近覆盖率读数为 2026-10-18（88%+），需 1.0 前复测。
+- **范围**：`apps/platform/tests/visual/{platform-pages.visual.test.ts,dialog-select-layer.visual.test.ts}`、`tests/visual/helpers/fixtures.ts`（归因失败信号与确定性夹具）、必要时的 `data-visual-mask` / 稳定帧等待；`docs/plan/backlog.md`（视觉非确定性候选闭环）；`release-1.0-readiness.md` G5 读数与证据。
+- **验收标准**：① `dialog-select-open-dark` 重建 10 轮 + 不带 update 比对 10 轮，字节稳定（或定位为门户 / 抗锯齿噪声后显式遮罩并写明理由，不整块遮罩目标区域）；② 新增 pr-checks 归因失败信号的视觉 / e2e 覆盖，前置断言锁定标签文案与色调 class；③ `pnpm test:coverage` 四维 ≥80% 实测并回填台账，关键模块 mutation 复测无存活；④ 本轮修复的时间边界 flake 纳入「无 flaky 复发」证据链。
+- **不做什么**：不为确定性牺牲覆盖；不改业务渲染；不调整覆盖率阈值。
+- **依赖**：追加批次（升级后 pr-checks 基线需先重建）。
+- **交付物**：预估 3-4 commits / 6-8 文件（含 1-2 张基线）/ 200-350 行。
+- **风险与缓解**：非确定性可能源于门户渲染时序 → 先做 10 轮取证再决定「等待稳定帧 / 遮罩 / 夹具钉死」，不直接放宽容差；覆盖率为历史读数 → 以本次实测为准并注明时点。
+
+### 追加临时待办（2026-10-30 用户授权，不占阶段条目编号，P1 🛠️/🎨）：caomei-ui 1.0.0-rc.1 升级与视觉回归
+
+- **目标**：平台组件库由 `0.7.0` 升到 `1.0.0-rc.1`（`next` 通道），消费其主题 token 拆分与组件行为修复，并在视觉 / 行为门禁上留下可审计证据。
+- **已核事实（2026-10-30 实测）**：registry `dist-tags.next = 1.0.0-rc.1`（`next` 于 2026-10-30T07:18:39Z 发布；`latest` 仍 `0.7.0`，2026-10-20 发布；距发布已超 `minimumReleaseAge: 60` 分钟窗口）；`engines >=22`（本仓 `^22.23.4 || ^24.22.1` 满足）；`peerDependencies` / `dependencies` / `exports`（13 键）与 0.7.0 **完全一致**；官方 `check:api-surface` 预演为 **0 删除文件 / 0 删除导出**（additive）。变化集中在：① token——新增 `--caomei-color-{primary,success,warning,danger,neutral}-text` 与 `--caomei-color-control-border`（控件边界加深），`text-muted` 值微调；② 组件——button hover/active 反馈、DataTable 全选作用域 / lazy 页内状态 / 键盘横向滚动、badge / tag / message 样式；③ 新增 `sakura` / `forest` / `ink` 预设。
+- **范围**：`apps/platform/package.json` + `pnpm-lock.yaml`；`app/assets/styles/_caomei-tokens.scss`（新 token 的明暗档对齐 / 是否覆盖）；受影响的 e2e class 断言（排序图标 / 底色 / 选择状态）；`apps/platform/tests/visual/**`；`docs/design/governance/caomei-ui-migration.md` §15.16（升级实证 + 逐基线量化）；`docs/guide/tech-stack.md` 与 `docs/i18n/en-US/guide/tech-stack.md`（当前升级史只记到 0.6.0，需补 0.7.0 与 1.0.0-rc.1，zh / en 成对同步）。
+- **验收标准**：① `pnpm why caomei-ui` 单版本 `1.0.0-rc.1`，`pnpm i --frozen-lockfile` 通过；② build / typecheck / lint 全绿；③ e2e 全量通过（重点 DataTable 受控选择、lazy 分页、行展开）；④ 视觉：先 `--update-snapshots=all` 重建，再**不带 update 连跑两遍**幂等；每张变更基线给出「变更源 → token / 组件」对照与像素量化（门禁口径 + 严格口径，口径见迁移评估 §15.15）；⑤ 受影响契约断言逐条适配并注明守卫意图（不得直接改期望值凑绿）；⑥ 新文本角色 token 在明暗两档对比度 ≥4.5:1（控件边框仅记录值）；⑦ 未采纳新预设，页面外观变化可逐条归因；⑧ `tech-stack` zh / en 版本行成对一致。
+- **不做什么**：不改页面布局 / 交互语义；不把 `sakura` / `forest` / `ink` 设为默认预设；不改 caomei-ui 仓库；不升级其余传递依赖的显式钉定。
+- **依赖**：无（与 M52.4 有「pr-checks 基线先重建」的顺序关系）。
+- **容量评估结论（§3.1.1 记录②）**：本批占原子基线文件 45.5%-51.0%（上界触阈值 2）、commits 30.0%-41.7%、文本行 27.5%-28.0%；用户 2026-10-30 明确放行不移出，保留全部 4 原子。
+- **交付物**：预估 3-5 commits / 15-25 文件（含 10-18 张基线）/ 300-500 行文本；基线为生成物，文件数不代表逻辑面。
+- **风险与缓解**：rc 为预发布 → 精确钉定 + 回滚路径（`pnpm add caomei-ui@0.7.0`）记入升级实证；视觉「低色差 + 大面积」盲区 → 用严格口径统计并逐张归因，不用 `--update-snapshots` 默认行为当证据；DataTable 行为变化 → 先一次性 smoke 监听 `pageerror` / `console.error`，再跑全量 e2e；`minimumReleaseAge` → rc.1 已过窗口，若仓内出现 rc.2 需等待窗口或按 [security.md §5.7](../standards/security.md) 精确豁免。
+
+---
+
+## 阶段收口要求
+
+- **质量门**：逐原子 `pnpm lint` + `pnpm typecheck` + 定向测试；跨包改动先 `pnpm -r build` 再 typecheck；阶段收口跑 platform 全量 + e2e + 视觉套件 + `test:coverage`。
+- **Review Gate**：每原子至少一轮 `Code Auditor`（`standard`，依赖升级 / 视觉基线改动升 `deep`），Reject 须闭环后复审。
+- **台账回填**：阶段完成后在 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md) §3.1 F2 标注闭环与证据、§3 G5 回填读数、§5 F2 批次表同步。
+- **归档**：按 [规划规范 §4](../standards/planning.md) 迁出为 `archive/todo-archive-phases-m52.md` + 索引行 + roadmap 状态同步；追加临时待办随阶段归档并在归档块内单列（沿用 M45 / M49 口径）。
+- **G 批次衔接**：本批收口后 F1/F2 全部闭环，G（M53）可启动契约冻结与真实环境矩阵；G8 指标采集脚本候选（backlog）在 G 规划时决定是否并入。

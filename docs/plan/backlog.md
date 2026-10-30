@@ -54,7 +54,7 @@
 
 ### 候选评估中（待评估 / 本阶段延后项）
 
-> **候选池概览（2026-10-30 实测）**：本区 61 项（2026-10-30 上收 M51 九项后实测；含 M50.2 / M50.3 复审衍生候选 + 2026-10-29 批量运行超时复盘派生 4 项 + 2026-10-30 用户实测派生 2 项（PR 正文 `From` 恒空、扫描页排序与时间区间）+ M51 收口登记 2 项（G8 指标采集脚本、PR 回环有界重试）；另 1 项设计定稿后按用户裁定转入 §延期 / 暂缓项）；P 标签覆盖不全（未标注者评估时补 P 标签，不默认升级）；本文件不维护分档统计，1.0 分档只见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)；未标注候选评估时补 P 标签，不默认升级。
+> **候选池概览（2026-10-30 实测）**：本区 55 项（2026-10-30 上收 M51 九项 / F2 七项后实测；含 M50.2 / M50.3 复审衍生候选 + 2026-10-29 批量运行超时复盘派生 4 项 + 2026-10-30 用户实测派生 2 项（PR 正文 `From` 恒空、扫描页排序与时间区间）+ M51 收口登记 2 项（G8 指标采集脚本、PR 回环有界重试）；F2 上收 7 项见 [M52](todo.md)；另 1 项设计定稿后按用户裁定转入 §延期 / 暂缓项）；P 标签覆盖不全（未标注者评估时补 P 标签，不默认升级）；本文件不维护分档统计，1.0 分档只见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)；未标注候选评估时补 P 标签，不默认升级。
 > **1.0 门槛与分档**：P0 23 / P1 8 / 1.0 后 15 的分档、门槛判定与批次计划见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)；本区候选在未上收前保持候选状态，上收后按批次从本表移除。
 
 - **PR 回环有界重试（P2 🚀，2026-10-30 M51.3 用户裁定延后）** —— 设计稿 `pr-feedback-loop.md` §8 保留 `FeedbackRetryDispatcher` 契约（同 PR 失败后重新触发既有修复链，需配额与触发面）；平台当前无「同 PR 重试」入口，`retryFailed` 开启时每仓库每进程只 warn 一次。待评估：补触发面（API / UI）+ 配额后再实施。触发：出现「PR 红后无人处理、需自动重试」的实际需求时。
@@ -63,8 +63,6 @@
 - **平台 typecheck 未覆盖 `.nuxt/tsconfig.node.json`（P2 🛠️，2026-10-30 审计发现）** —— `pnpm --filter @dependfix/platform typecheck`（`nuxt typecheck`）静默 exit 0，未覆盖 `.nuxt/tsconfig.json` 引用的 node 项目；实测该路径下 `nuxt.config.ts` 有 2 个既有类型错误（icon `rel: 'alternate icon'` 不在允许联合、i18n `locales` 声明为 readonly 与可变 `LocaleObject[]` 不兼容），另有 `.nuxt/tsconfig.node.json` 自身的 `emitDecoratorMetadata` / `experimentalDecorators` 组合告警。影响：`nuxt.config.ts` 一类配置错误长期不在门禁内。待评估：修掉 2 个错误后把该 project 纳入 typecheck 脚本（`vue-tsc -p .nuxt/tsconfig.json`）。触发：下次修改 `nuxt.config.ts` 或平台门禁治理批次。
 - **预算跳过的交付可观测性（P2 🎨）** —— 运行预算不足导致终验跳过时，引擎已写 `BUDGET_EXHAUSTED` 审计并置 `RepositoryResult.verificationSkipped='budget'`，但 Markdown 报告不单独渲染该字段、平台运行详情也不展示；「修了 N 条、交付 0 条」只能从 Errors 表追溯。待评估：报告与平台展示「验证跳过（预算）」并在 `deliverySkips` 家族里登记该跳过原因。触发：出现「预算耗尽但用户不知道为何没交付」的反馈时。
 - **平台侧交付载体（issue / 草稿 PR，P2 🎨）** —— 引擎 `fix-and-pr` 已按基线红档位产出载体（issue / 草稿 PR），平台执行链（`fix + commit` + `platform-delivery`）目前只记录 `summary.deliverySkipped*` 并在运行列表 / 详情展示；待评估：平台在交付决策处复用同一失败指纹开 issue / 创建草稿 PR，并补仓库级配置写入面（当前仅 env `DEPENDFIX_ON_BASELINE_RED`，UI / API 不暴露）。触发：平台用户反馈「基线红只有标签、没有可跟踪载体」时。口径见 [pr-delivery-closure.md §16.7](../design/governance/pr-delivery-closure.md#167-已知边界)。
-- **pr-checks 页归因标签的渲染验证**（M48.6 W-A1）—— 归因标签的 `v-if` / 色调 / 文案由纯函数单测与 e2e fixture 字段覆盖，但无视觉基线用例；触发：下次修改 pr-checks 页或重建视觉基线时顺带补一条带 `attribution` 的失败信号。
-- **`en-US` 配置指南存量漂移**（M48.3 / M48.5 / M48.6 共同边界）—— 英文版缺 `retryFailed` / `waitPrChecks` / `closeFailedPr` / 预算键等行（16 行存量漂移）；触发：下次配置键变更批次或 i18n 同步批次。
 - **镜像脚本只覆盖根 scripts 单一形态**（M48.2 边界）—— `pnpm --filter` / 递归 / env 前缀 / corepack 钉定只披露不执行；触发：目标仓库 CI 大量使用这些形态导致「本地假绿」再现。
 - **白名单内运行前未提交改动的归属**（M48.4 边界）—— 白名单内文件（典型 `package.json`）若在运行前已有用户改动，会与本次修复一并提交；触发：出现「PR 混入无关改动」的用户反馈时评估。
 - **`dependfix-remediator` REFERENCES 的 MCP 状态与入参映射过期**（M49.4 边界）—— `skills/` 与 `packages/skills/` 两份同文 `REFERENCES.md` 仍写「当前 MCP Server 未发布」，能力映射表入参名（`owner` / `severityThreshold` / `includeCodeScanning`）与当前 MCP schema（`repo` / `severity` / `code_scanning`）不一致；4 tool 检测子集为刻意最小集，保留。触发：F2 技能文档批次，或下次修改 MCP schema 时。
@@ -92,11 +90,6 @@
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
 - **PR Check 三源信号的 provider 原生日志富化（待评估）** —— 现象：M43.2 已完成三源（Checks + Commit Statuses + Deployments）归一化、聚合状态与失败源清单，但失败详情只到 provider / 信号层，**无 provider 原生 API 日志**（D2 裁定首批不做，留后续增量）。待评估点：是否接入 Vercel / Cloudflare / GitHub Actions 的原生失败日志拉取（需 provider 凭据承载面 + 配额控制 + 输出脱敏 + 单行 JSON 膨胀控制）。触发条件：用户报告「信号已失败但无日志可看」时。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
-
-- **`quick-start` 指南的 en-US 镜像为裁剪子集（行级漂移）（待评估）** —— 现象：`docs/guide/quick-start.md`（408 行 / 命令行参数表 25 行）与其镜像 `docs/i18n/en-US/guide/quick-start.md`（133 行 / 11 行）结构不同源——镜像缺 `--commands` / `--history` / `--verbose` / `--commit` 等多行（2026-10-15 核对 `rg -c '^\| \`--'` 实测 25 vs 11）。该漂移属既有状态（本轮改动 `--commands`行时发现镜像无对端），`docs:check:i18n`仅查重复页、`check:readme-i18n` 仅覆盖 README，故无机检。
-  - **待评估点**：① 是否补全镜像参数表（逐行对齐 zh，成本为一次性翻译同步）；② 或明确「en 侧为对外精简版」定位并在 i18n 新鲜度台账登记该差异（避免后续批次反复判定为遗漏）。
-  - **触发条件**：下次 i18n 新鲜度同步批次；或再次改动 `quick-start` 参数表时。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
 - **`alerts.vue` 存在一处闲置的 `useFixNow()` 解构（待评估）** —— 现象：`apps/platform/app/pages/alerts.vue` 顶部解构 `{ fixingRunId, fixError, fixSuccess, triggerFix }` 但全文件未使用（真正的「立即修复此仓库」入口在子组件 `alert-run-sidebar.vue`），伴随的注释也仍在描述已抽走的流程；该孤立实例同样不消费后加的 `fixMerged`。
@@ -146,12 +139,6 @@
   - **触发条件**：出现企业私服 CDN 域被拦的实例；或用户要求自动化。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
-- **`dialog-select-open-dark` 视觉基线的运行间非确定性（待评估）** —— 现象：`--update-snapshots=all` 重建时该基线多次产出与上一次不同但极接近的字节（实测差异约 28px / ratio 0.002% / maxΔ 35，集中在弹窗内 Select 面板的一小块区域），不带 update 复跑则稳定通过（差异远低于 `maxDiffPixels: 100` 预算）。2026-10-12~13 三次重建各复现一次（M43.1 / M43.2b / M43.2c 批次），均已还原为已提交版本。
-  - **2026-10-16 补充证据（本候选不闭环）**：① **归属订正**——M44.1（2026-10-14）起连续 5 次 push 的 `Visual Regression` 红**不是**本现象：其差异为 2080 / 2403 px 且跨运行**逐字相同**，根因是 i18n 提示语补入 `typecheck` 造成的基线连带失配（已重建，见 [todo.md](todo.md)）；② **新增实证（指向 update 落盘路径）**——构建后**首次** `--update-snapshots=all` 落盘的帧与随后连续三次 no-update 帧在弹窗遮罩下的表格区（y 298-419）差约 4k 像素，**二次** update 与 no-update 帧逐字节一致 ⇒ 观察对象从「基线本身漂移」移到「update 路径落盘帧非稳定」，故「重建后不带 update 连跑复核」已升为规范条款（[testing.md §6.7](../standards/testing.md)）。
-  - **待评估点**：① 是否为暗色浮层阴影 / 抗锯齿在门户面板上的舍入抖动（需定位具体像素来源）；② 是否需扩大该基线的 `data-visual-mask` 覆盖区或改元素级截图；③ 是否接受为已知边界（当前不影响门禁判定）；④ 是否在基线维护协议层面消除 update 落盘路径差异（统一「重建 + 连跑复核」两步产出基线，或对 update 产物加稳定帧二次取帧）。
-  - **触发条件**：该基线在**不带 update** 的复跑中失败（即超出容差）；或用户要求清理视觉基线噪声。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
-
 - **归档索引表格行的成对错位强调（`**；**` 形态，待评估）** —— 现象：`docs/plan/archive/index.md` 的 M16 / M17 等历史归档行内含 `` `**；**` ``（成对但无强调语义，渲染为加粗分号），系早期批次书写惯例遗留；此类 `**` 计数为**偶数**，`check-docs` 的 `emphasis` 规则按定义只覆盖**未配对**（奇数计数）形态（[文档规范 §2](../standards/documentation.md) 已把「成对但语义错位」声明为显式盲区）。
   - **待评估点**：① 是否统一清理（涉及多行同形，宜独立批次以保持归档排版一致）；② 或维持现状并在规范注释中作为盲区实例保留。
   - **触发条件**：归档索引再次批量编辑时；或用户要求清理归档排版。
@@ -167,10 +154,6 @@
   - **触发条件**：新增 / 扩容经验分片时；或用户要求清理归档排序。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
-- **zh 设计文档拆分后的 en-US 镜像结构漂移（待评估）** —— 现象：M44.4 分片化改造仅作用于 zh 事实源（`docs/design/**`），`docs/i18n/en-US/design/governance/{architecture,platform-ai-integration}.md` 等镜像仍为未拆分全量译文；镜像不在 `check-doc-size` 计量面（阈值表 glob 为 `docs/design/governance/*.md`）、`docs:check:i18n` 仅查 legacy/i18n 重复页，故该漂移无机检（2026-10-24 M48 新增 `pr-delivery-closure.md` 索引行同样未同步 en 镜像）。**待评估点**：① 镜像是否随 zh 结构同步拆分（成本较高）；② 或在 i18n 新鲜度台账登记「zh 结构 → 镜像结构」映射并在后续同步批次对齐。
-  - **触发条件**：下次 i18n 新鲜度同步批次；或 zh 侧继续分片化时。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
-
 - **`caomei-ui-migration.md` 存量超标的保序拆分（待评估）** —— 现象：`docs/design/governance/caomei-ui-migration.md` 940 行（治理设计阈值 ≤400 / 强制分片 >700），由 [check-doc-size 豁免表](../../scripts/check-doc-size.mjs) 逐条登记（理由：阈值入表时即超标、入链面广、§15 迁移实证需保序）。本批已产出拆分方案：**主文档保留 §1-§11**（实测 387 行 + 分片索引，仍 ≤400）、**分片 A = §12-§14**（上收触发条件 / 关联文档 / 文档元数据）、**分片 B = §15.1-§15.10**（169 行）、**分片 C = §15.11-§15.15**（339 行）（§15 内部按子节保序切分，三处分片均 ≤400）；落点命名 `<slug>-<主题>.md` 同级；拆分后须移除豁免表条目并重指入链（§15 被 experience-archive / caomei-ui-migration 迁移评估 §15.x 等引用）。
   - **待评估点**：① 是否按上述方案执行（独立内容治理批次）；② 或维持豁免（当前状态）并在豁免理由中保留「待该批次落地后移除此条」。
   - **触发条件**：启动独立内容治理批次时；或该文档再次增量更新时。
@@ -182,12 +165,6 @@
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
 - **`docs/standards/ai-collaboration.md` 已处 200 行健康上界（待评估）** —— 现象：该文档当前 200 行（`docs/standards/*.md` 阈值：≤200 健康 / 201-400 warning），M44 归档批次新增审计条款时因越界被迫改落 `testing.md §6.12`。**待评估点**：① 下次需扩条时先做结构压缩（合并同源小节）；② 或按 [文档规范 §3](../standards/documentation.md#3-文档行数阈值) 拆分子文档（如「审计协议」独立篇）。**触发条件**：下次需向该文档新增条款时。
-  - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
-
-- **归档链接使用 `--`（双连字符）锚点形态在浏览器侧为死锚（待评估）** —— 现象：`docs/plan/**` 中 M4x 归档链接普遍写作 `#m43-pr-check-…--2026-10-14-归档`（双连字符），而 VitePress 构建产物 id 收敛为**单连字符**（实测 `id="m43-pr-check-能力补强-运行时可靠性与工程治理-2026-10-12-用户决策方案-a-2026-10-14-归档"`）；客户端路由 `getElementById(decodeURIComponent(hash).slice(1))` 不做归一化 → 点击锚点无法滚动到目标段（页面可正常加载）。`check:docs` 的 `normAnchor` 剥离全部标点（含 `-`）→ 门禁不报。**该形态在 HEAD 已普遍存在（M41/M42/M43 等），非 M44 归档批次引入**。
-  - **待评估点**：① 批量把归档链接的 `--` 收敛为单连字符（并核对构建 id）；② 或在 `check-docs.mjs` 增加「锚点归一化后仍需与产物 id 一致」的规则（可机检子集 + 白名单）。
-  - **2026-10-15 M45 规划批次实测补充**：以 `docs:build` 产物 id 为权威复扫后，文档侧锚点与产物 id 存在**两类**系统性差异——(a) 非词字符（`:` / `/` / `（` / `.` / `~`）在产物侧转为单连字符（`M45: 收口（2026…A / 进行中）` → `m45-收口-2026…-a-进行中`），文档侧「去标点 + 空格转连字符」写法（含 `--`）与之不符；(b) **数字开头的章节号在产物侧带 `_` 前缀**（`### 1.1 硬性约束` → `_1-1-硬性约束`，文档侧普遍写 `#11-硬性约束`）。同批复扫另发现**存量缺段锚点 2 处**（`roadmap.md:41` 与 `archive/index.md` 指向 M31 归档段，缺段产物 id 为 `m31-apps-platform-ui-组件库迁移-primevue-→-caomei-ui-m31-1-m31-6-全部已闭环-2026-09-29-归档`）。**本批处置**：新增的 **M45 目标锚点**按产物 id 实证形态书写（如 `#m45-…-2026-10-15-用户决策方案-a`），不新增同类死锚；本批新增行中**沿用存量家族形态**的链接（指向 `planning.md` / `platform.md` / `caomei-ui-migration.md` / `todo-archive.md` 的 11 处，均为既有写法的复用）**不随本批改写法**——统一迁移归本候选（含上述 2 处缺段），以免在单批内制造同文件双形态。复现命令：`pnpm run docs:build` 后 `rg -o 'id="[^"]*"' docs/.vitepress/dist/plan/todo.html`。
-  - **触发条件**：下次归档批次或文档门禁扩面时。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
 - **M44 蒸馏新增条款的检查点挂接与配套收敛（待评估）** —— 现象：M44 阶段归档批次蒸馏新增 12 条严格约束（`planning.md §4.4` 第 16-20 条 / `testing.md §6.12` / `documentation.md §6` 五条），但 `code-quality-checklist.md` 的「规范条款 review 检查点矩阵」与 `code-auditor.agent.md` 必查项**均无对应行**（R1 分区 B 审计标记为「待补挂」）；另有 2 条 pattern 未落任何权威文档（「门禁规则扩面前先跑一次性探针量化分布」「E2E 取证临时仓库不要软链 node_modules」），及 3 处新条与既有条款主题重叠（`documentation.md §6` 量化断言 ↔ `planning.md §2.5`；`documentation.md §6` 引用范围措辞 ↔ 同节覆盖面声明；`planning.md §4.4` 第 18 条 ↔ 第 3 条）。
@@ -241,8 +218,6 @@
 
 - **0.6.0 发布后 master 3 连绿窗口未完成（P0 📚，G4 起点）** —— 发布提交 `efaa555f` 的 Test run `40744772890` success（E2E / Coverage / Visual 同步 success），但此后仅 1 次；G4 要求连续 20 次 push 绿或 2 周无红。**触发**：后续 push 累计；任一次红需按 §5.6 / G4 口径记录归因。
 
-- **存量归档锚点与产物 id 失配（P2 📚，2026-10-29 复审发现）** —— M0-M48 归档分片 / roadmap 分片中大量链接仍用旧形态（双连字符 / 数字标题无 `_` 前缀），`check:docs` 的宽松规范化判绿而站内跳转失效（抽样 `todo-archive-phases-m38.md:41` 与 `roadmap-phases-m0-m38.md` 均命中）。**目标**：以 `docs:build` 产物 id 为准一次性回填，并补机检。**范围**：`rg -o` 提取 dist id 与 md 链接逐字比对；新增 check 规则（严格相等，含 `_N-` 前缀与单连字符）；分批改指。**验收**：① 抽样 20 处跳转实测可达；② 新机检在存量回填后 0 命中；③ `check:docs` 与 `docs:build` 通过。**不做**：不改归档正文。
-
 - **Docker `platform-0.4.0` tag 与镜像 health 待复核（P2 🚀，M49.5 残余）** —— `workflow_dispatch` `40745976335` 的 QA 与 smoke 步骤 success（哨兵 build-arg → `/api/health` 端到端），多架构推送与 ACR / Jenkins 步骤在归档时仍在执行，`updatedAt` 停滞于 2026-10-28T18:35:56Z（疑似挂起）。**目标**：确认 `platform-0.4.0` tag 存在且镜像可启动。**验收**：① 三 registry 均有该 tag；② `docker run` 后 `/api/health` 200；③ run 结论 success。
 
 - **通知严重级别标签的跨 runtime 单点化（待评估，P3 🛠️）** —— 现象：`Critical` / `High` 标签存在三处口径——`apps/platform/app/utils/scan-options.ts`（前端单一事实源）、`apps/platform/server/services/notification/business-templates.ts`（邮件模板 zh / en 各一份）与 i18n 模板占位符；服务端无法直接 import app 层 util，M50.2 只能保证前端与 i18n 侧同源。**待评估点**：① 是否下沉到 `packages/core` 共享常量并让邮件模板消费；② 或维持现状（前端单点 + 服务端注释互指 + 用例锁定）；③ 与 i18n 占位符拼接口径的关系。**触发条件**：再次改动通知文案，或新增第三处严重级别消费方。
@@ -265,6 +240,7 @@
 - **PR 正文 `Upgraded Dependencies` 表 `From` 恒空 + `Strategy` 误标 `direct`（待评估，P2 🛠️，2026-10-30 用户实测）** —— 现象：真实 PR `CaoMeiYouRen/tinyfish-mcp#83` / `#78`、`cmyr-skills-agents#17`、`cookie-cloudflare#82`、`better-bytes#246`、`picgo-plugin-optimization#151` 的该表 `From` 列全部空白、`Strategy` 列一律 `direct`（6/6 命中，2026-10-30 逐 PR `gh pr view --json body` 实测，测量方：执行角色）。**根因（已定位，未修改代码）**：① 这些行全部来自「版本化 overrides」路径——告警 `manifestPath === 'pnpm-lock.yaml'` → `packages/engine/src/app/repo-fix.ts:334-470`，PR diff 只改 `pnpm-workspace.yaml#overrides` + `pnpm-lock.yaml`（`cookie-cloudflare#82` 的 To 为 `^6.28.1, ^7.29.1`，是该路径 `targets.join(', ')` 独有形态），而该路径在 `repo-fix.ts:413`（dry-run）/ `:470`、`packages/engine/src/app/repo-fix-batch.ts:106`、`packages/engine/src/fixers/dependency/index.ts:571` 一律写 `fromVersion: ''`（原设计口径：多实例无单一来源版本）；② 渲染层 `packages/engine/src/github/pr-creator.ts:662-663` 用 `u.fromVersion ?? '-'`，空串原样输出成空单元格，`packages/core/src/report/markdown-generator.ts:236` / `:481` 同病（报告侧 `Repositories` 表 `From` 同样空白）；③ `pr-creator.ts:650-658` 的策略映射缺 `versioned-override` 分支，落默认值 `direct`，掩盖「只钉 overrides、manifest 声明未动」的事实（审计误导性高于空白本身）；④ `aggregateUpgradeActions`（`pr-creator.ts:522-528`）合并同键 action 时只更新 `toVersion` / `isMajor` / `strategy`，未按注释「from 取最早的起点」回填 `fromVersion`，首个空值动作会让后续真实值失效。**修复素材已在手**：`readExistingOverrides(ctx.workDir)`（`repo-fix.ts:365`，旧 override 值）与 `readLockfileVersions(lockfilePath, packageName)`（`repo-fix.ts:341`、`helpers/index.ts:189`，旧锁定版本），无需新增 lockfile 读取。**待评估点**：① 数据侧在 action 记录真实旧值（含多实例形态，如 `4.13.9 → ^4.13.11`、`^4.7.9 → ^4.7.10`），还是仅在渲染侧把空串降级为 `—` / `n/a (overrides)`；② `versioned-override` 的展示文案（如 `pnpm overrides (versioned)`）与报告 / PR 正文是否同源；③ 聚合合并是否回填 `fromVersion`（取首个非空值）；④ 是否同步修正报告 markdown 的 `From` 列（同一空串口径）。**验收标准（草案）**：① 构造「lockfile 告警 → 版本化 overrides」运行 → PR 正文该行 `From` 非空或显式 `—`、`Strategy` 不再显示 `direct`；② 构造「直接依赖 manifest 升级」运行 → 行为不回退（`pr-creator.test.ts:1241-1242` 仍绿）；③ 同一包先空值后真值的动作序列 → 聚合行 `From` 取到真值；④ 报告 markdown `Repositories` 表与 PR 正文口径一致。**不做**：不改变版本化 overrides 的修复语义 / 写盘位置 / 提交面白名单判定；不为填 `From` 新增 lockfile 解析调用。**触发条件**：下次改动 PR 正文或报告渲染层；或用户要求修复该展示口径时。
   - **按 [规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) 不带 `M\d+` 阶段编号**：等待评估与用户决策。
 
+- **en-US 设计文档全量镜像（P2 📚，2026-10-30 M52 规划登记）** —— 现状：en 设计镜像仅 4 篇，zh 设计文档 67 篇（含 M44.4 拆分分片）；M52.3 只做「结构映射 + 索引补全」，不重译全文。待评估：1.0 后是否按「分片 → 镜像」逐篇补齐（成本随拆分增加、双维护风险高），或长期维持映射清单 + 关键路径翻译。触发：1.0 后文档国际化需求，或用户反馈英文站信息不足时。
 ### 待上收候选（评估完成，等待用户决策）
 
 > 本节为「评估完成、等待用户决策」候选的暂存区；候选**不含 `M\d+` 阶段编号**（[规划规范 §3.1](../standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement)）。
@@ -446,9 +422,9 @@
 
 | 内容类型 | 位置 |
 |:--|:--|
-| 当前阶段活跃任务 | **无活跃阶段**（M51 已闭环归档，见 [todo.md](todo.md) / [M51 分片](archive/todo-archive-phases-m51.md)）；插队容量治理见 [planning.md §3.1.1](../standards/planning.md#_3-1-1-插队后的阶段容量再平衡-hard-requirement-2026-10-19) |
-| 下一阶段（已授权，待规划） | **F2 文档与验证 → G 发布工程**（M52-M53；台账见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)） |
+| 当前阶段活跃任务 | **M52 文档平价与验证收口（1.0-F2）** — 4 原子 + 1 批追加临时待办，见 [todo.md](todo.md)；插队容量治理见 [planning.md §3.1.1](../standards/planning.md) |
+| 下一阶段（已授权，待规划） | **G 发布工程**（M53；台账见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)） |
 | 已完成阶段归档 | [todo-archive.md](todo-archive.md)（阶段索引 + [archive/](archive/) 分片） |
-| 里程碑与阶段交付 | [roadmap.md](roadmap.md)（M0-M51 已归档；F2/G 待规划） |
+| 里程碑与阶段交付 | [roadmap.md](roadmap.md)（M0-M51 已归档；M52 进行中；G 待规划） |
 | 长期主线 / 候选 / 待人工验收 / 已知边界 | 本文档（按四象限结构） |
 | 历史归档索引 | [archive/index.md](archive/index.md) |
