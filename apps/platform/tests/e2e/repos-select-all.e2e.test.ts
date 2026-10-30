@@ -106,10 +106,18 @@ test.describe('仓库列表跨页全选', () => {
             await expect(rows).toHaveCount(PAGE_SIZE, { timeout: 10000 })
             await expect(summary).toHaveText(`已选 ${REPO_COUNT} 条，当前筛选 ${PAGE_SIZE} 条`)
 
+            // 筛选为 0 时：仍保留清空入口，且不渲染误导性的「全选全部（0）」
+            await page.locator('#repos-filter-search').fill('no-such-repo-for-select-all')
+            await expect(rows).toHaveCount(0, { timeout: 10000 })
+            await expect(summary).toHaveText(`已选 ${REPO_COUNT} 条，当前筛选 0 条`)
+            await expect(page.getByRole('button', { name: '清空选择' })).toBeVisible()
+            await expect(page.getByRole('button', { name: /全选全部/ })).toHaveCount(0)
+
             // 清空选择
             await page.getByRole('button', { name: '清空选择' }).click()
-            await expect(summary).toHaveText(`已选 0 条，当前筛选 ${PAGE_SIZE} 条`)
             await expect(selectedRows).toHaveCount(0)
+            // 已选与筛选结果都为 0 时选择栏整体收起（不显示空计数）
+            await expect(summary).toHaveCount(0)
         } finally {
             // 单条删除失败不阻断其余清理（共享 e2e 库不因一条残留而放大）
             await Promise.allSettled(createdIds.map((id) => page.request.delete(`/api/repos/${id}`, {

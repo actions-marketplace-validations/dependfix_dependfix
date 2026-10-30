@@ -42,7 +42,7 @@ const { t } = useI18n()
                 {{ t('repos.clearSelection') }}
             </CaomeiButton>
             <CaomeiButton
-                v-if="!allSelected"
+                v-if="!allSelected && total > 0"
                 size="sm"
                 variant="ghost"
                 tone="neutral"
