@@ -40,6 +40,8 @@ export type AuditEventType =
     | 'ai_config_update'
     | 'verify_commands_update'
     | 'notification_settings_update'
+    | 'pr_feedback_commented'
+    | 'pr_feedback_closed'
 
 /** 审计事件类型枚举（API 校验用） */
 export const AUDIT_EVENT_TYPES: readonly AuditEventType[] = [
@@ -49,6 +51,8 @@ export const AUDIT_EVENT_TYPES: readonly AuditEventType[] = [
     'ai_config_update',
     'verify_commands_update',
     'notification_settings_update',
+    'pr_feedback_commented',
+    'pr_feedback_closed',
 ] as const
 
 /** 审计事件严重级别（与 alerts.severity 解耦：审计事件是系统信号，告警是业务信号） */
@@ -107,6 +111,7 @@ export class AuditEvent extends BaseEntity {
      * - sandbox_unavailable: `{ errno, code, adapter, message }`
      * - sandbox_degraded: `{ degradedReason: { code, message }, fallback: 'container' }`
      * - container_unavailable: `{ code, executor: 'container', message }`
+     * - pr_feedback_commented / pr_feedback_closed: `{ prNumber, headSha, conclusion }`
      */
     @Column({ type: 'text', nullable: true })
     payloadJson!: string | null

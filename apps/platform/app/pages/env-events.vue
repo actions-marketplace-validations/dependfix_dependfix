@@ -2,7 +2,7 @@
 // 环境/容器审计事件视图（env-events）
 // 数据源：GET /api/audit-events（执行器/环境异常 + 配置留痕事件 + 通知状态）
 // 过滤维度：type / severity / notified / repositoryId
-// 类型下拉与共享 audit_event 全量类型（AUDIT_EVENT_TYPES）口径一致（6 类）
+// 类型下拉与共享 audit_event 全量类型（AUDIT_EVENT_TYPES）口径一致（含 PR 回环反馈两类）
 import { computed } from 'vue'
 import { ChevronDown, ChevronUp, Funnel } from '@lucide/vue'
 import type { DataTableColumn, InputType } from 'caomei-ui'
@@ -59,6 +59,8 @@ const typeOptions = computed(() => [
     { label: t('envEvents.typeAiConfigUpdate'), value: 'ai_config_update' },
     { label: t('envEvents.typeVerifyCommandsUpdate'), value: 'verify_commands_update' },
     { label: t('envEvents.typeNotificationSettingsUpdate'), value: 'notification_settings_update' },
+    { label: t('envEvents.typePrFeedbackCommented'), value: 'pr_feedback_commented' },
+    { label: t('envEvents.typePrFeedbackClosed'), value: 'pr_feedback_closed' },
 ])
 
 const severityOptions = computed(() => [
@@ -104,6 +106,10 @@ const typeLabel = (type: string) => {
             return t('envEvents.typeVerifyCommandsUpdate')
         case 'notification_settings_update':
             return t('envEvents.typeNotificationSettingsUpdate')
+        case 'pr_feedback_commented':
+            return t('envEvents.typePrFeedbackCommented')
+        case 'pr_feedback_closed':
+            return t('envEvents.typePrFeedbackClosed')
         default:
             return type
     }

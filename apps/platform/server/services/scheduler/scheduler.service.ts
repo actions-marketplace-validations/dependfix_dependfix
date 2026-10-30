@@ -19,6 +19,7 @@ import type { ScanRequest } from '../scan-orchestrator.service'
 import { executeBatchRun } from '../batch/batch-executor'
 import { ActionStatusMonitor } from '../monitor/action-status-monitor'
 import { PollingSource } from '../monitor/polling-source'
+import { runPrFeedbackForRepository } from '../pr-feedback/service'
 import { decryptToken, getEncryptionKey } from '../credential.service'
 import { resolveRepositoryIds, type ScheduleSelectorData } from './selector'
 import { Credential } from '#server/entities/credential'
@@ -275,6 +276,29 @@ export const runPrCheckPoll = async (
         })
         totalProcessed += result.processed
         totalErrors += result.errors
+
+        // PR 回环反馈（同一节拍）：对已交付 PR 做幂等评论 / 关闭；失败只 warn，不影响轮询结果
+        let feedbackErrors = 0
+        for (const id of ids) {
+            try {
+                const feedback = await runPrFeedbackForRepository({
+                    ds,
+                    octokit,
+                    repositoryId: id,
+                    logger: { info() { /* 反馈仅需要 warn 通道 */ }, warn: (message: string) => console.warn(message) },
+                })
+                feedbackErrors += feedback.errors
+            } catch (error) {
+                feedbackErrors += 1
+                console.warn(
+                    `[scheduler] PR 回环反馈失败（仓库 ${id}，不影响轮询）：`,
+                    error,
+                )
+            }
+        }
+        if (feedbackErrors > 0) {
+            console.warn(`[scheduler] 本轮 PR 回环反馈失败 ${feedbackErrors} 次（已降级，不影响轮询结果）`)
+        }
     }
 
     return { processed: totalProcessed, errors: totalErrors }

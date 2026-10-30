@@ -1,6 +1,6 @@
 # 平台 PR 回环反馈设计（1.0-F1 / M51.3）
 
-> 状态：🔶 设计定稿（2026-10-30）——a（观察态）/ b（评论与关闭）实施中；重试（retry）待用户裁定
+> 状态：✅ 已实施（2026-10-30）——a（观察态）`2d0c9930` + b（评论与关闭）；重试（retry）按用户 2026-10-30 裁定延后（§8）
 >
 > 依赖：[M51.2 结论口径](./pr-build-deploy-signals.md#310-结论口径统一与同-ref-多轮收敛m512-2026-10-30)、
 > [对外 PR 交付闭环](./pr-delivery-closure.md)、[平台通知与邮件推送](./platform-notification.md)。
@@ -51,12 +51,16 @@ deliverFixAndPr（创建 / 命中同内容 PR）
 
 | 对象 | 幂等键 | 载体 |
 |:--|:--|:--|
-| 评论 | `(repositoryId, prNumber, headSha)` + `kind` | 评论区 HTML marker：`<!-- dependfix:pr-feedback headSha=<sha> kind=comment -->` |
-| 关闭 | `(repositoryId, prNumber, headSha)` | PR 状态（closed 后不再动作）+ `audit_event(pr_feedback_closed)` |
+| 评论 | `(repositoryId, prNumber, headSha)` | 评论区 HTML marker：`<!-- dependfix:pr-feedback headSha=<sha> -->`（b 批只有「评论」一种副作用，故不带 `kind`；新增副作用时再加） |
+| 关闭 | `(repositoryId, prNumber, headSha)` | **动作前查 PR 状态**（`pulls.get`，非 open 即跳过）+ `audit_event(pr_feedback_closed)` |
 | 重试 | `(repositoryId, prNumber, headSha)` | `audit_event(pr_feedback_retried)` |
 
-- 评论幂等**以 GitHub 侧 marker 为准**（列表评论判断），不新增列：多副本 / 重启后仍幂等，且与 CLI 侧
-  评论风格一致（CLI 用 attempt marker）。
+- 评论幂等**以 GitHub 侧 marker 为准**（列表评论判断），不新增列：重启后仍幂等，且与 CLI 侧评论风格一致
+  （CLI 用 attempt marker）。
+- **残余风险（多副本）**：「读列表 → 判定 → 评论」是 TOCTOU，两个 worker 同时处理同一 PR 可能各评论一次；
+  当前部署为单 worker 消费，登记为已知边界（可后续用审计占位或 `issue comment` 幂等键收敛）。
+- **marker 可被伪造**：公开仓库任何可评论者贴出 marker 即可**抑制**平台评论（无法触发关闭）；
+  登记为已知边界（后续可限定 `comment.user.type === 'Bot'`）。
 - 每轮每个 PR 最多一次动作尝试；动作失败只 warn，**不改变** run 结论、不重试本轮。
 
 ## 5. 决策规则
@@ -65,21 +69,26 @@ deliverFixAndPr（创建 / 命中同内容 PR）
 
 1. **窗口**：`now - PR 创建时间 > windowHours` → 停止观察（不评论 / 不关闭），记 debug 日志。
    时间源优先 `ScanRun.finishedAt`（平台交付时刻），缺失回退 `PRCheck.createdAt`。
-2. **评论**：`conclusion ∈ (failure, timed_out, action_required)` → 评论一次（§4 marker）。
-   评论正文：失败 job 名（最多 5 条）+ 归因标签 + 「由平台自动评论」说明 + 关闭提示（若开启）。
-3. **关闭**：`closeFailed` 开启 ∧ 上述失败状 ∧ PR 仍 open → 关闭并写审计。
+2. **PR 终态即停止**：动作前查 `pulls.get`，`state !== 'open'` → 跳过（关闭过 / 人工合并后不再评论、不重复关闭）。
+3. **评论**：`conclusion ∈ (failure, timed_out, action_required)` → 评论一次（§4 marker）。
+   评论正文：结论 + 失败来源（provider/name，来自 `PRCheck.failureSourcesJson`，最多 5 条）+ 自动评论说明
+   + 关闭提示（若开启）。**不含归因标签**（平台侧归因见 M51.2，评论区不重复展示）。
+4. **关闭**：`closeFailed` 开启 ∧ 上述失败状 ∧ PR 仍 open → 关闭并写审计。
    **平台不使用 `self_caused` 判据**（无父提交比对），因此关闭门槛比 CLI 低——这是本设计的显式取舍：
    默认关闭、开启后审计可追溯、PR 正文与评论均标注「自动关闭」。要求用户在仓库级配置中显式开启。
 4. **重试**（待裁定）：`retryFailed` 开启 ∧ 失败 ∧ 同 `headSha` 未重试过 → 重新触发既有修复链一次。
    需要平台对外暴露队列触发面（当前无 API），故 **a/b 不实现**，接口契约见 §8。
 5. `neutral` / `skipped` / `cancelled` **不触发**任何动作（与 M51.2 结论口径一致）。
+6. 窗口参照：`ScanRun.finishedAt`（查询已按 `>= now - windowHours` 过滤）；`PRCheck.createdAt` 回退在
+   当前查询下不可达，仅作为 `observation.ts` 的防御性能力保留。
 
 ## 6. 与监测器 / 通知的分工
 
 - **监测器**（`monitor/`）：采集三源信号 → 落 `PRCheck` → 告警状态机。不知道也不需要知道反馈策略。
 - **反馈服务**（新增 `services/pr-feedback/`）：只消费「监测器刚写入的 `PRCheck` + 观察态 PR」，
-  产出 PR 侧副作用（评论 / 关闭 / 审计）。**由监测器每轮末尾调用**（同一节拍），不新增调度器、
-  不阻塞 worker（失败只 warn）。
+  产出 PR 侧副作用（评论 / 关闭 / 审计）。**接在 `scheduler.runPrCheckPoll` 的每轮 poll 之后**
+  （同一节拍；不改 `ActionStatusMonitor` 的职责，也不新增调度器、不阻塞 worker）。失败降级为
+  `errors` 计数 + warn 汇总，不改变 `pollOnce` 结果。
 - **通知**：反馈不改变通知口径；关闭 PR 时写 `pr_feedback_closed` 审计，通知系统按既有规则决定是否提示。
 
 ## 7. 配置
@@ -95,9 +104,12 @@ deliverFixAndPr（创建 / 命中同内容 PR）
 }
 ```
 
-- 只接受已知键（未知键忽略并 warn），非法值回退默认；解析失败整体回退默认（fail-safe）。
-- 与 CLI 的 `--wait-pr-checks` / `--close-failed-pr` / `--retry-failed` **同名语义**，但平台侧是
-  「跨轮次持续观察」而不是「单次等待」，故独立配置。
+- 未知键**忽略**（不 warn、不阻断）；非法值回退该键默认；解析失败整体回退默认（fail-safe）。
+- 配置键名以本文件为准（`comment` / `closeFailed` / `retryFailed` / `windowHours`）；与 CLI 的
+  `--wait-pr-checks` / `--close-failed-pr` / `--retry-failed` 同名语义，但平台侧是「跨轮次持续观察」
+  而不是「单次等待」，故独立配置。
+- **当前只有库内写入面**（`Repository.prFeedback` JSON 列）：仓库设置 API / UI 与逐仓库开关属后续候选；
+  本批未暴露写接口，改动需直接更新该列。
 
 ## 8. 重试接口契约（未实施）
 
@@ -110,7 +122,8 @@ export interface FeedbackRetryDispatcher {
 
 - 曾考虑直接复用 `ScanQueue.add`：其 jobId 去重键是 `scan-<repositoryId>`，与「同 PR 重试」语义不完全等价
   （同仓库并发 run 会被合并）。因此重试需要先确认「无同仓库进行中 run」，并在受理后写审计。
-- 该能力依赖平台对外触发面与配额策略，**留待用户裁定后实施**（当前 `retryFailed` 只做配置解析与校验）。
+- 该能力依赖平台对外触发面与配额策略，**用户 2026-10-30 裁定本批不实施**；
+  当前 `retryFailed` 只做配置解析，开启时每轮打一次 warn（明确「未实现」而非静默忽略）。
 
 ## 9. 风险与边界
 
@@ -123,3 +136,5 @@ export interface FeedbackRetryDispatcher {
 | 观察态丢失 | 唯一事实源在库（`ScanRun.prNumber`），不依赖进程内状态 |
 | 平台无 `self_caused` | 关闭门槛比 CLI 低，已在 §5 显式登记取舍 |
 | 历史行 | `ScanRun.prNumber` 为 `null` 的存量 run 不进入观察态（不回填） |
+| 多副本并发评论 | 单 worker 部署下不发生；多副本时存在 TOCTOU（§4 已知边界） |
+| 查询成本 | 每轮每失败 PR 一次 `pulls.get` + 一次评论分页；PR 数极多时可按仓库限量（后续候选） |

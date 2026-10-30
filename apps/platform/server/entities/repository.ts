@@ -142,6 +142,16 @@ export class Repository extends BaseEntity {
      */
     @Column({ type: 'text', nullable: true })
     prCheckFocus!: string | null
+
+    /**
+     * PR 回环反馈配置（JSON 文本；`null` = 全默认）。
+     *
+     * 形状：`{ comment, closeFailed, retryFailed, windowHours }`，解析与默认值见
+     * `server/services/pr-feedback/config.ts`；口径见
+     * [pr-feedback-loop.md](../design/governance/pr-feedback-loop.md) §7。
+     */
+    @Column({ type: 'text', nullable: true, name: 'pr_feedback' })
+    prFeedback!: string | null
 }
 
 /** 解析 tags JSON 字符串 → 字符串数组（非法/缺失返回空数组，容错不抛错） */

@@ -703,6 +703,8 @@
         "typeAiConfigUpdate": "AI config updated",
         "typeVerifyCommandsUpdate": "Verify commands updated",
         "typeNotificationSettingsUpdate": "Notification settings updated",
+        "typePrFeedbackCommented": "PR feedback comment posted",
+        "typePrFeedbackClosed": "PR auto-closed by feedback loop",
         "expand": "Expand",
         "collapse": "Collapse",
         "errors": {
