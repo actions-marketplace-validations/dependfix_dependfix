@@ -22,6 +22,11 @@ import { requireAuth } from '#server/utils/guard'
  * - `repository`：按关联 Repository owner + name 排序，前端按项目分组
  * - 不传 / 其他值：原始列表，按 createdAt DESC（默认）
  *
+ * 并列兜底（2026-10-30）：主排序键相同的行（同毫秒 `createdAt` / 同 `packageName`）此前
+ * 行序取决于数据库返回顺序，同一查询两次可能不同。三种模式统一追加主键 `result.id DESC`
+ * 作次键，只保证**行序确定**；视觉基线的**意图顺序**仍由 fixtures 逐条钉死 `createdAt`
+ * 提供（主防线），二者不要互相替代。
+ *
  * rowGroup 语义：用户切换其他列排序时，迁移前组件库多列排序模式会自动把 groupRowsBy 保留为第一排序键，
  * 避免 group 顺序被破坏（上游多列排序实现约定，实证见迁移评估 §15.10）。
  *
@@ -81,6 +86,9 @@ export default defineEventHandler(async (event) => {
     } else {
         qb.orderBy('result.createdAt', 'DESC')
     }
+    // 并列兜底：主排序键相同（同毫秒 createdAt / 同 packageName）时按主键 DESC，
+    // 避免行序依赖数据库返回顺序（同一查询两次不一致 → 视觉基线抖动）
+    qb.addOrderBy('result.id', 'DESC')
 
     const results = await qb.getMany()
 
