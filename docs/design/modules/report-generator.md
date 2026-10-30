@@ -122,6 +122,8 @@ interface RepositoryResult {
     verificationPassed?: boolean
     /** 是否存在**本次改动引入**的验证失败（决定是否回滚；既有基线失败不归因本次） */
     verificationBlocking?: boolean
+    /** 验证被主动跳过（`budget` = 运行预算不足）：`undefined` + 该字段 = 未验证，不得渲染为通过 */
+    verificationSkipped?: 'budget'
     /** 该仓库总处理耗时（毫秒） */
     durationMs: number
 }
