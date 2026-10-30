@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { GitCommandError } from './git-run'
 import { GIT_COMMIT_HOOKS_ISOLATION_ARGS, GIT_COMMIT_SIGNING_ISOLATION_ARGS, GIT_PUSH_HOOKS_ISOLATION_ARGS, GIT_PUSH_SIGNING_ISOLATION_ARGS } from './git-signing'
 import { pushBranch } from './pr-creator'
 
@@ -86,7 +87,7 @@ describe('pushBranch hooks 隔离回归', () => {
      * - 反例：同环境裸 `git push` 必被拦截（证明 hook 真实生效，避免正例退化为恒真）
      * - 正例：`pushBranch` 成功，且标记文件不存在（证明 hook 未执行）
      */
-    it('目标仓库 pre-push hook 非 0 退出 → pushBranch 仍成功且 hook 未执行', () => {
+    it('目标仓库 pre-push hook 非 0 退出 → pushBranch 仍成功且 hook 未执行', async () => {
         const hooksGlobalDir = makeTempDir('dependfix-pushhooks-global-')
         const hooksGlobalConfig = join(hooksGlobalDir, 'gitconfig')
         writeFileSync(hooksGlobalConfig, '')
@@ -107,7 +108,7 @@ describe('pushBranch hooks 隔离回归', () => {
         rmSync(join(workDir, '.pre-push-ran'), { force: true })
 
         // 被测实现：`--no-verify` 隔离后 push 成功且 hook 未执行
-        pushBranch('main', workDir)
+        await pushBranch('main', workDir)
 
         expect(existsSync(join(workDir, '.pre-push-ran'))).toBe(false)
         expect(git(['ls-remote', '--heads', 'origin', 'main'], workDir)).toContain('refs/heads/main')
@@ -115,7 +116,7 @@ describe('pushBranch hooks 隔离回归', () => {
 })
 
 describe('pushBranch 签名隔离回归', () => {
-    it('宿主 push.gpgSign=true 时 pushBranch 仍成功（同环境裸 push 失败作反例对照）', () => {
+    it('宿主 push.gpgSign=true 时 pushBranch 仍成功（同环境裸 push 失败作反例对照）', async () => {
         const { workDir } = setupRepoWithOrigin()
         stubHostPushSigning()
 
@@ -124,16 +125,16 @@ describe('pushBranch 签名隔离回归', () => {
             .toThrow(/does not support --signed push/i)
 
         // 被测实现：显式 `-c push.gpgSign=false` 后 push 成功
-        expect(() => pushBranch('main', workDir)).not.toThrow()
+        await expect(pushBranch('main', workDir)).resolves.toBeUndefined()
 
         // 远端确实收到分支（证明反例与正例作用于同一 remote / 同一 commit）
         expect(git(['ls-remote', '--heads', 'origin', 'main'], workDir)).toContain('refs/heads/main')
     }, 20_000)
 
-    it('push 隔离参数仅作用于本次调用，不写入 repo local config', () => {
+    it('push 隔离参数仅作用于本次调用，不写入 repo local config', async () => {
         const { workDir } = setupRepoWithOrigin()
 
-        pushBranch('main', workDir)
+        await pushBranch('main', workDir)
 
         const localConfig = git(['config', '--local', '--list'], workDir)
         // 前置：local config 确有内容（证明 --list 走成功路径，而非命令失败返回空串）
@@ -141,5 +142,20 @@ describe('pushBranch 签名隔离回归', () => {
         // `--list` 会把键名小写化（push.gpgSign → push.gpgsign），故不能用大小写敏感的
         // not.toContain 断言（恒真）；改用 --get：键未落盘时 exit 1（严格 git helper 抛错）
         expect(() => git(['config', '--local', '--get', 'push.gpgSign'], workDir)).toThrow()
+    }, 20_000)
+})
+
+describe('pushBranch 失败语义', () => {
+    it('remote 缺失 → 抛 GitCommandError（含动作名 / 子命令 / 退出码），不静默成功', async () => {
+        const { workDir } = setupRepoWithOrigin()
+        execFileSync('git', ['remote', 'remove', 'origin'], { cwd: workDir, stdio: 'pipe' })
+
+        const error = await pushBranch('main', workDir).catch((err: unknown) => err)
+        expect(error).toBeInstanceOf(GitCommandError)
+        const gitError = error as GitCommandError
+        expect(gitError.message).toContain('push branch main failed')
+        expect(gitError.message).toContain('git push')
+        expect(gitError.code).not.toBe(0)
+        expect(gitError.aborted).toBe(false)
     }, 20_000)
 })

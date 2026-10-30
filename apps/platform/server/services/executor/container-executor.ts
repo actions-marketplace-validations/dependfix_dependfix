@@ -379,7 +379,7 @@ export class ContainerExecutor implements ScanExecutor {
                         const octokit = createPlatformOctokit(ctx.credential.token)
                         const plan = await planFixAndPrDelivery(octokit, owner, name, result)
                         // 创建/切换到 fix 分支（在 HEAD 上，含 commit）
-                        createFixBranch(plan.branchName, workDir)
+                        await createFixBranch(plan.branchName, workDir)
                         const delivery = await deliverFixAndPr({
                             owner,
                             repo: name,

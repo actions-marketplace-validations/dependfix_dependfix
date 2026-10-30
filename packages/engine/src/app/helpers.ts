@@ -590,9 +590,9 @@ export async function tryLockfileRepair(
  * - 提交集合由白名单 + fixer 声明路径决定（`stageAndCommit`）；含未声明的已跟踪改动时抛
  *   `CommitScopeError('UNEXPECTED_CHANGES')`，仅供生成物 / 未跟踪文件时抛 `NO_CHANGES`
  */
-export function commitLocalChanges(
+export async function commitLocalChanges(
     ctx: Pick<AppContext, 'logger' | 'workDir' | 'allActions' | 'authProvider' | 'deliverySkips'>,
-): void {
+): Promise<void> {
     const { logger, workDir, allActions, authProvider } = ctx
 
     // 纵深防御（不依赖 `hasGitChanges` 的内部非仓库守卫）：非 git 仓库时不能提交
@@ -640,7 +640,7 @@ export function commitLocalChanges(
     const author = authProvider?.getCommitAuthor()
     // 提交集合 = 固定白名单 ∪ 声明路径；未声明改动 / 空集合由 stageAndCommit 抛
     // CommitScopeError（调用方据此写 UNEXPECTED_CHANGES / NO_CHANGES，而不是笼统的 COMMIT_FAILED）
-    const scope = stageAndCommit(commitMessage, workDir, author, {
+    const scope = await stageAndCommit(commitMessage, workDir, author, {
         declaredPaths: collectDeclaredPaths(allActions),
     })
     if (scope.ignored.length > 0) {

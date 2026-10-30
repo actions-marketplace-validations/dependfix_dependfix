@@ -131,14 +131,14 @@ describe('collectDeclaredPaths', () => {
 })
 
 describe('listChangedPaths', () => {
-    it('列出已跟踪改动 / 未跟踪文件（展开目录）与删除', () => {
+    it('列出已跟踪改动 / 未跟踪文件（展开目录）与删除', async () => {
         const dir = initRepo({ 'package.json': '{}\n', 'src/app.ts': 'v1\n', 'src/gone.ts': 'bye\n' })
         writeTracked(dir, 'package.json', '{"name":"x"}\n')
         writeTracked(dir, 'src/app.ts', 'v2\n')
         rmSync(join(dir, 'src/gone.ts'))
         writeTracked(dir, 'src/new/deep.ts', 'new\n')
 
-        const changes = listChangedPaths(dir)
+        const changes = await listChangedPaths(dir)
         const byPath = new Map(changes.map((change) => [change.path, change]))
         expect(byPath.get('package.json')?.untracked).toBe(false)
         expect(byPath.get('src/app.ts')?.untracked).toBe(false)
@@ -146,18 +146,18 @@ describe('listChangedPaths', () => {
         expect(byPath.get('src/new/deep.ts')?.untracked).toBe(true)
     })
 
-    it('workDir 为仓库子目录时按子目录折算相对路径', () => {
+    it('workDir 为仓库子目录时按子目录折算相对路径', async () => {
         const root = initRepo({ 'package.json': '{}\n', 'sub/package.json': '{}\n', 'sub/src/app.ts': 'v1\n' })
         const workDir = join(root, 'sub')
         writeTracked(workDir, 'package.json', '{"name":"sub"}\n')
         writeTracked(workDir, 'src/app.ts', 'v2\n')
 
-        expect(listChangedPaths(workDir).map((change) => change.path).sort()).toEqual(['package.json', 'src/app.ts'])
+        expect((await listChangedPaths(workDir)).map((change) => change.path).sort()).toEqual(['package.json', 'src/app.ts'])
     })
 })
 
 describe('computeCommitScope', () => {
-    it('提交集合 = 白名单 ∪ 声明路径；生成物与未跟踪文件忽略', () => {
+    it('提交集合 = 白名单 ∪ 声明路径；生成物与未跟踪文件忽略', async () => {
         const dir = initRepo({
             'package.json': '{}\n',
             'packages/web/package.json': '{}\n',
@@ -176,7 +176,7 @@ describe('computeCommitScope', () => {
         writeTracked(dir, 'src/generated.tmp.ts', 'tmp\n')
         writeTracked(dir, 'src/new-fix.ts', 'export const x = 1\n')
 
-        const scope = computeCommitScope(dir, ['src/app.ts', 'src/new-fix.ts'])
+        const scope = await computeCommitScope(dir, ['src/app.ts', 'src/new-fix.ts'])
         expect(scope.paths).toEqual([
             'package.json',
             'packages/web/package.json',
@@ -190,47 +190,47 @@ describe('computeCommitScope', () => {
         expect(scope.missing).toEqual([])
     })
 
-    it('未声明的已跟踪改动进入 unexpected（打印路径），白名单仍可提交', () => {
+    it('未声明的已跟踪改动进入 unexpected（打印路径），白名单仍可提交', async () => {
         const dir = initRepo({ 'package.json': '{}\n', 'README.md': '# repo\n', 'src/hack.ts': 'v1\n' })
         writeTracked(dir, 'package.json', '{"name":"x"}\n')
         writeTracked(dir, 'README.md', '# hacked\n')
         writeTracked(dir, 'src/hack.ts', 'v2\n')
 
-        const scope = computeCommitScope(dir)
+        const scope = await computeCommitScope(dir)
         expect(scope.paths).toEqual(['package.json'])
         expect(scope.unexpected).toEqual(['README.md', 'src/hack.ts'])
     })
 
-    it('声明的非法路径被拒绝，其余判定照常', () => {
+    it('声明的非法路径被拒绝，其余判定照常', async () => {
         const dir = initRepo({ 'package.json': '{}\n' })
         writeTracked(dir, 'package.json', '{"name":"x"}\n')
 
-        const scope = computeCommitScope(dir, ['../escape.ts', '/abs.ts', ':(glob)**'])
+        const scope = await computeCommitScope(dir, ['../escape.ts', '/abs.ts', ':(glob)**'])
         expect(scope.paths).toEqual(['package.json'])
         expect(scope.rejected.map((item) => item.path)).toEqual(['../escape.ts', '/abs.ts', ':(glob)**'])
         expect(scope.rejected.every((item) => item.reason.length > 0)).toBe(true)
     })
 
-    it('声明但无对应改动 → missing（不阻断），空集合单独判定', () => {
+    it('声明但无对应改动 → missing（不阻断），空集合单独判定', async () => {
         const dir = initRepo({ 'package.json': '{}\n' })
-        const scope = computeCommitScope(dir, ['src/not-changed.ts'])
+        const scope = await computeCommitScope(dir, ['src/not-changed.ts'])
         expect(scope.paths).toEqual([])
         expect(scope.missing).toEqual(['src/not-changed.ts'])
     })
 
-    it('声明路径按字面量暂存：文件名含 glob 元字符不会连带同目录匹配文件', () => {
+    it('声明路径按字面量暂存：文件名含 glob 元字符不会连带同目录匹配文件', async () => {
         const dir = initRepo({ 'package.json': '{}\n', 'src/a[1].ts': 'v1\n' })
         writeTracked(dir, 'src/a[1].ts', 'v2\n')
         // 同目录的未跟踪文件会被 `src/a[1].ts` 的 glob 匹配（`[1]` → `1`）：不得被 `git add` 带入
         writeTracked(dir, 'src/a1.ts', 'decoy\n')
 
-        const scope = stageScopedChanges(dir, ['src/a[1].ts'])
+        const scope = await stageScopedChanges(dir, ['src/a[1].ts'])
 
         expect(scope.staged).toEqual(['src/a[1].ts'])
         expect(git(['diff', '--cached', '--name-only'], dir)).toBe('src/a[1].ts')
     })
 
-    it('未合并冲突 → 拒绝提交（git add 会静默「解决」冲突）', () => {
+    it('未合并冲突 → 拒绝提交（git add 会静默「解决」冲突）', async () => {
         const dir = initRepo({ 'conflict.txt': 'base\n' })
         git(['checkout', '-q', '-b', 'side'], dir)
         writeTracked(dir, 'conflict.txt', 'side\n')
@@ -244,39 +244,39 @@ describe('computeCommitScope', () => {
             // 预期冲突
         }
 
-        expect(listChangedPaths(dir).some((change) => change.conflicted)).toBe(true)
-        expect(() => stageScopedChanges(dir)).toThrowError(/unresolved merge conflict/)
+        expect((await listChangedPaths(dir)).some((change) => change.conflicted)).toBe(true)
+        await expect(stageScopedChanges(dir)).rejects.toThrowError(/unresolved merge conflict/)
     })
 
-    it('workDir 为子目录时，仓库根已暂存改动 → 拒绝（git commit 会连带提交索引）', () => {
+    it('workDir 为子目录时，仓库根已暂存改动 → 拒绝（git commit 会连带提交索引）', async () => {
         const root = initRepo({ 'root.ts': 'v1\n', 'sub/package.json': '{}\n' })
         writeTracked(root, 'root.ts', 'v2\n')
         git(['add', 'root.ts'], root)
         const workDir = join(root, 'sub')
         writeTracked(workDir, 'package.json', '{"name":"sub"}\n')
 
-        expect(listChangedPaths(workDir).some((change) => change.outside && change.staged)).toBe(true)
-        expect(() => stageScopedChanges(workDir)).toThrowError(/outside workDir/)
+        expect((await listChangedPaths(workDir)).some((change) => change.outside && change.staged)).toBe(true)
+        await expect(stageScopedChanges(workDir)).rejects.toThrowError(/outside workDir/)
     })
 
-    it('索引区已暂存的越界改动（生成物）→ 拒绝提交，且不擅自 reset 用户暂存区', () => {
+    it('索引区已暂存的越界改动（生成物）→ 拒绝提交，且不擅自 reset 用户暂存区', async () => {
         const dir = initRepo({ 'package.json': '{}\n', 'auto-imports.d.ts': '// v1\n' })
         writeTracked(dir, 'auto-imports.d.ts', '// v2\n')
         git(['add', 'auto-imports.d.ts'], dir)
         writeTracked(dir, 'package.json', '{"name":"x"}\n')
 
-        const scope = computeCommitScope(dir)
+        const scope = await computeCommitScope(dir)
         expect(scope.staged).toEqual(['auto-imports.d.ts'])
-        expect(() => stageScopedChanges(dir)).toThrowError(/staged change\(s\) outside the commit scope/)
+        await expect(stageScopedChanges(dir)).rejects.toThrowError(/staged change\(s\) outside the commit scope/)
         // 用户暂存区未被 reset（不销毁本地状态）
         expect(git(['diff', '--cached', '--name-only'], dir)).toBe('auto-imports.d.ts')
     })
 
-    it('删除的已跟踪文件未经声明 → unexpected（重命名不会绕过检测）', () => {
+    it('删除的已跟踪文件未经声明 → unexpected（重命名不会绕过检测）', async () => {
         const dir = initRepo({ 'package.json': '{}\n', 'src/old.ts': 'v1\n' })
         rmSync(join(dir, 'src/old.ts'))
 
-        const scope = computeCommitScope(dir)
+        const scope = await computeCommitScope(dir)
         expect(scope.unexpected).toEqual(['src/old.ts'])
     })
 })

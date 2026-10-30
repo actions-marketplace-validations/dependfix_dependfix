@@ -1,5 +1,8 @@
 // git-config.ts — 分支存在性 / 本地 git 身份保障（从 pr-creator.ts 拆出以控制文件行数）。
-import { execFileSync } from 'node:child_process'
+//
+// 交付链上的 git 调用统一走 [run-git](./git-run.ts) 的受管异步执行：同步子进程会阻塞
+// 事件循环，让平台执行超时与运行级取消都无法按时生效（口径见 executor-process-isolation §8.5）。
+import { runGit, runGitOrThrow } from './git-run'
 
 /**
  * PAT 路径默认 commit author（保持现有 PAT 路径用户行为零变化）。
@@ -15,41 +18,30 @@ export const PAT_DEFAULT_COMMIT_AUTHOR = {
     email: 'dependfix[bot]@users.noreply.github.com',
 } as const
 
-/** 分支是否已存在（`git rev-parse --verify`）。 */
-export function branchExists(branchName: string, workDir: string): boolean {
-    try {
-        execFileSync('git', ['rev-parse', '--verify', branchName], {
-            cwd: workDir,
-            stdio: 'pipe',
-        })
-        return true
-    } catch {
-        return false
-    }
+/** 分支是否已存在（`git rev-parse --verify`；非 0 退出即视为不存在）。 */
+export async function branchExists(branchName: string, workDir: string): Promise<boolean> {
+    const result = await runGit(['rev-parse', '--verify', branchName], { cwd: workDir })
+    return result.started && result.code === 0
 }
 
 /** 本地 git 身份：仅在 local config 缺失时写入（不覆盖用户既有配置）。 */
-export function ensureGitConfig(workDir: string, author?: { name: string, email: string }): void {
+export async function ensureGitConfig(workDir: string, author?: { name: string, email: string }): Promise<void> {
     const effectiveAuthor = author ?? PAT_DEFAULT_COMMIT_AUTHOR
-    const hasName = gitConfigExists('user.name', workDir)
-    const hasEmail = gitConfigExists('user.email', workDir)
+    const hasName = await gitConfigExists('user.name', workDir)
+    const hasEmail = await gitConfigExists('user.email', workDir)
 
     if (!hasName) {
-        execFileSync('git', ['config', 'user.name', effectiveAuthor.name], { cwd: workDir, stdio: 'pipe' })
+        await runGitOrThrow(['config', 'user.name', effectiveAuthor.name], { cwd: workDir, what: 'set git user.name' })
     }
     if (!hasEmail) {
-        execFileSync('git', ['config', 'user.email', effectiveAuthor.email], { cwd: workDir, stdio: 'pipe' })
+        await runGitOrThrow(['config', 'user.email', effectiveAuthor.email], { cwd: workDir, what: 'set git user.email' })
     }
 }
 
-function gitConfigExists(key: string, workDir: string): boolean {
+async function gitConfigExists(key: string, workDir: string): Promise<boolean> {
     // 必须用 `--local` 限定 local config 查询——否则 `git config user.name`（无 flag）
     // 走 lookup order (local → global → system)，会返回 host 全局 user.name（如
     // CaoMeiYouRen）误判"已配置"，让 ensureGitConfig 跳过 set local config。
-    try {
-        execFileSync('git', ['config', '--local', '--get', key], { cwd: workDir, stdio: 'pipe' })
-        return true
-    } catch {
-        return false
-    }
+    const result = await runGit(['config', '--local', '--get', key], { cwd: workDir })
+    return result.started && result.code === 0
 }

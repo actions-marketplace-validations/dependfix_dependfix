@@ -12,10 +12,10 @@
 //
 // 声明来源：`FixAction.changedPaths`（AI patch 多文件）与 `FixAction.filePath`
 // （code-scanning 单文件），且仅取**成功且非 noOp** 的动作——回滚掉的写盘不应留下声明。
-import { execFileSync } from 'node:child_process'
 import { isAbsolute } from 'node:path'
 import type { FixAction } from '@dependfix/core'
 import { GIT_COMMIT_HOOKS_ISOLATION_ARGS, GIT_COMMIT_SIGNING_ISOLATION_ARGS } from './git-signing'
+import { runGitOrThrow } from './git-run'
 
 /** 提交集合判定失败的两类信号（写入 `FixError.category`）。 */
 export type CommitScopeErrorCode = 'UNEXPECTED_CHANGES' | 'NO_CHANGES'
@@ -158,21 +158,20 @@ export function normalizeCommitPath(raw: string): { ok: true, path: string } | {
  * - `--no-renames`：重命名拆成「删除 + 新增」，删除因此不会绕过未声明检测
  * - 输出路径相对**仓库根**：按 `--show-prefix` 折算为 workDir 相对路径（workDir 可为子目录）
  */
-export function listChangedPaths(workDir: string): ChangedPath[] {
+export async function listChangedPaths(workDir: string): Promise<ChangedPath[]> {
     // 不限制 pathspec：`git commit`（cwd=workDir）提交的是整个索引，workDir 之外的已暂存改动
     // 同样会被带入，必须可见（workDir 与仓库根一致时 prefix 为空，行为等价）
-    const raw = execFileSync('git', [
+    const raw = await runGitOrThrow([
         'status',
         '--porcelain=v1',
         '-z',
         '--untracked-files=all',
         '--no-renames',
-    ], { cwd: workDir, stdio: 'pipe', encoding: 'utf-8' })
-    const prefix = execFileSync('git', ['rev-parse', '--show-prefix'], {
+    ], { cwd: workDir, what: 'list changed paths' })
+    const prefix = (await runGitOrThrow(['rev-parse', '--show-prefix'], {
         cwd: workDir,
-        stdio: 'pipe',
-        encoding: 'utf-8',
-    }).trim()
+        what: 'resolve repository prefix',
+    })).trim()
 
     const changes: ChangedPath[] = []
     for (const entry of raw.split('\0')) {
@@ -243,11 +242,11 @@ export interface StageAndCommitResult {
  * 索引区越界暂存内容（`UNEXPECTED_CHANGES`）。暂存用 `git add -- <paths>`（分批；`--` 阻断选项解析，
  * 每条路径加 `:(literal)` 终止通配，文件名含 `*` / `?` / `[` 时也只暂存字面路径）。
  */
-export function stageScopedChanges(
+export async function stageScopedChanges(
     workDir: string,
     declaredPaths: readonly string[] = [],
-): StageAndCommitResult {
-    const scope = computeCommitScope(workDir, declaredPaths)
+): Promise<StageAndCommitResult> {
+    const scope = await computeCommitScope(workDir, declaredPaths)
     if (scope.conflicts.length > 0) {
         throw new CommitScopeError(
             'UNEXPECTED_CHANGES',
@@ -290,7 +289,10 @@ export function stageScopedChanges(
     }
     for (const chunk of chunkPaths(scope.paths)) {
         // `:(literal)`：文件名里的 `*` / `?` / `[` 不得被当作 pathspec 通配（否则会连带暂存同目录的匹配文件）
-        execFileSync('git', ['add', '--', ...chunk.map((path) => `:(literal)${path}`)], { cwd: workDir, stdio: 'pipe' })
+        await runGitOrThrow(
+            ['add', '--', ...chunk.map((path) => `:(literal)${path}`)],
+            { cwd: workDir, what: 'stage commit scope' },
+        )
     }
     return { staged: scope.paths, ignored: scope.ignored, missing: scope.missing }
 }
@@ -301,23 +303,23 @@ export function stageScopedChanges(
  * author / 签名 / hooks 三条隔离：显式 `-c user.name` / `-c user.email` 覆盖 host 全局，
  * `-c commit.gpgsign=false` 阻断宿主签名，`--no-verify` 跳过目标仓库钩子（详见 ./git-signing.ts）。
  */
-export function commitStaged(
+export async function commitStaged(
     message: string,
     workDir: string,
     author: { name: string, email: string },
-): void {
-    execFileSync('git', [
+): Promise<void> {
+    await runGitOrThrow([
         '-c', `user.name=${author.name}`,
         '-c', `user.email=${author.email}`,
         ...GIT_COMMIT_SIGNING_ISOLATION_ARGS,
         'commit',
         ...GIT_COMMIT_HOOKS_ISOLATION_ARGS,
         '-m', message,
-    ], { cwd: workDir, stdio: 'pipe' })
+    ], { cwd: workDir, what: 'commit fix changes' })
 }
 
 /** 判定本次提交集合（不写盘、不暂存）。 */
-export function computeCommitScope(workDir: string, declaredPaths: readonly string[] = []): CommitScope {
+export async function computeCommitScope(workDir: string, declaredPaths: readonly string[] = []): Promise<CommitScope> {
     const rejected: PathRejection[] = []
     const declared = new Set<string>()
     const conflicts: string[] = []
@@ -330,7 +332,7 @@ export function computeCommitScope(workDir: string, declaredPaths: readonly stri
         }
     }
 
-    const changes = listChangedPaths(workDir)
+    const changes = await listChangedPaths(workDir)
     const paths = new Set<string>()
     const unexpected: string[] = []
     const ignored: string[] = []

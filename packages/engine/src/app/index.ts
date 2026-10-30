@@ -432,12 +432,12 @@ export class DependfixApp {
                 return
             }
             // 验证门禁：任一仓库验证失败 → 回滚，不提交坏改动
-            if (enforceVerificationGate(this.ctx, { preExistingDirty: this.preExistingDirty, action: 'commit' })) {
+            if (await enforceVerificationGate(this.ctx, { preExistingDirty: this.preExistingDirty, action: 'commit' })) {
                 return
             }
 
             try {
-                commitLocalChanges(this.ctx)
+                await commitLocalChanges(this.ctx)
             } catch (error: unknown) {
                 const message = toErrorMessage(error)
                 this.logger.error(`Local commit failed: ${message}`)
@@ -506,7 +506,7 @@ export class DependfixApp {
         if (abortBlocksDelivery(this.ctx, 'PR creation')) {
             return
         }
-        if (enforceVerificationGate(this.ctx, { preExistingDirty: this.preExistingDirty, action: 'pr' })) {
+        if (await enforceVerificationGate(this.ctx, { preExistingDirty: this.preExistingDirty, action: 'pr' })) {
             return
         }
 
@@ -530,7 +530,7 @@ export class DependfixApp {
         }
         if (!hasDeliverableFixes(this.allActions)) {
             this.logger.info('No deliverable fixes produced — skipping PR creation')
-            rollbackForSkippedDelivery({
+            await rollbackForSkippedDelivery({
                 logger: this.logger,
                 workDir: this.workDir,
                 preExistingDirty: this.preExistingDirty,
@@ -594,13 +594,13 @@ export class DependfixApp {
 
             // 5. Create fix branch (content-addressed) + commit + push
             const branchName = `dependfix/auto-fix-${fingerprint}`
-            createFixBranch(branchName, this.workDir)
+            await createFixBranch(branchName, this.workDir)
             this.logger.info(`Creating fix branch: ${branchName}`)
 
             this.logger.info('Staging and committing changes')
             const author = this.githubAppAuth?.getCommitAuthor()
             try {
-                const scope = stageAndCommit(buildCommitMessage(this.allActions), this.workDir, author, {
+                const scope = await stageAndCommit(buildCommitMessage(this.allActions), this.workDir, author, {
                     declaredPaths: collectDeclaredPaths(this.allActions),
                 })
                 if (scope.ignored.length > 0) {
@@ -625,7 +625,7 @@ export class DependfixApp {
             }
 
             this.logger.info(`Pushing branch: ${branchName}`)
-            pushBranch(branchName, this.workDir)
+            await pushBranch(branchName, this.workDir)
 
             // 6. Create PR (one PR covering all repos)
             const defaultBranch = await fetchDefaultBranch(client, owner, repo)

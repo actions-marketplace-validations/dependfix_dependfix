@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import type { Octokit } from '@octokit/rest'
 import {
@@ -19,6 +18,7 @@ import { commitStaged, stageScopedChanges, type StageAndCommitOptions, type Stag
 import { buildDraftDeliveryNotice } from './delivery-issue'
 import { formatAttemptMarker, type AttemptMarker } from './fix-fingerprint'
 import { branchExists, ensureGitConfig, PAT_DEFAULT_COMMIT_AUTHOR } from './git-config'
+import { runGitOrThrow } from './git-run'
 import { escapeTableCell } from './markdown-table'
 
 // ---------------------------------------------------------------------------
@@ -190,14 +190,14 @@ export function computeFixAndPrPlan(existingPRs: DependfixOpenPR[], fingerprint:
  *
  * @returns 分支名和是否为新创建
  */
-export function createFixBranch(branchName: string, workDir: string): FixBranchResult {
-    const exists = branchExists(branchName, workDir)
+export async function createFixBranch(branchName: string, workDir: string): Promise<FixBranchResult> {
+    const exists = await branchExists(branchName, workDir)
     if (exists) {
-        execFileSync('git', ['checkout', branchName], { cwd: workDir, stdio: 'pipe' })
+        await runGitOrThrow(['checkout', branchName], { cwd: workDir, what: `checkout fix branch ${branchName}` })
         return { branchName, created: false }
     }
 
-    execFileSync('git', ['checkout', '-b', branchName], { cwd: workDir, stdio: 'pipe' })
+    await runGitOrThrow(['checkout', '-b', branchName], { cwd: workDir, what: `create fix branch ${branchName}` })
     return { branchName, created: true }
 }
 
@@ -213,15 +213,15 @@ export function createFixBranch(branchName: string, workDir: string): FixBranchR
  * @throws {CommitScopeError} 提交集合含未声明改动 / 非法声明路径 / 为空
  * @see [M48.4 提交面白名单 §7](../../../../docs/design/governance/pr-delivery-closure.md#7-m484-提交面白名单与-yaml-定点编辑)
  */
-export function stageAndCommit(
+export async function stageAndCommit(
     message: string,
     workDir: string,
     author?: { name: string, email: string },
     options: StageAndCommitOptions = {},
-): StageAndCommitResult {
-    ensureGitConfig(workDir, author)
-    const staging = stageScopedChanges(workDir, options.declaredPaths ?? [])
-    commitStaged(message, workDir, author ?? PAT_DEFAULT_COMMIT_AUTHOR)
+): Promise<StageAndCommitResult> {
+    await ensureGitConfig(workDir, author)
+    const staging = await stageScopedChanges(workDir, options.declaredPaths ?? [])
+    await commitStaged(message, workDir, author ?? PAT_DEFAULT_COMMIT_AUTHOR)
     return staging
 }
 
@@ -234,14 +234,14 @@ export function stageAndCommit(
  * - **hooks**：`push --no-verify` 跳过被修复仓库的 `pre-push`（隔离环境无 `npx` / 目标仓库
  *   `node_modules` 不完整时该 hook 会以非 0 退出，把交付链打断为 `push_failed`）
  */
-export function pushBranch(branchName: string, workDir: string): void {
-    execFileSync('git', [
+export async function pushBranch(branchName: string, workDir: string): Promise<void> {
+    await runGitOrThrow([
         ...GIT_PUSH_SIGNING_ISOLATION_ARGS,
         'push',
         ...GIT_PUSH_HOOKS_ISOLATION_ARGS,
         'origin',
         branchName,
-    ], { cwd: workDir, stdio: 'pipe' })
+    ], { cwd: workDir, what: `push branch ${branchName}` })
 }
 
 // ---------------------------------------------------------------------------

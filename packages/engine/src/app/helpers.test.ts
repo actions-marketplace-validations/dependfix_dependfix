@@ -519,28 +519,28 @@ describe('commitLocalChanges', () => {
         }
     }
 
-    it('skips with a warning when workDir is not a git repository (no throw)', () => {
+    it('skips with a warning when workDir is not a git repository (no throw)', async () => {
         // 回归：非 git 目录下 hasGitChanges 误报 true → 旧实现继续走到 stageAndCommit，
         // 以 `git config user.name` 抛 `fatal: not in a git directory` → 记 COMMIT_FAILED
         const { ctx, logger } = makeCommitCtx(dir)
 
-        expect(() => commitLocalChanges(ctx)).not.toThrow()
+        await expect(commitLocalChanges(ctx)).resolves.toBeUndefined()
         expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('不是 git 仓库'))
         expect(logger.info).not.toHaveBeenCalled()
     })
 
-    it('skips informational when a git repository has no changes', () => {
+    it('skips informational when a git repository has no changes', async () => {
         execSync('git init -q', { cwd: dir })
         execSync('git config user.name test', { cwd: dir })
         execSync('git config user.email test@test', { cwd: dir })
         const { ctx, logger } = makeCommitCtx(dir)
 
-        commitLocalChanges(ctx)
+        await commitLocalChanges(ctx)
 
         expect(logger.info).toHaveBeenCalledWith('No changes to commit — skipping local commit')
     })
 
-    it('commits tracked whitelisted changes in a git repository', () => {
+    it('commits tracked whitelisted changes in a git repository', async () => {
         execSync('git init -q', { cwd: dir })
         execSync('git config user.name test', { cwd: dir })
         execSync('git config user.email test@test', { cwd: dir })
@@ -550,14 +550,14 @@ describe('commitLocalChanges', () => {
 
         const { ctx, logger } = makeCommitCtx(dir, [deliverableAction()])
 
-        commitLocalChanges(ctx)
+        await commitLocalChanges(ctx)
 
         expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('Committed fix changes to current branch'))
         // 提交落在本地当前分支（改动已入 HEAD）
         expect(execSync('git show HEAD:package.json', { cwd: dir, encoding: 'utf-8' })).toBe('{ "name": "v2" }\n')
     })
 
-    it('rejects undeclared tracked changes with UNEXPECTED_CHANGES (no commit)', () => {
+    it('rejects undeclared tracked changes with UNEXPECTED_CHANGES (no commit)', async () => {
         execSync('git init -q', { cwd: dir })
         execSync('git config user.name test', { cwd: dir })
         execSync('git config user.email test@test', { cwd: dir })
@@ -568,11 +568,11 @@ describe('commitLocalChanges', () => {
 
         const { ctx } = makeCommitCtx(dir, [deliverableAction()])
 
-        expect(() => commitLocalChanges(ctx)).toThrowError(/undeclared tracked change/)
+        await expect(commitLocalChanges(ctx)).rejects.toThrowError(/undeclared tracked change/)
         expect(execSync('git show HEAD:src.ts', { cwd: dir, encoding: 'utf-8' })).toBe('v1\n')
     })
 
-    it('commits a declared source path even outside the whitelist', () => {
+    it('commits a declared source path even outside the whitelist', async () => {
         execSync('git init -q', { cwd: dir })
         execSync('git config user.name test', { cwd: dir })
         execSync('git config user.email test@test', { cwd: dir })
@@ -584,13 +584,13 @@ describe('commitLocalChanges', () => {
         action.changedPaths = ['src.ts']
         const { ctx, logger } = makeCommitCtx(dir, [action])
 
-        commitLocalChanges(ctx)
+        await commitLocalChanges(ctx)
 
         expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('Committed fix changes to current branch'))
         expect(execSync('git show HEAD:src.ts', { cwd: dir, encoding: 'utf-8' })).toBe('v2\n')
     })
 
-    it('skips zero-fix runs even when side-effect files changed the worktree', () => {
+    it('skips zero-fix runs even when side-effect files changed the worktree', async () => {
         execSync('git init -q', { cwd: dir })
         execSync('git config user.name test', { cwd: dir })
         execSync('git config user.email test@test', { cwd: dir })
@@ -601,13 +601,13 @@ describe('commitLocalChanges', () => {
 
         const { ctx, logger } = makeCommitCtx(dir)
 
-        commitLocalChanges(ctx)
+        await commitLocalChanges(ctx)
 
         expect(logger.info).toHaveBeenCalledWith('No deliverable fixes produced — skipping local commit')
         expect(execSync('git show HEAD:tracked.txt', { cwd: dir, encoding: 'utf-8' })).toBe('v1\n')
     })
 
-    it('skips local commit when post-fix install verification is still pre-existing failing', () => {
+    it('skips local commit when post-fix install verification is still pre-existing failing', async () => {
         execSync('git init -q', { cwd: dir })
         execSync('git config user.name test', { cwd: dir })
         execSync('git config user.email test@test', { cwd: dir })
@@ -627,7 +627,7 @@ describe('commitLocalChanges', () => {
             },
         ])
 
-        commitLocalChanges(ctx)
+        await commitLocalChanges(ctx)
 
         expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Install verification is still failing'))
         expect(execSync('git show HEAD:tracked.txt', { cwd: dir, encoding: 'utf-8' })).toBe('v1\n')
