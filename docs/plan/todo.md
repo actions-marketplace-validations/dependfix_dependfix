@@ -27,7 +27,7 @@
 > **原子间依赖**：M51.3 ← M51.2（回环建立在统一结论之上）；M51.4 ← M51.1（issue / draft 正文需 per-alert 结果）；M51.5 / M51.6 独立。
 > **交付顺序**：M51.1 → M51.2 → M51.3 → M51.4 → M51.5 → M51.6。
 
-### M51.1 [P0 🛠️] ScanResult 修复结果回写（success / converged / failed / skipped）（**审计 R1 两分区 Reject → 已收口，R2 待执行**）
+### M51.1 [P0 🛠️] ScanResult 修复结果回写（success / converged / failed / skipped）（**已闭环** `1d5e187c` + `564755a2` + 本提交；Review Gate R1 deep 两分区 Reject → R2/R3 quick Pass）
 
 - **目标**：一次运行结束后，`ScanResult.fixStatus` 反映该告警的真实结果，而不是固定 `not-tried`；通知明细可据此剔除本地已满足告警。
 - **落地**：`packages/core` 新增 `report/alert-outcomes.ts`（`AlertFixOutcome` 契约 + `alertOutcomeKey`（含 `repository` 维度）+ `buildAlertOutcomes` 推导 + `ALERT_OUTCOME_STATUSES` / `isAlertOutcomeStatus` 白名单）；`RunResult.alertOutcomes?` 只列有结论的告警（缺键即 `not-tried`）。`packages/engine` 新增 `app/alert-outcomes.ts`（`recordConvergedAlerts` / `recordSkippedAlerts`，跳过原因受 `SkipReason` 约束；缺 `upstreamId` 只 warn），在收敛 / 跨 major / 清单分区四个判定点记录，`buildRunResult` 汇总产出。`apps/platform` 的 `reconcileAlerts` 新增 `outcomes` / `dryRun` 入参：新行取结论、活跃行按本次结论改写（含 `success` → `failed`；决策 1 的「修复记录保留」只作用于 supersede 路径）、缺键保持原值、已 supersede 行不参与、状态白名单过滤；`outcomesApplied` / `outcomesUnmatched` 入统计，编排层抽出 `reconcileRunResult` 单一入口。文档：新增 `governance/alert-outcome-writeback.md`（跨模块专项设计）+ `data-model.md` 契约段 + `release-1.0-readiness.md` §7 G2 冻结清单登记 + `platform-notification.md` §7.1 / §7.3 口径（含 `success` 首次生效与 `report-only` 前提）+ `report-generator.md` 可选字段指针。
@@ -35,9 +35,9 @@
 - **验收标准**：① 引擎报告标记 `converged` 的告警，平台落 `fixStatus=converged` 且不再出现在 `security_critical` / `security_high` / 周报「未修复」明细（**仅 `fix` / `fix-and-pr` run**；`report-only` 无结论）；② `success` / `failed` / `skipped` 三态同样可回写；③ 存量行保持 `not-tried`，`supersededAt` 语义不变（无破坏性迁移）；④ 定向测试覆盖四态映射、reconcile 幂等、supersede 不被误改；⑤ 报告 `alertsConverged` 计数与明细一致（同一次运行内可对账）。
 - **不做什么**：不改引擎修复判定与收敛计数口径（`alertsUnfixed` 算术保持既有）；不改通知开关、阈值与投递通道。
 - **依赖**：无前置阶段；与 M51.4 共享「skipped」语义（交付跳过）。契约变更已在 `data-model.md` 补段，并在 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md) §7 的 G2 冻结清单登记（`RunResult` 报告 schema 变更）。
-- **交付物（实测）**：3 commits（契约与引擎产出 / 平台落库 / 规划闭环）/ 21 files / 约 +1090 −45 行——远超预估 8-10 files / 250-350 行，主因是「契约 + 引擎 4 个采集点 + 平台写入 + 4 份文档 + 29 个新用例」；跨 core/engine/platform 三模块触发设计文档硬阈值，已补 `governance/alert-outcome-writeback.md`。
+- **交付物（实测）**：3 commits（契约与引擎产出 / 平台落库 / 规划闭环）/ 28 files / +1206 −55 行（含 4 个新文件 653 行）——远超预估 8-10 files / 250-350 行，主因是「契约 + 引擎 5 个采集点 + 平台写入 + 5 份文档 + 24 个新用例」；跨 core/engine/platform 三模块触发设计文档硬阈值，已补 `governance/alert-outcome-writeback.md`。
 - **风险与缓解**：多版本包「同包多告警」匹配歧义 → 以 `(repository, source, upstreamId, manifestPath)` 为键回写（`repository` 必需，避免多仓串号）；包级成功谓词会误判「同包另一清单已跳过」→ 显式记录优先于派生 `success`；历史 `supersededAt` 行不回写（单测锁定）。
-- **证据**：core 253 passed（`alert-outcomes.test.ts` 15 例：四态 / 键唯一性含跨仓 / 显式优先 / 跨仓不串号 / CS noOp / code-quality 不归因）；engine `src/app` 496 passed（`index-isolation` 三例锁定 converged 明细 = 计数、cross-major 落 `skipped`）；platform `server/services` 860 passed（`scan-reconcile` 新增 8 例：三态写入 / 活跃行改写 / success→failed / failed→converged 清文案 / 缺键保持 / 幂等与 supersede 隔离（合成输入）/ 脏条目与未知状态 / dry-run）；根全量 5352+ passed；`pnpm -r build` + `typecheck` 7 包 Done；eslint 0 error（3 存量 warning）；`gates:docs` 16 项 exit 0。
+- **证据**：根全量 345 文件 / 5361 passed（`alert-outcomes.test.ts` 16 例：四态 / 键唯一性含跨仓 / 显式优先 / 跨仓不串号 / CS compliant noOp / `noOp+error` 不判收敛 / code-quality 不归因；`scan-reconcile` 14 例；`index-isolation` / `major-upgrade` / `repeated-failure` 各含新增断言）；`pnpm -r build` + `typecheck` 7 包 Done；eslint 0 error（3 存量 warning）；`gates:docs` 16 项 exit 0；mutation 12/12 击杀（显式记录 / success 先于显式 / CS noOp 闸门 / 键去 repository / sticky guard / 状态白名单 / errorMessage 重置 / 收敛记录 / 跨线记录 / `!fixable` 兜底 / `not-tried` 放行 / 尝试上限显式记录）。
 - **边界**：`skipped` 明细是告警级、`alertsSkipped` 是 action 级（同包多告警共用一个 `noOp` 动作时明细更多），只有 `converged` 承诺与 `RunSummary.alertsConverged` 逐条对齐；活跃行可被后续运行覆盖（含 `success` → `failed`），「修复成就保留」仅作用于 supersede；`success` 与 `converged` 退出未修复明细属行为变更（发布说明需披露）；`report-only` run 无逐条结论；存量行不回填；依赖升级失败归因为包级。
 
 ### M51.2 [P1 🛠️] PR Check 结论口径统一 + 同 ref 多轮收敛（台账 ②+⑨）
