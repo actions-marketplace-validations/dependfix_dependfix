@@ -957,9 +957,9 @@ e2e 侧共改写 14 个 spec（`.p-dialog*` / `.p-select*` / `.p-drawer` / `.p-c
 | 类别 | 变更 | 平台命中点 | 处置 |
 | :--- | :--- | :--- | :--- |
 | **token（错配）** | 亮色档 `--caomei-color-primary-text` 是预设**静态值** `#1d4ed8`（蓝），不随平台把 `primary` 改为 teal-600 联动 | Tag / Badge / Message / Tabs / Toast 的文本色（全站可见） | **已覆盖**：`_caomei-tokens.scss` 亮色档钉 `teal-700 #0f766e`（8% teal soft 底上 4.97:1，达 AA）；暗色档显式钉 `#5eead4`（与平台暗色主色一致，10.19:1），不依赖预设的 `var()` 间接解析 |
-| **token（采纳）** | `control-border` 加深控件边界（亮 `#e2e8f0` → `#8a8b8d`、暗 `#334155` → `#67676a`） | 输入框 / 选择器 / 复选框 / 开关 / 次级按钮 / 分页 / 浮层触发器 | **采纳**（上游为 WCAG 1.4.11 非文本对比度）：亮色 3.41:1（白底）/ 3.26:1（elevated），暗色 3.17:1（`#0f172a`）/ **2.59:1（`#1e293b` elevated，低于 3:1）**；均较旧值（亮 `#e2e8f0` 在白底 1.23 / 在 elevated 1.18；暗 `#334155` 在 `#0f172a` 1.72 / 在 `#1e293b` 1.41）显著改善，不做本地覆盖，差值记入第 5 条 |
+| **token（采纳 + 暗色抬档）** | `control-border` 加深控件边界（亮 `#e2e8f0` → `#8a8b8d`、暗 `#334155` → `#67676a`） | 输入框 / 选择器 / 复选框 / 开关 / 次级按钮 / 分页 / 浮层触发器 | **亮色沿用上游** `#8a8b8d`（3.41:1 / 3.26:1）；**暗色本地抬档** `#7b8494`：上游单值在平台更亮的 elevated（`#1e293b`）只有 2.59:1，抬档后 page 4.74:1 / elevated 3.88:1（详见 §15.17 第 2 条）。均较旧值（1.23 / 1.18 / 1.72 / 1.41）显著改善 |
 | **token（排除）** | 亮色 `text-muted` 微调；三个新预设 | 平台 `theme` 已覆盖 `text-muted`；未启用预设 | 无影响；不采纳 `sakura` / `forest` / `ink` |
-| **行为（DataTable）** | 全选作用域收窄到当前页；`lazy` 缺 `rowKey` 告警 + 状态重置；根容器 `tabindex` | `repos`（受控多选 + 客户端分页）；`scans` 的 `lazy` 表已传 `row-key="id"`；`repo-history-dialog` 未传，但无选择 / 展开列，不触发告警、无行级状态可重置 | **无需适配**：受控选择经 `@update:selection` 回传，跨页已选集合不受影响；全选语义变为「本页全选」属上游 UX 修正（与 `selectAll` 新文案一致）。两处 `lazy` 表均不触发上游告警 |
+| **行为（DataTable）** | 全选作用域收窄到当前页；`lazy` 缺 `rowKey` 告警 + 状态重置；根容器 `tabindex` | 全站仅 `repos` 使用 `selection-mode="multiple"`（客户端分页 10/25/50）；`scans` 的 `lazy` 表已传 `row-key="id"`；`repo-history-dialog` 未传，但无选择 / 展开列，不触发告警、无行级状态可重置 | **已适配**（§15.17 第 1 条）：表头保持上游「当前页」语义；「全选全部筛选结果」改由表格上方选择栏 `全选全部（N）` / `清空选择` 承载，e2e 锁定「表头=当页、选择栏=全筛选结果、跨页保持」。两处 `lazy` 表均不触发上游告警 |
 | **视觉（按钮状态）** | 新增 hover / active 反馈（实底向 `neutral-solid` 混合、次级 / ghost 向文字色混合） | 全部按钮；**截图会把「鼠标停留」一起拍下** | **接受**：截图前 `page.click()` 的指针位置保留在控件上 → 基线中出现 hover 态（`pr-checks-toast-light` 的 neutral 实底 `#52525b → #50515b` 即此因），属真实交互态，不是噪声 |
 | **断言级契约** | 0.6.0 的排序占位（`--reserved`）/ 浮层底色等断言契约 | — | **本轮 0 处需要改期望值**：排序角标断言、暗色弹窗背景断言、`caomei-field--*` 断言均原样通过（不变绿凑数，见第 4 条） |
 
@@ -971,28 +971,28 @@ e2e 侧共改写 14 个 spec（`.p-dialog*` / `.p-select*` / `.p-drawer` / `.p-c
 | 基线 | 门禁口径 / 严格口径 | 严格占比 | maxΔ | bbox | 归因 |
 | :--- | :--- | ---: | ---: | :--- | :--- |
 | alerts-light.png | 6131 / 19158 | 1.25% | 99 | (137,14)-(1164,1006) | 控件边框（开关 / 分页）+ Tag 文本角色（success / warning / danger / primary / neutral） |
-| alerts-dark.png | 2104 / 2620 | 0.17% | 52 | (137,14)-(1164,236) | 仅控件边框（暗色 `-text` 与旧 `primary` 同值，文本零变化） |
+| alerts-dark.png | 2104 / 2622 | 0.17% | 72 | (137,14)-(1164,236) | 仅控件边框（暗色 `-text` 与旧 `primary` 同值，文本零变化；边框含 §15.17 抬档） |
 | alerts-right-light.png | ≈3856 / 12621（估算，见下） | 1.47% | 85 | (0,101)-(798,719) | **元素级补拍只含 Tag / 文本角色**（该图内 `control-border` 颜色对 0 命中）：neutral / success / primary / warning 文本色 + 抗锯齿合成色 |
-| alerts-right-dark.png | 0 / 0 | 0.00% | 0 | — | 暗色元素级补拍无变化（`-text` 与旧值同源）；严格口径 0 ⇒ 门禁口径必为 0，非估算 |
-| repos-light.png | 3387 / 6674 | 0.51% | 99 | (120,14)-(1302,470) | 复选框 / 分页边框 + neutral 文本 `#94a3b8 → #4b5563` + primary tag |
-| repos-dark.png | 2224 / 3030 | 0.23% | 52 | (120,14)-(1302,470) | 仅控件边框 |
+| alerts-right-dark.png | 0 / 0 | 0.00% | 0 | — | 暗色元素级补拍无变化（`-text` 与旧值同源；无控件边框元素）；严格口径 0 ⇒ 门禁口径必为 0，非估算 |
+| repos-light.png | 17527 / 186108 | 14.36% | 245 | (120,249)-(1319,523) | **含 §15.17 选择栏的版面变化**（表格整体下移）+ 复选框 / 分页边框 + neutral / primary 文本色 |
+| repos-dark.png | 29071 / 188455 | 14.54% | 233 | (120,14)-(1319,523) | 同上 + 暗色控件边框抬档 |
 | pr-checks-light.png | 1870 / 6392 | 0.49% | 99 | (144,14)-(1295,844) | 控件边框 + 结论 Tag 文本角色 |
 | pr-checks-toast-light.png | 1494 / 6580 | 0.51% | 99 | (144,14)-(1295,691) | 同 pr-checks + **按钮 hover 反馈**（neutral 实底混合） |
 | dialog-import-repos-light.png | 4320 / 4548 | 1.39% | 99 | (16,79)-(743,268) | 弹窗内表单字段 / 复选框边框（`control-border`） |
-| dialog-select-open-light.png | 8346 / 10983 | 0.85% | 99 | (120,14)-(1319,753) | 弹窗表单边框（含遮罩下的边框合成色 `#7c7f84 → #4c4c4d`） |
-| dialog-select-open-dark.png | 6558 / 9183 | 0.71% | 52 | (120,14)-(1302,753) | 同上（暗色档） |
+| dialog-select-open-light.png | 16242 / 107352 | 8.28% | 134 | (120,14)-(1319,753) | **含选择栏版面变化**（该用例在 `/repos` 打开弹窗，背景页下移）+ 弹窗表单边框 |
+| dialog-select-open-dark.png | 16647 / 107350 | 8.28% | 128 | (120,14)-(1319,753) | 同上 + 暗色控件边框抬档 |
 | scans-run-detail-light.png | 2086 / 10470 | 0.81% | 85 | (131,14)-(1302,823) | 控件边框 + warning / primary 文本角色 |
 | notifications-light.png | 5830 / 8438 | 0.64% | 99 | (137,14)-(1302,565) | 控件边框（开关 / 输入）+ warning 文本角色 |
-| notifications-dark.png | 5828 / 6490 | 0.49% | 52 | (655,14)-(1302,565) | 仅控件边框 |
+| notifications-dark.png | 5828 / 6492 | 0.49% | 72 | (655,14)-(1302,565) | 仅控件边框（含抬档） |
 | settings-light.png | 10467 / 12003 | 0.57% | 99 | (137,14)-(1302,1327) | 表单字段边框（纵向 1473px 整页基线的中段）+ 文本角色 |
-| settings-dark.png | 9736 / 11690 | 0.55% | 52 | (137,14)-(1302,1327) | 仅控件边框 |
+| settings-dark.png | 10330 / 11692 | 0.55% | 72 | (137,14)-(1302,1327) | 仅控件边框（含抬档） |
 | schedules-form-layer-light.png | 7210 / 13423 | 1.04% | 99 | (456,14)-(1319,717) | 弹窗内全部表单字段 / 选择器边框 |
-| schedules-form-layer-dark.png | 348 / 13389 | 1.03% | 52 | (456,14)-(1164,717) | 同上（暗色档；门禁口径小是因为边框色差低于 `threshold`，严格口径才见全量） |
+| schedules-form-layer-dark.png | 6691 / 13394 | 1.03% | 72 | (456,14)-(1164,717) | 同上（暗色档；抬档后边框色差超过 `threshold`，门禁口径由 348 升至 6691） |
 | alerts-run-drawer-light.png | 4559 / 14391 | 1.11% | 55 | (137,170)-(1073,741) | 抽屉内控件边框 + neutral 文本角色（含遮罩合成色） |
 | login-light.png | 1576 / 1728 | 0.13% | 99 | (527,431)-(912,544) | 登录表单字段边框 |
 
   - **口径说明**：`alerts-right-*` 因用例在整页截图断言处即中止而未进入元素级断言，门禁口径取本批一次性脚本的 pixelmatch 复刻实现（同 `threshold: 0.1` / `includeAA: false`）；该实现与 Playwright 报数逐一核对 **18 张**（其中 13 张完全一致、5 张偏差 1-4 px），故估算值可信。
-  - **结论**：20 张基线中 **19 张变化 / 1 张（`alerts-right-dark`）零变化**，全部差异可归因到上述两类 token 迁移（`control-border` 与 `-text` 角色）与按钮状态反馈，**无越界变更**；严格口径最大覆盖率 1.47%，图像尺寸全部一致（无布局位移）。`schedules-form-layer-dark`（门禁 348 vs 严格 13389）说明颜色阈值吞掉了约 97% 的亚阈值像素，但面积预算（`maxDiffPixels: 100`）仍使其在重建前被判失败——与 §15.14 登记的两条盲区轴已由 M34.3 收敛的结论一致，**不构成新的盲区实证**。
+  - **结论**：20 张基线中 **19 张变化 / 1 张（`alerts-right-dark`）零变化**；差异来源分三层且均已登记——① `control-border` 与 `-text` 角色迁移（全表）；② 按钮 hover 状态（`pr-checks-toast-light`）；③ **§15.17 新增选择栏的版面变化**（仅 `repos-*` 与 `dialog-select-open-*`，表格整体下移约一行）。图像尺寸全部为 1440×900，无越界布局。`schedules-form-layer-dark` 在抬档前（上游 `#67676a`）门禁 348、抬档后 6691——说明边框色差跨越了 `threshold`，颜色轴与面积轴的关系符合 [测试规范 §6.7](../../standards/testing.md#_6-7-视觉回归-截图识别层-apps-platform) 的既有结论。
 
 **4）回归验证矩阵（本批收口）**
 
@@ -1002,10 +1002,11 @@ e2e 侧共改写 14 个 spec（`.p-dialog*` / `.p-select*` / `.p-drawer` / `.p-c
 | 构建 | `pnpm -r build` | 全绿（platform 37.6 MB，41.8s） |
 | Typecheck | `pnpm typecheck` | 7 包 Done，0 error |
 | Lint | `pnpm lint` | 0 error（3 条存量 warning） |
-| 全量 e2e | `TMPDIR=/dev/shm pnpm test:e2e` | **207 passed / 0 failed**（含新增 2 例），2 flaky 均重试通过（见第 5 条） |
+| 全量 e2e | `TMPDIR=/dev/shm pnpm test:e2e` | **211 passed / 0 failed**（含新增 3 例），1-2 flaky 均重试通过（见第 5 条） |
 | 视觉回归 | `pnpm test:visual:update --update-snapshots=all` + 两轮 `pnpm test:visual` | 20 passed → 20 passed ×2（门禁口径无失败、无超预算；`.last-run` 与基线落盘同批自洽） |
 | 定向 e2e（DataTable 重点面） | `playwright test repos-crud / table-filters / scans / pr-checks --workers=1` | **28 passed**（受控多选 / 客户端分页 / 两处 `lazy` 翻页 / 行展开 / 运行详情） |
-| 新增守卫 | `playwright test tests/e2e/theme-tokens.e2e.test.ts` | 2 passed；**mutation 实测**：把亮色 `primary-text` 改回库默认 `#1d4ed8` → 亮色用例失败（`Expected "#0f766e" / Received "#1d4ed8"`），恢复后通过 |
+| 新增守卫 | `playwright test tests/e2e/theme-tokens.e2e.test.ts` | 4 passed（文本角色 2 + 控件边界对比度 2）；**mutation 实测**：亮色 `primary-text` 改回 `#1d4ed8` → 失败；删除暗色 `control-border` 覆盖 → 2.59:1 → 失败 |
+| 全选适配守卫 | `playwright test tests/e2e/repos-select-all.e2e.test.ts` | 1 passed；**mutation 实测**：`selectAllFiltered` 改为只取首页 → 失败（Expected 12 / Received 10） |
 | 文档值核验 | 一致性 / 对比度脚本 | 新文本角色：亮 `#0f766e` 在 8% teal soft 底 4.97:1、白底 5.47:1；暗 `#5eead4` 在 8% soft 底 10.19:1 / 深底 12.07:1 |
 
 - **断言未凑绿**：本轮 e2e 无一处需改期望值；新增的 `tests/e2e/theme-tokens.e2e.test.ts` 断言的是「文本角色跟随平台主色」这一**契约**（token 值 + `/scans` 激活 Tab 的实际计算色），而非像素快照。
@@ -1013,9 +1014,47 @@ e2e 侧共改写 14 个 spec（`.p-dialog*` / `.p-select*` / `.p-drawer` / `.p-c
 **5）观察与遗留**
 
 - **e2e flaky 与本升级无关，分属两条存量问题**：① **Select 首次点击族**（M50.4 残留，`tests/visual` 侧已用 `openSelectPanel` 兜底、e2e 侧未覆盖）——本轮出现 `scan-config`（扫描偏好 Select 面板项点击超时）与 `schedules`（计划类型选择器），`--repeat-each=2` 可复现；② **列表刷新时序**（M49.2a 登记的「平台 e2e 偶发等待超时」）——前一轮出现 `repos-crud`「删除后列表行未出现」。全部重试通过（207 passed / 0 failed），不随本批修复，避免混入主题。
-- **暗色 `control-border` 在 elevated 面 2.59:1**：上游按自家暗底 `#0b0b0d` 标定（3.17:1），平台 dark elevated 取 `#1e293b`（更亮）故落到 2.59:1，低于 WCAG 1.4.11 的 3:1。较升级前（1.41:1）仍显著改善；是否本地微调该 token 待用户裁定（候选条件：用户报告暗色表单边界不可辨）。
+- **暗色控件边界已抬档**：见 §15.17 第 2 条（`#7b8494`，elevated 3.88:1）；上游单值按自家暗面标定，属消费方面色差异，不构成上游缺陷。
 - **rc 通道风险与回滚**：`1.0.0-rc.1` 为预发布版本，精确钉定 + 单版本解析；回滚路径 `pnpm --filter @dependfix/platform add caomei-ui@0.7.0 --save-exact`（回滚后须按本节口径重建基线）。若仓内出现 rc.2，需重新过 `minimumReleaseAge` 窗口（口径见 [安全规范 §5.2](../../standards/security.md#_5-依赖与供应链安全-dependency-supply-chain-security) 与 [开发规范 §5.1.57](../../standards/development.md)），窗口内的精确豁免边界同源。
-- **表头全选语义无自动守卫**：`repos` 页的「全选」由「全部筛选结果」收窄为「当前页」（10 条），属上游 UX 修正，视觉基线拍不到该语义、e2e 也无跨页全选用例。本轮按上游口径接受（`selectAll` 文案已同步为「全选当前页」）；若后续确认批量扫描需要跨页全选，应由用户裁定后另立候选，不在本批改上游行为。
+- **表头全选语义已适配并加守卫**：表头保持上游「当前页」；跨页全选由选择栏承载，`repos-select-all.e2e.test.ts` 锁定（见 §15.17 第 1 条）。
 - **基线跨运行非字节稳定**：连续 `=all` 重建（同版本、同构建产物）在个别基线间存在 **≤26 px / maxΔ 1** 的亚像素抗锯齿噪声（本轮观察到 `scans-run-detail-light` 26 px、`schedules-form-layer-dark` 1 px；其余基线在相邻两次重建间逐字节相同）；差异远低于门禁（≤100 px 且色差阈值内），故不影响判定，但说明「字节稳定」不成立。该两图与 `dialog-select-open-dark` 一并作为 M52.4「视觉确定性与覆盖率」的取证对象。
 - **视觉基线的「hover 态」口径**：新按钮状态反馈使「点击后指针停留」成为基线的一部分。本批按真实交互态接受（不移动鼠标规避），后续新增截图用例需注意同一用例内点击顺序会影响 hover 归属。
 - **视觉覆盖边界**：本节表格自身已含 `Drawer`（`alerts-run-drawer-light`）与 `Toast`（`pr-checks-toast-light`），M45.5 / M50.4 之后 `schedules` / `scans` / `settings` / `notifications` 亦有基线；**仍未覆盖**的是 `Tabs` 切换态与 `Popover`（无落点页），由 e2e 行为断言兜底。M52.4 会补 pr-checks 归因标签守卫与 `dialog-select-open-dark` 确定性取证。
+
+### 15.17 caomei-ui 1.0 全选语义适配与暗色控件边界微调（2026-10-31 追加）
+
+> **背景**：§15.16 收口后按用户 2026-10-31 裁定处理两个遗留项——① 检查是否有表格依赖「跨页全选」并做适配；② 暗色 `control-border` 是否微调、是否需向上游反馈。
+
+**1）全选语义适配（`repos` 页）**
+
+- **检查结论**：全站仅 `repos` 使用 `selection-mode="multiple"`（`rg` 实测 1 处）；其余表页或为单选 / 无选择（`alert-run-sidebar`、`run-detail-dialog`、`pr-checks`、`batch-runs`、`repos/[id]/runs`），或只有 `expander` 列。两处 `lazy` 表（`scans`、`repo-history-dialog`）无选择列，不受全选语义影响。
+- **功能缺口**：`repos` 是客户端分页（10 / 25 / 50），表头全选只覆盖当前页；「批量扫描全部筛选结果」需逐页点击（或先把每页调到 50）。受控 `selectedRows` 按 row id 跨页保持，故逐页勾选可用但成本随页数线性增长。
+- **适配（不改上游行为）**：表头保持 1.0 语义（当前页）；卡片内表格上方新增选择栏——`已选 {selected} 条，当前筛选 {total} 条` + `全选全部（N）` / `清空选择`。`selectAllFiltered` 以整集合替换（与 DataTable「回写当前过滤集合」的既有语义一致）；选中判定按 id 比对（`selectedRows` 可能含被筛选隐藏的行）。
+- **落地拆分**：选择栏为独立组件 `app/components/repo-selection-bar.vue`（纯展示 + 两个 emit），状态与动作抽到 `app/composables/use-repo-selection.ts`（纯函数 `isAllFilteredSelected` 按 id 判定 + 组合式），既避免 `repos.vue` 越过 `max-lines: 800`，也让判定可单测。
+- **守卫**：`tests/e2e/repos-select-all.e2e.test.ts` 自建 12 条仓库并清理——断言「表头全选 = 10 条」「第 2 页未被波及」「翻页保持已选」「全选全部（12）覆盖两页」「清空归零」，并加版面守卫（选择栏底边不高于表格顶边）；单测 `tests/unit/use-repo-selection.test.ts` 覆盖「按 id 判定 / 缺行 / 空集合 / 含隐藏行 / 全选替换与清空」5 例。**mutation 实测**：`selectAllFiltered` 改为只取首页 → e2e 失败（Expected 12 / Received 10）。
+- **视觉**：`repos-*` 与 `dialog-select-open-*` 基线因选择栏整体下移重建（§15.16 表内已标注）；纯版面差异 repos-light 14.36% / repos-dark 14.54% / dialog-select-open 7.64%–8.28%（含 token 差异）。
+
+**2）暗色控件边界微调**
+
+- **上游标定**：`--caomei-color-control-border` 暗色为单值 `#67676a`，在库自身 surface 上达标——bg `#0b0b0d` 3.49:1、elevated `#17171a` 3.17:1。
+- **平台缺口**：平台暗色 surface 更亮（page `#0f172a`、elevated `#1e293b`）→ 原值在 elevated 只有 **2.59:1**，低于 WCAG 1.4.11 的 3:1（page 面 3.17:1 达标）。
+- **处置**：暗色档抬到 `#7b8494`（page **4.74:1** / elevated **3.88:1**），亮色档保持上游 `#8a8b8d`（3.41 / 3.26）。取值落在平台 slate 明暗档内，不是新品牌色。
+- **守卫**：`theme-tokens.e2e.test.ts` 新增两例，判据是「token 与**实际 surface** 的 WCAG 对比度 ≥ 3:1」（不锁色值）；**mutation 实测**：删除暗色覆盖 → 2.5948:1 → 失败。
+- **上游反馈结论**：**不是上游缺陷**（库自身两档 surface 均 ≥ 3.17:1），属「单值 token + 消费方自定义更亮暗面」的约束；本批不提交 issue，改为在本文登记该约束（换更亮 / 更深的 dark surface 需重算）。若后续要推动 surface-aware 默认值，可另开 enhancement。
+
+**3）验证（追加批次）**
+
+| 检查 | 命令 / 范围 | 结果 |
+| :--- | :--- | :--- |
+| 构建 / typecheck / lint | `pnpm -r build` / `pnpm typecheck` / `pnpm lint` | 全绿 / 7 包 0 error / 0 error（3 存量 warning） |
+| 全量 e2e | `TMPDIR=/dev/shm pnpm test:e2e` | **211 passed / 0 failed**，1-2 flaky 重试通过（`repos-crud` 创建、`scan-config` Select） |
+| 定向 | `repos-select-all` / `theme-tokens` / `use-repo-selection` 单测 / `repos-crud` ×3 | 1 passed / 4 passed / 5 passed（181 文件 2378 passed）/ 30 passed（flaky 未复现） |
+| 视觉 | `=all` 重建 + 两轮 `test:visual` | 20 passed ×3；相对 rc.1 首版重建 8 张（repos ×2、dialog-select ×2、4 张暗色边框） |
+| mutation | 2 项 | 2/2 击杀（全选作用域、暗色边框对比度） |
+| 文档 | `pnpm gates:docs` | 16 项 OK |
+
+**4）剩余边界**
+
+- 选择栏只服务 `repos`；若后续新增多选表，可把「筛选集合全选」提取为 composable。
+- `全选全部` 是整集合替换：被筛选隐藏的已选行会被移出（与 DataTable 回写语义一致，已在页面注释记录）。
+- 暗色 elevated 若继续调亮需重算 `control-border`；调深则对比度只升不降。
