@@ -1,6 +1,6 @@
 # 对外 PR 交付闭环设计（M48）
 
-> **状态**：✅ 已实施（2026-10-24 P 阶段落地；M48.1-M48.6 六原子于 2026-10-25 全部闭环，归档见 [M48](../../plan/archive/todo-archive-phases-m48.md#m48-对外-pr-交付闭环-2026-10-24-用户决策-d-e-2026-10-25-归档)）
+> **状态**：✅ 已实施（2026-10-24 P 阶段落地；M48.1-M48.6 六原子于 2026-10-25 全部闭环，归档见 [M48](../../plan/archive/todo-archive-phases-m48.md#m48-对外-pr-交付闭环-2026-10-24-用户决策-d-e-2026-10-25-归档)）；§16（基线红交付降级）为 M51.4 增量（2026-10-30）
 > **来源**：2026-10-24 对外 PR 巡检 + [backlog](../../plan/backlog.md) 8 项同源候选
 > **定位**：回答「dependfix 发出去的 PR 是否真的能绿、失败后是否还会原样重来、合并后的红 check 该归因给谁」
 
@@ -321,6 +321,7 @@ type CheckAttribution = 'self_caused' | 'pre_existing' | 'external_noise' | 'can
 | `jobBudgetMs` | number | 未设置（Actions 环境按 25 分钟兜底） | engine（env `DEPENDFIX_JOB_BUDGET_MS`） |
 | `closeFailedPr` | boolean | false | engine / CLI / Action |
 | `retryFailed` | boolean | false | engine / CLI / Action |
+| `onBaselineRed` | `'skip' \| 'issue' \| 'draft'` | `skip` | engine / CLI / Action（env `DEPENDFIX_ON_BASELINE_RED`；Action input `on-baseline-red`；无 CLI flag） |
 
 ### 10.2 报告字段
 
@@ -329,6 +330,8 @@ type CheckAttribution = 'self_caused' | 'pre_existing' | 'external_noise' | 'can
 - `FixAction.commandSource?: 'default' | 'repo-config' | 'ci-mirror'`（M48.2；仅 verification 动作）。
 - core `RunResult.prCheckWatch?: { attempts: Array<{ pr: { number, htmlUrl }, state: 'passed' | 'failed' | 'cancelled' | 'no_ci_detected' | 'timeout', attribution?: CheckAttribution, closed, commented, polls, durationMs, failedChecks?, reason?, commentError?, closeError? }>, runBudgetExhausted }`（M48.5 / M48.6；`failedChecks` 为 `{ name, url?, attribution }` 最多 5 条）；engine 的 `PullRequestResult` 只作内部返回（M48.5 起附带 `headSha` 供精确轮询）。
 - 运行摘要：`prsOpened` / `prsSkippedByFingerprint` / `prsClosedAfterFailure` / `checksTimedOut`（事件点累加，`computeSummary` 不重置）。
+- `RunResult.deliverySkips?: Array<{ repositories: string[], failingCommands: string[], carrier: { mode: 'skip' | 'issue' | 'draft', issue?: { number, htmlUrl, created, fingerprint }, draftPr?: { number, htmlUrl } } }>`（§16；仅基线红时存在，字段可选以兼容旧 JSON）。
+- 运行摘要（§16）：`deliverySkipped`（去重仓库数）/ `deliverySkipIssues`（本次新建 issue 数）/ `deliverySkipDraftPrs`（草稿 PR 数），均由 `computeSummary` 从 `deliverySkips` 幂等派生。
 
 ### 10.3 PR 正文标记
 
@@ -354,6 +357,7 @@ type CheckAttribution = 'self_caused' | 'pre_existing' | 'external_noise' | 'can
 | comment 权限不足（403） | 记录，不改变 PR 状态 | 否 |
 | PR 正文被模板覆盖 | 标记丢失 → fail-open | 否 |
 | 分类未知 | `unknown`，不判 passed、不关闭；合并仍由 mergify `check-success` 决定 | 否 |
+| 修复后安装仍为既有失败（基线红） | 按 `onBaselineRed` 三档：`skip` 回滚 + 留痕 / `issue` 开 issue（同指纹一次）+ 回滚 / `draft` 不回滚、草稿 PR（`waitPrChecks` 不等待） | 否（`PRE_EXISTING_FAILURE` 在跳过类白名单） |
 
 ## 12. 验证矩阵
 
@@ -398,3 +402,83 @@ type CheckAttribution = 'self_caused' | 'pre_existing' | 'external_noise' | 'can
 - [依赖修复执行记录](../modules/dependency-fixer-records.md)
 - [自动合并指南](../../guide/auto-merge.md)
 - [规划规范](../../standards/planning.md) / [测试规范](../../standards/testing.md)
+
+## 16. M51.4 基线红 / 安装失败的交付降级（2026-10-30）
+
+### 16.1 背景与目标
+
+修复后安装验证仍为既有失败（基线红）时，交付一直被**整段跳过**：改动回滚、报告记一条
+`PRE_EXISTING_FAILURE`、退出码中性。使用者只看到日志，没有可跟踪的载体，平台运行也表现为
+「有告警、无 PR」。
+
+目标：给这条路径一个**可跟踪载体**（issue / 草稿 PR / 仅报告三档），默认行为不变。
+
+**非目标**：不改 `PRE_EXISTING_FAILURE` 归因语义与跳过类白名单，不改安装失败判据与回滚链。
+
+### 16.2 档位与配置
+
+配置键 `DEPENDFIX_ON_BASELINE_RED`（`RuntimeConfig.onBaselineRed`，默认 `skip`；无 CLI flag）：
+
+| 档位 | 行为 | 改动落地 | 载体 |
+|:--|:--|:--|:--|
+| `skip`（默认） | 审计记录 + 回滚（与引入前逐字一致） | 否 | 无（仅报告 / 平台标签） |
+| `issue` | 按失败指纹开 issue（去重、关闭后不重开），随后仍回滚 | 否 | issue |
+| `draft` | 不回滚，照常提交 / 推送，PR 以**草稿**创建 | 是（草稿 PR） | draft PR |
+
+- 仅 `fix-and-pr` 生效；`fix` 模式下（平台执行链）能力主线不在引擎 PR 面，因此**只记录**
+  `summary.deliverySkipped*`，由平台展示「交付跳过」（见 §16.5）。
+- dry-run 一律按 `skip`：dry-run 无交付面可降级，且必须回滚。
+- 配置校验：非法值 fail-fast（`ON_BASELINE_RED must be one of: skip, issue, draft`）。
+
+### 16.3 issue 载体
+
+- **失败指纹**：`sha256(repositories.sort + failingCommands.sort).slice(0, 16)`。
+  刻意**不含**错误文本、时间戳与 run id——同一仓库 + 同一失败命令即视为同一失败，
+  CI 日志抖动不会造成 issue 重复；而错误文本可能携带路径 / 凭据，不进正文也不进指纹。
+- **落点**：`installBlockedRepos[0]`（首先命中的受影响仓库），与失败同源——若沿用运行级
+  「第一个仓库」，仓库顺序变化会让同一指纹的去重扫描落到另一个仓库而重复开 issue。
+- **去重**：正文首位 HTML marker `<!-- dependfix:delivery-skip fp=<fp> -->`；查询 `state: 'all'`
+  最近 100 条 issue/PR 条目并排除 PR 条目。**命中已关闭 issue 也复用**（关闭即人工确认的
+  「已知问题」，不自动重开）；查询 / 创建失败只 warn，交付跳过与退出码语义不变。
+- **标题 / 正文**：标题 `dependfix 交付跳过：<仓库集> 安装验证仍有既有失败`；正文含运行 id、
+  受影响仓库、失败命令、「先修安装链再重跑」的处置步骤与「关闭后不会自动重开」说明。
+- **标签**：尝试打 `dependfix`（仓库未建该标签时可能被静默丢弃）。标签只是检索便利，
+  去重与幂等**不依赖标签**（靠正文 marker）。
+- **权限面**：需要 token 具备 `issues: write`（PAT 一般已含 `repo` 范围；fine-grained token 需显式勾选）。
+
+### 16.4 draft 载体
+
+- `pulls.create` 携带 `draft: true`；正文最前插入警告区块（仓库 + 失败命令 + 「CI 会以同一既有失败
+  为红，先修安装链再转正」）。非草稿档正文逐字不变。
+- 草稿 PR 计入 `summary.prsOpened`，并额外计入 `summary.deliverySkipDraftPrs`。
+- `--wait-pr-checks` 在草稿档**不等待**：CI 必然复现既有失败，等待只会烧掉 job 预算。
+
+### 16.5 报告与平台展示
+
+- `RunResult.deliverySkips?: DeliverySkipRecord[]`（仓库集 / 失败命令 / 载体）→ 报告
+  `## Delivery Skipped` 段（无记录不渲染）。
+- `RunSummary` 新增 `deliverySkipped`（去重仓库数）、`deliverySkipIssues`（本次新建 issue 数）、
+  `deliverySkipDraftPrs`（草稿 PR 数），由 `computeSummary` 按记录幂等派生。
+- 平台：运行列表的告警列展示「交付跳过 N 个仓库」标签；运行详情（`repo-history-dialog` 的
+  结果行与 `run-detail-dialog` 元信息）另附载体计数（新建 issue / 草稿 PR）——避免把
+  「无 PR / 0 修复」误读成「扫描无告警」。旧 `summaryJson` 缺字段时按 0 处理（不渲染）。
+
+### 16.6 退出码中性（不变）
+
+`PRE_EXISTING_FAILURE` 仍在跳过类白名单内：三档都不改变 exit code。`draft` 档虽然创建了 PR，
+但该仓库的「本次引入的验证失败」判定不变（既有失败不归因），因此退出码与 `skip` 档一致。
+
+### 16.7 已知边界
+
+1. 平台执行链（`fix + commit`）只记录 summary，不创建 issue / 草稿 PR：平台交付面在
+   `platform-delivery`，与引擎 `fix-and-pr` 的载体创建不是同一路径（见 [backlog](../../plan/backlog.md)
+   的「平台侧交付载体」候选）。
+2. issue 去重只扫最近 100 条 issue；更早的同指纹 issue 不会被命中（fail-open：最多多开一条）。
+3. 人工关闭 issue 即视为已确认；后续同指纹运行不再新建（报告仍记 `deliverySkipped`）。
+4. 指纹不含错误文本：同一命令的不同根因会落在同一个 issue（人工跟踪粒度取舍，见 §16.3）。
+5. 多仓库运行时 issue 落在**首先命中的受影响仓库**（`installBlockedRepos[0]`）；草稿 PR 仍落在
+   运行级第一个仓库（与尝试标记同一约定）。
+6. **marker 可被伪造**：能写 issue 的账号贴出同 marker 可抑制本次创建（fail-open：少开一条 issue，
+   不会误删）。后续可限定 `user.type === 'Bot'`。
+7. 失败命令串原样进入 issue 正文（公开）：若 `commands` 里含 `https://user:token@registry` 这类
+   内联凭据会外泄——与 PR 正文既有口径一致（不改本批范围），配自定义命令时应走环境变量。

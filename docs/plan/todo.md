@@ -67,16 +67,22 @@
 - **交付物（实测）**：3 commits（设计 `08f0f4fc` / a `2d0c9930` / b `d10748fe`）/ 27 files / +1337 −9（a 11 files、b 18 files，含前端 i18n 与设计/计划同步）；超出条目自估 12-15 files：a/b 各含迁移、服务、用例与文档。
 - **风险与缓解**：长轮询占队列与锁 → 由 monitor 节拍驱动（不阻塞 await）；关闭 PR 不可逆 → 默认关 + 审计 + 二次确认文案。
 
-### M51.4 [P1 🎨] 基线红 / 安装失败的交付降级（台账 ④）
+### M51.4 [P1 🎨] 基线红 / 安装失败的交付降级（台账 ④）（**已闭环**）
 
 - **目标**：交付被跳过时给出可跟踪载体（issue / draft PR / 仅报告三档），默认行为不变；用户不再只剩日志。
-- **范围**：`packages/engine/src/app/skipped-delivery.ts`（跳过路径分支）、`github/pr-creator.ts`（issue 创建与去重查询）、配置键 `DEPENDFIX_ON_BASELINE_RED=skip|issue|draft`（默认 `skip`）、`apps/platform/server`（summary 字段 / run 标记 / 列表与详情展示）、报告条目。
-- **设计先行**：`pr-delivery-closure.md` 增量段（去重键、标题与正文、标签、退出码中性说明）。
-- **验收标准**：① 默认 `skip` 与现状逐字一致；② `issue` 模式同一失败指纹只开一次（关闭后不重开）；③ `draft` 模式创建 draft PR 并标记；④ 平台 run 列表 / 详情显示「交付跳过」而非「0 告警」；⑤ 退出码保持中性（`PRE_EXISTING_FAILURE` 仍在跳过类白名单）。
-- **不做什么**：不改 `PRE_EXISTING_FAILURE` 归因语义；不动安装失败判据与回滚链。
-- **依赖**：M51.1（正文需要 per-alert 结果与收敛明细）。
-- **交付物**：2 commits / 8-10 files / 300-400 行（预估）；文档：`pr-delivery-closure.md` 增量段 + `configuration.md` 配置键行。
-- **风险与缓解**：issue 噪声 → 失败指纹去重 + 关闭后冷却；权限面扩大（issues 写）→ 文档标注 token scope 并复用既有权限校验。
+- **范围**：`packages/engine/src/app/skipped-delivery.ts`（跳过路径分支）、`github/delivery-issue.ts`（指纹 / issue 创建与去重查询）、配置键 `DEPENDFIX_ON_BASELINE_RED=skip|issue|draft`（默认 `skip`，Action input `on-baseline-red`）、core 契约与报告段、`apps/platform`（summary 字段 / 运行列表与详情展示）。
+- **设计先行**：`pr-delivery-closure.md` §16 增量段（三档语义、失败指纹、issue 标题 / 正文 / 标签、草稿 PR 标记、平台展示、退出码中性、已知边界）+ §10 / §11 契约与降级矩阵同步。
+- **验收标准（实测）**：
+  - ① 默认 `skip` 与现状一致：同一 warn 文案、同一 `PRE_EXISTING_FAILURE` 条目、同一回滚，且不发 issue / PR 请求（`delivery-skip.test.ts` 断言 issues 端点未被调用）。
+  - ② `issue` 同一失败指纹只开一次：`state: 'all'` 最近 100 条 issue/PR 条目按正文 marker 命中即复用（含已关闭），集成用例 + 单测双覆盖。
+  - ③ `draft` 创建草稿 PR：`pulls.create` 带 `draft: true`、正文含「草稿交付」警告区、`--wait-pr-checks` 不等待。
+  - ④ 平台列表 / 详情显示「交付跳过 N 个仓库」（详情另附载体计数）：e2e `scans.e2e.test.ts` case 9 覆盖。
+  - ⑤ 退出码中性：三档 `exitCode === 0` 断言，`PRE_EXISTING_FAILURE` 仍在跳过类白名单。
+- **不做什么**：不改 `PRE_EXISTING_FAILURE` 归因语义；不动安装失败判据与回滚链；平台执行链不创建载体（只记录 + 展示）。
+- **依赖（实际口径）**：不依赖 M51.1——issue 正文用「仓库集 + 失败命令集」，不消费 per-alert 结果与收敛明细（原估依赖未使用）。
+- **交付物（实测）**：7 commits（`13137749` 纯搬迁 / `aa900622` core 契约与报告 / `2cfa1c11` 配置项 / `768cc86a` 草稿 PR API / `e0da9cb1` 记录与载体 / `6967731d` 平台展示 / 本收口）/ 36 files / +1610 −127；超出条目自估 2 commits / 8-10 files / 300-400 行（实际 ≈4 倍）：按原子边界拆分（搬迁 / core / 配置 / 草稿 API / 交付编排 / 平台 / 文档）。
+- **风险与缓解**：issue 噪声 → 失败指纹去重 + 关闭后不重开（100 条窗口，fail-open）；权限面扩大（issues 写）→ §16.3 与 `security.md §5.4` 标注 token scope；marker 可伪造 / 命令串可能带凭据 → §16.7 登记边界。
+- **审计**：R1 两分区均 Reject（A：diff 规模无拆分计划 + 7 warning；B：可见 UI 缺 V3 证据 + 5 warning）→ 收口：6 commit 拆分、issue 落点改「首先命中的受影响仓库」、报告载体文案不再谎报「本 PR」、补 3 例边界（载体失败 / dry-run / 空仓库）与三档 exitCode 断言、Action input、fixtures 放行新字段 + e2e case 9、文档 §10/§11 同步与边界登记 → R2 quick 复审。
 
 ### M51.5 [P1 🛠️] 运行级取消面收口 + 单仓剩余预算（台账 ⑤+⑥，拆 a/b）
 

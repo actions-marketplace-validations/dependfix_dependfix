@@ -54,9 +54,10 @@
 
 ### 候选评估中（待评估 / 本阶段延后项）
 
-> **候选池概览（2026-10-30 实测）**：本区 55 项（2026-10-30 上收 M51 九项后实测；含 M50.2 / M50.3 复审衍生候选 + 2026-10-29 批量运行超时复盘派生 4 项 + 2026-10-30 用户实测派生 2 项（PR 正文 `From` 恒空、扫描页排序与时间区间）；另 1 项设计定稿后按用户裁定转入 §延期 / 暂缓项）；P 标签覆盖不全（未标注者评估时补 P 标签，不默认升级）；本文件不维护分档统计，1.0 分档只见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)；未标注候选评估时补 P 标签，不默认升级。
+> **候选池概览（2026-10-30 实测）**：本区 56 项（2026-10-30 上收 M51 九项后实测；含 M50.2 / M50.3 复审衍生候选 + 2026-10-29 批量运行超时复盘派生 4 项 + 2026-10-30 用户实测派生 2 项（PR 正文 `From` 恒空、扫描页排序与时间区间）；另 1 项设计定稿后按用户裁定转入 §延期 / 暂缓项）；P 标签覆盖不全（未标注者评估时补 P 标签，不默认升级）；本文件不维护分档统计，1.0 分档只见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)；未标注候选评估时补 P 标签，不默认升级。
 > **1.0 门槛与分档**：P0 23 / P1 8 / 1.0 后 15 的分档、门槛判定与批次计划见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)；本区候选在未上收前保持候选状态，上收后按批次从本表移除。
 
+- **平台侧交付载体（issue / 草稿 PR，P2 🎨）** —— 引擎 `fix-and-pr` 已按基线红档位产出载体（issue / 草稿 PR），平台执行链（`fix + commit` + `platform-delivery`）目前只记录 `summary.deliverySkipped*` 并在运行列表 / 详情展示；待评估：平台在交付决策处复用同一失败指纹开 issue / 创建草稿 PR，并补仓库级配置写入面（当前仅 env `DEPENDFIX_ON_BASELINE_RED`，UI / API 不暴露）。触发：平台用户反馈「基线红只有标签、没有可跟踪载体」时。口径见 [pr-delivery-closure.md §16.7](../design/governance/pr-delivery-closure.md#167-已知边界)。
 - **pr-checks 页归因标签的渲染验证**（M48.6 W-A1）—— 归因标签的 `v-if` / 色调 / 文案由纯函数单测与 e2e fixture 字段覆盖，但无视觉基线用例；触发：下次修改 pr-checks 页或重建视觉基线时顺带补一条带 `attribution` 的失败信号。
 - **`en-US` 配置指南存量漂移**（M48.3 / M48.5 / M48.6 共同边界）—— 英文版缺 `retryFailed` / `waitPrChecks` / `closeFailedPr` / 预算键等行（16 行存量漂移）；触发：下次配置键变更批次或 i18n 同步批次。
 - **镜像脚本只覆盖根 scripts 单一形态**（M48.2 边界）—— `pnpm --filter` / 递归 / env 前缀 / corepack 钉定只披露不执行；触发：目标仓库 CI 大量使用这些形态导致「本地假绿」再现。
