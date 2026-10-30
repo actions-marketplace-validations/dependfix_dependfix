@@ -70,6 +70,20 @@ export async function enforceVerificationGate(
     }
 
     const { logger, workDir, allErrors } = ctx
+
+    // 预算跳过的终验（`verificationSkipped`）不得折叠成「验证通过」，也不等同「验证失败」：
+    // 不交付（保守，未经完整验证的改动不上抛），但**不回滚**（保留已通过单元供人工复核），
+    // 且不写 `VERIFICATION_FAILED`（`BUDGET_EXHAUSTED` 已由验证入口记录）
+    const budgetOnly = failedRepos.every((repo) => (
+        ctx.repoResults.find((result) => result.repository === repo)?.verificationSkipped === 'budget'
+    ))
+    if (budgetOnly) {
+        logger.warn(
+            `Verification skipped by run budget for: ${failedRepos.join(', ')} — delivery skipped `
+            + '(worktree preserved; no changes were rolled back)',
+        )
+        return true
+    }
     const actionLabel = options.action === 'pr' ? 'PR creation' : 'local commit'
     const repoList = failedRepos.join(', ')
     logger.error(`Verification failed for: ${repoList} — skipping ${actionLabel}`)
@@ -102,7 +116,7 @@ export async function enforceVerificationGate(
     } catch (error: unknown) {
         // 运行级取消期间回滚被前置守卫拦下（未产生子进程）：工作区交由调用方清理（平台删运行目录 /
         // CLI 用户自行处理），不记 ROLLBACK_FAILED 以免把「主动取消」渲染成回滚故障
-        if (error instanceof GitCommandError && error.aborted) {
+        if (error instanceof GitCommandError && error.aborted && !error.started) {
             logger.warn('Run aborted before rollback started — worktree left as-is (caller cleans up)')
             return true
         }

@@ -68,6 +68,8 @@ export interface RepoFixProgress {
     verificationPassed: boolean | undefined
     /** 是否存在本次改动引入的验证失败（决定交付回滚；见 RepositoryResult.verificationBlocking） */
     verificationBlocking: boolean | undefined
+    /** 主动跳过验证的原因（运行预算不足；见 RepositoryResult.verificationSkipped） */
+    verificationSkipped?: 'budget'
     defaultBranch: string
 }
 
@@ -184,6 +186,7 @@ export async function processRepoFix(
         lockfileRepaired: progress.lockfileRepaired,
         verificationPassed: progress.verificationPassed,
         verificationBlocking: progress.verificationBlocking,
+        verificationSkipped: progress.verificationSkipped,
         durationMs: Date.now() - startTime,
     })
 }
@@ -445,6 +448,10 @@ async function applyLockfileFixes(
         : { applied: false }
     const itemsToRetry = batchOutcome.applied || batchOutcome.skipSequential ? [] : batchItems
 
+    if (batchOutcome.budgetStop) {
+        stopReason = 'budget'
+        return { singleVersionAlerts, stopReason }
+    }
     if (batchOutcome.skipSequential) {
         stopReason = isAbortRequested() ? 'aborted' : 'environmental'
         return { singleVersionAlerts, stopReason }
@@ -591,6 +598,10 @@ async function applyGroupUpgrades(
         let environmentalStop = false
 
         for (const packageName of group.packages) {
+            if (!budgetAllows(ctx, { repository: repo, stage: 'fix', work: `package upgrade (group "${group.name}")` })) {
+                // 预算不足：不再启动新安装，交给组级校验 / 收尾（不回滚已应用的单元）
+                break
+            }
             const alert = alertByPackage.get(packageName)
             if (!alert) {
                 continue

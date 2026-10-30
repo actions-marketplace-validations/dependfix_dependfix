@@ -75,7 +75,14 @@ export const recordVerificationCheckpoint = async (
             return undefined
         }
         let id = stash.stdout.trim()
-        if (!id && stash.code === 0) {
+        if (!id && stash.code !== 0) {
+            ctx.logger.warn(
+                `[rollback] failed to create verification checkpoint for ${repo} (${label}): `
+                + `git stash create exited with code ${stash.code}${stash.stderr.trim() ? ` — ${stash.stderr.trim().slice(-200)}` : ''}`,
+            )
+            return undefined
+        }
+        if (!id) {
             // 工作区干净时 stash create 返回空串：用 HEAD 作为 checkpoint（回退首个单元时即回到基线）
             id = (await runGitOrThrow(['rev-parse', 'HEAD'], {
                 cwd: ctx.workDir,

@@ -219,6 +219,51 @@ describe('enforceVerificationGate', () => {
 })
 
 // ---------------------------------------------------------------------------
+// 预算跳过终验：不交付但也不回滚（保留已通过单元）
+// ---------------------------------------------------------------------------
+
+describe('enforceVerificationGate — 预算跳过', () => {
+    let workDir: string
+
+    beforeEach(() => {
+        workDir = mkdtempSync(join(tmpdir(), 'dependfix-budget-gate-'))
+        execSync('git init -q', { cwd: workDir })
+        execSync('git config user.name test', { cwd: workDir })
+        execSync('git config user.email test@test', { cwd: workDir })
+        writeFileSync(join(workDir, 'package.json'), '{"version":"1.0.0"}\n')
+        execSync('git add . && git commit -qm init', { cwd: workDir })
+        writeFileSync(join(workDir, 'package.json'), '{"version":"2.0.0"}\n')
+    })
+
+    afterEach(() => {
+        rmSync(workDir, { recursive: true, force: true })
+    })
+
+    it('只含预算跳过的仓库 → 中止交付、不回滚、不记 VERIFICATION_FAILED', async () => {
+        const ctx = {
+            logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+            workDir,
+            allErrors: [] as FixError[],
+            repoResults: [{
+                repository: 'foo/a',
+                verificationPassed: undefined,
+                verificationBlocking: true,
+                verificationSkipped: 'budget' as const,
+            }],
+        }
+
+        const blocked = await enforceVerificationGate(ctx as never, { preExistingDirty: false, action: 'pr' })
+
+        expect(blocked).toBe(true)
+        expect(ctx.logger.warn).toHaveBeenCalledWith(expect.stringContaining('Verification skipped by run budget'))
+        // 未验证不等于验证失败：不写 VERIFICATION_FAILED
+        expect(ctx.allErrors).toEqual([])
+        // 工作区保留（未回滚）：修复改动仍在
+        expect(execSync('git status --porcelain package.json', { cwd: workDir, encoding: 'utf-8' }).trim()).not.toBe('')
+    })
+})
+
+// ---------------------------------------------------------------------------
 // 取消态下的回滚（回滚期取消语义）
 // ---------------------------------------------------------------------------
 

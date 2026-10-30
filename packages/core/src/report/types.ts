@@ -153,6 +153,14 @@ export interface RepositoryResult {
      * 「链路未全绿，但失败均为既有基线，未归因本次改动」。
      */
     verificationBlocking?: boolean
+    /**
+     * 验证被**主动跳过**的原因（当前只有运行预算不足）。
+     *
+     * 与 `verificationPassed === undefined` 的分工：后者是「未验证」（dry-run / 未走修复链），
+     * 本字段显式说明「验证本应运行，但预算不足被跳过」——门禁据此**不交付**（保守），
+     * 且不得把该仓库渲染成「验证通过」。
+     */
+    verificationSkipped?: 'budget'
     durationMs: number
 }
 

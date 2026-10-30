@@ -67,7 +67,7 @@ export async function rollbackForSkippedDelivery(args: SkippedDeliveryRollbackAr
         logger.info(`Changes rolled back (delivery skipped: ${reason})`)
     } catch (error: unknown) {
         // 取消态下不启动回滚子进程：工作区交由调用方清理（与验证门禁同口径）
-        if (error instanceof GitCommandError && error.aborted) {
+        if (error instanceof GitCommandError && error.aborted && !error.started) {
             logger.warn(`Rollback skipped (run aborted before it started): ${reason}`)
             return
         }

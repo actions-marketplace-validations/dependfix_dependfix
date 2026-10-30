@@ -65,17 +65,20 @@ describe('verifyProject', () => {
         }
     }
 
-    it('剩余预算不足 → 不执行验证链，写一条 BUDGET_EXHAUSTED（不归因本次改动）', async () => {
+    it('剩余预算不足 → 不执行验证链、回调 onSkip、写一条 BUDGET_EXHAUSTED（不归因本次改动）', async () => {
         const ctx = {
             ...makeVerifyCtx(),
             deadlineAt: Date.now() - 1,
             budgetSkips: new Set<string>(),
         }
-        const actions = await verifyProject(ctx as never, 'foo/bar')
+        const onSkip = vi.fn()
+        const actions = await verifyProject(ctx as never, 'foo/bar', { onSkip })
 
         expect(actions).toEqual([])
         expect(verificationRunnerMock.runVerification).not.toHaveBeenCalled()
         expect(ctx.allErrors.map((error) => error.category)).toEqual(['BUDGET_EXHAUSTED'])
+        // 空 actions 不能被调用方折叠成「验证通过」：跳过必须显式回调
+        expect(onSkip).toHaveBeenCalledWith('budget')
     })
 
     it('replaces install command with corepack when toolchain version is set', async () => {

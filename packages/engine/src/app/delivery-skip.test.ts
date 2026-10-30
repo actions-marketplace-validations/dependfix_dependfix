@@ -178,16 +178,22 @@ describe('DependfixApp baseline-red delivery degradation', () => {
             .reply(200, { default_branch: 'master' })
     }
 
-    function runFixAndPr(env: Record<string, string> = {}): Promise<Awaited<ReturnType<DependfixApp['run']>>> {
-        const config = resolveRuntimeConfig({
-            env: {
-                GITHUB_TOKEN: 'token',
-                DEPENDFIX_MODE: 'fix-and-pr',
-                DEPENDFIX_REPOSITORIES: 'foo/bar',
-                ...env,
-            },
-            cliOverrides: { commands: ['pnpm lint'] },
-        })
+    function runFixAndPr(
+        env: Record<string, string> = {},
+        configPatch: Record<string, unknown> = {},
+    ): Promise<Awaited<ReturnType<DependfixApp['run']>>> {
+        const config = {
+            ...resolveRuntimeConfig({
+                env: {
+                    GITHUB_TOKEN: 'token',
+                    DEPENDFIX_MODE: 'fix-and-pr',
+                    DEPENDFIX_REPOSITORIES: 'foo/bar',
+                    ...env,
+                },
+                cliOverrides: { commands: ['pnpm lint'] },
+            }),
+            ...configPatch,
+        }
         const app = new DependfixApp({ config, workDir, reportOutputDir: join(workDir, 'reports'), commands: ['pnpm lint'] })
         return app.run()
     }
@@ -195,6 +201,19 @@ describe('DependfixApp baseline-red delivery degradation', () => {
     /** 修复改动是否留在工作区（跳过时回滚 / 草稿时提交；`.gitignore` 与报告目录属运行副产物，不参与断言）。 */
     const lockfileDirty = () => execSync('git status --porcelain pnpm-lock.yaml', { cwd: workDir }).toString().trim() !== ''
     const commitCount = () => Number(execSync('git rev-list --count HEAD', { cwd: workDir }).toString().trim())
+
+    it('预算耗尽（deadlineAt 已过）：不跑验证 / 不交付，写 BUDGET_EXHAUSTED（config → ctx 接线）', async () => {
+        nockRepository()
+        const { result, exitCode } = await runFixAndPr({}, { deadlineAt: Date.now() - 1 })
+
+        // 预算跳过属跳过类：exit code 保持中性
+        expect(exitCode).toBe(0)
+        expect(mockCreatePullRequest).not.toHaveBeenCalled()
+        expect(result.errors.some((error) => error.category === 'BUDGET_EXHAUSTED')).toBe(true)
+        const repoResult = result.repositories[0]
+        expect(repoResult?.verificationSkipped).toBe('budget')
+        expect(repoResult?.verificationPassed).toBeUndefined()
+    }, 30_000)
 
     it('默认 skip：记录交付跳过 + 回滚，不建 PR / issue', async () => {
         nockRepository()

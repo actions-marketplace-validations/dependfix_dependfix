@@ -58,6 +58,10 @@ describe('recordBudgetExhausted', () => {
 
         recordBudgetExhausted(target, { repository: 'foo/bar', stage: 'verify', work: 'post-fix verification' })
         expect(target.allErrors).toHaveLength(2)
+
+        // 多仓运行：不同仓库各自留痕（去重键含 repository）
+        recordBudgetExhausted(target, { repository: 'foo/baz', stage: 'fix', work: 'package upgrade lodash' })
+        expect(target.allErrors).toHaveLength(3)
     })
 })
 

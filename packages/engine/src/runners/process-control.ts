@@ -22,6 +22,7 @@
 // 边界：本模块只做状态与进程控制，不感知业务语义；**不在 engine 公共出口 re-export**
 // （内部实现，不扩大公开 API，口径同 `runners/verification-gate.ts`）。
 import { spawn, spawnSync } from 'node:child_process'
+import { StringDecoder } from 'node:string_decoder'
 
 /** 单流捕获上限（与 `execSync` 默认 `maxBuffer` 同量级）：超限后继续 drain 但不再累积。 */
 const MAX_STREAM_CAPTURE_BYTES = 1024 * 1024
@@ -160,6 +161,13 @@ export interface TrackedCommandResult {
     aborted: boolean
     /** spawn 级 errno（如 `ENOENT`——工具链缺失）；无时为 null */
     errno: string | null
+    /**
+     * 捕获是否触顶（超过 {@link MAX_STREAM_CAPTURE_BYTES} 后只 drain 不累积）。
+     *
+     * 与旧 `execSync` 的 `ENOBUFS` 抛错不同：超限不抛错，但调用方必须能看出输出不完整
+     * （否则会把截断的输出当成完整结果）。
+     */
+    outputTruncated?: boolean
     stdout: string
     stderr: string
     durationMs: number
@@ -220,8 +228,12 @@ export function runTrackedCommand(params: TrackedCommandParams): Promise<Tracked
         let timedOut = false
         const stdoutChunks: string[] = []
         const stderrChunks: string[] = []
+        // StringDecoder：按完整字符解码，避免多字节字符（中文路径 / 输出）在 chunk 边界被切断
+        const stdoutDecoder = new StringDecoder('utf-8')
+        const stderrDecoder = new StringDecoder('utf-8')
         let stdoutBytes = 0
         let stderrBytes = 0
+        let outputTruncated = false
 
         const cp = spawn(params.binary, params.args, {
             cwd: params.cwd,
@@ -261,6 +273,11 @@ export function runTrackedCommand(params: TrackedCommandParams): Promise<Tracked
                 clearTimeout(closeGraceTimer)
             }
             untrackChildProcess(cp.pid)
+            // 冲刷解码器残留（不足一个字符的字节不丢弃）
+            if (!outputTruncated) {
+                stdoutChunks.push(stdoutDecoder.end())
+                stderrChunks.push(stderrDecoder.end())
+            }
             resolve({
                 started: true,
                 exitCode: result.exitCode,
@@ -271,6 +288,7 @@ export function runTrackedCommand(params: TrackedCommandParams): Promise<Tracked
                 errno: result.errno ?? null,
                 stdout: stdoutChunks.join(''),
                 stderr: stderrChunks.join(''),
+                ...(outputTruncated ? { outputTruncated: true } : {}),
                 durationMs: Date.now() - startedAt,
             })
         }
@@ -299,19 +317,28 @@ export function runTrackedCommand(params: TrackedCommandParams): Promise<Tracked
             }, STREAM_CLOSE_GRACE_MS)
         }
 
-        const capture = (chunks: string[], bytes: number, data: Buffer): number => {
+        const capture = (
+            decoder: StringDecoder,
+            chunks: string[],
+            bytes: number,
+            data: Buffer,
+        ): number => {
             const next = bytes + data.byteLength
             if (bytes < MAX_STREAM_CAPTURE_BYTES) {
-                chunks.push(data.toString('utf-8'))
+                chunks.push(decoder.write(data))
+            } else if (!outputTruncated) {
+                outputTruncated = true
+                // 触顶后丢弃解码器残留，避免后续 write 继续累积
+                decoder.end()
             }
             return next
         }
 
         cp.stdout?.on('data', (data: Buffer) => {
-            stdoutBytes = capture(stdoutChunks, stdoutBytes, data)
+            stdoutBytes = capture(stdoutDecoder, stdoutChunks, stdoutBytes, data)
         })
         cp.stderr?.on('data', (data: Buffer) => {
-            stderrBytes = capture(stderrChunks, stderrBytes, data)
+            stderrBytes = capture(stderrDecoder, stderrChunks, stderrBytes, data)
         })
 
         cp.on('error', (err: NodeJS.ErrnoException) => {

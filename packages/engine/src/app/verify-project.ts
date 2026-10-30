@@ -234,6 +234,13 @@ export interface VerifyProjectOptions {
      * 不影响验证结论、exit code 与交付判定。
      */
     ciAlignment?: CiAlignmentContext
+    /**
+     * 验证被主动跳过时回调（当前只有运行预算不足）。
+     *
+     * 调用方据此把「未验证」与「验证通过」区分开：空 `actions` 既可能表示「无命令」也可能
+     * 表示「跳过」，**不能**用 `every(...)` 折叠成通过。
+     */
+    onSkip?: (reason: 'budget') => void
 }
 
 /** CI 口径比对所需的最小上下文（GitHub 源之外的运行 client 为 null）。 */
@@ -370,6 +377,7 @@ export async function verifyProject(
     }
 
     if (!budgetAllows(ctx, { repository: repo, stage: 'verify', work: 'post-fix verification' })) {
+        options.onSkip?.('budget')
         return []
     }
 

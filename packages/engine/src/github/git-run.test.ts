@@ -31,6 +31,17 @@ describe('runGit', () => {
         expect(result.aborted).toBe(false)
     })
 
+    it('参数按 argv 传递（不经 shell 拼接）：含空格 / 括号的值原样写入', async () => {
+        await runGitOrThrow(['init', '-q'], { cwd: dir, what: 'init repo' })
+        // shell:true 时 `(c)` 会被 shell 解释为子 shell（POSIX）或被 cmd 拆词（Windows）
+        await runGitOrThrow(['config', '--local', 'dependfix.probe', 'a b (c)'], { cwd: dir, what: 'write config' })
+        const value = await runGitOrThrow(['config', '--local', '--get', 'dependfix.probe'], {
+            cwd: dir,
+            what: 'read config',
+        })
+        expect(value.trim()).toBe('a b (c)')
+    })
+
     it('非 0 退出只经返回值暴露（runGit 不抛错）', async () => {
         const result = await runGit(['rev-parse', '--verify', 'no-such-ref'], { cwd: dir })
         expect(result.code).not.toBe(0)
@@ -105,6 +116,7 @@ describe('runGitOrThrow', () => {
         expect(gitError.message).toContain('exit code 128')
         expect(gitError.args[0]).toBe('rev-parse')
         expect(gitError.code).toBe(128)
+        expect(gitError.started).toBe(true)
         expect(gitError.timedOut).toBe(false)
     })
 

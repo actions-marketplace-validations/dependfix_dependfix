@@ -26,7 +26,7 @@ export interface BudgetTarget {
     deadlineAt?: number
     logger: Pick<Logger, 'info' | 'warn'>
     allErrors: FixError[]
-    /** 已记录的预算跳过（`stage:work`），避免同一跳过来回刷审计 */
+    /** 已记录的预算跳过（`repository:stage:work`），避免同一跳过来回刷审计 */
     budgetSkips?: Set<string>
 }
 
@@ -48,13 +48,14 @@ export function hasBudgetForNextStep(deadlineAt?: number, now = Date.now()): boo
  * 记录一次「预算不足 → 跳过启动新工作」。
  *
  * 审计条目进入 `allErrors`（报告 Errors 表可见），但 `BUDGET_EXHAUSTED` 在跳过类白名单内，
- * 不影响 exit code / 仓库成功判定。同一 `stage:work` 只记一次（循环里逐包命中不刷屏）。
+ * 不影响 exit code / 仓库成功判定。同一 `repository:stage:work` 只记一次（循环里逐包命中不刷屏；
+ * 多仓运行时每个仓库各自留痕）。
  */
 export function recordBudgetExhausted(
     target: BudgetTarget,
     input: { repository: string, stage: FixError['stage'], work: string },
 ): void {
-    const key = `${input.stage}:${input.work}`
+    const key = `${input.repository}:${input.stage}:${input.work}`
     const seen = target.budgetSkips
     if (seen?.has(key)) {
         return
@@ -78,7 +79,8 @@ export function recordBudgetExhausted(
 /**
  * 预算检查 + 留痕的组合入口：返回 `false` 表示调用方应停止启动新工作。
  *
- * 典型用法（每包 / 每组 / 每次验证前）：`if (!budgetAllows(ctx, repo, 'fix', 'package upgrade')) break`。
+ * 典型用法（每包 / 每组 / 每次验证前）：
+ * `if (!budgetAllows(ctx, { repository: repo, stage: 'fix', work: 'package upgrade' })) break`。
  */
 export function budgetAllows(
     target: BudgetTarget,

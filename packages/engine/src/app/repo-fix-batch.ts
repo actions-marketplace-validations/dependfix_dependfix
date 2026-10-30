@@ -15,6 +15,7 @@ import { applyVersionedOverridesBatch, type VersionedOverridesPlan } from '../fi
 import { quickVerifyProject, restoreTrackedFiles, snapshotTrackedFiles } from '../helpers'
 import { getAbortReason, isAbortRequested } from '../runners/process-control'
 import type { RepoFixCtx, RepoFixProgress } from './repo-fix'
+import { budgetAllows } from './budget'
 import { recordVerificationCheckpoint } from './verification-checkpoint'
 
 /** 合批条目（一个包一条；`targets` 用于动作的 `toVersion` 展示，与逐包路径同口径）。 */
@@ -32,6 +33,8 @@ export interface VersionedOverrideBatchOutcome {
     skipSequential?: boolean
     /** 失败原因（供日志 / 审计条目复用） */
     reason?: string
+    /** 运行预算不足：调用方应停止本仓库剩余安装尝试（不重试、不停机判定） */
+    budgetStop?: boolean
 }
 
 /**
@@ -47,6 +50,9 @@ export async function tryBatchVersionedOverrides(
     progress: RepoFixProgress,
     items: VersionedOverrideBatchItem[],
 ): Promise<VersionedOverrideBatchOutcome> {
+    if (!budgetAllows(ctx, { repository: repo, stage: 'fix', work: `batched versioned overrides (${items.length} packages)` })) {
+        return { applied: false, budgetStop: true, reason: 'run budget exhausted' }
+    }
     const snapshot = snapshotTrackedFiles(ctx.workDir)
     const packages = items.map((item) => item.alert.packageName)
     await recordVerificationCheckpoint(ctx, repo, progress, `versioned-override-batch:${packages.join(',')}`)

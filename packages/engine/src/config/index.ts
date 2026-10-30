@@ -128,7 +128,8 @@ export interface RuntimeConfig {
      */
     allowMajorUpgrade: boolean
     /**
-     * 验证失败回滚粒度：`unit`（默认）回退最近一个已通过 probe 的变更单元并重验一次；`repo` 保持整仓回滚。
+     * 验证失败回滚粒度：`unit`（默认）回退最近一个已通过 probe 的变更单元并重验一次；
+     * `repo` 保持既有整仓 `git reset --hard` 逃生语义。
      */
     rollbackGranularity?: RollbackGranularity
     /**

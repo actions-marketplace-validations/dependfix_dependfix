@@ -122,6 +122,24 @@ describe('runTrackedCommand', () => {
         expect(trackedChildProcessCount()).toBe(0)
     })
 
+    it('多字节字符跨 chunk 边界不被切断（StringDecoder）', async () => {
+        // 「中」的 UTF-8 编码是 3 字节：分两次 write（前 2 字节 + 后 1 字节）——
+        // 按 chunk 直接 toString 会乱码，StringDecoder 才能拼回完整字符
+        const script = [
+            'process.stdout.write(Buffer.from([0xE4, 0xB8]))',
+            'setTimeout(() => { process.stdout.write(Buffer.from([0xAD])) }, 50)',
+        ].join(';')
+        const result = await runTrackedCommand({
+            binary: process.execPath,
+            args: ['-e', script],
+            cwd: process.cwd(),
+            timeoutMs: 30_000,
+        })
+
+        expect(result.exitCode).toBe(0)
+        expect(result.stdout).toBe('中')
+    })
+
     it('非零退出不抛错（结果形态暴露退出码与 stderr）', async () => {
         const result = await runTrackedCommand({
             binary: process.execPath,

@@ -13,6 +13,11 @@
 // 边界：仓库**状态查询**（`git rev-parse` / `git diff --quiet`）仍是短命令，留在
 // `app/helpers.ts` 的同步实现（口径见 executor-process-isolation §8.5）；本模块只覆盖
 // 交付与回滚路径上的 git 命令。
+//
+// Windows 口径：`shell` 必须显式关闭。`runTrackedCommand` 对 `.cmd` 包裹（pnpm / npx）默认走
+// shell，但 git 在 Windows 上是 `git.exe`，**不需要** shell；`shell: true` 会让 Node 只按空格
+// 拼接 argv（不引号化），提交信息 / `:(literal)` 路径里的空格与括号会被 cmd 拆开（交付链失败），
+// 并形成命令注入面。
 import { runTrackedCommand } from '../runners/process-control'
 
 /** 交付类 git 命令的默认上限（弱网 push 的主要风险面；本地命令通常毫秒级结束）。 */
@@ -83,6 +88,8 @@ export class GitCommandError extends Error {
     readonly code: number | null
     readonly timedOut: boolean
     readonly aborted: boolean
+    /** 是否真正启动过子进程（`false` = 取消前置守卫拦下） */
+    readonly started: boolean
     readonly stderr: string
 
     constructor(params: {
@@ -91,6 +98,7 @@ export class GitCommandError extends Error {
         code: number | null
         timedOut: boolean
         aborted: boolean
+        started: boolean
         stderr: string
     }) {
         const detail = describeFailure(params)
@@ -101,6 +109,7 @@ export class GitCommandError extends Error {
         this.code = params.code
         this.timedOut = params.timedOut
         this.aborted = params.aborted
+        this.started = params.started
         this.stderr = params.stderr
     }
 }
@@ -112,6 +121,8 @@ export async function runGit(args: readonly string[], options: RunGitOptions): P
         args: [...args],
         cwd: options.cwd,
         timeoutMs: options.timeoutMs ?? GIT_COMMAND_TIMEOUT_MS,
+        // argv 按数组直接传给 git.exe：不经 shell 拼接（Windows 上的引号化由 libuv 负责）
+        shell: false,
         ...(options.env ? { env: options.env } : {}),
     })
     return {
@@ -144,6 +155,7 @@ export async function runGitOrThrow(
             code: result.code,
             timedOut: result.timedOut,
             aborted: result.aborted || !result.started,
+            started: result.started,
             stderr: result.stderr,
         })
     }

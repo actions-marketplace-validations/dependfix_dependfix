@@ -127,6 +127,7 @@ export async function finalizeRepoFix(
     const lockfileRepairChanged = progress.lockfileRepaired
 
     if (!ctx.config.dryRun) {
+        let budgetSkipped = false
         const verifyOptions = {
             baseline: currentBaseline(ctx),
             // 「无改动即豁免」：零告警仓库未采样基线（无任何写操作）——其失败一律视为既有失败，
@@ -134,13 +135,20 @@ export async function finalizeRepoFix(
             noChanges: options.exemptAttribution === true,
             // CI 口径比对上下文（只读 + 不阻断；无 GitHub client 时只做本地解析）
             ciAlignment: { client: options.client ?? null, defaultBranch: progress.defaultBranch },
+            onSkip: (reason: 'budget') => {
+                if (reason === 'budget') {
+                    budgetSkipped = true
+                }
+            },
         }
         let verifyActions = await verifyProject(ctx, repo, verifyOptions)
         let blocking = verifyActions.some((a) => !a.success && !a.preExisting)
+        // 首次终验即被预算跳过：未验证 ⇒ 不交付、不记「验证通过」
+        const firstVerificationSkipped = budgetSkipped
 
         // 终验存在本次引入失败时，默认先尝试回退最近一个已通过 probe 的单元并重验一次。
         // 通过 → 保留更早单元继续交付；仍失败 / 无 checkpoint → 原 actions 保持不变，门禁整仓回滚。
-        if (blocking && (ctx.config.rollbackGranularity ?? 'unit') === 'unit' && !options.exemptAttribution
+        if (!firstVerificationSkipped && blocking && (ctx.config.rollbackGranularity ?? 'unit') === 'unit' && !options.exemptAttribution
             && !ctx.preExistingDirty && !lockfileRepairFailed) {
             const outcome = await attemptSelectiveUnitRollback(
                 ctx,
@@ -151,7 +159,8 @@ export async function finalizeRepoFix(
                     beforeVerify: async () => {
                         // checkpoint 在 lockfile repair 之前：恢复后重做 repair，避免把「安装已合规」
                         // 这一修复一并回退导致重验假红。
-                        if (lockfileRepairChanged && progress.alertsCount > 0) {
+                        if (lockfileRepairChanged && progress.alertsCount > 0
+                            && budgetAllows(ctx, { repository: repo, stage: 'repair', work: 'lockfile repair after selective rollback' })) {
                             const repairAction = await tryLockfileRepair(ctx, repo)
                             ctx.allActions.push(repairAction)
                             if (repairAction.success && !repairAction.noOp) {
@@ -162,16 +171,28 @@ export async function finalizeRepoFix(
                 },
             )
             if (outcome.applied) {
-                verifyActions = outcome.verifyActions
-                blocking = outcome.blocking
+                if (budgetSkipped) {
+                    // 重验被预算跳过：不能宣称「保留更早单元」（一次验证都没跑）→ 退回整仓门禁
+                    blocking = true
+                } else {
+                    verifyActions = outcome.verifyActions
+                    blocking = outcome.blocking
+                }
             }
         }
 
         ctx.allActions.push(...verifyActions)
-        // 原始口径：修复后链路是否全绿（报告与「成功交付」启发式沿用）
-        progress.verificationPassed = verifyActions.every((a) => a.success)
-        // 归因口径：是否存在**本次引入**的失败（门禁据此回滚；既有失败不归因）
-        progress.verificationBlocking = blocking
+        if (firstVerificationSkipped) {
+            // 预算跳过终验：留 `undefined`（未验证）并显式标记，门禁据此不交付但也不回滚
+            progress.verificationPassed = undefined
+            progress.verificationBlocking = true
+            progress.verificationSkipped = 'budget'
+        } else {
+            // 原始口径：修复后链路是否全绿（报告与「成功交付」启发式沿用）
+            progress.verificationPassed = verifyActions.every((a) => a.success)
+            // 归因口径：是否存在**本次引入**的失败（门禁据此回滚；既有失败不归因）
+            progress.verificationBlocking = blocking
+        }
     } else {
         ctx.logger.info(`[dry-run] Skipping verification for ${repo}`)
         progress.verificationPassed = undefined

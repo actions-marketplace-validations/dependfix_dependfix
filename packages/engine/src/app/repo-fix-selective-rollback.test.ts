@@ -107,6 +107,24 @@ describe('finalizeRepoFix selective unit rollback', () => {
         expect(verifyProjectMock).toHaveBeenCalledTimes(1)
     })
 
+    it('预算跳过终验 → 留 undefined + verificationSkipped（不得记为验证通过）', async () => {
+        ctx.deadlineAt = Date.now() - 1
+        verifyProjectMock.mockImplementationOnce(async (
+            _ctx: unknown,
+            _repo: unknown,
+            options?: { onSkip?: (reason: 'budget') => void },
+        ) => {
+            options?.onSkip?.('budget')
+            return []
+        })
+
+        await finalizeRepoFix(ctx, 'foo/bar', progress)
+
+        expect(progress.verificationPassed).toBeUndefined()
+        expect(progress.verificationBlocking).toBe(true)
+        expect(progress.verificationSkipped).toBe('budget')
+    })
+
     it('reverts the latest unit and preserves the earlier verified unit when retry turns green', async () => {
         writeFileSync(join(workDir, 'package.json'), 'v2\n')
         expect(await recordVerificationCheckpoint(ctx, 'foo/bar', progress, 'unit-first')).toBeDefined()
