@@ -3,6 +3,9 @@ import type { DataTableColumn } from 'caomei-ui'
 import { Copy, Download, RefreshCw } from '@lucide/vue'
 import {
     alertsFound,
+    deliverySkipDraftPrs,
+    deliverySkipIssues,
+    deliverySkipped,
     environmentalFailureCount,
     failureKindLabel,
     failureStageLabel,
@@ -328,6 +331,18 @@ watch(() => props.runId, (runId) => {
                 <div v-if="!isRunResultMissing(detail) && unfixedAlerts(detail.summary) > 0" class="run-detail__meta-item">
                     <span class="run-detail__meta-label">{{ t('runs.unfixedAlertsLabel') }}</span>
                     <strong>{{ unfixedAlerts(detail.summary) }}</strong>
+                </div>
+                <div v-if="!isRunResultMissing(detail) && deliverySkipped(detail.summary) > 0" class="run-detail__meta-item">
+                    <span class="run-detail__meta-label">{{ t('runs.deliverySkippedLabel') }}</span>
+                    <strong :title="t('runs.deliverySkippedHint')">
+                        {{ t('runs.deliverySkipped', {count: deliverySkipped(detail.summary)}) }}
+                        <template v-if="deliverySkipIssues(detail.summary) > 0">
+                            · {{ t('runs.deliverySkipIssues', {count: deliverySkipIssues(detail.summary)}) }}
+                        </template>
+                        <template v-if="deliverySkipDraftPrs(detail.summary) > 0">
+                            · {{ t('runs.deliverySkipDraftPrs', {count: deliverySkipDraftPrs(detail.summary)}) }}
+                        </template>
+                    </strong>
                 </div>
                 <div v-if="!isRunResultMissing(detail) && environmentalFailureCount(detail) > 0" class="run-detail__meta-item">
                     <span class="run-detail__meta-label">{{ t('runs.environmentalFailuresLabel') }}</span>

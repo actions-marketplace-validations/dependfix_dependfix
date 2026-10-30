@@ -101,6 +101,10 @@ const scanRunSchema = z.object({
         alertsConverged: z.number().int().min(0).optional(),
         /** 环境性失败事件数（UI 在列缺失时回退该值） */
         environmentalFailures: z.number().int().min(0).optional(),
+        /** 交付跳过（基线红）：受影响仓库数 / 新建 issue 数 / 草稿 PR 数 */
+        deliverySkipped: z.number().int().min(0).optional(),
+        deliverySkipIssues: z.number().int().min(0).optional(),
+        deliverySkipDraftPrs: z.number().int().min(0).optional(),
         /** 跳过总数与按原因分组（结果披露） */
         alertsSkipped: z.number().int().min(0).optional(),
         alertsSkippedByReason: z.object({

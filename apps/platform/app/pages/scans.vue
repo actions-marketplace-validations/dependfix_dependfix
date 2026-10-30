@@ -21,6 +21,7 @@ import type { DataTableColumn, DataTablePageEvent, SplitButtonMenuItem } from 'c
 import {
     alertsFound,
     buildExportScopeItems,
+    deliverySkipped,
     environmentalFailureCount,
     failureKindLabel,
     failureStageLabel,
@@ -835,6 +836,14 @@ onMounted(refresh)
                                 >
                                     <CaomeiTag tone="neutral">
                                         {{ breakdownTag(row.summary) }}
+                                    </CaomeiTag>
+                                </span>
+                                <span
+                                    v-if="deliverySkipped(row.summary) > 0"
+                                    :title="t('runs.deliverySkippedHint')"
+                                >
+                                    <CaomeiTag tone="warning">
+                                        {{ t('runs.deliverySkipped', {count: deliverySkipped(row.summary)}) }}
                                     </CaomeiTag>
                                 </span>
                             </span>

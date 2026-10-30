@@ -11,7 +11,15 @@
 import type { DataTableColumn, DataTablePageEvent } from 'caomei-ui'
 import { ArrowLeft, Copy, Download, ExternalLink, Eye } from '@lucide/vue'
 import { scanSeverityLabel } from '~/utils/scan-options'
-import { alertsFound, environmentalFailureCount, isRunResultMissing, unfixedAlerts } from '~/utils/run-view'
+import {
+    alertsFound,
+    deliverySkipDraftPrs,
+    deliverySkipIssues,
+    deliverySkipped,
+    environmentalFailureCount,
+    isRunResultMissing,
+    unfixedAlerts,
+} from '~/utils/run-view'
 import { downloadFile } from '~/utils/download'
 
 const props = withDefaults(defineProps<{
@@ -399,6 +407,20 @@ watch(() => route.query[props.queryKey], async (newVal) => {
                     >
                         <CaomeiTag tone="warning">
                             {{ t('runs.unfixedAlerts', {count: unfixedAlerts(detail.summary ?? null)}) }}
+                        </CaomeiTag>
+                    </span>
+                    <span
+                        v-if="deliverySkipped(detail.summary ?? null) > 0"
+                        :title="t('runs.deliverySkippedHint')"
+                    >
+                        <CaomeiTag tone="warning">
+                            {{ t('runs.deliverySkipped', {count: deliverySkipped(detail.summary ?? null)}) }}
+                            <template v-if="deliverySkipIssues(detail.summary ?? null) > 0">
+                                · {{ t('runs.deliverySkipIssues', {count: deliverySkipIssues(detail.summary ?? null)}) }}
+                            </template>
+                            <template v-if="deliverySkipDraftPrs(detail.summary ?? null) > 0">
+                                · {{ t('runs.deliverySkipDraftPrs', {count: deliverySkipDraftPrs(detail.summary ?? null)}) }}
+                            </template>
                         </CaomeiTag>
                     </span>
                 </template>

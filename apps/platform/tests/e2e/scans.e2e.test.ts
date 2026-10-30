@@ -388,6 +388,55 @@ test('case 8: /scans 结果可信度 — 未修复 / 环境性失败 / 退出码
 })
 
 /**
+ * 交付跳过（基线红）：`summary.deliverySkipped*` > 0 时列表与详情都要显示「交付跳过」，
+ * 而不是让「有修复但未交付」被读成「没有告警」。
+ */
+test('case 9: /scans 展示交付跳过（列表 + 详情 + 载体计数）', async ({ page }) => {
+    const stamp = Date.now()
+    const owner = `e2e-scans-delivery-${stamp}`
+    const name = `app-${stamp}`
+    const created = await page.request.post('/api/e2e/fixtures', {
+        data: {
+            repos: [{ owner, name }],
+            scanRuns: [{
+                repositoryOwner: owner,
+                repositoryName: name,
+                status: 'completed',
+                mode: 'fix-and-pr',
+                summary: {
+                    alertsFound: 2,
+                    alertsFixed: 2,
+                    alertsUnfixed: 0,
+                    deliverySkipped: 2,
+                    deliverySkipIssues: 1,
+                    deliverySkipDraftPrs: 1,
+                },
+                exitCode: 0,
+            }],
+        },
+    })
+    expect(created.status()).toBe(200)
+    const { scanRuns } = await created.json() as { scanRuns: { id: string, repositoryId: string }[] }
+    const runId = scanRuns[0]!.id
+    const repositoryId = scanRuns[0]!.repositoryId
+
+    await page.goto(`/scans?repository=${repositoryId}`)
+    await waitForHydration(page)
+    const row = page.locator('.scans__run-list .caomei-data-table__row').filter({ hasText: owner })
+    await expect(row).toBeVisible({ timeout: 15000 })
+    await expect(row).toContainText('交付跳过 2 个仓库')
+
+    await page.goto(`/scans?run=${runId}`)
+    await waitForHydration(page)
+    const dialog = page.locator('.caomei-dialog__content')
+    await expect(dialog).toBeVisible({ timeout: 15000 })
+    const outcome = dialog.locator('.repo-history__outcome')
+    await expect(outcome).toContainText('交付跳过 2 个仓库')
+    await expect(outcome).toContainText('新建 issue 1')
+    await expect(outcome).toContainText('草稿 PR 1')
+})
+
+/**
  * viewer 角色可见性：阶段扫描历史是只读数据，viewer 应可见（与 batch-runs 一致）；
  * 菜单项 + 页面均可访问。
  */

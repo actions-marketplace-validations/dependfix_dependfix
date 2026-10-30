@@ -2,6 +2,9 @@ import { ALERT_SEVERITIES, SKIP_REASONS } from '@dependfix/core'
 import { describe, expect, it } from 'vitest'
 import {
     alertsFound,
+    deliverySkipDraftPrs,
+    deliverySkipIssues,
+    deliverySkipped,
     environmentalFailureCount,
     formatBuildLabel,
     formatBytes,
@@ -201,5 +204,21 @@ describe('formatBuildLabel', () => {
             .toEqual({ label: '2026.10.23', unknown: false })
         expect(formatBuildLabel('2026.10.23', null, '未知'))
             .toEqual({ label: '2026.10.23', unknown: false })
+    })
+})
+
+describe('deliverySkipped', () => {
+    it('读取交付跳过计数（缺失 / 脏数据 → 0）', () => {
+        expect(deliverySkipped({ deliverySkipped: 2 })).toBe(2)
+        expect(deliverySkipped({})).toBe(0)
+        expect(deliverySkipped(null)).toBe(0)
+        expect(deliverySkipped({ deliverySkipped: 'x' })).toBe(0)
+    })
+
+    it('载体计数分别读取 issue / draft PR', () => {
+        expect(deliverySkipIssues({ deliverySkipIssues: 1 })).toBe(1)
+        expect(deliverySkipDraftPrs({ deliverySkipDraftPrs: 1 })).toBe(1)
+        expect(deliverySkipIssues({})).toBe(0)
+        expect(deliverySkipDraftPrs({})).toBe(0)
     })
 })

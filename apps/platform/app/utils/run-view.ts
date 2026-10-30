@@ -64,6 +64,21 @@ export interface BreakdownRow {
     count: number
 }
 
+/**
+ * 交付跳过（基线红）的仓库数（`summary.deliverySkipped`）。
+ *
+ * >0 表示「有修复产出但没有交付」：列表 / 详情据此展示「交付跳过」标签，
+ * 避免把「无 PR」误读为「扫描无告警」。口径见
+ * [pr-delivery-closure.md §16](../../../../docs/design/governance/pr-delivery-closure.md#16-m514-基线红--安装失败的交付降级2026-10-30)。
+ */
+export const deliverySkipped = (summary: Record<string, unknown> | null) => summaryNumber(summary, 'deliverySkipped')
+
+/** 本次运行新建的交付降级 issue 数（`issue` 档）。 */
+export const deliverySkipIssues = (summary: Record<string, unknown> | null) => summaryNumber(summary, 'deliverySkipIssues')
+
+/** 本次运行创建的草稿 PR 数（`draft` 档）。 */
+export const deliverySkipDraftPrs = (summary: Record<string, unknown> | null) => summaryNumber(summary, 'deliverySkipDraftPrs')
+
 /** 跳过总数（`summary.alertsSkipped`）。 */
 export const skippedTotal = (summary: Record<string, unknown> | null) => summaryNumber(summary, 'alertsSkipped')
 
