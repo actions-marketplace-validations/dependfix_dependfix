@@ -36,6 +36,15 @@
     --caomei-select-max-width: none;
 }
 
+// 语义文本角色（caomei-ui 1.0.0 起 Tag / Badge / Message / Tabs / Toast / 指示器等把「文本色」从
+// `--caomei-color-primary` 拆到 `--caomei-color-primary-text`）：库内亮色档为该角色给了静态值
+// `#1d4ed8`（蓝），与平台把 `--caomei-color-primary` 改为 teal-600 的事实脱钩——不覆盖就会出现
+// 「teal 底 + 蓝字」的错配。故亮色档按主色加深到 teal-700（实测在 8% teal soft 底上 4.97:1，达 AA）。
+// 取值与 nuxt.config.ts 的 `caomeiUI.theme['primary-solid']` 同源（teal-700）：调整主色时两处一起改。
+:root:root {
+    --caomei-color-primary-text: #0f766e;
+}
+
 :root.dark,
 :root[data-theme='dark'] {
     // 暗底强调色取 teal-300，在深背景上保持充分对比度
@@ -50,6 +59,10 @@
     --caomei-color-text: #{$color-text-dark};
     --caomei-color-text-muted: #{$color-text-muted};
     --caomei-color-border: #{$color-border-dark};
+
+    // 文本角色随暗色主色走（亮青）：库内暗色档本就用 `var(--caomei-color-primary)` 动态解析，
+    // 此处显式引用同一 token，避免未来上游改回静态值时静默错配（暗色 8% soft 底上 10.19:1）。
+    --caomei-color-primary-text: var(--caomei-color-primary);
 }
 
 // 亮色档主按钮实底：改用 `primary-solid`（teal-700 #0f766e）+ `on-solid`（白）= 5.47:1（AA）。

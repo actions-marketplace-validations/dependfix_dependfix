@@ -140,8 +140,8 @@ importers:
         specifier: ^6.4.0
         version: 6.4.0(ioredis@6.0.0(supports-color@10.2.2))(pg@8.23.1)
       caomei-ui:
-        specifier: 0.7.0
-        version: 0.7.0(@nuxt/kit@4.6.2(@nuxt/schema@4.6.2)(confbox@0.3.1)(dotenv@18.0.9)(giget@3.3.1)(jiti@2.7.0)(magic-string@1.4.3)(mlly@1.8.2)(oxc-parser@0.141.0)(rolldown@1.2.15)(unplugin@3.4.0(esbuild@0.25.12)(rolldown@1.2.15)(rollup@4.62.4)(vite@8.3.5(@types/node@26.6.5)(esbuild@0.25.12)(jiti@2.7.0)(sass@1.106.1)(terser@5.49.2)(tsx@4.23.15)(yaml@2.9.1))))(vue@3.5.44(typescript@6.0.3))
+        specifier: 1.0.0-rc.1
+        version: 1.0.0-rc.1(@nuxt/kit@4.6.2(@nuxt/schema@4.6.2)(confbox@0.3.1)(dotenv@18.0.9)(giget@3.3.1)(jiti@2.7.0)(magic-string@1.4.3)(mlly@1.8.2)(oxc-parser@0.141.0)(rolldown@1.2.15)(unplugin@3.4.0(esbuild@0.25.12)(rolldown@1.2.15)(rollup@4.62.4)(vite@8.3.5(@types/node@26.6.5)(esbuild@0.25.12)(jiti@2.7.0)(sass@1.106.1)(terser@5.49.2)(tsx@4.23.15)(yaml@2.9.1))))(vue@3.5.44(typescript@6.0.3))
       chart.js:
         specifier: ^4.6.1
         version: 4.6.1
@@ -3777,9 +3777,9 @@ packages:
   caniuse-lite@1.0.30001819:
     resolution: {integrity: sha512-LFUqIIAwpzsIuevnKnsR9qnStBcgzPShTX61lBwN9uFkkf8o8zLiebEjbW8AYtZiF+1YKDWfdt/pWDtMuG8Xwg==}
 
-  caomei-ui@0.7.0:
-    resolution: {integrity: sha512-2IQMWtrfDzqL0yg9IQEoIaaTzWAf78wW4rnrzPOM21DtmAOC7RUoWyFUJ9q7viun+RymdXwskc9TiDxuGc22fA==}
-    engines: {node: '>=20'}
+  caomei-ui@1.0.0-rc.1:
+    resolution: {integrity: sha512-0+GPUOEJZpwdT33qGp4jHL+IVUvsVwTX4xgIsFdTX/8kr3i5XrsFTfdCMfUHwh0+zD0P1qJSzBUGP++cdMhfzg==}
+    engines: {node: '>=22'}
     peerDependencies:
       '@nuxt/kit': ^4.0.0
       echarts: ^6.0.0
@@ -6797,9 +6797,6 @@ packages:
   statuses@2.0.2:
     resolution: {integrity: sha512-DvEy55V3DB7uknRo+4iOGT5fP1slR8wQohVdknigZPMpMstaKJQWhwiYBACJE3Ul2pTnATihhBYnRhZQHGBiRw==}
     engines: {node: '>= 0.8'}
-
-  std-env@4.2.0:
-    resolution: {integrity: sha512-oCUKSupKTHX53EyjDtuZQ64pjLJ6yYCtpmEw0goYxtjG9KpbRe8KAsl2tBUGU9DyMcJ0RwJ8GqJAFzMXcXW1Rw==}
 
   std-env@4.3.0:
     resolution: {integrity: sha512-OtU/EgQ1kIm5KwqQpBC6ZEMXrZRui11w8zgfTWp8cdO9B8OaPsbA8bTHO2P+HNo1VlUTGMVBwPhydu6poeXiag==}
@@ -10806,7 +10803,7 @@ snapshots:
       istanbul-reports: 3.2.0
       magicast: 0.5.4
       obug: 2.2.1
-      std-env: 4.2.0
+      std-env: 4.3.0
       tinyrainbow: 3.1.1
       vitest: 4.1.12(@types/node@26.6.5)(@vitest/coverage-v8@4.1.12)(vite@8.3.5(@types/node@26.6.5)(esbuild@0.25.12)(jiti@2.7.0)(sass@1.106.1)(terser@5.49.2)(tsx@4.23.15)(yaml@2.9.1))
 
@@ -11576,7 +11573,7 @@ snapshots:
 
   caniuse-lite@1.0.30001819: {}
 
-  caomei-ui@0.7.0(@nuxt/kit@4.6.2(@nuxt/schema@4.6.2)(confbox@0.3.1)(dotenv@18.0.9)(giget@3.3.1)(jiti@2.7.0)(magic-string@1.4.3)(mlly@1.8.2)(oxc-parser@0.141.0)(rolldown@1.2.15)(unplugin@3.4.0(esbuild@0.25.12)(rolldown@1.2.15)(rollup@4.62.4)(vite@8.3.5(@types/node@26.6.5)(esbuild@0.25.12)(jiti@2.7.0)(sass@1.106.1)(terser@5.49.2)(tsx@4.23.15)(yaml@2.9.1))))(vue@3.5.44(typescript@6.0.3)):
+  caomei-ui@1.0.0-rc.1(@nuxt/kit@4.6.2(@nuxt/schema@4.6.2)(confbox@0.3.1)(dotenv@18.0.9)(giget@3.3.1)(jiti@2.7.0)(magic-string@1.4.3)(mlly@1.8.2)(oxc-parser@0.141.0)(rolldown@1.2.15)(unplugin@3.4.0(esbuild@0.25.12)(rolldown@1.2.15)(rollup@4.62.4)(vite@8.3.5(@types/node@26.6.5)(esbuild@0.25.12)(jiti@2.7.0)(sass@1.106.1)(terser@5.49.2)(tsx@4.23.15)(yaml@2.9.1))))(vue@3.5.44(typescript@6.0.3)):
     dependencies:
       '@internationalized/date': 3.12.4
       '@lucide/vue': 1.61.0(vue@3.5.44(typescript@6.0.3))
@@ -15049,8 +15046,6 @@ snapshots:
   standard-as-callback@2.1.0: {}
 
   statuses@2.0.2: {}
-
-  std-env@4.2.0: {}
 
   std-env@4.3.0: {}
 
