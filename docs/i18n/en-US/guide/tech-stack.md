@@ -52,7 +52,7 @@ Versions are **not** duplicated here — [`apps/platform/package.json`](../../..
 | nuxt | Full-stack framework |
 | vue | UI framework |
 | vue-router | Routing |
-| caomei-ui | In-house UI component library (version pinned exactly; PrimeVue 4 migration completed in M31, upgraded to 0.5.0 in M34.2, then to 0.6.0 on 2026-10-11) |
+| caomei-ui | In-house UI component library (version pinned exactly; PrimeVue 4 migration completed in M31, upgraded to 0.5.0 in M34.2, to 0.6.0 on 2026-10-11 (0.6.0 upgrade regression completed on 2026-10-12) and to 0.7.0 on 2026-10-25; upgraded to 1.0.0-rc.1 from the `next` channel on 2026-10-31) |
 | @lucide/vue | Icon components (passed through `CaomeiIcon`) |
 | @nuxtjs/i18n | Internationalization |
 | better-auth | Authentication core (SSO / third-party login via `better-auth/plugins` → `genericOAuth`) |
