@@ -3,6 +3,7 @@ import {
     type RunResult,
     type FixAction,
     type RepeatedAttemptStatus,
+    type DeliverySkipCarrier,
     aggregateSeverity,
     groupByRepository,
     formatDuration,
@@ -119,6 +120,31 @@ export function generateMarkdownReport(result: RunResult): string {
             sections.push(
                 `| ${escapeMd(record.repository)} | \`${escapeMd(record.packageName)}\` | \`${escapeMd(record.key)}\` | ${record.attempt} | ${attemptStatusLabel(record.status)} |`,
             )
+        }
+        sections.push('')
+    }
+
+    // ---- 2.7 Delivery Skipped（基线红的交付降级；有记录时渲染）----
+    const deliverySkips = result.deliverySkips ?? []
+    if (deliverySkips.length > 0) {
+        sections.push(
+            '## Delivery Skipped',
+            '',
+            '> 修复后安装验证仍为**既有失败**（本次改动前即为红）→ 修复未被交付；',
+            '> exit code 不受影响（`PRE_EXISTING_FAILURE` 在跳过类白名单内）。',
+            '',
+            '| Repository | Failing command | Carrier |',
+            '|------------|-----------------|---------|',
+        )
+        for (const record of deliverySkips) {
+            const carrier = describeDeliveryCarrier(record.carrier)
+            const repos = record.repositories.length > 0
+                ? record.repositories.map((repo) => `\`${escapeMd(repo)}\``).join('<br>')
+                : '—'
+            const commands = record.failingCommands.length > 0
+                ? record.failingCommands.map((command) => `\`${escapeMd(command)}\``).join('<br>')
+                : '—'
+            sections.push(`| ${repos} | ${commands} | ${carrier} |`)
         }
         sections.push('')
     }
@@ -511,6 +537,22 @@ function actionDetails(action: FixAction, error?: string): string {
 /** 转义 Markdown 表格中的 `\` 与 `|`（先转义反斜杠避免已有转义双重处理）与换行（错误消息常含多行，折叠为空格） */
 function escapeMd(text: string): string {
     return text.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ')
+}
+
+/**
+ * 交付降级载体的人类可读描述（报告表格用）。
+ *
+ * `mode === 'draft'` 且没有 `draftPr` 表示本次**没有新建**草稿 PR（同指纹既有 PR / 无改动 / 创建失败），
+ * 不能写成「本 PR」——PR 正文里的「本 PR」语义由 `buildDraftDeliveryNotice` 单独表达。
+ */
+function describeDeliveryCarrier(carrier: DeliverySkipCarrier): string {
+    if (carrier.issue) {
+        return `issue #${carrier.issue.number} (${carrier.issue.created ? 'created' : 'already exists'})`
+    }
+    if (carrier.draftPr) {
+        return `draft PR #${carrier.draftPr.number}`
+    }
+    return carrier.mode === 'draft' ? 'draft (no new PR)' : 'report only (skip)'
 }
 
 /** 行内代码片段转义：在 `escapeMd` 基础上剥离反引号（名称来自目标仓库，反引号会提前闭合代码段）。 */

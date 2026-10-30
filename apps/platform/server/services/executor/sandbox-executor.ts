@@ -183,6 +183,9 @@ export class SandboxExecutor implements ScanExecutor {
                 prsSkippedByFingerprint: 0,
                 prsClosedAfterFailure: 0,
                 checksTimedOut: 0,
+                deliverySkipped: 0,
+                deliverySkipIssues: 0,
+                deliverySkipDraftPrs: 0,
             },
             repositories: [{
                 repository: repo,

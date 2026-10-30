@@ -115,6 +115,18 @@ export interface RunSummary {
     prsClosedAfterFailure: number
     /** PR check 等待超预算（per-PR / per-run）次数 */
     checksTimedOut: number
+    /**
+     * 交付被跳过的仓库数（修复后安装仍为既有失败 → 有修复但不交付）。
+     *
+     * 非 0 表示「有修复产出、但没有交付」，消费方（平台 run 列表 / 详情）应展示
+     * 「交付跳过」而不是把 `alertsFixed = 0` / 无 PR 误读为「没有告警」。
+     * 口径见 [pr-delivery-closure.md §16](../../../../docs/design/governance/pr-delivery-closure.md)。
+     */
+    deliverySkipped: number
+    /** 交付降级载体新建的 issue 数（`issue` 档；命中既有 issue 不新建，不计） */
+    deliverySkipIssues: number
+    /** 交付降级载体创建的草稿 PR 数（`draft` 档；同时计入 `prsOpened`） */
+    deliverySkipDraftPrs: number
 }
 
 /**
@@ -322,6 +334,43 @@ export interface RunResult {
      * [pr-delivery-closure.md §8](../../../../docs/design/governance/pr-delivery-closure.md)。
      */
     prCheckWatch?: PrCheckWatchReport
+    /**
+     * 交付跳过记录（修复后安装仍为既有失败 → 有修复但不交付）。
+     *
+     * 记录受影响仓库、命中命令与降级载体；`skip` 档只有记录（无载体），`issue` / `draft`
+     * 档带载体编号。口径见
+     * [pr-delivery-closure.md §16](../../../../docs/design/governance/pr-delivery-closure.md)。
+     */
+    deliverySkips?: DeliverySkipRecord[]
+}
+
+/**
+ * 基线红的交付降级档位（`DEPENDFIX_ON_BASELINE_RED`）。
+ *
+ * - `skip`：默认，仅日志 + 报告记录（行为与引入前逐字一致）
+ * - `issue`：按失败指纹开 issue（关闭后不重开）
+ * - `draft`：照常提交并创建草稿 PR（CI 预期因既有失败为红）
+ */
+export type BaselineRedDelivery = 'skip' | 'issue' | 'draft'
+
+/** 交付降级的载体（一个 run 至多一个）。 */
+export interface DeliverySkipCarrier {
+    /** 触发生效的档位（`skip` 时无载体字段） */
+    mode: BaselineRedDelivery
+    /** `issue` 档：命中的既有 issue 或本次新建（`created` 区分） */
+    issue?: { number: number, htmlUrl: string, created: boolean, fingerprint: string }
+    /** `draft` 档：本次创建的草稿 PR */
+    draftPr?: { number: number, htmlUrl: string }
+}
+
+/** 交付跳过记录（run 级；修复后安装仍为既有失败）。 */
+export interface DeliverySkipRecord {
+    /** 受影响仓库（`owner/repo`） */
+    repositories: string[]
+    /** 命中的安装命令（去重，保持执行顺序；报告与 issue 正文引用） */
+    failingCommands: string[]
+    /** 降级载体 */
+    carrier: DeliverySkipCarrier
 }
 
 /**
@@ -714,5 +763,8 @@ export function createEmptyRunSummary(): RunSummary {
         prsSkippedByFingerprint: 0,
         prsClosedAfterFailure: 0,
         checksTimedOut: 0,
+        deliverySkipped: 0,
+        deliverySkipIssues: 0,
+        deliverySkipDraftPrs: 0,
     }
 }
