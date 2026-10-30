@@ -12,7 +12,9 @@ import type { RepoFixCtx, RepoFixProgress } from './repo-fix'
 import { applyMemberUpgrades } from './repo-fix-member'
 
 const makeTarget = () => ({
-    deadlineAt: Date.now() + 60_000,
+    // 余量必须大于最小步预算：`budgetAllows` 在读到 deadlineAt 之后才调 `Date.now()`，
+    // 恰好等于 60_000 时跨 tick / GC 会把剩余算成 59999ms → flaky（全量并发下实测）。
+    deadlineAt: Date.now() + MIN_STEP_BUDGET_MS + 60_000,
     logger: { info: vi.fn(), warn: vi.fn() },
     allErrors: [] as FixError[],
     budgetSkips: new Set<string>(),
