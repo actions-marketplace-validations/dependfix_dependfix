@@ -457,7 +457,7 @@ async function applyLockfileFixes(
             break
         }
         const snapshot = snapshotTrackedFiles(ctx.workDir)
-        recordVerificationCheckpoint(ctx, repo, progress, `versioned-override:${alert.packageName}`)
+        await recordVerificationCheckpoint(ctx, repo, progress, `versioned-override:${alert.packageName}`)
         ctx.logger.info(`[multi-version] ${alert.packageName}: applying versioned overrides`, { overrides: versionedOverrides })
         const result = await applyVersionedOverrides({
             packageName: alert.packageName,
@@ -576,7 +576,7 @@ async function applyGroupUpgrades(
 
     for (const group of groups) {
         snapshot = snapshotTrackedFiles(ctx.workDir)
-        recordVerificationCheckpoint(ctx, repo, progress, `group:${group.name}`)
+        await recordVerificationCheckpoint(ctx, repo, progress, `group:${group.name}`)
 
         const pendingActions: FixAction[] = []
         const upgradedInGroup: NormalizedSecurityAlert[] = []
@@ -707,7 +707,7 @@ async function applyGroupUpgrades(
         }
 
         for (const alert of upgradedInGroup) {
-            recordVerificationCheckpoint(ctx, repo, progress, `group:${group.name}:${alert.packageName}`)
+            await recordVerificationCheckpoint(ctx, repo, progress, `group:${group.name}:${alert.packageName}`)
             const action = await upgradeAlert(ctx, alert, { familyTargets })
             ctx.allActions.push(action)
             if (!action.success) {

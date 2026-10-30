@@ -2,9 +2,9 @@
 // 验证门禁：修复（提交/PR）交付前的最后一道检查。
 // 任一仓库验证失败时，记录审计、回滚修复改动，防止把未通过 lint/build/typecheck/test/install
 // 的坏改动提交给用户（曾导致坏 PR 被创建）。
-import { execSync } from 'node:child_process'
 import { toErrorMessage, type RepositoryResult } from '@dependfix/core'
 import { isGitRepository, type AppContext } from '../app/helpers'
+import { GitCommandError, runGitOrThrow } from '../github/git-run'
 
 /**
  * 单仓库是否被「本次改动引入的验证失败」阻断。
@@ -38,8 +38,9 @@ export function findVerificationFailedRepos(repoResults: RepositoryResult[]): st
  * - 仅限验证失败且尚未提交的场景；不清理未跟踪文件（避免误删用户文件；
  *   node_modules 等未跟踪目录保留，下次 install 自愈）
  */
-export function rollbackChanges(workDir: string): void {
-    execSync('git reset --hard HEAD', { cwd: workDir, stdio: 'pipe' })
+export async function rollbackChanges(workDir: string): Promise<void> {
+    // 受管异步：取消 / 超时期间回滚也必须可被进程树终止，且不阻塞事件循环
+    await runGitOrThrow(['reset', '--hard', 'HEAD'], { cwd: workDir, what: 'rollback worktree' })
 }
 
 /**
@@ -59,10 +60,10 @@ export function rollbackChanges(workDir: string): void {
  * - 多仓库共享 workDir 时文件级改动无法按仓拆分；选择性回滚按当前仓库最近 checkpoint 处理，
  *   失败时显式记录 `ROLLBACK_GRANULARITY_DEGRADED` 后退回整仓回滚
  */
-export function enforceVerificationGate(
+export async function enforceVerificationGate(
     ctx: Pick<AppContext, 'logger' | 'workDir' | 'allErrors' | 'repoResults'>,
     options: { preExistingDirty: boolean, action: 'pr' | 'commit' },
-): boolean {
+): Promise<boolean> {
     const failedRepos = findVerificationFailedRepos(ctx.repoResults)
     if (failedRepos.length === 0) {
         return false
@@ -96,9 +97,15 @@ export function enforceVerificationGate(
     }
 
     try {
-        rollbackChanges(workDir)
+        await rollbackChanges(workDir)
         logger.info('Changes rolled back')
     } catch (error: unknown) {
+        // 运行级取消期间回滚被前置守卫拦下（未产生子进程）：工作区交由调用方清理（平台删运行目录 /
+        // CLI 用户自行处理），不记 ROLLBACK_FAILED 以免把「主动取消」渲染成回滚故障
+        if (error instanceof GitCommandError && error.aborted) {
+            logger.warn('Run aborted before rollback started — worktree left as-is (caller cleans up)')
+            return true
+        }
         const message = toErrorMessage(error)
         logger.error(`Rollback failed: ${message}`)
         allErrors.push({

@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { execSync } from 'node:child_process'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FixError } from '@dependfix/core'
+import { requestAbort, resetProcessControlState } from './process-control'
 import { enforceVerificationGate, findVerificationFailedRepos, isRepoVerificationBlocked, rollbackChanges } from './verification-gate'
 
 // ---------------------------------------------------------------------------
@@ -87,7 +88,7 @@ describe('rollbackChanges', () => {
         rmSync(workDir, { recursive: true, force: true })
     })
 
-    it('discards uncommitted fix changes (working tree + index)', () => {
+    it('discards uncommitted fix changes (working tree + index)', async () => {
         writeFileSync(join(workDir, 'package.json'), '{"version":"1.0.0"}')
         execSync('git add . && git commit -qm init', { cwd: workDir })
 
@@ -95,7 +96,7 @@ describe('rollbackChanges', () => {
         writeFileSync(join(workDir, 'package.json'), '{"version":"2.0.0"}')
         execSync('git add package.json', { cwd: workDir })
 
-        rollbackChanges(workDir)
+        await rollbackChanges(workDir)
 
         expect(execSync('git status --porcelain', { cwd: workDir, encoding: 'utf-8' }).trim()).toBe('')
         expect(execSync('git show HEAD:package.json', { cwd: workDir, encoding: 'utf-8' })).toContain('"version":"1.0.0"')
@@ -139,43 +140,43 @@ describe('enforceVerificationGate', () => {
         rmSync(workDir, { recursive: true, force: true })
     })
 
-    it('所有 repo 通过验证 → 返回 false 不阻断交付（行 47 failedRepos.length === 0 分支）', () => {
+    it('所有 repo 通过验证 → 返回 false 不阻断交付（行 47 failedRepos.length === 0 分支）', async () => {
         const ctx = baseCtx(workDir)
         ctx.repoResults = [{ repository: 'foo/a', verificationPassed: true } as never]
-        const blocked = enforceVerificationGate(ctx as never, { preExistingDirty: false, action: 'pr' })
+        const blocked = await enforceVerificationGate(ctx as never, { preExistingDirty: false, action: 'pr' })
         expect(blocked).toBe(false)
         expect(ctx.allErrors).toHaveLength(0)
         expect(ctx.logger.error).not.toHaveBeenCalled()
     })
 
-    it('action=pr → 文案使用 "PR creation"（行 52 action 三元 PR 分支 + 行 61 同三元）', () => {
+    it('action=pr → 文案使用 "PR creation"（行 52 action 三元 PR 分支 + 行 61 同三元）', async () => {
         const ctx = baseCtx(workDir)
-        const blocked = enforceVerificationGate(ctx as never, { preExistingDirty: false, action: 'pr' })
+        const blocked = await enforceVerificationGate(ctx as never, { preExistingDirty: false, action: 'pr' })
         expect(blocked).toBe(true)
         expect(ctx.logger.error).toHaveBeenCalledWith(expect.stringContaining('skipping PR creation'))
         expect(ctx.allErrors[0]?.message).toContain('PR not created')
     })
 
-    it('action=commit → 文案使用 "local commit"（行 52 action 三元 commit 分支 + 行 61 同三元）', () => {
+    it('action=commit → 文案使用 "local commit"（行 52 action 三元 commit 分支 + 行 61 同三元）', async () => {
         const ctx = baseCtx(workDir)
-        const blocked = enforceVerificationGate(ctx as never, { preExistingDirty: false, action: 'commit' })
+        const blocked = await enforceVerificationGate(ctx as never, { preExistingDirty: false, action: 'commit' })
         expect(blocked).toBe(true)
         expect(ctx.logger.error).toHaveBeenCalledWith(expect.stringContaining('skipping local commit'))
         expect(ctx.allErrors[0]?.message).toContain('commit skipped')
     })
 
-    it('preExistingDirty=true → 不自动回滚，warn 提示手动处理（行 64 preExistingDirty 真分支）', () => {
+    it('preExistingDirty=true → 不自动回滚，warn 提示手动处理（行 64 preExistingDirty 真分支）', async () => {
         const ctx = baseCtx(workDir)
-        const blocked = enforceVerificationGate(ctx as never, { preExistingDirty: true, action: 'pr' })
+        const blocked = await enforceVerificationGate(ctx as never, { preExistingDirty: true, action: 'pr' })
         expect(blocked).toBe(true)
         expect(ctx.logger.warn).toHaveBeenCalledWith(expect.stringContaining('pre-existing uncommitted changes'))
         // 不调用 rollbackChanges → 已修改的 package.json 应保留 '2.0.0'
         expect(execSync('git show :package.json', { cwd: workDir, encoding: 'utf-8' })).toContain('"version":"2.0.0"')
     })
 
-    it('rollbackChanges 成功 → 还原 package.json 到 1.0.0 + 记录 VERIFICATION_FAILED 审计（行 71 try 成功分支）', () => {
+    it('rollbackChanges 成功 → 还原 package.json 到 1.0.0 + 记录 VERIFICATION_FAILED 审计（行 71 try 成功分支）', async () => {
         const ctx = baseCtx(workDir)
-        const blocked = enforceVerificationGate(ctx as never, { preExistingDirty: false, action: 'pr' })
+        const blocked = await enforceVerificationGate(ctx as never, { preExistingDirty: false, action: 'pr' })
         expect(blocked).toBe(true)
         expect(ctx.logger.info).toHaveBeenCalledWith('Changes rolled back')
         // 已暂存的 '2.0.0' 应被回滚到 HEAD（'1.0.0'）
@@ -183,11 +184,11 @@ describe('enforceVerificationGate', () => {
         expect(ctx.allErrors.map((e) => e.category)).toEqual(['VERIFICATION_FAILED'])
     })
 
-    it('非 git 仓库 → 跳过回滚（warn，不追加 ROLLBACK_FAILED；结论仍为中止交付）', () => {
+    it('非 git 仓库 → 跳过回滚（warn，不追加 ROLLBACK_FAILED；结论仍为中止交付）', async () => {
         const nonGitDir = mkdtempSync(join(tmpdir(), 'dependfix-nongit-'))
         try {
             const ctx = baseCtx(nonGitDir)
-            const blocked = enforceVerificationGate(ctx as never, { preExistingDirty: false, action: 'pr' })
+            const blocked = await enforceVerificationGate(ctx as never, { preExistingDirty: false, action: 'pr' })
             expect(blocked).toBe(true)
             expect(ctx.logger.warn).toHaveBeenCalledWith(expect.stringContaining('不是 git 仓库'))
             // 审计优先：VERIFICATION_FAILED 仍记录；无工作树可回滚 → 不产生 ROLLBACK_FAILED
@@ -197,14 +198,14 @@ describe('enforceVerificationGate', () => {
         }
     })
 
-    it('rollbackChanges 失败（git 仓库但 HEAD 不可解析，如尚无提交）→ 追加 ROLLBACK_FAILED 审计，不掩盖 VERIFICATION_FAILED', () => {
+    it('rollbackChanges 失败（git 仓库但 HEAD 不可解析，如尚无提交）→ 追加 ROLLBACK_FAILED 审计，不掩盖 VERIFICATION_FAILED', async () => {
         const emptyRepo = mkdtempSync(join(tmpdir(), 'dependfix-emptyrepo-'))
         try {
             // 空仓库（无任何提交）：isGitRepository 为 true（rev-parse --git-dir 成功），
             // 但 `git reset --hard HEAD` 无法解析 HEAD → 回滚抛错 → ROLLBACK_FAILED 分支
             execSync('git init -q', { cwd: emptyRepo })
             const ctx = baseCtx(emptyRepo)
-            const blocked = enforceVerificationGate(ctx as never, { preExistingDirty: false, action: 'pr' })
+            const blocked = await enforceVerificationGate(ctx as never, { preExistingDirty: false, action: 'pr' })
             expect(blocked).toBe(true)
             expect(ctx.logger.error).toHaveBeenCalledWith(expect.stringContaining('Rollback failed'))
             // VERIFICATION_FAILED + ROLLBACK_FAILED 两条审计并存
@@ -214,5 +215,48 @@ describe('enforceVerificationGate', () => {
         } finally {
             rmSync(emptyRepo, { recursive: true, force: true })
         }
+    })
+})
+
+// ---------------------------------------------------------------------------
+// 取消态下的回滚（M51.5 a：回滚期取消）
+// ---------------------------------------------------------------------------
+
+describe('rollback during abort', () => {
+    let workDir: string
+
+    afterEach(() => {
+        resetProcessControlState()
+        try {
+            rmSync(workDir, { recursive: true, force: true })
+        } catch {
+            // ignore
+        }
+    })
+
+    it('取消态下不启动回滚子进程：门禁 warn 且不记 ROLLBACK_FAILED', async () => {
+        workDir = mkdtempSync(join(tmpdir(), 'dependfix-abort-rollback-'))
+        execSync('git init -q', { cwd: workDir })
+        execSync('git config user.name test', { cwd: workDir })
+        execSync('git config user.email test@test', { cwd: workDir })
+        writeFileSync(join(workDir, 'package.json'), '{"version":"1.0.0"}\n')
+        execSync('git add . && git commit -qm init', { cwd: workDir })
+        writeFileSync(join(workDir, 'package.json'), '{"version":"2.0.0"}\n')
+
+        requestAbort('unit test abort')
+
+        await expect(rollbackChanges(workDir)).rejects.toMatchObject({ aborted: true })
+
+        const ctx = {
+            logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+            workDir,
+            allErrors: [] as FixError[],
+            repoResults: [{ repository: 'foo/a', verificationPassed: false } as never],
+        }
+        const blocked = await enforceVerificationGate(ctx as never, { preExistingDirty: false, action: 'pr' })
+        expect(blocked).toBe(true)
+        expect(ctx.logger.warn).toHaveBeenCalledWith(expect.stringContaining('aborted before rollback started'))
+        // 只有 VERIFICATION_FAILED；主动取消不产生 ROLLBACK_FAILED
+        expect(ctx.allErrors.map((e) => e.category)).toEqual(['VERIFICATION_FAILED'])
     })
 })

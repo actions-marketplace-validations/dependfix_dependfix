@@ -26,10 +26,10 @@ describe('skipDeliveryForInstallFailure', () => {
         rmSync(workDir, { recursive: true, force: true })
     })
 
-    it('records a skipped-delivery audit entry and rolls back clean worktree', () => {
+    it('records a skipped-delivery audit entry and rolls back clean worktree', async () => {
         writeFileSync(join(workDir, 'tracked.txt'), 'v2\n', 'utf-8')
 
-        skipDeliveryForInstallFailure({
+        await skipDeliveryForInstallFailure({
             logger: logger as never,
             workDir,
             preExistingDirty: false,
@@ -47,10 +47,10 @@ describe('skipDeliveryForInstallFailure', () => {
         expect(execSync('git status --porcelain --untracked-files=no', { cwd: workDir, encoding: 'utf-8' }).trim()).toBe('')
     })
 
-    it('does not roll back when the worktree was dirty before the run', () => {
+    it('does not roll back when the worktree was dirty before the run', async () => {
         writeFileSync(join(workDir, 'tracked.txt'), 'v2\n', 'utf-8')
 
-        skipDeliveryForInstallFailure({
+        await skipDeliveryForInstallFailure({
             logger: logger as never,
             workDir,
             preExistingDirty: true,

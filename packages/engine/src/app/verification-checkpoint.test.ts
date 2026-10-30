@@ -70,7 +70,7 @@ describe('verification checkpoint / selective rollback', () => {
         ctx.summary.alertsFixed = 1
         writeFileSync(join(workDir, 'package.json'), 'v2\n')
         // 第二个单元开始前：checkpoint 记录的是「已保留第一个单元」的状态
-        expect(recordVerificationCheckpoint(ctx, 'foo/bar', progress, 'unit-before-second')).toBeDefined()
+        expect(await recordVerificationCheckpoint(ctx, 'foo/bar', progress, 'unit-before-second')).toBeDefined()
 
         ctx.allActions.push(makeAction('second'))
         progress.fixed = 2
@@ -93,7 +93,7 @@ describe('verification checkpoint / selective rollback', () => {
         ctx.allActions.push(makeAction('first'))
         progress.fixed = 1
         writeFileSync(join(workDir, 'package.json'), 'v2\n')
-        expect(recordVerificationCheckpoint(ctx, 'foo/bar', progress, 'unit-before-second')).toBeDefined()
+        expect(await recordVerificationCheckpoint(ctx, 'foo/bar', progress, 'unit-before-second')).toBeDefined()
 
         ctx.allActions.push(makeAction('second'))
         progress.fixed = 2
@@ -122,7 +122,7 @@ describe('verification checkpoint / selective rollback', () => {
         ctx.allActions.push(makeAction('first'))
         writeFileSync(join(workDir, 'package.json'), 'v2\n')
 
-        expect(recordVerificationCheckpoint(ctx, 'foo/bar', progress, 'unit-first')).toBeUndefined()
+        expect(await recordVerificationCheckpoint(ctx, 'foo/bar', progress, 'unit-first')).toBeUndefined()
         const outcome = await attemptSelectiveUnitRollback(ctx, 'foo/bar', progress, async () => [])
         expect(outcome).toMatchObject({ applied: false, blocking: true })
         expect(readFileSync(join(workDir, 'package.json'), 'utf-8')).toBe('v2\n')
@@ -142,7 +142,7 @@ describe('verification checkpoint / selective rollback', () => {
         writeFileSync(join(workDir, 'index.ts'), 'export const value: string = "ok"\nexport const safe = true\n')
         ctx.allActions.push(makeAction('first'))
         progress.fixed = 1
-        expect(recordVerificationCheckpoint(ctx, 'foo/bar', progress, 'before-ts-regression')).toBeDefined()
+        expect(await recordVerificationCheckpoint(ctx, 'foo/bar', progress, 'before-ts-regression')).toBeDefined()
         writeFileSync(join(workDir, 'index.ts'), 'export const value: number = "bad"\n')
         ctx.allActions.push(makeAction('second'))
         progress.fixed = 2
@@ -168,7 +168,7 @@ describe('verification checkpoint / selective rollback', () => {
         ctx.allActions.push(makeAction('first'))
         progress.fixed = 1
         writeFileSync(join(workDir, 'package.json'), 'v2\n')
-        expect(recordVerificationCheckpoint(ctx, 'foo/bar', progress, 'before-second')).toBeDefined()
+        expect(await recordVerificationCheckpoint(ctx, 'foo/bar', progress, 'before-second')).toBeDefined()
 
         ctx.allActions.push(makeAction('second'))
         progress.failed = 1
@@ -190,14 +190,14 @@ describe('verification checkpoint / selective rollback', () => {
         ])
     })
 
-    it('negative control: repository-level rollback discards the earlier unit too', () => {
+    it('negative control: repository-level rollback discards the earlier unit too', async () => {
         ctx.allActions.push(makeAction('first'))
         writeFileSync(join(workDir, 'package.json'), 'v2\n')
-        expect(recordVerificationCheckpoint(ctx, 'foo/bar', progress, 'unit-first')).toBeDefined()
+        expect(await recordVerificationCheckpoint(ctx, 'foo/bar', progress, 'unit-first')).toBeDefined()
 
         ctx.allActions.push(makeAction('second'))
         writeFileSync(join(workDir, 'package.json'), 'v3\n')
-        rollbackChanges(workDir)
+        await rollbackChanges(workDir)
 
         expect(readFileSync(join(workDir, 'package.json'), 'utf-8')).toBe('v1\n')
         expect(ctx.allActions.map((action) => action.target)).toEqual(['first', 'second'])

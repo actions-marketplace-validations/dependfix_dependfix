@@ -20,6 +20,7 @@ import {
     createDeliverySkipIssue,
     findDeliverySkipIssue,
 } from '../github/delivery-issue'
+import { GitCommandError } from '../github/git-run'
 import { rollbackChanges } from '../runners/verification-gate'
 import { collectFailingInstallCommands, recordDeliverySkip } from './delivery'
 import { hasGitChanges } from './helpers'
@@ -33,13 +34,13 @@ export interface SkippedDeliveryRollbackArgs {
 }
 
 /** 交付因「修复后安装仍既有失败」被跳过时的统一处置（日志 + 审计 + 回滚）。 */
-export function skipDeliveryForInstallFailure(args: {
+export async function skipDeliveryForInstallFailure(args: {
     logger: Logger
     workDir: string
     preExistingDirty: boolean
     allErrors: FixError[]
     repos: string[]
-}): void {
+}): Promise<void> {
     const { logger, workDir, preExistingDirty, allErrors, repos } = args
     const repoList = repos.join(', ')
     logger.warn(
@@ -52,19 +53,24 @@ export function skipDeliveryForInstallFailure(args: {
         category: 'PRE_EXISTING_FAILURE',
         message: `Delivery skipped: install verification still failing (pre-existing) for ${repoList}`,
     })
-    rollbackForSkippedDelivery({ logger, workDir, preExistingDirty, reason: 'install verification still failing' })
+    await rollbackForSkippedDelivery({ logger, workDir, preExistingDirty, reason: 'install verification still failing' })
 }
 
 /** 交付被跳过时回滚本次运行产生的改动（非 git / 无改动 / 运行前脏工作区时跳过）。 */
-export function rollbackForSkippedDelivery(args: SkippedDeliveryRollbackArgs): void {
+export async function rollbackForSkippedDelivery(args: SkippedDeliveryRollbackArgs): Promise<void> {
     const { logger, workDir, preExistingDirty, reason } = args
     if (preExistingDirty || !hasGitChanges(workDir)) {
         return
     }
     try {
-        rollbackChanges(workDir)
+        await rollbackChanges(workDir)
         logger.info(`Changes rolled back (delivery skipped: ${reason})`)
     } catch (error: unknown) {
+        // 取消态下不启动回滚子进程：工作区交由调用方清理（与验证门禁同口径）
+        if (error instanceof GitCommandError && error.aborted) {
+            logger.warn(`Rollback skipped (run aborted before it started): ${reason}`)
+            return
+        }
         logger.warn(`Rollback after skipped delivery failed: ${toErrorMessage(error)}`)
     }
 }
@@ -193,7 +199,7 @@ export async function handleBaselineRedDelivery(args: BaselineRedDeliveryArgs): 
         recordDeliverySkip(ctx, { repositories: installBlockedRepos, failingCommands, carrier: { mode: 'skip' } })
     }
 
-    skipDeliveryForInstallFailure({
+    await skipDeliveryForInstallFailure({
         logger: ctx.logger,
         workDir,
         preExistingDirty,

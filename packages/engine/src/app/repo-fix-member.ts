@@ -80,7 +80,7 @@ export async function applyMemberUpgrades(
             continue
         }
         const memberSnapshot = snapshotTrackedFiles(ctx.workDir, [memberManifestPath])
-        recordVerificationCheckpoint(ctx, repo, progress, `member-upgrade:${alert.packageName}`)
+        await recordVerificationCheckpoint(ctx, repo, progress, `member-upgrade:${alert.packageName}`)
         ctx.logger.warn(
             `[member-upgrade] ${alert.packageName}: upgrading member declaration in ${memberManifestPath} → ${alert.recommendedVersion}`,
         )

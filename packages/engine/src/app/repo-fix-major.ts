@@ -79,7 +79,7 @@ export async function applyAutoMajorUpgrades(
             continue
         }
         const majorSnapshot = snapshotTrackedFiles(ctx.workDir)
-        recordVerificationCheckpoint(ctx, repo, progress, `major-upgrade:${alert.packageName}`)
+        await recordVerificationCheckpoint(ctx, repo, progress, `major-upgrade:${alert.packageName}`)
         ctx.logger.warn(
             `[major-upgrade] ${alert.packageName}: applying cross-major upgrade → ${alert.recommendedVersion} (explicit --allow-major-upgrade; full verification required)`,
         )

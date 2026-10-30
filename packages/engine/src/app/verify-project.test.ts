@@ -569,7 +569,7 @@ describe('verifyProject', () => {
         const verificationPassed = actions.every((a) => a.success)
         expect(verificationPassed).toBe(false)
 
-        const blocked = enforceVerificationGate({
+        const blocked = await enforceVerificationGate({
             logger: ctx.logger,
             workDir,
             allErrors: ctx.allErrors,

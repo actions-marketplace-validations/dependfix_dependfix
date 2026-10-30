@@ -92,7 +92,7 @@ describe('finalizeRepoFix selective unit rollback', () => {
 
     it('skips selective rollback when the worktree was dirty before the run', async () => {
         writeFileSync(join(workDir, 'package.json'), 'v2\n')
-        expect(recordVerificationCheckpoint(ctx, 'foo/bar', progress, 'unit-first')).toBeDefined()
+        expect(await recordVerificationCheckpoint(ctx, 'foo/bar', progress, 'unit-first')).toBeDefined()
         ctx.allActions.push(action('second'))
         ctx.summary.alertsFixed = 2
         progress.fixed = 2
@@ -109,7 +109,7 @@ describe('finalizeRepoFix selective unit rollback', () => {
 
     it('reverts the latest unit and preserves the earlier verified unit when retry turns green', async () => {
         writeFileSync(join(workDir, 'package.json'), 'v2\n')
-        expect(recordVerificationCheckpoint(ctx, 'foo/bar', progress, 'unit-first')).toBeDefined()
+        expect(await recordVerificationCheckpoint(ctx, 'foo/bar', progress, 'unit-first')).toBeDefined()
 
         // 第二个单元：动作 / 计数 / 文件都前进；终验失败
         ctx.allActions.push(action('second'))

@@ -7,8 +7,8 @@
 // 生成一个游离 commit 对象作为工作树 checkpoint（不移动 HEAD / 不新增 ref）；单元成功时保留，
 // 最终验证失败时恢复当前仓库最近 checkpoint，截断该单元的动作 / 进度 / summary，并重跑一次完整验证。
 // 重验通过 → 保留更早单元继续交付；仍失败 → 记录 ROLLBACK_GRANULARITY_DEGRADED 后退回整仓回滚。
-import { execFileSync } from 'node:child_process'
 import type { FixAction, RunSummary } from '@dependfix/core'
+import { runGit, runGitOrThrow } from '../github/git-run'
 import type { RepoFixCtx, RepoFixProgress } from './repo-fix'
 import { isGitRepository } from './helpers'
 
@@ -54,12 +54,12 @@ export const findLatestVerificationCheckpoint = (
  * `git stash create` 只捕获已跟踪文件；未跟踪文件（如 AI 新建源码）不在本批范围。
  * 工作区干净时回退到 HEAD，保证首个单元也有可回退基线。
  */
-export const recordVerificationCheckpoint = (
+export const recordVerificationCheckpoint = async (
     ctx: RepoFixCtx,
     repo: string,
     progress: RepoFixProgress,
     label: string,
-): VerificationCheckpoint | undefined => {
+): Promise<VerificationCheckpoint | undefined> => {
     if (ctx.config.dryRun || (ctx.config.rollbackGranularity ?? 'unit') !== 'unit' || !ctx.verificationCheckpoints) {
         return undefined
     }
@@ -68,18 +68,19 @@ export const recordVerificationCheckpoint = (
         return undefined
     }
     try {
-        let id = execFileSync(
-            'git',
-            ['stash', 'create', `dependfix:${repo}:${label}`],
-            { cwd: ctx.workDir, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] },
-        ).trim()
-        if (!id) {
+        // 受管异步：checkpoint 建立同样不得阻塞事件循环（取消 / 超时期间要有落定机会）
+        const stash = await runGit(['stash', 'create', `dependfix:${repo}:${label}`], { cwd: ctx.workDir })
+        if (!stash.started) {
+            // 取消前置守卫拦下：不建 checkpoint（调用方按「无 checkpoint」处理）
+            return undefined
+        }
+        let id = stash.stdout.trim()
+        if (!id && stash.code === 0) {
             // 工作区干净时 stash create 返回空串：用 HEAD 作为 checkpoint（回退首个单元时即回到基线）
-            id = execFileSync('git', ['rev-parse', 'HEAD'], {
+            id = (await runGitOrThrow(['rev-parse', 'HEAD'], {
                 cwd: ctx.workDir,
-                encoding: 'utf-8',
-                stdio: ['ignore', 'pipe', 'pipe'],
-            }).trim()
+                what: 'resolve checkpoint HEAD',
+            })).trim()
         }
         if (!id) {
             return undefined
@@ -106,10 +107,10 @@ export const recordVerificationCheckpoint = (
 }
 
 /** 恢复 checkpoint：工作树 / 暂存区回到 checkpoint，HEAD 不变。 */
-const restoreCheckpoint = (ctx: RepoFixCtx, checkpoint: VerificationCheckpoint): void => {
-    execFileSync('git', ['read-tree', '--reset', '-u', checkpoint.id], {
+const restoreCheckpoint = async (ctx: RepoFixCtx, checkpoint: VerificationCheckpoint): Promise<void> => {
+    await runGitOrThrow(['read-tree', '--reset', '-u', checkpoint.id], {
         cwd: ctx.workDir,
-        stdio: 'pipe',
+        what: 'restore verification checkpoint',
     })
 }
 
@@ -180,7 +181,7 @@ export const attemptSelectiveUnitRollback = async (
     }
 
     try {
-        restoreCheckpoint(ctx, checkpoint)
+        await restoreCheckpoint(ctx, checkpoint)
         restoreProgressAndActions(ctx, progress, checkpoint)
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error)

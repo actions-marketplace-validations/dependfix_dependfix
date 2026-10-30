@@ -49,7 +49,7 @@ export async function tryBatchVersionedOverrides(
 ): Promise<VersionedOverrideBatchOutcome> {
     const snapshot = snapshotTrackedFiles(ctx.workDir)
     const packages = items.map((item) => item.alert.packageName)
-    recordVerificationCheckpoint(ctx, repo, progress, `versioned-override-batch:${packages.join(',')}`)
+    await recordVerificationCheckpoint(ctx, repo, progress, `versioned-override-batch:${packages.join(',')}`)
     ctx.logger.info(
         `[multi-version] 合批 ${items.length} 个包：${packages.join(', ')}（一次安装 + 组级验证）`,
     )
