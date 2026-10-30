@@ -80,9 +80,9 @@
   - ⑤ 退出码中性：三档 `exitCode === 0` 断言，`PRE_EXISTING_FAILURE` 仍在跳过类白名单。
 - **不做什么**：不改 `PRE_EXISTING_FAILURE` 归因语义；不动安装失败判据与回滚链；平台执行链不创建载体（只记录 + 展示）。
 - **依赖（实际口径）**：不依赖 M51.1——issue 正文用「仓库集 + 失败命令集」，不消费 per-alert 结果与收敛明细（原估依赖未使用）。
-- **交付物（实测）**：7 commits（`13137749` 纯搬迁 / `aa900622` core 契约与报告 / `2cfa1c11` 配置项 / `768cc86a` 草稿 PR API / `e0da9cb1` 记录与载体 / `6967731d` 平台展示 / 本收口）/ 36 files / +1610 −127；超出条目自估 2 commits / 8-10 files / 300-400 行（实际 ≈4 倍）：按原子边界拆分（搬迁 / core / 配置 / 草稿 API / 交付编排 / 平台 / 文档）。
+- **交付物（实测）**：8 commits（`13137749` 纯搬迁 / `aa900622` core 契约与报告 / `2cfa1c11` 配置项 / `67a75964` 草稿 PR API + 记录与载体 / `1a85f418` 平台展示 / `880445a4` 文档收口 / `7407bad0` 注释与空行收口）/ 42 files / +1737 −139；超出条目自估 2 commits / 8-10 files / 300-400 行（实际 ≈4 倍）：按原子边界拆分（搬迁 / core / 配置 / 交付编排 / 平台 / 文档），并注明「草稿 PR API 与记录/载体合批」——两者互相依赖，单独提交不可编译。
 - **风险与缓解**：issue 噪声 → 失败指纹去重 + 关闭后不重开（100 条窗口，fail-open）；权限面扩大（issues 写）→ §16.3 与 `security.md §5.4` 标注 token scope；marker 可伪造 / 命令串可能带凭据 → §16.7 登记边界。
-- **审计**：R1 两分区均 Reject（A：diff 规模无拆分计划 + 7 warning；B：可见 UI 缺 V3 证据 + 5 warning）→ 收口：6 commit 拆分、issue 落点改「首先命中的受影响仓库」、报告载体文案不再谎报「本 PR」、补 3 例边界（载体失败 / dry-run / 空仓库）与三档 exitCode 断言、Action input、fixtures 放行新字段 + e2e case 9、文档 §10/§11 同步与边界登记 → R2 quick 复审。
+- **审计**：R1 两分区均 **Reject**（A：diff 规模无拆分计划 + 7 warning；B：可见 UI 缺 V3 证据 + 5 warning）→ 收口：原子提交拆分、issue 落点改「首先命中的受影响仓库」、报告载体文案不再谎报「本 PR」、补边界用例（载体失败 / dry-run / 空仓库 / 草稿不等待 check）与三档 exitCode 断言、Action input、fixtures 放行新字段 + e2e case 9、文档 §10/§11 同步与边界登记 → R2 quick **两分区均 Pass**（A 0 blocker，RG-A1~A13 全 closed 或排版级 partial；B 0 blocker，RG-B1 + 8 warning 全 closed）。
 
 ### M51.5 [P1 🛠️] 运行级取消面收口 + 单仓剩余预算（台账 ⑤+⑥，拆 a/b）
 
