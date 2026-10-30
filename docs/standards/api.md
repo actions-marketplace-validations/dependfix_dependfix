@@ -44,6 +44,8 @@ interface PaginatedData<T> {
 }
 ```
 
+**排序确定性（严格约束）**：列表查询（含分页 / 截断 `take(N)`）必须显式排序；主排序键可并列（同毫秒时间戳、同分组名）时追加唯一列（通常主键）`DESC` 作次键——行序不得依赖数据库返回顺序，否则同一查询两次可能不同（视觉基线与截断集合抖动）。次键只保证确定性，业务意图顺序仍由数据显式决定。本约束自 2026-10-30 起对**新增 / 修改**的列表查询生效，存量清单与推进逐处见 [backlog](../plan/backlog.md)。已挂 [review 检查点矩阵](../../.github/skills/code-reviewer/references/code-quality-checklist.md)。
+
 ## 5. 认证
 
 - 使用 better-auth 作为认证框架
