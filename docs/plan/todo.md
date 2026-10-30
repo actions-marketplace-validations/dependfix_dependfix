@@ -96,9 +96,9 @@
   - ④ 单测覆盖 deadline 边界、异步 push 失败（`GitCommandError` 含子命令 / 退出码）、回滚期取消（`aborted` 拒绝 + 门禁只记 `VERIFICATION_FAILED`，不记 `ROLLBACK_FAILED`）。
 - **不做什么**：不做仓库级超时配置（已单列 backlog 候选）；不改验证链条数与顺序；短状态查询（`git rev-parse` / `git diff --quiet` / `git remote get-url`，非穷举）保持同步（`git status` 已随交付链异步）。
 - **依赖**：无前置；`deadlineAt` 由上层计算（平台 = now + timeoutMs），引擎只消费，与「仓库级执行预算」候选的解析面解耦。
-- **交付物（实测）**：4 个主体提交（`860e275c` 交付类 git 受管异步 / `62d232fe` 回滚与 checkpoint 异步 + 取消期语义 / `4651f227` 预算检查 / `53916762` 平台透传 + 分类映射）+ 1 个审计收口提交（`11c1427a`）+ 文档收口；合计 40 files / +1156 −255（超估计 10-12 files / 400-600 行：异步化调用面覆盖 17 个测试文件，且 R1 审计要求补取消期 / 预算语义与 Windows argv 边界）。
+- **交付物（实测）**：10 个提交（4 主体：`860e275c` 交付类 git 受管异步 / `62d232fe` 回滚与 checkpoint 异步 + 取消期语义 / `4651f227` 预算检查 / `53916762` 平台透传 + 分类映射；2 修复：`11c1427a` 取消·预算·编码边界 / `f6d89117` 取消文案；4 文档：`9dff9fc5` / `ec1a9d26` / `8defd84f` / `2bf1cec6`）+ 本次数字回填；合计 42 files / +1193 −256（超估计 10-12 files / 400-600 行：异步化调用面覆盖 17 个测试文件，且 R1 审计要求补取消期 / 预算语义与 Windows argv 边界）。
 - **风险与缓解**：异步化调用面广 → 逐调用点替换 + 定向用例（17 个受影响测试文件全部改 await 并复跑）；deadline 与「部分成功交付」冲突 → 已明确「预算只跳过未开始的工作；**终验被跳过视为未验证**（不交付、不回滚、留 `verificationSkipped`）」；取消期回滚被前置守卫拦下 → 工作区交由调用方清理且不误记 `ROLLBACK_FAILED`（已启动中被取消按真实失败留痕）。
-- **审计**：R1 两分区均 **Reject**（A：Windows 交付链被 shell 拼接 + 预算跳过终验记「验证通过」；B：同一验证假绿 + 文档口径）→ 收口：`shell: false` + `started` 语义、预算跳过按未验证处理（不交付不回滚）、预算检查补组合批 / 分组逐包 / 重做 repair、去重键含 repository、StringDecoder 与截断标记、checkpoint 失败 warn、文档与数字订正 → R2 quick 复审。
+- **审计**：R1 两分区均 **Reject**（A：Windows 交付链被 shell 拼接 + 预算跳过终验记「验证通过」；B：同一验证假绿 + 文档口径）→ 收口：`shell: false` + `started` 语义、预算跳过按未验证处理（不交付不回滚）、预算检查补组合批 / 分组逐包 / 重做 repair、去重键含 repository、StringDecoder 与截断标记、checkpoint 失败 warn、文档与数字订正 → R2 quick **两分区均 Pass**（A 0 blocker：RG-A1/A3/A4/A5/A7/A8/A10/A11/A12/A13 closed、A2 功能闭环、A6 截断标记已透出；B 0 blocker：RG-B1/B3/B4/B5/B7 closed、B2/B6 文档与字段清单已补齐）。
 
 ### M51.6 [P2 🛠️] 配置写入闸门 + alerts 原始列表排序兜底（台账 ⑦+⑧）
 
