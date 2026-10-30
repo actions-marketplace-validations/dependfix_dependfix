@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { nextTick, ref } from 'vue'
-import { isAllFilteredSelected, useRepoSelection } from '../../app/composables/use-repo-selection'
+import { isAllFilteredSelected, remapSelectionById, useRepoSelection } from '../../app/composables/use-repo-selection'
 
 /**
  * use-repo-selection 单测：caomei-ui 1.0.0 全选语义适配的纯逻辑面。
@@ -26,6 +26,26 @@ describe('isAllFilteredSelected', () => {
 
     it('已选集合含筛选外的隐藏行时仍算全选', () => {
         expect(isAllFilteredSelected([row('1'), row('2'), row('hidden')], [row('1'), row('2')])).toBe(true)
+    })
+})
+
+describe('remapSelectionById', () => {
+    it('刷新（对象换新）后按 id 映射到新对象并保持顺序', () => {
+        const stale = [row('2'), row('1')]
+        const fresh = [row('1'), row('2')]
+        const mapped = remapSelectionById(stale, fresh)
+        expect(mapped.map((item) => item.id)).toEqual(['2', '1'])
+        // 引用必须换成新对象，库内受控选择才能重新勾选
+        expect(mapped[0]).toBe(fresh[1])
+        expect(mapped[1]).toBe(fresh[0])
+    })
+
+    it('刷新后已删除的行被移出', () => {
+        expect(remapSelectionById([row('1'), row('2')], [row('2')]).map((item) => item.id)).toEqual(['2'])
+    })
+
+    it('空已选保持空（不产生新数组语义变化）', () => {
+        expect(remapSelectionById([], [row('1')])).toEqual([])
     })
 })
 

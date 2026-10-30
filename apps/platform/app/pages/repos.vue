@@ -25,6 +25,9 @@ const success = ref('')
 const config = useRuntimeConfig()
 const defaultBranch = (config.public.defaultBranch as string) || 'main'
 
+// 批量扫描 / 行选择：`selectedRows` 是独立集合，刷新后按 id 重映射（见 use-repo-selection）
+const selectedRows = ref<RepoView[]>([])
+
 const fetchData = async () => {
     loading.value = true
     error.value = ''
@@ -34,6 +37,8 @@ const fetchData = async () => {
             $fetch('/api/credentials'),
         ])
         repos.value = repoRes as RepoView[]
+        // 刷新生成新对象：按 id 把已选集合映射过去，避免「计数仍在、勾选态消失」
+        selectedRows.value = remapSelectionById(selectedRows.value, repos.value)
         credentials.value = credRes as { id: string, name: string, type: string }[]
     } catch (e: any) {
         error.value = t('repos.errors.loadFailed', { message: e?.data?.message ?? e?.message ?? t('common.errors.unknown') })
@@ -260,7 +265,6 @@ const submitScanConfig = () => {
 }
 
 // 批量扫描（勾选多仓库 → 跳转批量运行页）；状态与提交逻辑见 use-repo-batch-scan.ts
-const selectedRows = ref<RepoView[]>([])
 
 /**
  * 行选择受控回写：提供 `selection` 时 caomei 进入受控模式，不回写则勾选无效
@@ -339,7 +343,8 @@ const resetRepoFilters = () => {
 /**
  * 客户端「搜索（owner / 仓库名 / 标签 / 凭据名）+ 筛选（执行方式 / 包管理器 / 凭据）」叠加结果。
  *
- * 与行选择的交互（现状语义，本次未改变）：`selectedRows` 是独立持有的已选集合，筛选变化本身不清空它；
+ * 与行选择的交互：`selectedRows` 是独立持有的已选集合，筛选变化本身不清空它；
+ * 列表刷新（保存 / 删除 / 重新拉取）后按 id 重映射到新对象（库内受控选择按对象引用解析）；
  * 但**任意一次勾选 / 取消勾选都会以当前过滤后的集合回写选择**（caomei DataTable 行为），
  * 因此被筛选隐藏的已选行会在下一次勾选时被静默移出（跨页选择不受影响）。
  * 「批量扫描」计数可能大于当前可见行数——筛选是视图态，不改变集合本身。

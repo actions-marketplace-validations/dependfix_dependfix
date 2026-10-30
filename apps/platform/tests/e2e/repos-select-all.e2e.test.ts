@@ -36,7 +36,7 @@ test.describe('仓库列表跨页全选', () => {
                     headers: { cookie: cookieHeader, origin: E2E_ORIGIN },
                     data: {
                         owner: OWNER,
-                        name: `repo-${String(i).padStart(2, '0')}`,
+                        name: `repo-${RUN_ID}-${String(i).padStart(2, '0')}`,
                         platform: 'github',
                         packageManager: 'pnpm',
                         defaultBranch: 'main',
@@ -90,9 +90,25 @@ test.describe('仓库列表跨页全选', () => {
             await expect(rows).toHaveCount(PAGE_SIZE, { timeout: 10000 })
             await expect(selectedRows).toHaveCount(PAGE_SIZE)
 
+            // 刷新一致性：编辑保存触发 fetchData（列表对象全部换新）→ 选择必须按 id 保住，
+            // 否则会出现「已选 12 条」但没有任何行勾选的视图矛盾
+            await page.getByRole('button', { name: '编辑' }).first().click()
+            const dialog = page.locator('.caomei-dialog__content')
+            await expect(dialog).toBeVisible({ timeout: 15000 })
+            await dialog.getByRole('button', { name: '保存' }).click()
+            await expect(dialog).not.toBeVisible({ timeout: 15000 })
+            await expect(summary).toHaveText(`已选 ${REPO_COUNT} 条，当前筛选 ${REPO_COUNT} 条`)
+            await expect(selectedRows).toHaveCount(PAGE_SIZE)
+
+            // 筛选变化不清空已选（「全选全部 / 批量扫描」语义依赖该不变量）；
+            // 用本次 runId 限定到 10 条（00-09），证明筛选收窄后选择仍在
+            await page.locator('#repos-filter-search').fill(`${RUN_ID}-0`)
+            await expect(rows).toHaveCount(PAGE_SIZE, { timeout: 10000 })
+            await expect(summary).toHaveText(`已选 ${REPO_COUNT} 条，当前筛选 ${PAGE_SIZE} 条`)
+
             // 清空选择
             await page.getByRole('button', { name: '清空选择' }).click()
-            await expect(summary).toHaveText(`已选 0 条，当前筛选 ${REPO_COUNT} 条`)
+            await expect(summary).toHaveText(`已选 0 条，当前筛选 ${PAGE_SIZE} 条`)
             await expect(selectedRows).toHaveCount(0)
         } finally {
             for (const id of createdIds) {
