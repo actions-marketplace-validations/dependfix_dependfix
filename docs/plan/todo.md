@@ -86,7 +86,7 @@
 - **容量评估结论（§3.1.1 记录②）**：本批占原子基线文件 45.5%-51.0%（上界触阈值 2）、commits 30.0%-41.7%、文本行 27.5%-28.0%；用户 2026-10-30 明确放行不移出，保留全部 4 原子。
 - **交付物**：预估 3-5 commits / 15-25 文件（含 10-18 张基线）/ 300-500 行文本；基线为生成物，文件数不代表逻辑面。
 - **风险与缓解**：rc 为预发布 → 精确钉定 + 回滚路径（`pnpm add caomei-ui@0.7.0`）记入升级实证；视觉「低色差 + 大面积」盲区 → 用严格口径统计并逐张归因，不用 `--update-snapshots` 默认行为当证据；DataTable 行为变化 → 先一次性 smoke 监听 `pageerror` / `console.error`，再跑全量 e2e；`minimumReleaseAge` → rc.1 已过窗口，若仓内出现 rc.2 需等待窗口或按 [security.md §5](../standards/security.md) 与 [development.md §5.1.57](../standards/development.md) 的成熟窗口口径处理。
-- **闭环（2026-10-31）**：`fdbb4e57`（升级 + token 适配 + 19 张基线 + 守卫用例）、`858e4683`（[§15.16](../design/governance/caomei-ui-migration.md#_15-16-caomei-ui-1-0-0-rc-1-升级实证-2026-10-31) 实证与版本史）。证据：全量 e2e 207 passed / 0 failed（2 flaky 重试通过）、视觉 `=all` 重建 20 passed + 两轮 20 passed、定向 DataTable e2e 28 passed、`gates:docs` 16 项、审计 R1 → R2 Pass。残余：暗色 `control-border` 在 elevated 面 2.59:1、表头全选语义无自动守卫（均登记于 §15.16 第 5 条）。
+- **闭环（2026-10-31）**：`fdbb4e57`（升级 + token 适配 + 19 张基线 + 守卫用例）、`858e4683`（[§15.16](../design/governance/caomei-ui-migration.md#_15-16-caomei-ui-1-0-0-rc-1-升级实证-2026-10-31) 实证与版本史）、`9bc7c677`（全选语义适配 + 暗色边界微调）、`6a17b8d6`（[§15.17](../design/governance/caomei-ui-migration.md#_15-17-caomei-ui-1-0-全选语义适配与暗色控件边界微调-2026-10-31-追加) 实证）。证据：全量 e2e 211 passed / 0 failed（1-2 flaky 重试通过）、视觉 `=all` 重建 20 passed + 两轮 20 passed、定向 DataTable e2e 28 passed、选择逻辑单测 5 passed、`gates:docs` 16 项、审计 R1 → R2 Pass（追加批次另跑 R1）。残余：暗色 `control-border` 若换更亮暗面需重算、选择栏仅覆盖 `repos`（均登记于 §15.17 第 4 条）。
 
 ---
 
