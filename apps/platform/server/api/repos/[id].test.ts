@@ -109,6 +109,31 @@ describe('GET /api/repos/[id]', () => {
         )
     })
 
+    it('rejects PUT with unknown sandboxLimits key (如 gpu) → 400（strict，不静默剥离）', async () => {
+        await expectError(
+            callId('PUT', `/api/repos/${id}`, { sandboxLimits: { memoryMb: 2048, gpu: 1 } }, { id }),
+            400,
+        )
+    })
+
+    it('tags 缺省 = 不修改（其它字段更新不清空既有标签）', async () => {
+        await callId('PUT', `/api/repos/${id}`, { tags: ['prod'] }, { id })
+        await callId('PUT', `/api/repos/${id}`, { note: '仅改备注' }, { id })
+
+        const detail = await callId('GET', `/api/repos/${id}`, undefined, { id }) as { tags: string[] }
+        expect(detail.tags).toEqual(['prod'])
+    })
+
+    it('tags 写入即归一（trim + 去重），读回与写入一致', async () => {
+        const result = await callId('PUT', `/api/repos/${id}`, {
+            tags: [' prod ', 'prod', 'core'],
+        }, { id }) as { updated: boolean }
+        expect(result).toEqual({ id, updated: true })
+
+        const detail = await callId('GET', `/api/repos/${id}`, undefined, { id }) as { tags: string[] }
+        expect(detail.tags).toEqual(['prod', 'core'])
+    })
+
     it('persists verifyCommands JSON via PUT', async () => {
         // 仓库级自定义验证命令序列化 + 读取（数组 → JSON 列 → 数组）
         const result = await callId('PUT', `/api/repos/${id}`, {

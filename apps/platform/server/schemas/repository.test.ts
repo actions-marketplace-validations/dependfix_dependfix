@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { repositorySchema, repositoryUpdateSchema, SANDBOX_EXECUTOR_DISABLED_MESSAGE } from './repository'
-import { parseSandboxLimits, parseVerifyCommands } from '#server/entities/repository'
+import { parseSandboxLimits, parseTags, parseVerifyCommands } from '#server/entities/repository'
 
 describe('repository schemas', () => {
     it('创建：owner/name 必填，默认值生效', () => {
@@ -143,6 +143,63 @@ describe('repository schemas', () => {
         it('更新：sandboxLimits 越界 → fail', () => {
             const bad = repositoryUpdateSchema.safeParse({ sandboxLimits: { memoryMb: 100000 } })
             expect(bad.success).toBe(false)
+        })
+
+        it('创建 / 更新：含未知键（如 gpu）→ fail（strict，避免「配了但静默不生效」）', () => {
+            const created = repositorySchema.safeParse({
+                owner: 'a',
+                name: 'b',
+                sandboxLimits: { memoryMb: 2048, gpu: 1 },
+            })
+            expect(created.success).toBe(false)
+            expect(created.success === false && created.error.issues.some((issue) => issue.code === 'unrecognized_keys')).toBe(true)
+            expect(repositoryUpdateSchema.safeParse({ sandboxLimits: { cpu: 1, gpu: 1 } }).success).toBe(false)
+        })
+    })
+
+    describe('tags（仓库标签）', () => {
+        it('创建：逐项 trim 并去重（保序，重复项不占额度）', () => {
+            const ok = repositorySchema.safeParse({
+                owner: 'a',
+                name: 'b',
+                tags: [' frontend ', 'frontend', 'critical', 'critical'],
+            })
+            expect(ok.success).toBe(true)
+            expect(ok.success && ok.data.tags).toEqual(['frontend', 'critical'])
+        })
+
+        it('创建：去重后超过 20 个 → fail（重复项不计入容量）', () => {
+            const twentyUniqueWithDuplicates = [
+                ...Array.from({ length: 20 }, (_, i) => `tag-${i}`),
+                'tag-0',
+            ]
+            expect(repositorySchema.safeParse({ owner: 'a', name: 'b', tags: twentyUniqueWithDuplicates }).success).toBe(true)
+
+            const bad = repositorySchema.safeParse({
+                owner: 'a',
+                name: 'b',
+                tags: Array.from({ length: 21 }, (_, i) => `tag-${i}`),
+            })
+            expect(bad.success).toBe(false)
+        })
+
+        it('创建：空白项 / 超长标签 → fail', () => {
+            expect(repositorySchema.safeParse({ owner: 'a', name: 'b', tags: ['   '] }).success).toBe(false)
+            expect(repositorySchema.safeParse({ owner: 'a', name: 'b', tags: ['x'.repeat(51)] }).success).toBe(false)
+        })
+
+        it('更新：undefined = 不修改 / null 或 [] = 清空', () => {
+            expect(repositoryUpdateSchema.safeParse({}).success).toBe(true)
+            expect(repositoryUpdateSchema.safeParse({ tags: null }).success).toBe(true)
+            expect(repositoryUpdateSchema.safeParse({ tags: [] }).success).toBe(true)
+            expect(repositoryUpdateSchema.safeParse({ tags: ['prod'] }).success).toBe(true)
+        })
+
+        it('parseTags：与写入侧同源归一（trim + 去重）——存量脏数据读回即重写结果', () => {
+            expect(parseTags('[" prod ","prod","  ","critical"]')).toEqual(['prod', 'critical'])
+            expect(parseTags(null)).toEqual([])
+            expect(parseTags('not-json')).toEqual([])
+            expect(parseTags('{"a":1}')).toEqual([])
         })
     })
 

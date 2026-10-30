@@ -5,6 +5,11 @@ import {
     MAX_PR_CHECK_FOCUS_PROVIDER_LENGTH,
     PR_CHECK_FOCUS_KINDS,
 } from '#server/utils/pr-check-focus'
+import {
+    MAX_REPOSITORY_TAGS,
+    MAX_REPOSITORY_TAG_LENGTH,
+    normalizeRepositoryTags,
+} from '#server/utils/repository-tags'
 
 /**
  * 是否含换行 / 控制字符（含 DEL）。
@@ -26,6 +31,26 @@ const hasControlChar = (value: string): boolean => {
  */
 export const SANDBOX_EXECUTOR_DISABLED_MESSAGE = '独立沙箱容器暂不可用（真实执行尚未闭环），请选择平台容器或 GitHub Action'
 
+/**
+ * 仓库标签写入闸门（`POST /api/repos` / `PUT /api/repos/[id]` / e2e fixtures 共用）。
+ *
+ * - 逐项 trim / 非空 / 长度上限（{@link MAX_REPOSITORY_TAG_LENGTH}）
+ * - 归一去重（保序）：重复标签不占额度，存进列的即读回的值
+ * - 去重后条目数 ≤ {@link MAX_REPOSITORY_TAGS}，超限由 API 层转 400
+ *
+ * 读取侧（`parseTags`）复用同一 `normalizeRepositoryTags`，但**不施加容量上限**：
+ * 存量超限行保持可读（宽容），容量只在写入把关。
+ */
+export const repositoryTagsSchema = z.array(
+    z.string().trim().min(1, '标签不能为空')
+        .max(MAX_REPOSITORY_TAG_LENGTH, `单个标签最长 ${MAX_REPOSITORY_TAG_LENGTH} 字符`),
+)
+    .transform((tags) => normalizeRepositoryTags(tags))
+    .refine(
+        (tags) => tags.length <= MAX_REPOSITORY_TAGS,
+        `最多 ${MAX_REPOSITORY_TAGS} 个标签（去重后）`,
+    )
+
 /** 仓库创建基础校验（Zod）。owner/name 为必填，其余有默认或可选。 */
 export const repositoryBase = z.object({
     owner: z.string().trim().min(1, 'owner 不能为空').max(100).regex(/^[A-Za-z0-9_.-]+$/, 'owner 含非法字符'),
@@ -38,17 +63,18 @@ export const repositoryBase = z.object({
     executorKind: z.enum(['container', 'github-action', 'sandbox']).default('container'),
     note: z.string().max(500).nullable().optional(),
     /** 仓库标签（数组形式输入；空数组在 API 层转 null 存储；更新语义：undefined=不修改 / null 或 [] = 清空） */
-    tags: z.array(z.string().trim().min(1, '标签不能为空').max(50)).max(20, '最多 20 个标签').nullable().optional(),
+    tags: repositoryTagsSchema.nullable().optional(),
     /**
      * 沙箱资源限额覆盖（可选；缺省走平台 SANDBOX_DEFAULTS：2048MB / 1.0 CPU）。
      * 字段范围：memoryMb [64, 32768] 整数 MB / cpu [0.1, 16]。
      * 限额优先级（sandbox-executor.ts:107 注释）：仓库级 sandboxLimits > 沙箱级 > SANDBOX_DEFAULTS。
      * UI 不暴露该字段，仅 API 层透传；演进路径：未来可加折叠面板批量配置。
+     * `.strict()`：未知键（如 `gpu`）直接 400——否则会被 Zod 静默剥离，形成「配了但不生效」。
      */
     sandboxLimits: z.object({
         memoryMb: z.number().int().min(64, 'memoryMb 至少 64MB').max(32768, 'memoryMb 至多 32768MB (32GB)').optional(),
         cpu: z.number().min(0.1, 'cpu 至少 0.1').max(16, 'cpu 至多 16').optional(),
-    }).nullable().optional(),
+    }).strict().nullable().optional(),
     /**
      * 仓库级自定义验证命令（覆盖引擎默认验证链 `DEFAULT_VERIFY_COMMANDS`）。
      * 语义与 CLI `--commands` 对齐：数组每项为一条命令；缺省（undefined / null / []）走默认链。

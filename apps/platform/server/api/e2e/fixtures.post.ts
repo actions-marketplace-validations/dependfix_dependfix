@@ -8,6 +8,7 @@ import { ScanResult } from '#server/entities/scan-result'
 import { PRCheck, PR_CHECK_CONCLUSIONS } from '#server/entities/pr-check'
 import { resolveOrganizationId } from '#server/utils/organization'
 import { summarizeFailureSources } from '#server/services/monitor/build-signals'
+import { repositoryTagsSchema } from '#server/schemas/repository'
 
 // useRuntimeConfig 由 Nuxt/Nitro auto-import 提供（vitest 环境由 tests/setup-nuxt-server.ts stub）
 // 不在 h3 中显式 import，避免被 h3 解析为 undefined（h3 不导出 useRuntimeConfig）
@@ -57,10 +58,11 @@ const repoSchema = z.object({
     executorKind: z.enum(['container', 'github-action', 'sandbox']).default('container'),
     /**
      * 仓库标签（可选）。视觉回归基线需要确定性的标签列渲染，否则该列只能落空态；
-     * 写入口径与 POST /api/repos 一致（JSON 字符串存储；空数组 / 缺省写 null）。
+     * 写入口径与 POST /api/repos 一致（同一 `repositoryTagsSchema`：trim + 去重 + 容量上限；
+     * JSON 字符串存储；空数组 / 缺省写 null）。
      * 注意：按 owner/name 复用既有仓库时**不更新**该字段（幂等语义），标签仅在该仓库首次创建时生效。
      */
-    tags: z.array(z.string().trim().min(1).max(50)).max(20).optional(),
+    tags: repositoryTagsSchema.optional(),
 })
 
 const scanRunSchema = z.object({

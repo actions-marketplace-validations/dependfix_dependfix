@@ -58,15 +58,15 @@ describe('POST /api/e2e/fixtures 双门控（todo.md §M22.6）', () => {
 
     /**
      * repos[].tags：视觉回归基线需要确定性的标签列渲染（apps/platform/tests/visual/），
-     * 故 fixtures 端点支持可选标签。写入口径与 POST /api/repos 一致（JSON 字符串存储；
-     * 缺省 / 空数组写 null）。
+     * 故 fixtures 端点支持可选标签。写入口径与 POST /api/repos 一致（同一 `repositoryTagsSchema`：
+     * trim + 去重 + 容量上限；JSON 字符串存储；缺省 / 空数组写 null）。
      */
-    it('repos[].tags 落库为 JSON 字符串，缺省 / 空数组写 null', async () => {
+    it('repos[].tags 落库为 JSON 字符串（trim + 去重），缺省 / 空数组写 null', async () => {
         vi.stubEnv('E2E_TEST', 'true')
         vi.stubGlobal('useRuntimeConfig', () => ({ encryptionKey: 'test-encryption-key-32-bytes!!', e2eFixturesAllowed: true }))
         await fixturesPostHandler(makeEvent('POST', '/api/e2e/fixtures', {
             repos: [
-                { owner: 'visual-fixture', name: 'with-tags', tags: ['frontend', 'critical'] },
+                { owner: 'visual-fixture', name: 'with-tags', tags: [' frontend ', 'frontend', 'critical'] },
                 { owner: 'visual-fixture', name: 'without-tags' },
                 { owner: 'visual-fixture', name: 'empty-tags', tags: [] },
             ],

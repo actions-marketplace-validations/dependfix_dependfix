@@ -8,6 +8,7 @@ import {
 import { BaseEntity } from './base-entity'
 import { Credential } from './credential'
 import { Organization } from './organization'
+import { normalizeRepositoryTags } from '#server/utils/repository-tags'
 
 /** 仓库托管平台（当前仅 GitHub） */
 export type RepositoryPlatform = 'github'
@@ -154,7 +155,13 @@ export class Repository extends BaseEntity {
     prFeedback!: string | null
 }
 
-/** 解析 tags JSON 字符串 → 字符串数组（非法/缺失返回空数组，容错不抛错） */
+/**
+ * 解析 tags JSON 字符串 → 字符串数组（非法/缺失返回空数组，容错不抛错）。
+ *
+ * 归一与写入侧**同源**（`normalizeRepositoryTags`：trim + 去重保序），保证
+ * 「按合法输入写入的值 = 读回的值」；存量脏数据（未 trim / 重复项）读时一并归一，
+ * 无需回填。容量上限只在写入侧把关（读取保持宽容，不截断存量行）。
+ */
 export const parseTags = (raw: string | null | undefined): string[] => {
     if (!raw) {
         return []
@@ -162,7 +169,7 @@ export const parseTags = (raw: string | null | undefined): string[] => {
     try {
         const parsed: unknown = JSON.parse(raw)
         return Array.isArray(parsed)
-            ? parsed.filter((tag): tag is string => typeof tag === 'string')
+            ? normalizeRepositoryTags(parsed.filter((tag): tag is string => typeof tag === 'string'))
             : []
     } catch {
         return []
