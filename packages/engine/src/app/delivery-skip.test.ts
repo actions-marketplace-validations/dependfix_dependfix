@@ -24,6 +24,7 @@ const {
     mockCreatePullRequest,
     mockPushBranch,
     mockFindDependfixOpenPR,
+    mockRunPrCheckWatch,
 } = vi.hoisted(() => ({
     mockRunVerification: vi.fn(),
     mockUpgradeDependency: vi.fn(),
@@ -31,6 +32,7 @@ const {
     mockCreatePullRequest: vi.fn(),
     mockPushBranch: vi.fn(),
     mockFindDependfixOpenPR: vi.fn(),
+    mockRunPrCheckWatch: vi.fn(),
 }))
 
 vi.mock('../runners/verification-runner', async (importOriginal) => {
@@ -56,6 +58,11 @@ vi.mock('../github/pr-creator', async (importOriginal) => {
         pushBranch: mockPushBranch,
         findDependfixOpenPR: mockFindDependfixOpenPR,
     }
+})
+
+vi.mock('./pr-check-watch-run', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('./pr-check-watch-run')>()
+    return { ...actual, runPrCheckWatch: mockRunPrCheckWatch }
 })
 
 vi.mock('./delivery', async (importOriginal) => {
@@ -153,6 +160,7 @@ describe('DependfixApp baseline-red delivery degradation', () => {
         mockCreatePullRequest.mockReset().mockResolvedValue({ number: 1, htmlUrl: 'https://github.com/foo/bar/pull/1' })
         mockPushBranch.mockReset()
         mockFindDependfixOpenPR.mockReset().mockResolvedValue([])
+        mockRunPrCheckWatch.mockReset()
     })
 
     afterEach(() => {
@@ -275,9 +283,12 @@ describe('DependfixApp baseline-red delivery degradation', () => {
         })
     }, 30_000)
 
-    it('draft 档：不回滚，照常提交并创建草稿 PR（正文带草稿说明）', async () => {
+    it('draft 档：不回滚，照常提交并创建草稿 PR（正文带草稿说明，且不等待 check）', async () => {
         nockRepository()
-        const { result, exitCode } = await runFixAndPr({ DEPENDFIX_ON_BASELINE_RED: 'draft' })
+        const { result, exitCode } = await runFixAndPr({
+            DEPENDFIX_ON_BASELINE_RED: 'draft',
+            DEPENDFIX_WAIT_PR_CHECKS: 'true',
+        })
 
         expect(exitCode).toBe(0)
         expect(mockPushBranch).toHaveBeenCalledTimes(1)
@@ -296,5 +307,8 @@ describe('DependfixApp baseline-red delivery degradation', () => {
         // 草稿交付不回滚：修复改动已提交（初始提交 + 修复提交）
         expect(lockfileDirty()).toBe(false)
         expect(commitCount()).toBe(2)
+        // 草稿 PR 不进入 check 回环（CI 必然复现既有失败，等待只会烧预算）
+        expect(mockRunPrCheckWatch).not.toHaveBeenCalled()
+        expect(result.summary.checksTimedOut).toBe(0)
     }, 30_000)
 })

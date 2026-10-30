@@ -53,4 +53,3 @@ export function logPartialSourceFailureSummary(
         `[alerts] 部分源拉取失败（per-source 错误隔离）— 成功源已保留继续处理，详细如下：\n  - ${summary}`,
     )
 }
-

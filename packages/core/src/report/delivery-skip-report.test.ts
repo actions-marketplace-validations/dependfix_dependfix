@@ -24,7 +24,7 @@ describe('generateMarkdownReport — Delivery Skipped', () => {
         expect(md).toContain('PRE_EXISTING_FAILURE')
     })
 
-    it('draft 档区分「本 PR」与已建 PR；无记录时不渲染', () => {
+    it('draft 档区分「已建 PR」与「未新建」；无记录时不渲染', () => {
         const draftMd = generateMarkdownReport({
             ...EMPTY_RUN_RESULT,
             deliverySkips: [{
@@ -43,6 +43,15 @@ describe('generateMarkdownReport — Delivery Skipped', () => {
             }],
         })
         expect(skipMd).toContain('report only (skip)')
+        const createdMd = generateMarkdownReport({
+            ...EMPTY_RUN_RESULT,
+            deliverySkips: [{
+                repositories: ['foo/bar'],
+                failingCommands: [],
+                carrier: { mode: 'draft' as const, draftPr: { number: 8, htmlUrl: 'https://github.com/foo/bar/pull/8' } },
+            }],
+        })
+        expect(createdMd).toContain('draft PR #8')
         expect(generateMarkdownReport(EMPTY_RUN_RESULT)).not.toContain('## Delivery Skipped')
     })
 })

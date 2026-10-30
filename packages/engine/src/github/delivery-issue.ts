@@ -10,7 +10,7 @@ import type { Octokit } from '@octokit/rest'
 import type { RunResult } from '@dependfix/core'
 import { escapeTableCell } from './markdown-table'
 
-/** 交付跳过 issue 的推荐标签（不存在时按 GitHub 语义自动创建）。 */
+/** 交付跳过 issue 的推荐标签（仅用于检索；仓库未建该标签时可能被静默丢弃，去重不依赖它）。 */
 export const DELIVERY_SKIP_LABEL = 'dependfix'
 
 /** 交付跳过 issue 的 HTML 标记前缀（正文首位；去重判定用）。 */

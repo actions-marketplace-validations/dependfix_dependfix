@@ -819,4 +819,3 @@ function truncatePRBody(lines: string[]): string {
     }
     return `${kept.join('\n')}${truncationNote}`
 }
-

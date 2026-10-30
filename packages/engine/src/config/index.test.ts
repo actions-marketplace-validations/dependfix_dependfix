@@ -382,7 +382,6 @@ describe('resolveRuntimeConfig', () => {
         }).rollbackGranularity).toBe('repo')
     })
 
-
     it('rejects invalid rollbackGranularity', () => {
         expect(() => resolveRuntimeConfig({
             env: {
