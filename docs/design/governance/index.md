@@ -41,6 +41,7 @@
 | [1.0 发布门槛与就绪度台账](./release-1.0-readiness.md) | 发布治理（G1-G8 门槛 / P0-P1 分档 / 真实环境矩阵 / 批次计划） | 🔶 进行中（2026-10-25 立项；目标 1.0.0） |
 | [发布前安全告警门禁设计](./release-security-gate.md) | 发布治理（Dependabot + Code Scanning 发布级阻断 / 豁免台账 / fail-closed 决策） | ✅ 已落地（2026-10-29，`release.yml` 接线 + 单测） |
 | [对外 PR 交付闭环设计](./pr-delivery-closure.md) | 专项设计（M48：家族锁步 / CI 独有脚本 / 失败指纹 / 提交面 / PR 回环 / 归因） | ✅ 已落地（2026-10-25，M48.1-M48.6 六原子闭环；Review Gate 逐条 Pass） |
+| [仓库级执行预算与超时配置设计](./repo-execution-limits.md) | 专项设计（四个超时仓库级覆盖 + 平台封顶 + Worker 锁 / 孤儿阈值同源 + 前端设置面） | 🔶 设计定稿（2026-10-30，D1-D3 已裁定；待上收） |
 
 ## 使用约定
 
