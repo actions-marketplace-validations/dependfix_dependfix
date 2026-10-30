@@ -2,7 +2,9 @@
 // 环境/容器审计事件视图（env-events）
 // 数据源：GET /api/audit-events（执行器/环境异常 + 配置留痕事件 + 通知状态）
 // 过滤维度：type / severity / notified / repositoryId
-// 类型下拉与共享 audit_event 全量类型（AUDIT_EVENT_TYPES）口径一致（含 PR 回环反馈两类）
+// 类型下拉与共享 audit_event 全量类型（AUDIT_EVENT_TYPES）口径一致（含 PR 回环反馈两类）。
+// 新增 / 删除审计类型时必须同步：本列表 + server/entities/audit-event.ts 的 AUDIT_EVENT_TYPES
+// + e2e `env-events.e2e.test.ts` 的「全量类型口径」用例（否则 CI 的 E2E 会在下拉计数上失败）。
 import { computed } from 'vue'
 import { ChevronDown, ChevronUp, Funnel } from '@lucide/vue'
 import type { DataTableColumn, InputType } from 'caomei-ui'
