@@ -19,7 +19,7 @@ overrides:
   "@octokit/request": ^9.2.1
   "@octokit/request-error": ^5.1.1
   tmp: ^0.2.4
-  glob: ^11.1.0
+  glob: ^14.0.3
   flatted: 3.4.2
   brace-expansion@1: ^1.1.21
   brace-expansion@2: ^2.1.7
@@ -34,6 +34,7 @@ overrides:
   "@octokit/auth-app": 8.3.0
   moment: ^2.31.0
   qs: ^6.16.1
+  node-forge: ^1.4.2
   svgo: ^4.1.0
   "@vitest/mocker": ^4.1.12
   hono: ^4.13.5
@@ -57,8 +58,12 @@ overrides:
 # 机制与复核条件见 docs/standards/security.md §5.7；修复版本发布后必须移除对应条目。
 audit:
   ignore:
-    # node-forge <= 1.4.0（RSA PKCS#1 v1.5 签名校验）；
-    # 路径 apps/platform > nuxt > @nuxt/cli / nitropack > listhen
-    # 2026-10-27 prod 审计转阻断后保留：node-forge latest 1.4.0，无 >1.4.0 修复版本；
-    # §5.6 判据为阻断步骤 exit 0，ignored 条目不参与阻断（security.md §5.6 / §5.7）。
-    - GHSA-86w9-cpqp-85rv
+    # minimatch < 11.0.1（glob 模式拒绝服务）；修复线只有 11.x，而消费者仍钉旧大版本：
+    # - @nuxtjs/i18n > @intlify/unplugin-vue-i18n > eslint 链（minimatch 3.1.5）
+    # - nuxt > @nuxt/nitro-server > nitropack > archiver > readdir-glob（minimatch 5.1.9）
+    # - @typescript-eslint/typescript-estree（minimatch 10.2.4）
+    # 注：glob 已跨大版本覆盖到 14.0.3 —— 14 仍导出 glob / globSync / hasMagic，且仅用于构建期（@vercel/nft / archiver-utils），
+    # 已由 build / lint-md / e2e / 视觉验证；minimatch 的消费者（eslint / readdir-glob / typescript-estree）无此兼容性，故保留豁免。
+    # 跨大版本覆盖会破坏 v3/v5/v10 API；仅构建期工具链，不进入请求处理路径。
+    # 复核：消费者上游改用 minimatch >=11（或 eslint / archiver 放弃旧 API）后移除。
+    - GHSA-g3hv-75wg-m249
