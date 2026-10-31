@@ -89,7 +89,9 @@ jobs:
           # GITHUB_TOKEN 无法读取该 API。仓库 Settings → Secrets 配置 GH_PAT。
           dependabot-alerts-token: ${{ secrets.GH_PAT }}
           cleanup-branches-auto: ${{ inputs.cleanup-branches-auto || 'true' }}
-          # 自用验证链：与引擎默认链（install + lint + build + typecheck + test）保持语义一致，
+          # 自用验证链：与引擎默认链（install + lint + build + typecheck + test）保持语义一致——
+          # 此处的 `pnpm lint` 是**产品修复链**的 fix 通道（会把自动修复带入安全修复 PR），不是质量门禁；
+          # 质量门禁见 test/release/docker 的 `pnpm run lint:check`（无 --fix，含平台独立配置）。
           # 仅多一步 `nuxt prepare`（本仓库 eslint 依赖 .nuxt/tsconfig.json 生成物，默认链无该步骤会
           # 导致解析失败——教训见 docs/design/governance/experience-archive-§36-§40-toolchain.md）。
           # `--commands` 是整链替换语义：默认链扩展不会自动跟随自用链，故本文件的链条由

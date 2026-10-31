@@ -26,7 +26,7 @@ metadata:
 
 ## 常见检查
 
-- pnpm lint
+- pnpm run lint:check
 - pnpm lint:md
 - pnpm test
 

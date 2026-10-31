@@ -119,8 +119,8 @@
 ## 9. 提交前检查
 
 1. **Review Gate**：所有改动必须经至少一轮 review 且 A 阶段（`Code Auditor (代码审计员)`）放行。
-2. **Lint**：**门禁** `pnpm run lint:check` 零 error（无 `--fix`，依次跑根配置与平台独立配置）；本地修复用 `pnpm lint`。
-   门禁只带 `--fix` 时，自动修复会被静默写回工作区而提交态仍带 error（本地绿 / HEAD 红）——CI 与提交前一律用 `lint:check` 复核。
+2. **Lint**：**门禁** `pnpm run lint:check` 零 error（无 `--fix`，依次跑根配置与平台独立配置；告警预算：根 10 / 平台 11，超预算即失败）；本地自动修复用 `pnpm lint`。
+   若把只带 `--fix` 的 `pnpm lint` 当门禁，自动修复会被静默写回工作区而提交态仍带 error（本地绿 / HEAD 红）——质量门禁（Test / Release / Docker）与提交前复核一律用 `lint:check`；产品自修复链（`security-auto-fix.yml`）保留 fix 语义，不属门禁。
 3. **Typecheck**：`pnpm typecheck` 零 error。
 4. **测试**：定向测试通过；命中全量测试条件时执行 `pnpm test`。
 5. **提交执行**：必须通过 `conventional-committer` skill 提交（禁止裸 `git commit -m`），见 [Git 规范](./git.md)。

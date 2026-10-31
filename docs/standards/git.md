@@ -21,7 +21,7 @@
 
 1. **必须使用 `conventional-committer` skill**：任何代码、文档、配置或脚本的提交都必须通过 `conventional-committer` skill 执行。禁止直接使用 `git commit -m "..."` 裸提交。
 2. **格式要求**：提交消息必须符合 Conventional Commits 规范，格式：`<type>(<scope>): <description>`，且 `description` 统一使用**中文或用户使用的语言**。
-3. **质量前置**：提交前必须确认 A 阶段（`Code Auditor (代码审计员)`）已放行，且 `pnpm lint`、`pnpm typecheck` 和必要的定向测试均已通过。质量门禁未通过时不得提交。
+3. **质量前置**：提交前必须确认 A 阶段（`Code Auditor (代码审计员)`）已放行，且 `pnpm run lint:check`（无 `--fix` 的门禁命令）、`pnpm typecheck` 和必要的定向测试均已通过。质量门禁未通过时不得提交。
 4. **原子粒度**：一个提交对应一个逻辑变更，关联且仅关联 `todo.md` 中的一个原子条目。
 5. **分批提交（长任务强制）**：单次提交规模建议与拆分规则见 [规划规范 §1.1 任务粒度约束](./planning.md#11-硬性约束)；按"可独立验证"的顺序分批次提交，每批独立过 Review Gate；锁文件（pnpm-lock.yaml）等随其所属批次提交。
 6. **推送禁令**：`git commit` 后不得自动执行 `git push`，推送仅限用户明确要求时执行。提交完成后应告知用户"已提交到本地，等待推送确认"。
@@ -109,7 +109,7 @@
 - ESLint `--fix` 自动修改（如 `@typescript-eslint/array-type` 规则偏好 `T[]` 写法替换 `Array<T>`、`@typescript-eslint/consistent-type-imports` 加 `type` 关键字等）是合规修改——两种写法 TypeScript 等价，规则要求即合规。**应该接受 + 独立 `chore` commit**——不要回滚。
 - 详见 [归档 §四十二](../design/governance/experience-archive-§41-§48-archive-batch.md#四十二coverage-阈值对-refactor-顺序敏感纯-rename-commit-可触发无关覆盖债务清算2026-08-27ci-run-33068271005-修复)
 - 修正：lint auto-fix 是合规修改，**不要回滚**。如不希望与 docs 提交混杂，应在 commit 前 `git restore --staged <file>` 排除；如已 uncommitted，作为 standalone chore commit 独立接受。
-- 实操：在每次 commit 前过一遍 lint（`pnpm lint` / `pnpm run lint:md` / `pnpm typecheck`）确认 0 error；如发现 working tree 有未提交 lint auto-fix 改动，按本节策略处理（接受并独立 commit）。
+- 实操：在每次 commit 前过一遍 lint（门禁用 `pnpm run lint:check`，本地自动修复用 `pnpm lint`；另 `pnpm run lint:md` / `pnpm typecheck`）确认 0 error；如发现 working tree 有未提交 lint auto-fix 改动，按本节策略处理（接受并独立 commit）。
 
 ### 3.6 commit message 信息密度规范
 
@@ -131,7 +131,7 @@ commit message 应聚焦于"当次提交的改动"+"可供事后复查的信息"
 
 **不应包含**（git diff / CI 实测输出已涵盖，堆砌无增量价值）：
 
-- 执行了哪些命令（如 `pnpm run check:docs` / `pnpm lint` / `pnpm typecheck` 等）
+- 执行了哪些命令（如 `pnpm run check:docs` / `pnpm run lint:check` / `pnpm typecheck` 等）
 - 执行结果数字（如 "links: 103" / "lint:md 0 error" / "1001/1008 passed"）
 - 改动行数（如 "+189/-3"）
 - 无依据的表述（如「确切路径需源码进一步确认」——无依据就别写）
