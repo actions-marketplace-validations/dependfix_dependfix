@@ -90,6 +90,15 @@
 
 ---
 
+### 追加临时待办（2026-10-31 用户授权，不占阶段条目编号，P1 🧪）：lint 门禁 check 通道与平台存量清理
+
+- **来源**：caomei-ui 升级批次的审计衍生项——根 `lint` 与平台 `lint` 均只有 `--fix` 通道，自动修复会静默改工作区（曾导致「本地绿 / HEAD 红」），且根配置与平台独立配置规则集不同（平台侧存量 20 error / 15 warning）。用户 2026-10-31 明确指示「清理存量；添加门禁」。
+- **范围**：根与平台 `package.json` 脚本；`.github/workflows/{test,release,docker}.yml`；根 `eslint.config.js` 注释；平台 10 个存量违规文件；`docs/standards/{development,platform}.md`。
+- **验收标准**：① 新增 `pnpm run lint:check`（无 `--fix`）在根与平台均 0 error，且链式覆盖两套配置；② 平台存量 20 error 清零；③ Test / Release / Docker 三工作流改用门禁命令；④ 负例可复现（临时注入 `Array<T>` → exit 1，跑后还原）；⑤ 门禁不修改工作区（跑后 `git status` 干净）；⑥ 平台告警预算显式登记（11 条 = 9 条有意保留的 `no-deprecated` + 2 条存量 `max-lines`），新增告警即失败；⑦ 标准口径（提交前检查 / 平台质量门禁）同步。
+- **不做什么**：不删除 `hasLiveJob` 兼容期 API；不拆分 `alerts.vue` / `scans.vue`（存量 `max-lines` 归后续重构）；不改 AGENTS.md（受保护文件，其「lint 必须通过」口径由 `lint:check` 满足）。
+- **证据**：`pnpm run lint:check` exit 0（根 3 warning / 平台 11 warning）；负例注入后 exit 1；typecheck 7 包；platform 单测 2381 passed；全量 e2e 210 passed；视觉 20 passed；`gates:docs` 16 项。
+- **闭环（2026-10-31）**：`5a0da483`（存量清理）、`9cb95c1a`（门禁与 CI）、`f12029fa`（标准口径）；审计结论待回填。
+
 ## 阶段收口要求
 
 - **质量门**：逐原子 `pnpm lint` + `pnpm typecheck` + 定向测试；跨包改动先 `pnpm -r build` 再 typecheck；阶段收口跑 platform 全量 + e2e + 视觉套件 + `test:coverage`。
