@@ -143,8 +143,9 @@ Nuxt 4（全栈 SSR + API Routes，`app/` + `server/`）/ TypeScript strict / UI
 
 ## 9. 质量门禁
 
-- `pnpm lint` / `pnpm typecheck`（根目录，含平台）。
-- **平台 Vue 模板规则只在平台自己的 ESLint 配置生效**：根 `pnpm run lint` 不覆盖平台 `eslint.config.js`（`eslint-config-cmyr/nuxt`）的模板规则，且两侧脚本都带 `--fix`（静默修正、exit 0）→ 平台改动收尾须额外跑**非 `--fix`** 检查 `pnpm --filter @dependfix/platform exec eslint . --max-warnings 10`，确保提交态 fix-stable。
+- `pnpm run lint:check` / `pnpm typecheck`（根目录）：`lint:check` 为无 `--fix` 的门禁，先跑根配置再链式跑平台独立配置；CI 的 Test / Release / Docker 均用它。
+- **两套 ESLint 配置不是同一规则集**：根配置用 type-aware 子集；平台配置（`eslint-config-cmyr/nuxt`）额外启用 `strictTypeChecked` / stylistic（`array-type`、`consistent-type-definitions`、`vue/object-curly-spacing` 等）。平台改动须同时满足；本地修复用平台 `lint`，提交前用 `lint:check` 复核。
+- 平台告警预算 `--max-warnings 11`（9 条有意保留的 `no-deprecated` + 2 条存量 `max-lines`），只可随清理下调。
 - `nuxt build` 必须通过（Docker 构建前置）；平台相关改动须运行平台 `test`；提交走 [conventional-committer 流程](./git.md)，scope 用 `platform`；注释禁止规划编号标记（[开发规范 §3](./development.md)）。
 
 ## 10. 运行时与部署（容器镜像 / 启动 / 队列降级）
