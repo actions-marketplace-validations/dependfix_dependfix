@@ -687,7 +687,7 @@ async function reconcileRunResult(
         newAlerts: result.alerts,
         outcomes: result.alertOutcomes,
         // JSON 外部输入：config 理论上必有，运行时防御性判空
-        dryRun: result.config?.dryRun === true,
+        dryRun: result.config?.dryRun,
     })
     if (stats.outcomesUnmatched > 0) {
         logger.warn(

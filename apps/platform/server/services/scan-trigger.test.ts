@@ -67,7 +67,7 @@ describe('enqueueScanJob（僵尸 job 自愈）', () => {
         await createRepo('repo-trigger')
     })
 
-    const makeQueue = (addResults: Array<{ reused: boolean, existingRunId: string | null }>) => {
+    const makeQueue = (addResults: { reused: boolean, existingRunId: string | null }[]) => {
         const add = vi.fn()
         for (const result of addResults) {
             add.mockResolvedValueOnce({ jobId: 'scan-repo-trigger', ...result })

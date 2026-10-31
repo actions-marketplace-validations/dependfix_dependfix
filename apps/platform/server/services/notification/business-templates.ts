@@ -6,7 +6,7 @@ export interface SecurityNotificationData {
     scopeLabel: 'run' | 'batch'
     scopeId: string
     counts: { critical: number, high: number, total: number }
-    repositories: Array<{ repository: string, critical: number, high: number, total: number }>
+    repositories: { repository: string, critical: number, high: number, total: number }[]
     truncated: { critical: number, high: number, total: number }
     link?: string
 }
@@ -35,7 +35,7 @@ export interface WeeklyDigestNotificationData {
     /** ISO 周键（如 `2026-W43`） */
     weekKey: string
     counts: { critical: number, high: number, total: number }
-    repositories: Array<{ repository: string, critical: number, high: number, total: number }>
+    repositories: { repository: string, critical: number, high: number, total: number }[]
     truncated: { critical: number, high: number, total: number }
     /** 快照运行汇总的本地已满足（converged）告警数（仅披露，不改明细计数） */
     exempted: number
@@ -145,7 +145,7 @@ const textFooter = (s: Strings, link?: string): string => [s.footer, link ?? '']
 
 /** 仓库分组明细（最多 50 行，其余折叠为 `+N`）；安全告警与周报共用。 */
 const repositoryBreakdownHtml = (
-    repositories: ReadonlyArray<{ repository: string, critical: number, high: number, total: number }>,
+    repositories: readonly { repository: string, critical: number, high: number, total: number }[],
     s: Strings,
 ): string => {
     const shown = repositories.slice(0, 50)

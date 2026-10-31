@@ -318,7 +318,7 @@ describe('monitor/build-signals 失败源汇总', () => {
 })
 
 describe('monitor/build-signals 状态映射覆盖', () => {
-    const cases: Array<[string, UnifiedBuildSignalState]> = [
+    const cases: [string, UnifiedBuildSignalState][] = [
         ['success', 'success'],
         ['failure', 'failure'],
         ['timed_out', 'failure'],

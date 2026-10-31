@@ -27,13 +27,13 @@ export type PRCheckSignalView = Omit<UnifiedBuildSignal, 'observedAt'> & {
 export type PRCheckFailureSourceView = BuildFailureSource
 
 /** JSON 列安全解析（缺失 / 非 JSON / 非数组时回退 null，不抛错） */
-const parseJsonArrayColumn = <T>(value: string | null | undefined): T[] | null => {
+const parseJsonArrayColumn = (value: string | null | undefined): unknown[] | null => {
     if (!value) {
         return null
     }
     try {
         const parsed: unknown = JSON.parse(value)
-        return Array.isArray(parsed) ? parsed as T[] : null
+        return Array.isArray(parsed) ? parsed : null
     } catch {
         return null
     }
@@ -44,7 +44,7 @@ export const toPRCheckView = (row: PRCheck) => {
     // 若调用方漏加载，`focusConfigured=false` 且全部信号 `focused=true` —— 属已知降级路径（`repository: null` 可作旁证）
     const focus = parsePRCheckFocus(row.repository?.prCheckFocus)
     // 元素级形态守卫：`signals_json` 合法但含非对象元素（脏数据）时丢弃该元素，避免解引用抛错阻塞整份列表
-    const signals = parseJsonArrayColumn<Omit<PRCheckSignalView, 'focused'>>(row.signalsJson)
+    const signals = (parseJsonArrayColumn(row.signalsJson) as Omit<PRCheckSignalView, 'focused'>[] | null)
         ?.filter((signal) => typeof signal === 'object' && signal !== null)
     return {
         id: row.id,
@@ -62,7 +62,7 @@ export const toPRCheckView = (row: PRCheck) => {
             ...signal,
             focused: !focus || matchesPRCheckFocus(signal, focus),
         })) ?? null,
-        failureSources: parseJsonArrayColumn<PRCheckFailureSourceView>(row.failureSourcesJson),
+        failureSources: parseJsonArrayColumn(row.failureSourcesJson) as PRCheckFailureSourceView[] | null,
         checkRunId: row.checkRunId,
         detailsUrl: row.detailsUrl,
         errorMessage: row.errorMessage,

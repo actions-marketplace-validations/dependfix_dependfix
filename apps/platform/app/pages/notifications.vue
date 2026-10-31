@@ -318,24 +318,24 @@ onMounted(load)
                 striped
                 :empty-text="t('notifications.emptyLogs')"
             >
-                <template #cell-createdAt="{ row }">
+                <template #cell-createdAt="{row}">
                     {{ d(new Date(row.createdAt), 'long') }}
                 </template>
-                <template #cell-category="{ row }">
+                <template #cell-category="{row}">
                     {{ categoryLabel(row.category) }}
                 </template>
-                <template #cell-scope="{ row }">
+                <template #cell-scope="{row}">
                     <span class="text-muted">{{ row.scopeType }} · {{ row.scopeId }}</span>
                 </template>
-                <template #cell-status="{ row }">
+                <template #cell-status="{row}">
                     <CaomeiTag :tone="statusTone(row.status)">
                         {{ statusLabel(row.status) }}
                     </CaomeiTag>
                 </template>
-                <template #cell-recipients="{ row }">
+                <template #cell-recipients="{row}">
                     <span class="text-muted">{{ row.recipients.join(', ') || '—' }}</span>
                 </template>
-                <template #cell-errorMessage="{ row }">
+                <template #cell-errorMessage="{row}">
                     <span class="text-muted">{{ row.errorMessage ?? '—' }}</span>
                 </template>
             </CaomeiDataTable>

@@ -59,7 +59,7 @@ const emptySummary = (): HighRiskSummary => ({
     fingerprint: '',
 })
 
-const countSeverities = (rows: ReadonlyArray<{ severity: string }>): HighRiskCounts => {
+const countSeverities = (rows: readonly { severity: string }[]): HighRiskCounts => {
     const counts = emptyCounts()
     for (const row of rows) {
         if (row.severity === 'critical') {

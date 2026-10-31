@@ -152,7 +152,7 @@ describe('repository schemas', () => {
                 sandboxLimits: { memoryMb: 2048, gpu: 1 },
             })
             expect(created.success).toBe(false)
-            expect(created.success === false && created.error.issues.some((issue) => issue.code === 'unrecognized_keys')).toBe(true)
+            expect(!created.success && created.error.issues.some((issue) => issue.code === 'unrecognized_keys')).toBe(true)
             expect(repositoryUpdateSchema.safeParse({ sandboxLimits: { cpu: 1, gpu: 1 } }).success).toBe(false)
         })
     })

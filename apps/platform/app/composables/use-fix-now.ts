@@ -38,7 +38,7 @@ export interface UseFixNowDeps {
         repositoryId: string,
         body: { mode: 'fix', severityThreshold: string, reuseScanRunId: string },
     ) => Promise<FixNowScanResponse>
-    navigate: (to: string) => Promise<unknown> | void
+    navigate: (to: string) => Promise<unknown>
 }
 
 export interface UseFixNowReturn {

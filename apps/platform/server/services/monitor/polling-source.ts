@@ -19,7 +19,7 @@ import {
 } from './build-signals'
 
 /** deployment status 的最小字段集（归一化输入） */
-type DeploymentStatusInput = {
+interface DeploymentStatusInput {
     state?: string | null
     description?: string | null
     environment_url?: string | null
