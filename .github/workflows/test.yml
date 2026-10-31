@@ -47,7 +47,7 @@ jobs:
       # CI 中 pnpm i 不构建 workspace 包，必须先构建 core+engine+cli 否则 lint/typecheck 类型解析失败
       # （本地开发因存在 dist 不触发；顺序与 Dockerfile 的 core → engine → cli → platform 一致）
       - run: pnpm --filter @dependfix/core build && pnpm --filter @dependfix/engine build && pnpm --filter dependfix build
-      - run: pnpm run lint
+      - run: pnpm run lint:check
       # i18n 校验：lint:i18n 单独执行（@intlify/vue-i18n 规则较慢，不并入常规 lint）；
       # i18n:audit:missing 缺词 parity 作为 blocker；docs:check:i18n 防旧目录回流；
       # i18n:check:anchor 检测 locale 文件 anchor 错位污染（en-US.json 被中文污染等）

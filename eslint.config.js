@@ -172,7 +172,9 @@ export default defineConfig([
         // Nuxt 平台（apps/platform）：TS 使用平台 tsconfig（extends .nuxt/tsconfig.json 并 include server/**/*）
         // 规则采用 momei 的 Nuxt 策略：no-unsafe-* 系列关闭（Nuxt/TypeORM/better-auth 生态类型复杂，
         // 且 workspace 包未构建（无 dist）时类型解析失败会触发 unsafe 警告爆炸，渐进收紧）。
-        // 与 apps/platform/eslint.config.js（eslint-config-cmyr/nuxt 为基础）保持同一语义。
+        // 与 apps/platform/eslint.config.js 并非同一规则集：后者额外启用 strictTypeChecked / stylistic
+        // （array-type、consistent-type-definitions、vue/object-curly-spacing 等），且两套配置各自可执行。
+        // CI 门禁（pnpm run lint:check）会依次跑根配置与平台配置，改动平台文件须同时满足两者。
         files: ['apps/platform/**/*.{ts,tsx,mts,cts}'],
         // nuxt.config.ts 使用 Nuxt auto-import（defineNuxtConfig），须用 .nuxt/tsconfig.json 单独校验；
         // i18n/localeDetector.ts 被 @nuxtjs/i18n 排除出平台 tsconfig（nitro tsconfig 兜底类型检查），

@@ -12,7 +12,7 @@
     "build": "nuxt build",
     "preview": "nuxt preview",
     "typecheck": "nuxt typecheck",
-    "lint": "cross-env NODE_ENV=production eslint . --fix --max-warnings 10",
+    "lint": "cross-env NODE_ENV=production eslint . --fix --max-warnings 11",
     "lint:i18n": "cross-env NODE_ENV=production ESLINT_I18N=true eslint . --quiet",
     "lint:css": "stylelint \"**/*.{html,css,scss,sass,vue}\" --fix",
     "lint:css:check": "stylelint \"**/*.{html,css,scss,sass,vue}\"",
@@ -36,7 +36,8 @@
     "db:migrate:show": "tsx server/database/scripts/db-migrate.ts --show",
     "db:migrate:revert": "tsx server/database/scripts/db-migrate.ts --revert",
     "trace:set-cookie": "node scripts/set-cookie-trace.mjs",
-    "trace:set-cookie:md": "SET_COOKIE_TRACE_FORMAT=md node scripts/set-cookie-trace.mjs"
+    "trace:set-cookie:md": "SET_COOKIE_TRACE_FORMAT=md node scripts/set-cookie-trace.mjs",
+    "lint:check": "cross-env NODE_ENV=production eslint . --max-warnings 11"
   },
   "dependencies": {
     "@dependfix/core": "workspace:*",

@@ -45,7 +45,7 @@ jobs:
       # CI 中 pnpm i 不构建 workspace 包，必须先构建 core+engine+cli 否则 lint/typecheck 类型解析失败
       # （顺序与 Dockerfile 的 core → engine → cli → platform 一致）
       - run: pnpm --filter @dependfix/core build && pnpm --filter @dependfix/engine build && pnpm --filter dependfix build
-      - run: pnpm run lint
+      - run: pnpm run lint:check
       - run: pnpm run lint:md:check
       - run: pnpm run typecheck
       - run: pnpm run test
