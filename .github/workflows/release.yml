@@ -28,7 +28,7 @@ jobs:
       # 发布前安全告警门禁读取 Code Scanning alerts（Dependabot alerts 需 GH_PAT，见下）
       security-events: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 0

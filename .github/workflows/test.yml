@@ -11,7 +11,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
       - name: Setup Node.js@lts environment
@@ -139,7 +139,7 @@ jobs:
       contents: read
       actions: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
       - name: Setup Node.js@lts environment
@@ -222,7 +222,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
       - name: Setup Node.js@lts environment
