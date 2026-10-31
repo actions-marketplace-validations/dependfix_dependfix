@@ -1,6 +1,6 @@
 {
   "name": "@dependfix/skills",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "dependfix 产品 Agent Skills 权威源（dependfix-remediator），随 npm 发布",
   "author": "CaoMeiYouRen",
   "license": "MIT",
@@ -25,7 +25,7 @@
     "README.md"
   ],
   "engines": {
-    "node": ">=20"
+    "node": "^22.23.4 || ^24.22.1"
   },
   "publishConfig": {
     "access": "public"

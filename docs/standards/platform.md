@@ -1,351 +1,201 @@
 # 平台开发规范（apps/platform）
 
-> 状态: 已确认（2026-08-07 人工审查通过，6 项决策全部确认，见 §11）
-> 适用范围: `apps/platform/`（Nuxt 4 全栈管理平台）的代码、配置、实体、API、样式与测试。
-> 基础规范: 本规范是 [开发规范](./development.md)、[API 规范](./api.md)、[测试规范](./testing.md)、[安全规范](./security.md) 在平台子系统的细化与补充；冲突时以本规范（平台专属）为准。
-> 参考蓝本: [momei 平台实现参考分析](../research/2026-08-07-momei-platform-reference.md)
-
----
+> 状态：已确认（2026-08-07 人工审查通过，6 项决策见 §12）
+> 适用范围：`apps/platform/`（Nuxt 4 全栈管理平台）的代码、配置、实体、API、样式与测试。
+> 基础规范：本规范是 [开发规范](./development.md)、[API 规范](./api.md)、[测试规范](./testing.md)、[安全规范](./security.md) 在平台子系统的细化与补充；冲突时以本规范（平台专属）为准。
 
 ## 1. 技术选型（版本以 pnpm-lock.yaml 为准）
 
-| 类别 | 选型 | 说明 |
-|:--|:--|:--|
-| 框架 | Nuxt 4（全栈 SSR + API Routes） | `app/` + `server/` 目录结构 |
-| 语言 | TypeScript（strict 逐步收紧） | 平台独立 tsconfig（`nuxt typecheck`） |
-| UI | PrimeVue 4 + `@primevue/nuxt-module` | 组件库 |
-| 主题 | `@primeuix/themes@^2.0.3`（Aura preset + 自定义 primary，MIT 协议；2026-09-08 M25.1 从 v3.x 降级消除 PrimeUI 商业 License） | 暗色模式 `darkModeSelector: '.dark'` |
-| 图标 | `primeicons@^7.0.0`（MIT 协议；2026-09-09 M26.4a 从 v8.x 降级消除 PrimeUI 商业 License——v7→v8 引入 PrimeUI 商业 License 协议，7.x 仍为纯 MIT） | 全仓库实际使用 30 个 icon class（pi-check/pi-times/pi-bolt/pi-pencil/pi-trash/pi-plus/pi-play/pi-pause/pi-stop-circle/pi-sun/pi-moon/pi-eye/pi-copy/pi-refresh/pi-filter/pi-save/pi-user/pi-lock/pi-ban/pi-list/pi-arrow-left/pi-chevron-{up,down}/pi-external-link/pi-envelope/pi-history/pi-upload/pi-check-circle/pi-times-circle/pi-play-circle） |
-| 样式 | 纯 SCSS + BEM，无 CSS-in-JS / Tailwind | 全局变量 + mixin |
-| 认证 | better-auth（邮箱密码） | TypeORM adapter（自研，见 §4.2） |
-| ORM | TypeORM 1.x | 显式驱动注入，多后端兼容 |
-| 数据库 | SQLite（M6 默认）/ MySQL / PostgreSQL（预留） | `DATABASE_TYPE` / `DATABASE_URL` 切换 |
-| 校验 | Zod | server API 输入 |
-| 构建 | Nuxt build（`nuxt build` / `.output/`） | |
-| 测试 | Vitest（node 环境）+ 组件测试（按需） | |
+Nuxt 4（全栈 SSR + API Routes，`app/` + `server/`）/ TypeScript strict / UI `caomei-ui`（`caomei-ui/nuxt` 模块，**精确锁版本**，1.0 前 API 可能调整）/ 纯 SCSS + BEM / better-auth（邮箱密码）+ 自研 TypeORM adapter / TypeORM 1.x / SQLite（默认，MySQL · PostgreSQL 预留）/ Zod / Vitest。
 
-> 版本策略：`nuxt`、`better-auth`、`typeorm`、`primevue` 等核心依赖跟随 momei 已验证版本线（monorepo 内 workspace 依赖用 `workspace:*`）。**禁止引入未经验证的新大版本**；跨大版本升级必须先走 TypeORM 1.x 升级评估式的 probe 流程（见 [momei 参考 §5](../research/2026-08-07-momei-platform-reference.md)）。
+- 版本唯一事实源 = `apps/platform/package.json` + `pnpm-lock.yaml`，选型对应见 [技术栈](../guide/tech-stack.md)。
+- **禁止引入未做验证的新大版本**；跨大版本升级须先走 probe 评估（参照 [momei 参考 §5](../research/2026-08-07-momei-platform-reference.md)）。
 
 ## 2. 目录结构（Nuxt 4）
 
-```
-apps/platform/
-├── app/                        # Nuxt 4 srcDir：前端代码
-│   ├── app.vue                 # 根组件
-│   ├── assets/styles/          # SCSS（_variables / _mixins / main）
-│   ├── components/             # Vue 组件（kebab-case.vue）
-│   ├── composables/            # 组合式函数（kebab-case.ts，自动导入）
-│   ├── layouts/                # 布局（default.vue）
-│   ├── middleware/             # 路由中间件（auth.ts）
-│   ├── pages/                  # 页面路由
-│   ├── plugins/                # 客户端插件（按需）
-│   └── utils/                  # 前后端共享前端工具（auth-client 等）
-├── server/
-│   ├── api/                    # REST API（Nuxt server routes）
-│   │   ├── auth/               # better-auth 挂载
-│   │   ├── repos/              # 仓库 CRUD + 扫描触发（T602/T603，任务归属见 [archive/todo-archive-phases-m6-m7-t711.md §M6](archive/todo-archive-phases-m6-m7-t711.md#m6-最小平台-mvp已归档)）
-│   │   ├── credentials/        # 凭据管理（T602，任务归属见 [archive/todo-archive-phases-m6-m7-t711.md §M6](archive/todo-archive-phases-m6-m7-t711.md#m6-最小平台-mvp已归档)）
-│   │   ├── runs/               # 扫描历史/报告（T603/T604，任务归属见 [archive/todo-archive-phases-m6-m7-t711.md §M6](archive/todo-archive-phases-m6-m7-t711.md#m6-最小平台-mvp已归档)）
-│   │   └── alerts/             # 告警查询（T604，任务归属见 [archive/todo-archive-phases-m6-m7-t711.md §M6](archive/todo-archive-phases-m6-m7-t711.md#m6-最小平台-mvp已归档)）
-│   ├── database/               # 数据库层
-│   │   ├── index.ts            # DataSource 初始化（多后端）
-│   │   ├── type.ts             # getDateType() 列类型映射
-│   │   ├── naming-strategy.ts  # snake_case 命名策略
-│   │   └── typeorm-adapter.ts  # better-auth TypeORM adapter
-│   ├── entities/               # TypeORM 实体
-│   ├── services/               # 业务逻辑层（扫描编排、凭据加解密）
-│   ├── middleware/             # server 中间件（按需）
-│   └── utils/                  # server 工具（auth 实例、加密、雪花 ID）
-├── Dockerfile                  # 多阶段镜像（alpine-nodejs 构建 / minimize 运行时，含 cli/core dist）
-├── docker-compose.yml          # SQLite 数据卷部署
-├── nuxt.config.ts
-└── package.json
-```
+`app/`（前端 srcDir：`assets/styles` · `components` · `composables` · `layouts` · `middleware` · `pages` · `plugins` · `utils`）+ `server/`（`api` · `database` · `entities` · `services` · `middleware` · `utils`）+ `Dockerfile` · `docker-compose*.yml` · `nuxt.config.ts` · `package.json`；逐目录职责见 [`apps/platform/`](../../apps/platform)。
 
-### 目录约束
-
-- `app/` 与 `server/` 不得互相 import（跨层通信走 API / runtimeConfig）
-- `server/utils/` 只放无状态工具与单例工厂；有状态业务放 `server/services/`
-- `server/entities/` 只放实体定义，不放业务逻辑
-- 文件名统一 **kebab-case**（`use-color-mode.ts`、`credential.service.ts`）；Vue 组件同样 **kebab-case.vue**（与全局 [开发规范 §2](./development.md) 一致）
+- **目录约束**：`app/` 与 `server/` 不得互相 import（跨层通信走 API / runtimeConfig）；`server/utils/` 只放无状态工具与单例工厂，有状态业务放 `server/services/`；`server/entities/` 只放实体定义；文件名统一 **kebab-case**（含 Vue 组件 `kebab-case.vue`，与 [开发规范 §2](./development.md) 一致）。
 
 ## 3. 数据库规范（多后端兼容 + 时区）
 
-### 3.1 环境变量（DATABASE_* 族）
-
-| 变量 | 默认值 | 说明 |
-|:--|:--|:--|
-| `DATABASE_TYPE` | 自动推断（`sqlite`） | `sqlite` / `mysql` / `postgres`；按 `DATABASE_URL` 前缀推断 |
-| `DATABASE_URL` | `''` | MySQL/PG 连接串；SQLite 支持 `sqlite:path` / `file:path` |
-| `DATABASE_PATH` | `data/dependfix.sqlite` | SQLite 文件路径（必须可配，容器内指向数据卷） |
-| `DATABASE_SSL` | `false` | 多后端时启用 SSL |
-| `DATABASE_ENTITY_PREFIX` | `dependfix_` | 表前缀 |
-| `DATABASE_SYNCHRONIZE` | `false` | 全场景显式 opt-in 才同步 schema（详见 [development.md §5.1.19](./development.md)） |
-| `MACHINE_ID` | `process.pid % 1024` | 雪花 ID 机器位 |
-
-### 3.2 时区与列类型（关键约束）
-
-**所有时间列必须通过 `getDateType()` 获取列类型，禁止写死 `'datetime'`**：
-
-```typescript
-// server/database/type.ts
-export const getDateType = (dbType?: string): string => {
-    switch (dbType ?? 'sqlite') {
-        case 'sqlite':
-            return 'datetime'
-        case 'mysql':
-            return 'datetime'
-        case 'postgres':
-            return 'timestamp with time zone' // PG 必须带时区，否则跨时区读写偏移
-        default:
-            return 'datetime'
-    }
-}
-```
-
-- 实体中 `CreateDateColumn` / `UpdateDateColumn` / 日期字段统一 `{ type: getDateType() }`
-- **禁止**在实体中硬编码 `'datetime'` / `'timestamp'` 字面量（PostgreSQL 部署会静默出现时区偏移，且单测难以覆盖）
-- 代码中一律使用 `Date` 对象；存储层由 TypeORM 按列类型转换
+- **3.1 环境变量（DATABASE_* 族）**：`DATABASE_TYPE` · `DATABASE_URL` · `DATABASE_PATH` · `DATABASE_SSL` · `DATABASE_ENTITY_PREFIX` · `DATABASE_SYNCHRONIZE` · `MACHINE_ID`——默认值与口径以 [平台配置指南](../guide/configuration.md) + [`.env.full.example`](../../apps/platform/.env.full.example) 为准（[§11](#11-环境变量总表env-example-对齐) 只列平台差异点）；`DATABASE_SYNCHRONIZE` 的反模式禁止见 [工程实践判例 EP-17](../design/governance/engineering-practice-notes.md)。
+- **3.2 时区与列类型（关键约束）**：时间列**必须**经 `getDateType()` 取列类型（`server/database/type.ts`），**禁止**硬编码 `'datetime'` / `'timestamp'`（PostgreSQL 会静默产生时区偏移）；`postgres` 映射 `timestamp with time zone`；`CreateDateColumn` / `UpdateDateColumn` / 日期字段统一 `{ type: getDateType() }`，代码一律用 `Date` 对象。
 
 ### 3.3 DataSource 初始化
 
-- 支持三后端，**显式传入 driver 实例**（`better-sqlite3` / `mysql2` / `pg`），绕过 TypeORM 1.x 动态 require（Docker/Vercel 已知坑）
-- 顶层 `import` 驱动模块，供 Nitro Rolldown 静态分析
-- `synchronize` / `migrationsRun` 全场景显式 opt-in（dev/test 也不再自动开启 synchronize）；详见 [development.md §5.1.19 TypeORM 1.x synchronize 与 migrationsRun 反模式禁止](./development.md)
-- 启动期日志打印 `synchronize` + `migrationsRun` + 各自 env（development.md §5.1.19 hard requirement）
-- 初始化失败不抛致命错误：日志告警 + 功能降级（对齐 momei `reportDatabaseInitializationFailure` 语义）
-- 幂等单例 + 并发初始化锁（`ensureDatabaseInitialized`）
+- 支持 sqlite / mysql / postgres，**显式传入 driver 实例**并顶层 `import` 驱动模块（供 Nitro Rolldown 静态分析，绕过 TypeORM 1.x 动态 require）。
+- `synchronize` / `migrationsRun` 全场景显式 opt-in（含 dev / test）；启动期日志打印两值与各自 env；初始化失败不抛致命错误（告警 + 功能降级）；幂等单例 + 并发初始化锁。
+- **迁移必须前缀感知 + 幂等**：统一用 `migration-helpers.ts`（`resolveTableName` 前缀回退 + `addColumnIfMissing` / `dropColumnIfExists` / `createIndexIfMissing`），并配「两种前缀 / 同时存在 / up-down 幂等 / 表缺失」用例；`queryRunner.connection` 已 deprecated，改用 `queryRunner.dataSource`。
+- **基线迁移与空库自举**：首条迁移从实体元数据建全部基础表 / 索引 / 外键（前缀感知 + 跨方言 + 幂等，存量库整表跳过）；全新部署走 `pnpm db:init` 或 compose 默认 `DATABASE_MIGRATIONS_RUN=true`。⚠️ **任何列 / 表变更必须编写独立迁移**——基线由元数据生成，漏写会让全新库 / CI 全绿而存量库永久缺列。**且新迁移类必须登记进 `createDataSourceOptions().migrations` 数组**（唯一登记点；未登记则生产 `DATABASE_MIGRATIONS_RUN=true` + `synchronize=false` 路径永不执行，存量库永久缺列；防护见 `server/database/migrations/migrations-registry.test.ts` 的登记一致性与存量库真实迁移链用例）。
 
-### 3.4 实体规范
+- **3.4 实体规范**：继承 `BaseEntity`（雪花 ID + `getDateType()` 时间戳）；属性名 camelCase，列名由 `SnakeCaseNamingStrategy` 转 snake_case；better-auth 四表（`user` / `session` / `account` / `verification`）字段对齐默认 schema，**不得增删**，平台自有字段（如 `role`）经 `user.additionalFields` 声明并同步实体；跨库类型归一（SQLite `bigint` → `integer`；PG `bigint` → `integer`、长文本 → `text`），实体写法须保持三后端可编译。
+- **3.5 TypeORM 查询模式**：`find()` **不支持嵌套路径 order by**（仅顶层字段，否则抛 `EntityPropertyNotFoundError`），「按关联实体字段排序」一律用 QueryBuilder（`leftJoinAndSelect` + `orderBy` / `addOrderBy`）；统一代码路径优先，同一查询不并存 `find` 与 QueryBuilder 两条路径。
+- **3.6 e2e / fixtures 端点双门控规范**：`server/api/e2e/*` 端点**必须**叠加两道门控——① `process.env.E2E_TEST === 'true'`；② `useRuntimeConfig().e2eFixturesAllowed`（`nuxt.config.ts` runtimeConfig 注册，由 `NUXT_E2E_FIXTURES_ALLOWED` 注入），两条件同时满足才放行，否则 404。**禁止**以任何 `process.env.NODE_ENV` 形态（`=== 'production'` / `!== 'development'`）或 `import.meta.dev` 作第二门控（Nitro / esbuild 构建期把 `process.env.NODE_ENV` 静态替换为构建时值致表达式折叠，prod build 恒 404；`NODE_ENV !== 'development'` 无法清晰区分 dev / test / staging；`import.meta.dev` 无法区分 staging），**禁止**单 `E2E_TEST` 门控。D 阶段自检：逐个核对 `server/api/e2e/*.ts` 含双门控；`pnpm --filter @dependfix/platform build` 后 grep 产物确认表达式未折叠；A 阶段由 code-auditor 必查项覆盖。
+- **3.7 SQLite 启动期备份 + 自检工具**：权威完整声明（备份路径 / fsync / 保留策略 / 命令式恢复 / 自检判断逻辑）见 [security.md §2.1](./security.md)，本节只保留平台角度差异化信息——**调用时机** `backup.ts` 在 `ensureDatabaseInitialized()` 之前同步调用，且与 3.6 双门控协同（见 [security.md §2.1.4](./security.md)）；**D 阶段自检**核对 `backup.ts` / `db-restore.ts` / `db-doctor.ts` 三文件存在且含核心实现（fsync / retention / `--yes` 门控 / 报告格式）；**A 阶段 Review Gate** 要求 `backup.ts` 含 fsync + retention、`db-restore.ts` 含 `--yes` 二次确认、`db-doctor.ts` 打印 schema_version + freelist_count。
 
-- 继承 `BaseEntity`（雪花 ID + `getDateType()` 时间戳）
-- 属性名 camelCase（与 better-auth schema 一致），列名由 `SnakeCaseNamingStrategy` 转 snake_case
-- better-auth 四表（`user` / `session` / `account` / `verification`）字段对齐 better-auth 默认 schema，**不得增删字段**；平台自有字段（如 `role`）通过 better-auth `user.additionalFields` 配置并同步实体
-- 跨库类型归一：SQLite 下 `bigint` → `integer`；PG 下 `bigint` → `integer`、长文本 → `text`（M6 以 SQLite 为默认目标，但实体写法必须保持三后端可编译）
+### 3.7.1 fixtures API 无节流默认 + 节流触发条件
 
-### 3.5 TypeORM 查询模式
+- fixtures handler **默认无节流 / debounce / rate-limit**，依赖调用方（`tests/e2e/global-setup.ts` 与各 suite）顺序串行调用；调用频次低（global-setup ≤ 2 次），不存在并发资源竞态。**触发条件**：CI 偶现 fixtures DELETE 502/503 + 资源释放竞态时，先复现再启用轻量节流（`server/utils/fixtures-throttle.ts`，100ms；超限 429），不加复杂锁。
 
-- **`find()` 不支持嵌套路径 order by**：TypeORM 1.x `find({ order: { 'scanRun.repository.owner': 'ASC' } })` **不支持嵌套路径 order by**（仅支持 entity 顶层字段），会抛 `EntityPropertyNotFoundError: Property "scanRun.repository.owner" was not found in "ScanResult". Make sure your query is correct.`（`node_modules/typeorm/query-builder/SelectQueryBuilder.js:2371` 等抛出位置）。任何"按关联实体字段排序"的需求必须用 QueryBuilder：`createQueryBuilder('result').leftJoinAndSelect('result.scanRun', 'scanRun').leftJoinAndSelect('scanRun.repository', 'repository').orderBy('repository.owner', 'ASC').addOrderBy('repository.name', 'ASC')`。统一代码路径优先（全部走 QueryBuilder 而非 find + QueryBuilder 两条路径），简化维护 + 行为等价。修复 commit `374a278`（alerts 视图切换按包 / 按项目）。
-
-### 3.6 e2e / fixtures 端点双门控规范
-
-`apps/platform/server/api/e2e/*` 下的所有端点（fixtures.post.ts / fixtures.delete.ts 等）**必须**叠加两道门控，防止生产环境误暴露。
-
-**强制门控**（两条件同时满足才放行；`useRuntimeConfig()` 来自 Nuxt auto-import，server/api/ 路由可直接调用，**无需显式 import**）：
-```typescript
-import { createError, defineEventHandler } from 'h3'
-
-const config = useRuntimeConfig() // Nuxt auto-import，无需 import；h3 不导出 useRuntimeConfig
-if (process.env.E2E_TEST !== 'true' || !config.e2eFixturesAllowed) {
-    throw createError({ statusCode: 404, statusMessage: 'Not Found' })
-}
-```
-
-**`e2eFixturesAllowed` 在 `nuxt.config.ts` 的 runtimeConfig 注册**：
-```typescript
-// nuxt.config.ts
-runtimeConfig: {
-    // 生产构建默认 false（NUXT_E2E_FIXTURES_ALLOWED 未设）；仅 e2e webServer 启动时显式开启
-    e2eFixturesAllowed: process.env.NUXT_E2E_FIXTURES_ALLOWED === 'true' || process.env.E2E_TEST === 'true',
-}
-```
-
-**双门控要求**：
-- 单门控 `E2E_TEST === 'true'` 风险：生产环境误设 `E2E_TEST=true`（运维误操作、docker-compose 复制粘贴、CI 环境变量泄漏）即暴露端点
-- 叠加 `runtimeConfig.e2eFixturesAllowed` 兜底：仅当显式 `NUXT_E2E_FIXTURES_ALLOWED=true` 时才放行；prod build 默认 false
-
-**第二门控不能用 `process.env.NODE_ENV === 'production'`（陷阱）**：
-- ⚠️ **Nitro / esbuild 构建期会把 `process.env.NODE_ENV` 静态替换为构建时值**（prod build 时折叠为 `"production"`，dev build 时折叠为 `"development"`）
-- 表达式 `process.env.E2E_TEST !== 'true' || process.env.NODE_ENV === 'production'` 在产物中被折叠为 `... || true`，**永远 404**，e2e 套件必然破裂
-- **runtimeConfig 是 Nuxt 官方运行时覆盖通道**（`NUXT_` 前缀），运行时由 `NUXT_E2E_FIXTURES_ALLOWED` 注入，可绕开 esbuild define；prod build 时 `e2eFixturesAllowed` 默认 false，端点 404，e2e webServer 启动时设 `NUXT_E2E_FIXTURES_ALLOWED=true` 覆盖为 true
-- 详见 [todo-archive.md §M22 段](../plan/todo-archive.md#m22-sqlite-数据保护防御加固m221m222m223m224m225m226-全部已闭环--2026-09-01-归档) M22.6 + [经验归档 §五十](../design/governance/experience-archive.md)
-
-**应用范围**：
-- `apps/platform/server/api/e2e/fixtures.post.ts` — POST /api/e2e/fixtures
-- `apps/platform/server/api/e2e/fixtures.delete.ts` — DELETE /api/e2e/fixtures
-- 未来新增的 `apps/platform/server/api/e2e/*.ts` 文件全部适用
-
-**禁止**：
-- ❌ 单 `E2E_TEST` 门控（缺 `runtimeConfig.e2eFixturesAllowed` 兜底）
-- ❌ `process.env.NODE_ENV === 'production'` 门控（**esbuild define 折叠陷阱**，prod build 永远 404；M22 阶段实证）
-- ❌ `NODE_ENV !== 'development'` 门控（dev/test/staging 区分不清晰）
-- ❌ `import.meta.dev` 门控（仅 Nuxt 内置 dev/prod 区分，部署到 staging 仍误暴露）
-
-**D 阶段自检**：
-- Full Stack Master (全栈大师) agent 检查所有 `apps/platform/server/api/e2e/*.ts` 文件，确认含双门控代码（`useRuntimeConfig().e2eFixturesAllowed` 第二门控）
-- **构建产物 grep 兜底**：`pnpm --filter @dependfix/platform build` 后 `rg -n "E2E_TEST\|e2eFixturesAllowed" apps/platform/.output/server/chunks/routes/api/e2e/*.mjs`，确认产物未折叠表达式（不应出现 `|| true`）
-
-**A 阶段 Review Gate**：code-auditor 主责边界新增"e2e 端点双门控 + runtimeConfig 兜底 + 构建产物 grep"必查项
-
-**应用示例**：详见 [经验归档 §五十](../design/governance/experience-archive.md) + [todo-archive.md §M22.6](../plan/todo-archive.md#m22-sqlite-数据保护防御加固m221m222m223m224m225m226-全部已闭环--2026-09-01-归档)。
-
-### 3.7 SQLite 启动期备份 + 自检工具（引用 security.md §2.1 + 平台角度差异化信息）
-
-> 权威完整声明（备份路径 / fsync / 保留策略 / 命令式恢复 / 自检工具判断逻辑等）见 [security.md §2.1](./security.md)。本节仅保留平台角度差异化信息（调用时机 / 协同关系 / D 阶段自检 + A 阶段 Review Gate）。
-
-**调用时机**：backup.ts 在 `ensureDatabaseInitialized()` 之前同步调用（详见 [security.md §2.1.1](./security.md)）
-
-**协同关系**：与 e2e / fixtures 端点双门控（[platform.md §3.6](#36-e2e--fixtures-端点双门控规范)）协同——防止生产环境误暴露清空端点（详见 [security.md §2.1.4](./security.md)）
-
-**D 阶段自检**：必须验证 backup.ts / db-restore.ts / db-doctor.ts 3 个文件存在且含核心实现（fsync / retention / `--yes` 门控 / 报告格式；文件路径见 [security.md §2.1](./security.md)）
-
-**A 阶段 Review Gate**：backup.ts 必须含 fsync + retention 清理逻辑；db-restore.ts 必须含 `--yes` 二次确认；db-doctor.ts 必须打印 schema_version + freelist_count
-
-### 3.7.1 fixtures API 无节流默认 + 经验性节流方案
-
-fixtures handler（`apps/platform/server/api/e2e/fixtures.{post,delete}.ts`）**当前无任何节流 / debounce / rate-limit 代码**，依赖调用方（`tests/e2e/global-setup.ts` + 各 test suite）按顺序串行调用。**M24.2 阶段源码追溯判定**（`rg -n "rate.?limit|throttle|debounce" apps/platform/server/api/e2e/` 0 命中）：调用频次低（global-setup 阶段 ≤ 2 次），不存在并发资源竞态。
-
-**经验性节流方案**（M24.2 follow-up，未来 e2e 复现 fixture 并发问题时实施）：
-
-```typescript
-// apps/platform/server/utils/fixtures-throttle.ts
-let lastFixtureCall = 0
-export const fixturesRateLimit = (): boolean => {
-    const now = Date.now()
-    if (now - lastFixtureCall < 100) return false  // 100ms 节流
-    lastFixtureCall = now
-    return true
-}
-```
-
-fixtures.delete / fixtures.post 在双门控通过后调用 `fixturesRateLimit()`；返回 false → `429 Too Many Requests`。
-
-**未来触发条件**：CI 偶现 fixtures DELETE 502/503 + 资源释放竞态时优先复现 → 启用节流而非加复杂锁。详见 [经验归档 §五十七 M24.2 候选 ④（experience-archive.md §五十七段）](../design/governance/experience-archive.md)。
+- **3.8 仓库级自定义验证命令（verifyCommands，M32.1 C76）**：`Repository.verifyCommands`（text 列，JSON 数组字符串）声明该仓库验证命令链，覆盖引擎默认链，语义与 CLI `--commands` 对齐（空数组 / null 走默认链）。**单一事实源链路**：存储 `server/entities/repository.ts`（`parseVerifyCommands` 容错）→ 校验 `server/schemas/repository.ts`（≤ 20 条 / 每条非空且 ≤ 500 字符 / 禁换行与控制字符）→ 写入口 `POST /api/repos` + `PUT /api/repos/[id]`（`undefined` 不改 / `null` 或 `[]` 清空）→ 审计 `repository-audit.ts`（仅实际变化时记 `verify_commands_update`）→ 执行 `scan-orchestrator` → `ContainerExecutor` → 引擎 `{ commands }`。**安全边界（hard requirement）**：该字段等价于远程命令执行面（引擎以 `spawn(command, { shell: true })` 执行，不做脚本存在性校验）；写操作走 `requireRole(['admin', 'org_admin'])`（viewer 403）；变更登记 `AuditEvent`（审计失败仅日志不阻断保存）；**不**提供自由 shell 会话、**不**放宽单命令超时、**不**得当作沙箱已缓解该风险（`sandbox-executor.ts` 为最小占位；2026-10-27 起 sandbox 入口临时关闭——UI 禁用 / API 拒绝新写入 / 存量仓库强制降级 `container` + degraded，本配置仅对容器执行器生效）。**UI** 为仓库新增 / 编辑弹窗 `repo-form-dialog.vue`（多行文本一行一条）；review 检查点已由 code-auditor 必查项「修复执行安全基线」+「shell 命令安全」覆盖。
+- **3.9 目标仓库配置文件 `.github/dependfix.yml`（C85）**：目标仓库自声明配置（与 `dependabot.yml` 同范式），首批仅 `overrideProtect`；读取 / 合并 / 降级矩阵以 [依赖升级修复器 §12.7](../design/modules/dependency-fixer-records.md) 为唯一权威，本节只记平台侧接线。**平台侧无需额外接线**（`container-executor.ts` 在 fix / fix-and-pr 下先 clone 再构造引擎实例，引擎构造期读取 `<workDir>/.github/dependfix.yml`；报告模式（report-only）不 clone、不 commit → 行为不变）；**不提供 UI 入口**（随目标仓库走，平台不落库、不暴露表单，与 3.8 的「平台字段」形态刻意区分）；**中央优先**（平台透传的中央 `overrideProtect`（env / CLI）一旦指定，目标仓库声明即整体被忽略）；**可观测性**（生效 / 被中央覆盖 / 降级告警均写引擎日志，平台 `MemoryLogger` 捕获并展示在执行日志；命中保护记 `OVERRIDE_PROTECTED`，见 [override-protect-policy.md](../design/governance/override-protect-policy.md)）；**review 检查点挂接**——「中央优先（防绕过）」与「不提供 UI 入口」两条已挂 [review 检查点矩阵](../../.github/skills/code-reviewer/references/code-quality-checklist.md#规范条款-review-检查点矩阵严格约束逐条挂接)。
 
 ## 4. 认证规范（better-auth）
 
-### 4.1 实例配置（`server/utils/auth.ts`）
-
-- 邮箱密码登录；`requireEmailVerification` 与 `sendVerificationEmail` 由 `smtpEnabled`（`SMTP_HOST` 是否配置）驱动——**SMTP 未配置自动跳过验证**（未配置自动禁用模式）
-- 会话：`expiresIn 30d`、`updateAge 1d`、`storeSessionInDatabase: true`
-- `advanced.database.generateId` = 雪花 ID（与实体 `@BeforeInsert` 同源）
-- **首用户自动 admin**：`databaseHooks.user.create.before` 中判断用户数，首个注册用户 `role = 'admin'`
-- `role` 字段通过 `user.additionalFields` 声明（`input: false`，防客户端注入）
-- 认证 API 挂载：`server/api/auth/[...].ts` → `auth.handler(toWebRequest(event))`
-- 客户端：`app/utils/auth-client.ts`（`createAuthClient`）+ `app/composables/use-session.ts`（SSR 拉取会话）+ `app/middleware/auth.ts`（未登录跳 `/login`）
+- **4.1 实例配置（`server/utils/auth.ts`）**：邮箱密码登录；`requireEmailVerification` + `sendVerificationEmail` 由 `smtpEnabled`（`SMTP_HOST` 是否配置）驱动——**SMTP 未配置自动跳过验证**；会话 `expiresIn 30d` / `updateAge 1d` / `storeSessionInDatabase: true`，`advanced.database.generateId` 用雪花 ID（与实体 `@BeforeInsert` 同源）；**首用户自动 admin**（`databaseHooks.user.create.before` 判断用户数，首个注册用户 `role = 'admin'`），`role` 经 `user.additionalFields` 声明（`input: false`，防客户端注入）；认证 API 挂载 `server/api/auth/[...].ts`，客户端 `app/utils/auth-client.ts` + `app/composables/use-session.ts` + `app/middleware/auth.ts`（未登录跳 `/login`）。
 
 ### 4.2 TypeORM adapter（`server/database/typeorm-adapter.ts`）
 
-- 使用 better-auth 1.6+ `createAdapterFactory`，实现 CustomAdapter 8 方法
-- `consumeOne` / `incrementOne` 提供原生实现（语义对齐 momei；factory 缺省回退也可接受，但原生实现减少一次事务包装）
-- 事务：`dataSource.transaction(async (manager) => callback(createAdapter(manager)))`
-- 字段映射：实体属性名 = better-auth schema 字段名（camelCase）；列名由命名策略转换，**adapter 不感知列名**
-- 禁止在 adapter 中 import 业务实体（保持通用）
-- **better-auth adapter 必须显式实现 `transaction`**：better-auth 1.7.2 `getBaseAdapter` 在 adapter 不实现 `transaction` 时**自动 patch fallback** `cb => cb(adapter)`（非真事务，仅同步回调）+ logger warn 但**不阻断**业务运行。**M24.2 源码追溯结论**：项目 `typeorm-adapter.ts:209` 已实现 `dataSource.transaction(...)` 真事务，better-auth 走真事务路径（fallback 不适用）。**防御**（防 future 重构引入回退）：在 `server/utils/__tests__/better-auth-adapter-transaction.test.ts` 写单测验证项目 typeorm-adapter.transaction 是真事务（mock adapter + 验证 callback commit 时序），不依赖 better-auth 上游 fallback。详见 [经验归档 §五十七 M24.2 教训 1 + 教训 3](../design/governance/experience-archive.md)。
+- 使用 better-auth `createAdapterFactory` 实现 CustomAdapter 8 方法；`consumeOne` / `incrementOne` 提供原生实现。
+- **必须显式实现 `transaction`**：`dataSource.transaction(async (manager) => callback(createAdapter(manager)))`——adapter 不实现时 better-auth 会自动 patch 非事务 fallback（仅同步回调）+ warn 但不阻断。**防御**：写单测锁定项目 adapter 走真事务路径，防后续重构回退。
+- 字段映射：实体属性名 = better-auth schema 字段名（camelCase），列名由命名策略转换（adapter 不感知列名）；禁止在 adapter 中 import 业务实体。
 
 ## 5. 凭据安全规范（T602 起生效）
 
-- 平台级密钥：环境变量 `NUXT_ENCRYPTION_KEY`（AES-256-GCM 密钥，32 字节 base64 或 hex；Nuxt `NUXT_` 前缀约定）；未配置时**禁用凭据功能并明确报错**（不静默降级为明文）—— M17.1 标准化（C38 治理：service 直读 env → `useRuntimeConfig().encryptionKey` + 移除 inline fallback；详见 M17 闭环记录 [todo-archive.md §M17.1](../plan/todo-archive.md)）
-- Credential 实体：`type`（classic-pat / fine-grained-pat / github-app）、`encryptedToken` / `encryptedPrivateKey`（GitHub App 路径）、`appId` / `installationId` / `botLogin`（GitHub App 路径公开信息）、`name`、`repoId` 关联——M18.3 接入 GitHub App 路径扩展
-- 加解密工具（`server/services/credential.service.ts`）：AES-256-GCM + 随机 IV（12 字节），密文格式 `{iv}.{authTag}.{ciphertext}`（三段 base64 点号拼接，GCM 自带完整性校验）；PAT 路径加密 `token`，GitHub App 路径加密 `privateKey`（PEM）；解密仅在执行时 worker 内存中，用完即弃。算法细节与审计必查项见 [security.md §5.5](./security.md#55-凭据加密存储c28-已闭环2026-08-20)
-- **禁止**：token / privateKey 明文落库、token 进日志、token 进前端响应（API 返回 `hasToken` 布尔即可）
-- Dependabot alerts 读取必须显式凭据（`GITHUB_TOKEN` 不可用，见 [G2 处置记录](../plan/todo-archive.md)）
-- 测试用独立随机密钥（不读生产 env）
+- 平台级密钥 `NUXT_ENCRYPTION_KEY`（AES-256-GCM，32 字节 base64 或 hex）；未配置时**禁用凭据功能并明确报错**（不静默降级为明文）。服务经 `useRuntimeConfig().encryptionKey` 读取（无 inline fallback）。
+- Credential 实体字段：`type`（classic-pat / fine-grained-pat / github-app）、`encryptedToken` / `encryptedPrivateKey`、`appId` / `installationId` / `botLogin`、`name`、`repoId`。
+- 加解密（`server/services/credential.service.ts`）：AES-256-GCM + 随机 IV（12 字节），密文 `{iv}.{authTag}.{ciphertext}`；解密仅在执行时 worker 内存中，用完即弃（算法细节与审计必查项见 [security.md §5.5](./security.md#55-凭据加密存储c28-已闭环2026-08-20)）。
+- **禁止** token / privateKey 明文落库、进日志、进前端响应（API 只返回 `hasToken` 布尔）；Dependabot alerts 读取必须显式凭据（`GITHUB_TOKEN` 不可用）；测试用独立随机密钥。
 
 ## 6. API 规范（server/api）
 
-- 遵循 [API 规范](./api.md)；Nuxt server routes 命名 `*.get.ts` / `*.post.ts` / `*.put.ts` / `*.delete.ts`
-- 所有输入用 Zod 校验（`z.object`），非法输入返回 400 + 结构化错误
-- 响应统一：成功直接返回数据；错误 `{ statusCode, statusMessage, data? }`（h3 原生结构），业务错误在 `data.code` 区分
-- 认证守卫：除 `auth/**` 与登录相关外，API 默认要求会话（`requireSession` 工具），未登录 401
-- 凭据类 API 永不返回明文 token
-- API 层只做参数校验与响应组装，业务逻辑下沉 `server/services/`
-- **h3 `defineEventHandler` 行为：handler 是 `async function` 而非 `async function*` generator**：`async function*` 在 h3 默认 handler 路径下不会自动迭代（需显式 `sendIterable`）；如误用 `async function*` 写 API handler，Nitro 默认路径下行为异常（不会自动 yield）。**防御**：写 Nuxt server route 时 handler 一律 `defineEventHandler(async (event) => { ... })`；如确需流式响应（SSE / 长轮询），显式 `defineEventHandler(async (event) => { ... return sendIterable(event, generator) })`。详见 [经验归档 §五十七 M24.2 候选 ②](../design/governance/experience-archive.md)。
+- 遵循 [API 规范](./api.md)；路由命名 `*.get.ts` / `*.post.ts` / `*.put.ts` / `*.delete.ts`；所有输入用 Zod 校验，非法输入 400 + 结构化错误。
+- 响应统一：成功直接返回数据，错误 `{ statusCode, statusMessage, data? }`（业务错误在 `data.code` 区分）；凭据类 API 永不返回明文 token；认证守卫除 `auth/**` 与登录相关外默认要求会话（`requireSession`），未登录 401。
+- 业务逻辑下沉 `server/services/`，API 层只做参数校验与响应组装；handler **必须**用 `defineEventHandler(async (event) => { ... })`（普通 async function），误用 `async function*` generator 在默认路径下不会自动迭代（需显式 `sendIterable`，仅流式响应场景）。
+
+### 6.1 错误码与告警状态口径（平台展示消费 engine 错误码）
+
+- 展示 engine `AppError.code` 时按口径区分文案与语义；**关键区分** `ALERTS_DISABLED` ≠ `PERMISSION_DENIED`：前者计「未启用」+ 按源给开启指引、**不计失败**；`PERMISSION_DENIED` / `AUTHENTICATION_FAILED` / `RATE_LIMITED` / `REPO_NOT_FOUND` / `NETWORK_ERROR` / `GITHUB_API_ERROR` 均计失败并给对应指引。
+- **仓库级失败判据（多源并行）**：engine `fetchRepoAlerts` 在「**无任何成功源且存在失败源**」时抛错——某源未启用而其余启用源全部真实失败 → 按仓库失败处理（不再以 0 告警走成功路径）；成功源与失败源并存时按 per-source 隔离、不抛错。失败仓库走失败分支（`defaultBranch` 空串 / `alertsCount` 0），错误信号由每源 `FETCH_FAILED` 承载；退出码仍由 `allErrors` 非空判定。未启用仓库计入 `RunSummary.reposWithAlertsDisabled` + `RunResult.alertsDisabled`（含 `source`）明细，不影响 exitCode；403 判定权威见 [github-client.md §5.3](../design/modules/github-client.md)；**文案落点分层**——报告层用源无关通用指引 + `Source` 列，日志 / 运行提示由 `alertsDisabledHint(source)` 给按源开启路径。
+
+### 6.2 运行失败分类口径（`failure_code` / `failure_stage` / `failure_kind`）
+
+- `ScanRun.status='failed'` 语义过载，故落库三列支持筛选与汇总：`failure_code`（归一化原始码；`engine_delivery_failed` 从 message 回读细分，无法解析保留兜底码）/ `failure_stage`（source · clone · install · fix · verify · deliver · runtime · cleanup · unknown）/ `failure_kind`（transient / deterministic / unknown）。
+- **单一事实源**：`server/services/run-failure-classify.ts` 集中映射表 + `unknown` 兜底；前端 `app/utils/run-view.ts` 仅复制枚举词汇供筛选控件，标签经 i18n 渲染。
+- 参与分类的终态 = `failed` + 有错误码的 `dispatched`；成功态与 `degraded` 三列为 null；覆盖全部失败写路径（orchestrator · batch-executor · stale-cleanup · scan.post · force-fail）；`reuse=true` 复用既有 run 时三列随 `errorJson` / `summaryJson` 一并清空。存量行回填 `pnpm db:backfill:run-failure`（默认 dry-run，`--apply` + y/N，幂等）。**不建索引**：单组织 run 量级小（summary 窗口上限 500）。完整模型见 [run-failure-taxonomy.md](../design/governance/run-failure-taxonomy.md)；运行结果可信度（`exit_code` / `environmental_failure_count`、未修复 / 结果缺失口径）见该文 §5.7–§5.8；执行内存 / OOM 归因（`memory_max_bytes` / `peak_rss_bytes` / `oom_killed` / `resource_json`）见该文 §5.10 与 [executor-process-isolation.md §8.4](../design/governance/executor-process-isolation.md)；构建版本回执（`build_version` / `build_commit`，写入点与刷新语义）见该文 §5.11。
 
 ## 7. 前端规范（app/）
 
-- Vue 3 Composition API + `<script setup lang="ts">`
-- PrimeVue 组件按需使用（`@primevue/nuxt-module` 自动导入，无需手动注册）；模板中 PascalCase
-- 样式：SCSS + BEM；全局变量/ mixin 通过 `vite.css.preprocessorOptions.scss.additionalData` 注入，**组件内直接使用 `$space-4` / `$color-primary` 等变量**
-- 暗色模式：`use-color-mode.ts` 切换 `<html>.dark` + localStorage 持久化；PrimeVue 主题 `darkModeSelector: '.dark'`。**全局 SCSS mixin 适配**：`main.scss` 是全局 CSS 无 scope，原 `@mixin dark-mode { :global(.dark) & { @content; } }` 编译失败（`:global()` 是 CSS Modules 语法只在 `<style scoped>` 有效）；正确写法是 `.dark &`（mixin 改动 1 行，4 处 `@include dark-mode` 自动 work）—— 这是 2026-08-20 C59 mixin 修复的根因。
-- composables / utils 文件 **kebab-case**；Vue 组件 **kebab-case.vue**；样式类 BEM
-- 页面组件默认导出为空（布局/路由由 Nuxt 管理），业务状态放 composables 或组件内
-- 禁止 `any`；模板中不写复杂逻辑（抽到 computed / 函数）
+- Vue 3 Composition API + `<script setup lang="ts">`；禁止 `any`；模板不写复杂逻辑（抽 computed / 函数）。
+- caomei-ui 组件按需使用（`caomei-ui/nuxt` 自动导入，无需注册）；模板中 PascalCase（`Caomei*`）；样式 SCSS + BEM，全局变量 / mixin 经 Vite `additionalData` 注入（组件内直接使用 `$space-4` / `$color-primary` 等）。
+- 暗色模式：`use-color-mode.ts` 切换 `<html>.dark` + localStorage；全局 mixin 适配须写 `.dark &`（`@mixin` 内 `:global(.dark) &` 编译失败——`:global()` 仅在 `<style scoped>` 有效）。
+- 文件 kebab-case（含组件），与 [开发规范 §2](./development.md) 一致；页面组件默认导出为空，业务状态放 composables 或组件内。
+- **列表并发守卫不得静默丢弃用户输入**：`if (inflight) return` 型短路守卫须记录**最后一次**待补跑参数，当前请求 `finally` 收尾后补跑一次（实例 `scans.vue` 的 `queuedRunFetch`）；写入型守卫同理不得吞掉用户动作。
 
-### 7.1 PrimeVue 4 集成实践
+### 7.1 caomei-ui 集成实践
 
-- **sortable 用 `data-p-sortable-column` 属性**（PrimeVue 4 把 sortable class 改成 data attribute，CSS-in-JS 模式；CSS class `.p-sortable-column` 已废弃）：e2e selector 必须用 `th[data-p-sortable-column="true"]`。写 PrimeVue 4 e2e 前 grep 实际渲染产物确认 attribute vs class。
-- **业务语义排序需 `:default-sort-order="-1"`**：PrimeVue 默认 asc 排序与 critical-first 业务顺序相反；column sortable 必须加 `:default-sort-order="-1"`，否则用户首次点击得到反语义结果。`sort-helpers` 的 `_xxxRank` 是升序的 asc 顺序（0 在前），要 desc 显示业务优先级必须显式 -1。
-- **派生字段运行时修改路径必须同步**：派生字段（`_severityRank` / `_statusRank` / `_roleRank`）的首次注入（fetch 时 `withXxxRank`）不能覆盖后续运行时修改路径——必须每次同步（如 `updateStatusRank` / `updateRoleRank`）。否则 fetchDetail 修改 row.status 后没更新 _statusRank，DataTable 排序引用陈旧 rank → 业务语义错位。
-- **`<Chart>` 引入体积警告**：PrimeVue `<Chart>` 内部 `import('chart.js/auto')` 引入 ~200KB 全量依赖，与 tree-shakable 原则冲突。引入 PrimeVue wrapper 组件前先 grep 内部是否引入了全量依赖；如确实需要 Chart.js，**自实现 `ChartCanvas.vue` 包装**（仅注册用到的 controllers/elements/scales/plugins 子集，如 `LinearScale` + `CategoryScale` + `BarController` + `BarElement` + `DoughnutController` + `ArcElement` + `Tooltip` + `Legend`），实测 bundle < 50KB gzip（vs PrimeVue wrapper 200KB，节省 75%）。`<ClientOnly>`  包裹避免 SSR `window is not defined` 报错。
-- **类型 vs 运行时契约核验**：编写 PrimeVue v-model 绑定、ref 形态、callback 契约时**必须直接看 `node_modules/primevue/<comp>/index.mjs` 内部实现**（如 `this.expandedRowGroups.indexOf(...)` 调用），不能信 TypeScript 类型声明（已知 type bug 案例：`DataTableExpandedRows = Record<string, boolean>` 类型允许，但 PrimeVue 4 `v-model:expanded-row-groups` 内部要求 `string[]`，传 Record 触发 `TypeError: ...indexOf is not a function`）。本项目已积累 2 条同类 latent bug：`alerts.vue expandedPackages Record → string[]` 修复（C64，commit `de28ae4`）+ `alerts.vue multiSortMeta` 修复（commit `5c39fe5`）。核验流程：grep `node_modules/primevue/<comp>/index.mjs` 找 `this.<ref>.indexOf` / `this.<ref>[0].field` 等内部契约调用点。
-- **`sort-mode="multiple"` 必须用 `v-model:multi-sort-meta` 传初始排序**：PrimeVue 4 `sort-field` + `sort-order` 仅在 `sort-mode="single"` 下生效；切到 `multiple` 后 `d_multiSortMeta` 不会被自动填充（保持空数组 `[]`），但 `d_sortField` 被赋值后 `sorted` 仍为 `true`（`node_modules/primevue/datatable/index.mjs:6091-6093` `sorted = d_sortField || ...`），进入 `processedData` 走 `sortMultiple(data)` → `multisortField(d, d, 0)` → `d_multiSortMeta[0].field` → 空数组 `TypeError: Cannot read properties of undefined (reading 'field')`。正确写法：`v-model:multi-sort-meta="ref<DataTableSortMeta[]>([{field: 'packageName', order: 1}])"`（PrimeVue Volt UI 官方文档明确："In multiple sort mode, `multiSortMeta` should be used"）。触发条件：必须有真实数据加载（e2e 因 mock 数据未真正进入 DataTable 计算路径，被 hydration fixme 掩盖，调试时易误判）。修复 commit `5c39fe5`。
-- **PrimeVue 4 DataTable 不支持 `:sort-meta` prop（silent ignore 陷阱）**：PrimeVue 4 DataTable 的 sort 状态 prop **仅**有 `v-model:multi-sort-meta`（v-model 形式），**没有** `:sort-meta` / `sortMeta` 等命名（实测 `node_modules/primevue/datatable/DataTable.vue` + `BaseDataTable.vue` 0 命中 `sortMeta`/`sort-meta`，仅 `multiSortMeta` 在 L371/L418/L463）。Vue 模板解析时未知 prop 被静默忽略（无运行时错误但也无功能效果——默认排序失效 + 用户点击列头排序无法持久）。**防御**：写 PrimeVue 4 DataTable 多列排序前 grep `node_modules/primevue/datatable/index.mjs` 确认 prop 名；TypeScript 类型声明也仅暴露 `multiSortMeta: DataTableSortMeta[]`，未暴露 `sortMeta`。详见 [经验归档 §五十六 M24.1 教训 3](../design/governance/experience-archive.md)。
-- **`<Select>` disabled 不渲染 root `.p-disabled` class**：PrimeVue 4 `<Select>`（非 editable 形态，default）的 `disabled` 状态**不渲染 root `.p-disabled` class**，而是写到内部 `<span role="combobox">` 的 `aria-disabled="true"` + `tabindex="-1"`（`node_modules/primevue/select/index.mjs:1134-1167` span 渲染分支）。editable 形态才走 `<input>` 的 `disabled` 属性。e2e 断言必须用 selector `.p-select span[role="combobox"]` 而非 root `.p-select` class（`.p-disabled` class 来自 `style/index.mjs:10` 的 CSS-in-JS 模板，PrimeVue 4 默认未注入到 DOM）。
-- **bugfix 烟雾脚本**：一次性 smoke 验证脚本（`tests/e2e/_smoke-xxx.mjs`，跑完即删）能精准捕获 PrimeVue 类型/运行时契约类 bug 的修复有效性：监听 `pageerror` + `console.error`，过滤已知 noise（preload warnings），断言关键 TypeError 文本（如 `multisortField` / `Cannot read properties of undefined.*reading 'field'`）。比单纯 typecheck 更具说服力，特别是 e2e 被 known-issue fixme 掩盖的场景。验证后清理脚本不留痕（开发规范 §5.1.11 调试临时代码清理规则）。
+- 派生字段（`_severityRank` / `_statusRank` / `_roleRank`）的**运行时修改路径必须同步**（每次 `updateXxxRank`），否则排序引用陈旧 rank → 业务语义错位。
+- 图表组件：优先自实现 `chart-canvas.vue`（仅注册用到的 controllers / elements / scales / plugins，避免全量 `chart.js/auto` 体积）；用 `<ClientOnly>` 包裹避免 SSR `window is not defined`。
+- **类型 vs 运行时契约核验**：编写 v-model / ref / callback 契约时**必须直读依赖包源码**（`node_modules/<pkg>/dist/*.mjs`）——Vue 对未知 prop / 事件**静默忽略**，类型声明可能滞后或过宽；bugfix 可用一次性 smoke 脚本（`tests/e2e/_smoke-xxx.mjs`，跑完即删）监听 `pageerror` / `console.error`、过滤已知噪声（如 preload warnings）并断言关键错误文本，比单纯 typecheck 更具说服力，验证后清理不留痕（[工程实践判例 EP-10](../design/governance/engineering-practice-notes.md)）。
 
 ### 7.2 i18n 配置单点声明
 
-- **配置中心位置**：`apps/platform/i18n/` 目录下两个文件协作承载全部 i18n 配置：
-  - `apps/platform/nuxt-i18n-config.ts` —— @nuxtjs/i18n 模块层配置（locales / strategy / langDir / defaultLocale / detectBrowserLanguage / detector 路径），被 `nuxt.config.ts` 顶层 import 后 spread 到 `i18n` 字段；**jiti 安全**（无 `defineI18nConfig` 顶层调用）。
-  - `apps/platform/i18n/i18n.config.ts` —— vue-i18n 构建期配置（datetime/number formats 本地化），通过 `nuxt.config.ts` 的 `i18n.vueI18n` 字段按文件路径加载，**仅可由 Nuxt transform pipeline 加载**（注入了 `defineI18nConfig` 全局）。
-  - `apps/platform/i18n/localeDetector.ts` —— 浏览器语言检测器（`resolveLocale` 纯函数，便于单测）；`nuxt-i18n-config.ts` 仅以路径常量引用。
-  - `apps/platform/nuxt.config.ts` 的 `i18n` 块仅做引用（spread `nuxtI18n` + `vueI18n` 路径 + `experimental.localeDetector`），不再重复 locales / strategy / langDir / detectBrowserLanguage 等字段；当前 i18n 块 6 行（含括号）。
-- **jiti 加载边界（关键约束）**：`nuxt.config.ts` 顶层 import 走 jiti（轻量 TS 转换器，无 Nuxt transform pipeline），而 `defineI18nConfig` 是 @nuxtjs/i18n 模块加载时通过 addImports 注入的运行时全局。因此 `nuxt.config.ts` 顶层 **只能 import 拆出的 `nuxt-i18n-config.ts`**（仅 named export const 定义，无模块顶层副作用），**不能 import `i18n.config.ts`**（其 default export 会触发 jiti 顶层 evaluate `defineI18nConfig(...)` → `is not defined` 报错）。这是双文件拆分的唯一根因，不接受合并尝试（合并会在 typecheck 时暴露）。
-- **`as const` 锁定字面量类型**：`nuxtI18n = { ... } as const` 是必需的，避免 spread 后被 Nuxt 模块类型推断为宽化（`string` 而非字面量），引发 `@nuxtjs/i18n` 字段契约检查报错。
-- **nuxt.config.ts i18n 块行数上限**：≤ 10 行（仅引用 + 必要 override）。超出即视为散落配置点回归，应回收到 `nuxt-i18n-config.ts`。
-- **新增语言流程**：仅改 `nuxt-i18n-config.ts` 一处（`nuxtI18n.locales` 追加 1 项 `{ code, name, file, language }`）+ 在 `apps/platform/i18n/locales/` 下复制对应 `.json` 并补翻译。`nuxt.config.ts` 与 `i18n.config.ts` 不需任何 i18n 字段调整。
-- **职责边界**：本节聚焦 i18n **配置实现层**（字段归属与单点声明）；语言标识规范 / fallback 链 / 文案归属层级 / 翻译流程见 [i18n.md §3](./i18n.md#3-平台-ui-国际化)。
-- **禁止反模式**：
-  - 在 `nuxt.config.ts` i18n 块内重复声明 `locales` / `strategy` / `langDir`（散落点回归）
-  - 把 `vueI18n` 字段写成内联对象而非文件路径（无法承载 `locales` 等模块层字段，也丢失 i18n.config.ts 作为运行时配置中心的边界）
-  - 把 `i18n.config.ts` 的 named export（含 vue-i18n 配置以外的代码）放到会被 jiti 顶层 import 的位置（必须物理拆分）
-  - 在 detector 文件里直接 hard-code `defaultLocale` 或 locale 列表（应通过 `nuxtI18n` 配置中心维护）
+- **配置中心** = `apps/platform/i18n/`：`nuxt-i18n-config.ts`（模块层 locales / strategy / langDir / defaultLocale / detector，被 `nuxt.config.ts` 顶层 import 后 spread）+ `i18n.config.ts`（vue-i18n 构建期配置，按文件路径加载）+ `localeDetector.ts`（`resolveLocale` 纯函数）。
+- **jiti 加载边界（关键约束）**：`nuxt.config.ts` 顶层只能 import `nuxt-i18n-config.ts`（仅 named export const、无顶层副作用），**不能** import `i18n.config.ts`（其 default export 会触发 jiti 顶层求值 `defineI18nConfig` → `is not defined`）；这是双文件拆分的唯一根因。`nuxtI18n = { ... } as const` 必需（防 spread 后字面量类型宽化引发模块字段契约检查报错）。
+- **`nuxt.config.ts` 的 i18n 块 ≤ 10 行**（仅引用 + 必要 override），超出即视为散落配置点回归；**新增语言流程**仅改 `nuxt-i18n-config.ts` 一处 + 在 `i18n/locales/` 复制对应 `.json` 并补翻译。语言标识规范 / fallback 链 / 文案归属见 [i18n.md §3](./i18n.md#3-平台-ui-国际化)。
+- **禁止**：i18n 块内重复声明 `locales` / `strategy` / `langDir`；把 `vueI18n` 写成内联对象；把 `i18n.config.ts` 的 named export 放到会被 jiti 顶层 import 的位置；detector 内 hard-code locale 列表。
 
 ### 7.3 Utility 抽取与跨组件共享
 
-- **抽取时机**：D 阶段实现收尾时若发现同一格式化函数在 ≥ 2 个 SFC 中重复出现（如 `modeLabel` / `executorLabel` / `formatDuration`），立即抽到 `apps/platform/app/utils/<feature>.ts` 单文件集中维护；同时接受 Review Gate `suggest` 触发的反向抽取（先实现后抽取）。
-- **utility 签名**：仅接受纯函数（无副作用、依赖参数化）；i18n 相关函数应接收 `t: (key, params?) => string` 翻译函数作为参数，而非在 utility 内部 `useI18n()`——避免 utility 与 Vue 实例耦合，提高单测覆盖度（无需 mock i18n）。
-- **utility 单测一次性覆盖所有分支**：抽取后立即补单测覆盖所有分支（含 NaN / Infinity / 缺失字段 / 负时长 / 非法日期等边界）；不接受"先实现后补测"的两段式——utility 函数纯度高，单测零成本，理应一次到位（M15.1 run-view.test.ts 16 case 单批覆盖 6 函数所有分支）。
-- **函数签名变更必须同步所有调用方**：utility 函数签名变更后必须 grep 全仓所有调用方同步更新；`pnpm typecheck` 不捕捉 vitest mock 下的类型错误（mock 路径可能跳过部分类型检查），Review Gate `audit-depth: quick` 仍能命中此类 blocker（M15.1 第 1 轮 Reject B1 `alertsFound` 误用——调用方传整个 run 对象，签名已变）。
-- **跨组件复用边界**：utility 一旦抽到 `utils/<feature>.ts`，所有 SFC（含 dialog 组件）通过 import 复用；禁止在第二个 SFC 中复制定义（即使仅微调）。
+- **抽取时机**：同一纯格式化函数在 ≥ 2 个 SFC 重复出现即抽到 `app/utils/<feature>.ts`；同时接受 Review Gate `suggest` 触发的反向抽取。
+- **签名**：仅接受纯函数（无副作用、依赖参数化）；i18n 相关函数接收 `t` 翻译函数为参数，不在 utility 内 `useI18n()`。抽取后**立即**补单测覆盖全部分支（含 NaN / Infinity / 缺失字段 / 负时长 / 非法日期）；函数签名变更必须 grep 全仓同步调用方（`typecheck` 不捕捉 vitest mock 下的类型错误）。
+- 一旦抽到 `utils/<feature>.ts`，所有 SFC（含 dialog）一律 import 复用，禁止在第二处复制定义（即使仅微调）。
+- **有状态 composable 的 SSR 与可测性**：localStorage 偏好**不得**在构造期读存储（SSR 首帧错配），由 `onMounted` 或打开弹窗时填充；存储以可选参数注入，读写与解析全路径 try/catch（访问 `localStorage` 本身可能抛错）；单测用内存实现 + 抛错 getter 覆盖读写 / 脏数据 / 抛错分支。实例见 `app/composables/use-scan-preferences.ts`。
+
+- 依赖注入型 composable 的**缺省实现求值时机**（setup 期 vs 事件期）见 [工程实践判例 EP-31](../design/governance/engineering-practice-notes.md)（条目为列表项无独立锚点，按 §2「本地文件链接默认不带锚点」引用）。
+
+### 7.4 caomei-ui 接线约定
+
+> 迁移缘由、分批计划与逐批结论见 [UI 组件库迁移评估](../design/governance/caomei-ui-migration.md)（PrimeVue 迁移已于 M31 闭环、依赖已卸载）；本节只登记**接线约定**。
+
+- **模块注册**：`modules: ['caomei-ui/nuxt', '@nuxtjs/i18n']` + `caomeiUI: { prefix: 'Caomei', darkMode: 'class', theme }`；组件名 `Caomei*` / 类名 `caomei-*` / token `--caomei-*`。
+- **token 覆盖分两处，不可合并**：`caomeiUI.theme` 只生成一条跨明暗的 `:root` 声明（适合跨主题稳定实底色）；随明暗自适应的 token 必须落在 `app/assets/styles/_caomei-tokens.scss`，暗色档用 `:root.dark`（特异性 0,2,0）压过库内 `:is(.dark, …)`（0,1,0）。`_caomei-tokens.scss` **必须显式 `@use './variables' as *`**（漏写时唯 `build` 能暴露 `Undefined variable`）。
+- **主色 token 取值**：`--caomei-color-primary-solid: #0f766e`（teal-700）配白实测 5.47:1（≥ AA 4.5:1）；`--caomei-color-primary` 亮 `#0d9488` / 暗 `#5eead4`，其作底须配 `--caomei-color-primary-foreground: #0b0b0d`（库默认白字不达标）。
+- **图标与 provider**：`CaomeiIcon` 的 prop 是 `icon: Component`（`@lucide/vue`），**不存在** `name` 字符串 prop，一律写 `<CaomeiIcon :icon="X" />`（默认 `size="1em"`；直接写 `<X />` 会按 24px 渲染偏大）；`app/app.vue` 用 `CaomeiConfigProvider`（`:locale` 单点映射平台 i18n）→ `CaomeiToastProvider` → `CaomeiConfirmDialog` 包裹应用，`useToast()` / `useConfirm()` 自动导入，原生 `confirm()` 一律改 `useConfirm().open({ tone: 'danger' })`。
+- **选择器家族**：Select / MultiSelect / AutoComplete 默认上限 `20rem`，仓库统一覆盖 `--caomei-select-max-width: none`（覆盖必须用 `:root:root`（0,2,0）压过后加载的库 `:root`）；`CaomeiSelect` 的可见根是 Reka `SelectTrigger` 按钮，页面 scoped 与全局样式都会被库 scoped 规则（0,2,0）压过 → 单个选择器限宽须用外层容器（`display: inline-block` + 定宽）或 `:deep()`（`CaomeiInput` 根是普通 div，不受此限）。
+- **组件差异速查**：`CaomeiSelect` 无 `#value` 槽与 `loading` prop；`CaomeiDrawer` 只 emit `update:open`（无 `hide`）；`CaomeiCheckbox` 根是 `role="checkbox"` 按钮（不可嵌在 `<label>` 内，文案走 `text` prop）；`CaomeiInput` 的 `type` 不含 `datetime-local`；`CaomeiInput` / `CaomeiTextarea` 透传的 `@input` **先于** v-model 写回 → 依赖新值的同步 handler 必须用 `@update:model-value`。
+- **受控状态必须回写**：`expandedRowGroups` / `expandedRows` / `multiSortMeta` / `page` 等须配 `@update:*` 回写，只声明 prop 不回写会出现「内建按钮点了没反应」。
+- **`CaomeiDialog` 响应式宽度用 `--caomei-dialog-width` 钩子**，不用 inline `:style="{width}"`（inline 恒高于样式表，会让 `:breakpoints` 成死代码）；定宽且无 breakpoint 需求可继续用 inline `:style`。**`CaomeiSelect` 的 `SelectItem` 不接受空串 `value`**（SSR 直接抛错 → 500）；「全部」/「未设置」项必须用哨兵值（`__all__` / `__auto__`），对外提交前映射为不传参 / `null`。
+- **DataTable 密度与分组**：无 `size` prop，仓库在 `_caomei-tokens.scss` 统一收敛为 small 档（覆盖单元格须用 `.caomei-data-table__table th.caomei-data-table__th` 级选择器），`pr-checks.vue` 例外（用户裁定恢复 caomei 默认密度）；从 `columns` 剔除 `groupRowsBy` 同名列且**不保留分组字段的客户端排序键**，「按包」连续性由**组排序键**保证（组内最高级别 rank × 步长 − 包名升序序号，`summarizePackageGroups`），不依赖服务端 `orderBy`。
+- **验证命令**：`pnpm --filter @dependfix/platform typecheck` + `lint` + `test`；样式类改动必须跑 `build`（唯 `build` 编译 SCSS）。
+
+> 执行分层说明：「影响打包 / 入口 / 产物时必跑 `build`」由 [AGENTS.md 必要检查](../../AGENTS.md) 第 3 条承接；「`SelectItem` 不接受空串 `value`」与「响应式宽度用 `--caomei-dialog-width` 钩子」两条为**严格约束**，已登记 [review 检查点矩阵](../../.github/skills/code-reviewer/references/code-quality-checklist.md#规范条款-review-检查点矩阵严格约束逐条挂接)；其余为执行层指引。
+
+### 7.5 上游组件问题归因与 issue 上报流程
+
+> 适用：平台页面 / 组件行为异常，且怀疑根因在组件库（`caomei-ui`）或其传递依赖，而非本仓代码。
+
+- **第 1 步 · 归因判定（三条全过才按上游问题上报）**：① 移除本仓样式覆盖 / 容器约束 / 受控状态写法后仍复现；② 库自带 demo 同样复现；③ 版本与 prop 未越界（存在性以已安装版本 `node_modules/<pkg>/dist/**` 源码为准）；仅在叠加本仓覆盖后才出现 → 回 [§7.4](#74-caomei-ui-接线约定) 排查。
+- **第 2–4 步 · 取证与上报**：最小复现片段 + 浏览器侧实测值（`getComputedStyle` / `getBoundingClientRect` / `elementFromPoint`）+ 截图，且**与冻结代码同批生成**（[测试规范 §6.8](./testing.md#68-取证工件必须与冻结代码同批生成)）；上报路径以目标仓库 `.github/ISSUE_TEMPLATE/` 模板优先（无模板按其通用 bug 结构提交，**不因缺模板而放弃**）；模板要素（环境版本 + 最小复现 + 期望与实际 + 截图）缺一不可，**不写入**本仓私有代码 / 内部数据 / 凭据。
+- **第 5 步 · 本仓侧处置**：在 [backlog](../plan/backlog.md) 登记「已上报上游 + 影响面 + 临时措施」；**不在本仓为上游缺陷做二次封装兜底**（需兜底时由用户明确决策并单独登记）。
+
+### 7.6 运行时 env 开关的 UI 状态暴露用只读端点
+
+- **不要用 `runtimeConfig.public`**：`nuxt.config` 求值发生在**构建期**，非 `NUXT_PUBLIC_` 前缀的根级 env 只在构建时烘焙，容器运行时 `-e` 注入不会刷新 → 公开配置与 `process.env` 口径漂移。
+- **做法**：由服务端**只读端点**按请求读取 `process.env` 返回状态（如 `GET /api/schedules/monitor-status`），前端据此渲染提示，与服务端开关**同源、无烘焙漂移**；进程级 env 不可热更 → UI 文案须说明「设置后需重启进程生效」。本条为**严格约束**，已登记 [review 检查点矩阵](../../.github/skills/code-reviewer/references/code-quality-checklist.md#规范条款-review-检查点矩阵严格约束逐条挂接)。
 
 ## 8. 测试规范
 
-- server 层纯逻辑（加密、adapter、服务）用 Vitest node 环境，位于 `server/**/*.test.ts`
-- 涉及 Nuxt runtime（`useRuntimeConfig` / API 路由）的测试：API 集成测试放 `tests/` 或 `server/api/**/*.test.ts`，通过 `@nuxt/test-utils` 启动（M6 按需引入，T602 起）
-- 数据库测试：SQLite `:memory:` + `DATABASE_TYPE=sqlite`，每个测试独立 DataSource（`beforeEach` 重建）
-- 时间列断言：使用 `getDateType('sqlite')` 期望值，避免硬编码
-- 测试命令：`pnpm --filter @dependfix/platform test`（vitest run）
+- server 层纯逻辑（加密 / adapter / 服务）用 Vitest node 环境，位于 `server/**/*.test.ts`；涉及 Nuxt runtime（`useRuntimeConfig` / API 路由）的集成测试放 `tests/` 或 `server/api/**/*.test.ts`，经 `@nuxt/test-utils` 启动。
+- 数据库测试用 SQLite `:memory:` + `DATABASE_TYPE=sqlite`，每个测试独立 DataSource（`beforeEach` 重建）；时间列断言用 `getDateType('sqlite')` 期望值，避免硬编码。
+- 命令：`pnpm --filter @dependfix/platform test`；视觉回归 `pnpm --filter @dependfix/platform test:visual`（更新基线加 `--update-snapshots`），口径见 [测试规范 §6.7](./testing.md#67-视觉回归截图识别层appsplatform)。
 
 ## 9. 质量门禁
 
-- `pnpm lint` / `pnpm typecheck`（根目录，含平台）
-- `nuxt build` 必须通过（Docker 构建前置）
-- 平台相关改动需运行 `pnpm --filter @dependfix/platform test`
-- 提交走 [conventional-committer 流程](./git.md)，scope 用 `platform`（如 `feat(platform): ...`）
-- 注释禁止规划编号标记（T601 等），违反即清理（[开发规范 §3](./development.md)）
+- `pnpm run lint:check` / `pnpm run lint:css:check` / `pnpm typecheck`（根目录）：前两者无 `--fix`，且 `lint:check` 链式跑平台配置；Test / Release / Docker 均执行前三者。
+- **两套 ESLint 配置不是同一规则集**：根用 type-aware 子集；平台（`eslint-config-cmyr/nuxt`）另启 `strictTypeChecked` / stylistic（`array-type`、`consistent-type-definitions`、`vue/object-curly-spacing`）。平台改动须同时满足。
+- 平台告警预算 `--max-warnings 11`（9 条有意保留的 `no-deprecated` + 2 条存量 `max-lines`），只可随清理下调。
+- `nuxt build` 必须通过（Docker 构建前置）；平台相关改动须运行平台 `test`；提交走 [conventional-committer 流程](./git.md)，scope 用 `platform`；注释禁止规划编号标记（[开发规范 §3](./development.md)）。
 
-## 10. 环境变量总表（.env.example 对齐）
+## 10. 运行时与部署（容器镜像 / 启动 / 队列降级）
 
-| 变量 | 必需 | 默认值 | 说明 |
-|:--|:--:|:--|:--|
-| `PORT` | 否 | `3000` | 平台监听端口（容器内固定 3000，外部映射） |
-| `AUTH_SECRET` | 生产必需 | 开发随机 | better-auth 密钥 |
-| `DATABASE_PATH` | 否 | `data/dependfix.sqlite` | SQLite 路径（容器内 `/app/data/dependfix.sqlite`） |
-| `DATABASE_TYPE` / `DATABASE_URL` | 否 | `sqlite` | 多后端切换 |
-| `DATABASE_SSL` | 否 | `false` | MySQL/PG 启用 SSL（多后端时生效） |
-| `DATABASE_ENTITY_PREFIX` | 否 | `dependfix_` | 表前缀 |
-| `DATABASE_SYNCHRONIZE` | 否 | `false` | 全场景显式 opt-in 才同步 schema（详见 [development.md §5.1.19](./development.md)） |
-| `NUXT_ENCRYPTION_KEY` | 凭据功能必需 | 空 | AES-256-GCM 平台密钥（PAT token + GitHub App PEM 私钥共用同一密钥派生） |
-| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` | 否 | 空 | 配置后启用邮件验证 |
-| `NUXT_PUBLIC_BETTER_AUTH_URL` | 反向代理时 | 自动推断 | 认证基础 URL |
-| `MACHINE_ID` | 否 | `pid % 1024` | 雪花机器位 |
+> 镜像构建产物与运行契约；容器编排文件见 [§2](#2-目录结构nuxt-4)。完整选型与依据见 [平台执行模型隔离设计](../design/governance/executor-process-isolation.md)。
 
-## 11. 决策记录（2026-08-07 人工审查确认）
+### 10.1 镜像自足性优先于部署侧 env
 
-1. **多后端时机**：M6 默认 SQLite 交付，`getDateType()` + driver 注入 + `DATABASE_URL` 推断一次性做对（避免 T601 后返工）；MySQL/PG 真实部署验证延后到 M7 —— ✅ 确认
-2. **表前缀**：默认 `dependfix_`（`DATABASE_ENTITY_PREFIX` 可配）—— ✅ 确认（需要前缀）
-3. **synchronize 策略**：M6 开发/测试自动同步 + 生产显式开启（`DATABASE_SYNCHRONIZE=true`）；正式迁移链排期 M7 —— ✅ 确认（2026-09-01 演进：synchronize / migrationsRun 均显式 opt-in，详见 [development.md §5.1.19](./development.md)）
-4. **雪花 ID**：沿用 momei 方案（48 位时间戳 + 10 位机器 + 12 位序列，hex 输出）；与 better-auth 默认 UUID 不同，全局统一 —— ✅ 确认
-5. **首用户 admin**：首个注册用户自动 `role=admin`（`databaseHooks.user.create.before`）—— ✅ 确认
-6. **文件命名**：文件与 Vue 组件统一 **kebab-case**（Nuxt 自动导入 `use-session.ts` → `useSession`）—— ✅ 确认；全局 [开发规范 §2](./development.md) 已同步修订（Vue 组件由 PascalCase 改为 kebab-case）
+- Docker 镜像的关键启动默认值（如 `DATABASE_MIGRATIONS_RUN=true`）**必须**用 Dockerfile runtime `ENV` 固化，不能只靠 compose 注入（用户可能沿用旧 compose 或直接 `docker run`，导致镜像「能启动但功能不可用」）；**发布门禁**为推送前对真实构建镜像跑首启冒烟（不注入该 env），断言 HTTP 200 + 业务表数下限 + 无 `no such table`（`apps/platform/docker/smoke-test.sh`，已接入 `docker.yml`）；空库 + 未开迁移时启动须打明确告警。**官方 Node 基础镜像工具链口径**：官方镜像默认启用 corepack shim，会按 `packageManager` 回源下载 pnpm 并覆盖镜像内 `npm i -g` 的版本——钉定 pnpm 版本前先移除 shim；node-gyp 默认回源 nodejs.org 下载 headers，受限网络需 `npm_config_nodedir=/usr/local`；pnpm 11 的 registry 覆盖使用 `pnpm_config_*` 前缀（`npm_config_registry` 不保证生效），构建期切 registry 时两种前缀同时导出以兼容；镜像冒烟可核对 pnpm 版本。
 
-## 12. 相关文档
+- **10.2 runtime 镜像的 Node 依赖面只含 .output（Nitro trace 自包含）**：`.output/server/node_modules` 由 Nitro trace 自带全部运行时依赖（含 better-sqlite3 的 musl prebuild），workspace 包被打进 `.output/server/chunks`——runtime 阶段**只 `COPY .output`**，**不得**再复制根 `node_modules` + workspace dist（曾致镜像膨胀至约 1.1GB，移除后约 239MB）。**校验口径**：`rg "from ['\"]@dependfix" apps/platform/.output/server` 应 0 命中（排除注释）；`.output/server/package.json` 声明依赖逐项 `existsSync` 全命中 + 容器 HTTP 冒烟 + 原生模块 PRAGMA。**系统工具链**：目标仓库原生模块回退编译所需 `python3/make/g++` 的安装口径、体积实测与 `smoke-test.sh` 校验见 [dependency-fixer-records.md §12.11](../design/modules/dependency-fixer-records.md)。
 
-- [开发规范](./development.md)
-- [API 规范](./api.md)
-- [安全规范](./security.md)
-- [测试规范](./testing.md)
-- [momei 平台实现参考分析](../research/2026-08-07-momei-platform-reference.md)
-- [架构设计](../design/governance/architecture.md)
+### 10.3 Nitro 插件不阻塞监听（启动引导语义）
+
+- `defineNitroPlugin(() => { void asyncInit() })` **不会 await**，日志 `Listening on …` 早于初始化完成——启动引导注释不得写「对外服务前就绪」，应说明与首次请求共享 single-flight promise。
+- 一次性 / 迁移专用模式（`DEPENDFIX_MIGRATIONS_ONLY=true`）用 `process.exit` 退出；`.catch` 中**必须**按该 env 补 `process.exit(1)`，否则一次性容器遇异常会挂起而非失败退出。
+
+### 10.4 队列模式自动降级必须含「消费者维度」
+
+- 「Redis 可用即异步」的降级矩阵若不含「是否存在消费者」，会形成静默黑洞：job 入队后无人消费 → pending 永远挂起 → stale cleanup 约 30 分钟后判 `orphan_run`。
+- `auto` 模式**必须**仅在「Redis 可用**且**本进程消费队列（`inProcessWorker`）」时异步；本进程不消费且无独立 worker 消费时须降级 `sync`（容器默认形态由独立 worker 进程消费，见 [§10.6](#106-队列执行进程隔离独立-worker-进程)——该形态应显式 `QUEUE_ENABLED=true`）。
+- **env 口径**：Nuxt runtimeConfig 运行时覆盖只认 `NUXT_` 前缀（容器需 `NUXT_IN_PROCESS_WORKER`）；`.env.example` 的无前缀名只是 compose 插值源，直接注入容器无效。
+
+- **10.5 队列锁参数显式化与锁问题观测**：in-process Worker **必须**显式配置 `lockDuration` / `lockRenewTime`（`SCAN_WORKER_LOCK_OPTIONS`，见 `server/services/queue/scan-worker.ts`），不得依赖 BullMQ 隐式默认（30 秒）——引擎同步子进程会阻塞 event loop 使续期定时器延后，易触发 `could not renew lock` / `Missing lock`，job 被判 stalled 重排（存在重复执行风险）。**取值口径**：`lockDuration` 取 `resolveExecutionTimeoutMs()`（缺省 30 分钟，可经 `EXECUTION_TIMEOUT_MS` 覆盖），`lockRenewTime` 取其一半；两处口径**同源联动**（单测锁定该对齐关系），env 变更需重启进程。**锁问题观测**：Worker **必须**注册 `stalled` / `lockRenewalFailed` / `error` 事件并输出结构化日志（`[scan-worker] {json}`）；`stalled` / `lockRenewalFailed` 载荷含 `jobId` 并经注入的 `queue.getJob` 补全 `runId`（未解析显式 `null`）；`error` 载荷无 job 上下文（由配对的 `lockRenewalFailed` 承载）。**同根因去重**：LockManager 续期失败会同时 emit `lockRenewalFailed` 与 `error`（message 前缀 `could not renew lock for job`）——`error` 日志须标 `duplicateOf: 'lockRenewalFailed'` 供聚合去重（与 [§6.1](#61-错误码与告警状态口径平台展示消费-engine-错误码) 同类的「同一根因不重复告警」思路）。
+
+### 10.6 队列执行进程隔离（独立 worker 进程）
+
+- **形态与监听收敛**：容器部署**默认**启动双进程（`DEPENDFIX_QUEUE_WORKER=1`，由 `docker/entrypoint.sh` 实现）——独立 worker 进程 `NUXT_IN_PROCESS_WORKER=true` 消费队列，HTTP 进程 `=false` 不消费；扫描执行完全在 worker，**HTTP 进程 event loop 不被阻塞**，从根上消除锁续期失败（锁参数与观测见 10.5）。worker 的 Nitro HTTP 监听经 `NITRO_UNIX_SOCKET`（默认 `/tmp/dependfix-queue-worker.sock`）收敛，不占端口、不对外暴露。**迁移唯一执行者**：worker 侧 `DATABASE_MIGRATIONS_RUN=false`，迁移只由主进程执行。**Redis 不可用**：两进程各自按 [§10.4](#104-队列模式自动降级必须含消费者维度) 降级 `sync`。
+- **进程角色与 HTTP-only 插件**：入口向两进程分别注入 `DEPENDFIX_ROLE`（worker 子进程 `worker` / HTTP 主进程 `server`；单进程形态由入口归一化为 `server`，外部误设 `worker` 不生效），worker 侧据此**跳过 HTTP-only 插件**——`stale-cleanup`（周期清理：30 秒首跑 + 5 分钟节拍，含孤儿清理 / 批次对账 / `_pending/` 目录删除）、`build-info`（部署产物版本戳，容器级一条即可，见 10.7）与 `weekly-digest`（周汇总）。判定由 `server/utils/process-role.ts` 单点实现（`HTTP_ONLY_PLUGINS` / `NON_HTTP_ONLY_PLUGINS` 清单为单一事实源，单测锁定「插件目录内每个 nitro 插件都已分类」）。**非 HTTP-only**：`database-bootstrap` 两进程均保留——worker 自身依赖数据源引导，且迁移唯一执行者已由 `DATABASE_MIGRATIONS_RUN=false` 隔离；`resource-probe` 两进程均保留——worker 需要输出执行面内存 / 并发探测（只读、不阻断）；`logger` 亦两进程共用（见 10.9）。**缺省与回退**：容器单进程形态由入口归一化为 `server`；未设置（本地 `pnpm dev` / 直连 `node .output/server/index.mjs`）与 `=server` 行为一致，不跳过任何插件；未识别值按 `server` 处理并告警（**fail-safe**：宁可多跑一次幂等清理，也不静默停用孤儿清理）。**为何不用 `IN_PROCESS_WORKER` 作判据**：双进程形态下 worker 子进程与单进程形态都是 `true`（唯一为 `false` 的是 HTTP 主进程，语义恰好相反）。机检落点：`server/utils/process-role.test.ts`（三态 + 未识别值方向）+ `server/plugins/*.test.ts`（注册守卫）+ `docker/entrypoint.test.mjs`（角色注入）。
+- **向后兼容与回退**：入口层不设 `DEPENDFIX_QUEUE_WORKER` 时默认 `0`（单进程）；compose 默认 `QUEUE_WORKER=1`，设 `0` 回退；`NUXT_QUEUE_ENABLED=false` 时入口跳过 worker 并 warn；本地 `pnpm dev` / 直接 `node .output/server/index.mjs` 不经 entrypoint，仍用进程内 worker。
+- **崩溃自愈（看护循环）**：entrypoint 以看护子 shell 托管 worker——异常退出按指数退避自动重启（1s 起翻倍、封顶 30s，记录退出码 / 次数 / 时间）；连续快速失败超上限（5 次）后**转为慢重试**（`DEPENDFIX_QUEUE_WORKER_SLOW_RETRY_SECONDS`，缺省 300s，日志降噪），**不得永久停止重启**——`stale-cleanup` 只能改 DB、不能消费队列，worker 永久退出会让所有任务无声挂起；**HTTP 主进程始终继续服务**；稳定运行 60s 后快速计数与慢重试状态归零；容器停止（TERM / INT）时终止看护循环与 worker。**退避等待必须可被信号打断**：用 `sleep N & wait $!`（前台 `sleep` 会阻塞 trap，容器 `docker stop` 宽限内被 SIGKILL 成 137，破坏约定的 143 退出语义），并以真实 `sleep` + `TERM` 计时用例锁定。
+- **信号处置顺序**：双进程形态下，容器停止（TERM / INT）的转发 trap **必须**先于「启动子进程」与「输出就绪行」安装（本条为**严格约束**，已登记 [review 检查点矩阵](../../.github/skills/code-reviewer/references/code-quality-checklist.md#规范条款-review-检查点矩阵严格约束逐条挂接)）。就绪行是外部观测方（容器编排 / 健康检查 / 行为测试）唯一的同步点，落在 trap 安装之前的信号按默认处置直接终止 PID 1——看护循环与 worker 因此失去父进程，观测方读到的也是 signal 终止而非约定的 143 退出码；主进程尚未启动（`MAIN_PID` 未赋值）时无主进程可转发，应直接退出（看护进程仍由 `stop_queue_worker` 兜底）而非吞掉停止信号后照旧启动。机检落点为 `apps/platform/docker/entrypoint.test.mjs` 的源码顺序断言。
+- **已知边界**：① 两进程共享 SQLite（WAL + `busy_timeout` 由 DataSource 初始化落地）；② **插件面已按进程角色收敛**：worker 侧不再重复启动 HTTP-only 插件（周期清理 / 版本戳），仅保留两进程共用的启动期数据源引导与资源探测（判定与清单见上「进程角色与 HTTP-only 插件」）；③ 连续快速重启超上限后转慢重试（消费者不会永久消失，见 [队列僵尸任务终结与去重键释放设计](../design/governance/queue-stale-recovery.md)）；④ **空库首启时序**——worker 插件首次查询可能命中未建表，由 `stale-cleanup` 首跑延迟 + 幂等重试承担；⑤ **入口脚本前导段**（权限 / 路径校验等 `run_platform` 之前的步骤）尚无 trap，此窗口内的 TERM / INT 仍按默认处置终止 PID 1，但此时子进程尚未创建，无孤儿面；⑥ **子进程启动窗口**——trap 已生效但 `SUPERVISOR_PID` / `MAIN_PID` 尚未捕获的极窄窗口内到达的 TERM / INT 无变量可转发（仅 `stop_queue_worker` 的 pid 文件兜底），未命中部分短暂孤儿化，由容器运行时随 PID 1 退出一并回收；⑦ **启动期备份的双份副作用**——双进程各自备份一次（[EP-16](../design/governance/engineering-practice-notes.md)，hard requirement），保留份数（`BACKUP_RETENTION_COUNT`）的实际覆盖窗口减半；治本属独立条目。
+
+- **10.7 部署产物版本戳（构建期注入 + 运行时核对）**：链路为 CI `--build-arg BUILD_COMMIT/BUILD_VERSION` → Dockerfile `ARG` → `ENV NUXT_BUILD_COMMIT/NUXT_BUILD_VERSION` → Nuxt 以 `NUXT_` 前缀运行时覆盖 `runtimeConfig`（未注入缺省 `unknown`，不阻断启动）。**暴露面**：`GET /api/health`（**公开只读，无鉴权**）返回 `{ version, commit, startedAt }`，启动日志输出 `[build] version=… commit=… startedAt=…`；用途是消除「代码已修复但线上仍复现」的陈旧产物误判。**CI 接线**：`docker.yml` 三个构建步骤均传 `--build-arg`；镜像冒烟额外断言 `/api/health` 200 + JSON 字段与启动版本戳行；env 命名用 `NUXT_BUILD_*`（对齐 Nuxt 运行时覆盖通道，避免 esbuild define 折叠，与 3.6 同源原则）。**运行级回执**：同一值经 `server/utils/run-build-info.ts` 写入每次 run 的 `scan_run.build_version` / `build_commit` 并透传 `RuntimeConfig.buildVersion/buildCommit`，引擎在 run 日志中输出 `[build] dependfix version=… commit=… source=host|engine-package`（`source=engine-package` 为 CLI / MCP 无宿主注入时的包版本回退）；`github-action` 模式两列记录受理 / 派发本次 run 的平台构建，实际执行镜像在目标仓库 runner。口径与降级见 [run-failure-taxonomy.md §5.11](../design/governance/run-failure-taxonomy.md)。
+- **10.8 pnpm store 持久化与安装产物提交卫生**：目标仓库依赖安装的 store **必须**落持久卷（入口默认 `PNPM_CONFIG_STORE_DIR=$DATA_DIR/pnpm-store`，compose 转发），否则容器每次重建都冷安装。三条入口不变式：① 可写性按**真实运行身份写探针**判定（`test -w` 不看挂载只读属性）；② 不可用（只读 / 权限 / 非绝对路径）时 warn 并 **unset 回退**（只 warn 不 unset 会让 pnpm 继续用坏路径）；③ store 目录**以运行身份创建**，不对用户路径 `chown`（根路径拒绝回退）。**硬链接前提**：store 与 `RUN_WORK_ROOT` 同卷（跨盘退化为复制）。**提交卫生**：安装产物不得进入交付提交——运行开始前把 `.pnpm-store/` / `node_modules/` 写入目标仓库 `.git/info/exclude`（幂等），**不得**改 `.gitignore`；仅 `fix` / `fix-and-pr` 非 `dry-run` 预置。清单与边界见 [gitignore-management.md](../design/governance/gitignore-management.md) §7；部署侧见 [deployment.md「pnpm store 与依赖缓存」](../guide/deployment.md#pnpm-store-与依赖缓存)。
+- **10.9 进程级日志通道**：进程级日志**必须**经 `server/utils/logger.ts` 输出（已接入边界禁新增裸 `console.*`），运行级 `MemoryLogger` 不得重复落文件；文件布局 / 轮转 / 配置回退 / 致命路径 / 脱敏 / 多进程边界的硬约束与唯一权威见 [platform-logging.md](../design/governance/platform-logging.md)，检查点见矩阵 §10.9 行。
+
+## 11. 环境变量总表（.env.example 对齐）
+
+> 默认值与完整说明以 [`apps/platform/.env.full.example`](../../apps/platform/.env.full.example) + [平台配置指南](../guide/configuration.md) 为唯一权威；本节只列平台差异点。
+
+- 运行与部署类：`EXECUTION_TIMEOUT_MS`（缺省 `1800000`，非法 / 越界 fail-closed 回退；与队列锁时长**同源**，见 10.5）、`DEPENDFIX_QUEUE_WORKER`（入口 `0` / compose `1`）与 `DEPENDFIX_ROLE`（入口按进程注入 `worker` / `server`，worker 跳过 HTTP-only 插件；均见 [§10.6](#106-队列执行进程隔离独立-worker-进程)）、`DEPENDFIX_QUEUE_WORKER_SLOW_RETRY_SECONDS`（worker 慢重试间隔，缺省 300，见 [§10.6](#106-队列执行进程隔离独立-worker-进程)）、`STALE_CLEANUP_RUNNING_GRACE_MS` / `STALE_CLEANUP_PENDING_GRACE_MS`（孤儿清理宽限，缺省 300000，见 [队列僵尸任务终结与去重键释放设计](../design/governance/queue-stale-recovery.md)）、`NUXT_BUILD_COMMIT` / `NUXT_BUILD_VERSION`（构建期注入、运行时只读，见 10.7）、`PNPM_CONFIG_STORE_DIR`（pnpm store 目录，入口默认 `/app/data/pnpm-store`，见 10.8）、`LOG_*`（见 10.9）、`DEPENDFIX_WEEKLY_DIGEST_HOUR`（周报触发小时，缺省 `9`，0-23，见 [platform-notification.md §6.5](../design/governance/platform-notification.md#_6-5-周汇总触发)）、`ACTION_STATUS_MONITOR_ENABLED`（PR Check 状态监测总开关；进程级、不可热更，前端提示经只读端点，见 [§7.6](#76-运行时-env-开关的-ui-状态暴露用只读端点)）。**数据与认证类**：`DATABASE_*` 族见 [§3](#3-数据库规范多后端兼容--时区) 与 [平台配置指南](../guide/configuration.md)；`NUXT_ENCRYPTION_KEY` 见 [§5](#5-凭据安全规范t602-起生效)；`AUTH_SECRET` / `SMTP_*` / `NUXT_PUBLIC_BETTER_AUTH_URL` / `PORT` / `MACHINE_ID` 见 `.env.full.example`。
+
+## 12. 决策记录（2026-08-07 人工审查确认）
+
+- **多后端时机**：默认 SQLite 交付，`getDateType()` + driver 注入 + `DATABASE_URL` 推断一次性做对，MySQL / PG 真实部署验证延后。—— ✅ 确认
+- **表前缀**：默认 `dependfix_`（`DATABASE_ENTITY_PREFIX` 可配）；**synchronize 策略**：后续统一演进为 `synchronize` / `migrationsRun` 均显式 opt-in（见 [工程实践判例 EP-17](../design/governance/engineering-practice-notes.md)）。—— ✅ 确认
+- **雪花 ID**：48 位时间戳 + 10 位机器 + 12 位序列（hex 输出），全局统一；**首用户 admin**：首个注册用户自动 `role=admin`；**文件命名**：文件与 Vue 组件统一 kebab-case（已同步 [开发规范 §2](./development.md)）。—— ✅ 确认
+
+## 13. 相关文档
+
+- 规范：[开发规范](./development.md) / [API 规范](./api.md) / [安全规范](./security.md) / [测试规范](./testing.md) / [i18n 规范](./i18n.md)；指南：[技术栈](../guide/tech-stack.md) / [平台配置指南](../guide/configuration.md)；[平台执行模型隔离设计](../design/governance/executor-process-isolation.md) / [UI 组件库迁移评估](../design/governance/caomei-ui-migration.md) / [运行失败分类与筛选设计](../design/governance/run-failure-taxonomy.md) / [架构设计](../design/governance/architecture.md)；调研：[momei 平台实现参考分析](../research/2026-08-07-momei-platform-reference.md)

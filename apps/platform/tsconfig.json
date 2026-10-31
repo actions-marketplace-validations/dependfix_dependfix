@@ -12,6 +12,14 @@
         "server/**/*",
         "i18n/**/*",
         "playwright.config.ts",
+        "playwright.visual.config.ts",
         "tests/**/*"
+    ],
+    "exclude": [
+        "node_modules",
+        "../../node_modules",
+        "dist",
+        ".data",
+        "i18n/localeDetector.ts"
     ]
 }

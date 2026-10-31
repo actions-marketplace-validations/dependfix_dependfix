@@ -51,4 +51,11 @@ export class Organization extends BaseEntity {
      */
     @Column({ type: 'varchar', length: 255, nullable: true, name: 'ai_api_url' })
     aiApiUrl!: string | null
+
+    /**
+     * 组织通知设置 JSON（形状见 platform-notification.md §4.3）。
+     * null = 全默认；解析失败按默认值降级（不阻断扫描）。
+     */
+    @Column({ type: 'text', nullable: true, name: 'notification_settings_json' })
+    notificationSettingsJson!: string | null
 }

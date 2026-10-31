@@ -1,0 +1,580 @@
+import { classifyCheckFailure } from '@dependfix/core'
+import { describe, expect, it } from 'vitest'
+import {
+    aggregateOverallStatus,
+    capSignals,
+    dedupeSignalsByLatestRound,
+    deriveWorstConclusion,
+    isTerminalOverallStatus,
+    isWithinUpdatedWindow,
+    MAX_FAILURE_SOURCES,
+    MAX_SIGNALS_PER_PR,
+    normalizeCheckRun,
+    normalizeCommitStatus,
+    normalizeDeployment,
+    pickCheckRunId,
+    pickErrorSummary,
+    PR_UPDATED_WINDOW_MS,
+    resolveCheckProvider,
+    resolveDeploymentProvider,
+    resolveStatusProvider,
+    shouldSkipTerminalPr,
+    SIGNAL_SUMMARY_MAX_LENGTH,
+    SIGNAL_URL_MAX_LENGTH,
+    summarizeFailureSources,
+    TERMINAL_REPOLL_QUIET_MS,
+} from './build-signals'
+import type { UnifiedBuildSignal, UnifiedBuildSignalState } from './types'
+
+const observedAt = new Date('2026-10-12T00:00:00Z')
+
+const makeSignal = (overrides: Partial<UnifiedBuildSignal> = {}): UnifiedBuildSignal => ({
+    kind: 'check',
+    provider: 'github-actions',
+    name: 'Test',
+    state: 'success',
+    rawState: 'success',
+    sourceId: '1',
+    targetUrl: null,
+    logUrl: null,
+    summary: null,
+    observedAt,
+    ...overrides,
+})
+
+describe('monitor/build-signals provider 归因', () => {
+    it('check provider 取 app.slug（小写化）；缺失回退 unknown', () => {
+        expect(resolveCheckProvider('GitHub-Actions')).toBe('github-actions')
+        expect(resolveCheckProvider(null)).toBe('unknown')
+        expect(resolveCheckProvider('  ')).toBe('unknown')
+    })
+
+    it('status provider 取 context 前缀（支持 / – - : 空格分隔）', () => {
+        expect(resolveStatusProvider('Vercel – web-app')).toBe('vercel')
+        expect(resolveStatusProvider('ci/circleci: build')).toBe('ci')
+        expect(resolveStatusProvider('continuous-integration/travis-ci/push')).toBe('continuous-integration')
+        expect(resolveStatusProvider('')).toBe('unknown')
+        expect(resolveStatusProvider(null)).toBe('unknown')
+    })
+
+    it('deployment provider 取 creator.login 并归一化机器人形态（与 status 前缀口径一致）；缺失回退 unknown', () => {
+        expect(resolveDeploymentProvider('vercel[bot]')).toBe('vercel')
+        expect(resolveDeploymentProvider('Vercel[bot]')).toBe('vercel')
+        expect(resolveDeploymentProvider('alice')).toBe('alice')
+        expect(resolveDeploymentProvider('12345+vercel[bot]')).toBe('vercel')
+        expect(resolveDeploymentProvider(null)).toBe('unknown')
+        expect(resolveDeploymentProvider('  ')).toBe('unknown')
+    })
+})
+
+describe('monitor/build-signals 归一化', () => {
+    it('check run：completed 保留原始 conclusion 粒度', () => {
+        const timedOut = normalizeCheckRun(
+            { id: 1, name: 'Test', status: 'completed', conclusion: 'timed_out', app: { slug: 'github-actions' } },
+            observedAt,
+        )
+        expect(timedOut.state).toBe('failure')
+        expect(timedOut.rawState).toBe('timed_out')
+        expect(timedOut.sourceId).toBe('1')
+    })
+
+    it('check run：未完成 → pending（rawState 为 null）', () => {
+        const pending = normalizeCheckRun({ id: 2, name: 'Test', status: 'in_progress', conclusion: null }, observedAt)
+        expect(pending.state).toBe('pending')
+        expect(pending.rawState).toBe(null)
+    })
+
+    it('check run：completed 但 conclusion=null → failure（fail-closed，与 CLI 回环同口径）', () => {
+        const signal = normalizeCheckRun({ id: 3, name: 'Test', status: 'completed', conclusion: null }, observedAt)
+        expect(signal.state).toBe('failure')
+        expect(signal.rawState).toBe(null)
+        // 聚合 / 结论派生同向：不静默为通过或跳过
+        expect(aggregateOverallStatus([signal])).toBe('failure')
+        expect(deriveWorstConclusion([signal])).toBe('failure')
+    })
+
+    it('commit status / deployment 的 roundAt 取值', () => {
+        const status = normalizeCommitStatus(
+            { id: 1, context: 'Vercel – web', state: 'success', updated_at: '2026-10-12T00:05:00Z', created_at: '2026-10-12T00:01:00Z' },
+            observedAt,
+        )
+        expect(status.roundAt).toBe('2026-10-12T00:05:00Z')
+        const legacyStatus = normalizeCommitStatus({ id: 2, context: 'ci/build', state: 'pending' }, observedAt)
+        expect(legacyStatus.roundAt).toBeNull()
+
+        // 传入 updated_at 也不得参与排序（入参类型已不含该字段；此处以 as 绕过类型守卫验证运行时口径）
+        const deployment = normalizeDeployment(
+            { id: 3, environment: 'Production', created_at: '2026-10-12T00:02:00Z', updated_at: '2026-10-12T00:20:00Z' } as Parameters<typeof normalizeDeployment>[0],
+            { state: 'success' },
+            observedAt,
+        )
+        // 只用 created_at：updated_at 会因迟到 status 刷新而把旧部署排到新部署之后
+        expect(deployment.roundAt).toBe('2026-10-12T00:02:00Z')
+    })
+
+    it('check run：roundAt 取 started_at 优先（re-run 未完成时 completed_at 为空）', () => {
+        const running = normalizeCheckRun(
+            { id: 9, name: 'Test', status: 'in_progress', conclusion: null, started_at: '2026-10-12T01:00:00Z' },
+            observedAt,
+        )
+        expect(running.roundAt).toBe('2026-10-12T01:00:00Z')
+        const done = normalizeCheckRun(
+            {
+                id: 8,
+                name: 'Test',
+                status: 'completed',
+                conclusion: 'success',
+                started_at: '2026-10-12T00:00:00Z',
+                completed_at: '2026-10-12T00:05:00Z',
+            },
+            observedAt,
+        )
+        expect(done.roundAt).toBe('2026-10-12T00:00:00Z')
+    })
+
+    it('check run：URL 超限置 null（截断会产出无效链接）', () => {
+        const longUrl = `https://example.com/${'x'.repeat(SIGNAL_URL_MAX_LENGTH)}`
+        const signal = normalizeCheckRun(
+            { id: 5, name: 'Test', status: 'completed', conclusion: 'failure', details_url: longUrl },
+            observedAt,
+        )
+        expect(signal.targetUrl).toBeNull()
+
+        const short = normalizeCheckRun(
+            { id: 6, name: 'Test', status: 'completed', conclusion: 'failure', details_url: 'https://example.com/ok' },
+            observedAt,
+        )
+        expect(short.targetUrl).toBe('https://example.com/ok')
+    })
+
+    it('check run：摘要按上限截断', () => {
+        const long = 'x'.repeat(SIGNAL_SUMMARY_MAX_LENGTH + 50)
+        const signal = normalizeCheckRun(
+            { id: 4, name: 'Test', status: 'completed', conclusion: 'failure', output: { text: long } },
+            observedAt,
+        )
+        expect(signal.summary?.length).toBe(SIGNAL_SUMMARY_MAX_LENGTH + 3)
+        expect(signal.summary?.endsWith('...')).toBe(true)
+    })
+
+    it('commit status：state 映射（error → error / pending → pending）', () => {
+        expect(normalizeCommitStatus({ id: 1, context: 'Vercel – web', state: 'error' }, observedAt).state).toBe('error')
+        expect(normalizeCommitStatus({ id: 2, context: 'ci', state: 'pending' }, observedAt).state).toBe('pending')
+    })
+
+    it('deployment：无 status → pending；有 status 取 environment_url / log_url', () => {
+        const noStatus = normalizeDeployment({ id: 10, environment: 'Preview', creator: { login: 'vercel[bot]' } }, null, observedAt)
+        expect(noStatus.state).toBe('pending')
+        expect(noStatus.targetUrl).toBe(null)
+
+        const failed = normalizeDeployment(
+            { id: 11, environment: 'Preview', creator: { login: 'vercel[bot]' } },
+            { state: 'failure', environment_url: 'https://preview.example.com', log_url: 'https://logs.example.com' },
+            observedAt,
+        )
+        expect(failed.state).toBe('failure')
+        expect(failed.targetUrl).toBe('https://preview.example.com')
+        expect(failed.logUrl).toBe('https://logs.example.com')
+    })
+})
+
+describe('monitor/build-signals 聚合与派生', () => {
+    it('任一 failure / error → overall=failure（pending 让位于失败）', () => {
+        expect(aggregateOverallStatus([makeSignal({ state: 'success' }), makeSignal({ state: 'error' })])).toBe('failure')
+        expect(aggregateOverallStatus([makeSignal({ state: 'pending' }), makeSignal({ state: 'failure' })])).toBe('failure')
+    })
+
+    it('无失败但存在 pending → overall=pending', () => {
+        expect(aggregateOverallStatus([makeSignal({ state: 'success' }), makeSignal({ state: 'pending' })])).toBe('pending')
+    })
+
+    it('全部 success / neutral / skipped → overall=success', () => {
+        expect(aggregateOverallStatus([makeSignal({ state: 'success' })])).toBe('success')
+        expect(aggregateOverallStatus([makeSignal({ state: 'neutral' }), makeSignal({ state: 'skipped' })])).toBe('success')
+        expect(aggregateOverallStatus([])).toBe('success')
+    })
+
+    it('conclusion 派生保留失败 check 的原始粒度；非 check 失败源落 failure', () => {
+        expect(
+            deriveWorstConclusion([
+                makeSignal({ kind: 'check', state: 'failure', rawState: 'timed_out' }),
+                makeSignal({ kind: 'deployment', state: 'failure', rawState: 'failure' }),
+            ]),
+        ).toBe('timed_out')
+
+        expect(
+            deriveWorstConclusion([makeSignal({ kind: 'deployment', state: 'error', rawState: 'error' })]),
+        ).toBe('failure')
+    })
+
+    it('conclusion 派生：pending / neutral / skipped / success 分支', () => {
+        expect(deriveWorstConclusion([makeSignal({ state: 'pending', rawState: null })])).toBe('pending')
+        expect(deriveWorstConclusion([makeSignal({ state: 'neutral', rawState: 'neutral' })])).toBe('neutral')
+        expect(
+            deriveWorstConclusion([
+                makeSignal({ state: 'skipped', rawState: null }),
+                makeSignal({ state: 'skipped', rawState: null }),
+            ]),
+        ).toBe('skipped')
+        expect(deriveWorstConclusion([makeSignal({ state: 'success' })])).toBe('success')
+        expect(deriveWorstConclusion([])).toBe('success')
+    })
+
+    it('capSignals：同严重度保持源侧顺序（稳定排序）', () => {
+        const stable = [
+            makeSignal({ name: 'a', state: 'success' }),
+            makeSignal({ name: 'b', state: 'success' }),
+            makeSignal({ name: 'c', state: 'pending', rawState: null }),
+        ]
+        expect(capSignals(stable).map((s) => s.name)).toEqual(['c', 'a', 'b'])
+    })
+
+    it('capSignals：按严重度保留失败信号并截断到上限', () => {
+        const many: UnifiedBuildSignal[] = Array.from({ length: MAX_SIGNALS_PER_PR + 5 }, (_, i) =>
+            makeSignal({ name: `ok-${i}`, state: 'success' }))
+        many.push(makeSignal({ name: 'critical-failure', state: 'failure', rawState: 'failure' }))
+
+        const capped = capSignals(many)
+        expect(capped).toHaveLength(MAX_SIGNALS_PER_PR)
+        expect(capped[0]!.name).toBe('critical-failure')
+    })
+
+    it('pickCheckRunId / pickErrorSummary 优先失败源', () => {
+        const signals = [
+            makeSignal({ kind: 'check', state: 'success', sourceId: 'ok-1', summary: 'ok' }),
+            makeSignal({ kind: 'check', state: 'failure', rawState: 'failure', sourceId: 'fail-1', summary: 'boom' }),
+        ]
+        expect(pickCheckRunId(signals)).toBe('fail-1')
+        expect(pickErrorSummary(signals)).toBe('boom')
+        expect(pickCheckRunId([])).toBe(null)
+        expect(pickErrorSummary([])).toBe(null)
+    })
+})
+
+describe('monitor/build-signals 节流', () => {
+    const now = new Date('2026-10-12T00:00:00Z')
+
+    it('窗口内 / 窗口外判定', () => {
+        expect(isWithinUpdatedWindow(new Date(now.getTime() - 1000).toISOString(), now)).toBe(true)
+        expect(isWithinUpdatedWindow(new Date(now.getTime() - PR_UPDATED_WINDOW_MS - 1000).toISOString(), now)).toBe(false)
+    })
+
+    it('恰在窗口边界（差值 === windowMs）视为窗口内', () => {
+        expect(isWithinUpdatedWindow(new Date(now.getTime() - PR_UPDATED_WINDOW_MS).toISOString(), now)).toBe(true)
+    })
+
+    it('缺失 / 非法时间戳 fail-open（视为需处理）', () => {
+        expect(isWithinUpdatedWindow(null, now)).toBe(true)
+        expect(isWithinUpdatedWindow(undefined, now)).toBe(true)
+        expect(isWithinUpdatedWindow('not-a-date', now)).toBe(true)
+    })
+
+    it('终态判定：failure / success 为终态；pending / NULL / 未知值一律非终态（保守重采）', () => {
+        expect(isTerminalOverallStatus('failure')).toBe(true)
+        expect(isTerminalOverallStatus('success')).toBe(true)
+        expect(isTerminalOverallStatus('pending')).toBe(false)
+        expect(isTerminalOverallStatus(null)).toBe(false)
+        expect(isTerminalOverallStatus(undefined)).toBe(false)
+        expect(isTerminalOverallStatus('weird')).toBe(false)
+    })
+
+    it('终态跳过判定：终态 + 静默窗口内才跳过；窗口外 / 非终态 / 无既有行不跳过', () => {
+        const recent = { overallStatus: 'success', lastPolledAt: new Date(now.getTime() - 60 * 1000) }
+        const stale = {
+            overallStatus: 'success',
+            lastPolledAt: new Date(now.getTime() - TERMINAL_REPOLL_QUIET_MS - 1000),
+        }
+        expect(shouldSkipTerminalPr(recent, now)).toBe(true)
+        expect(shouldSkipTerminalPr(stale, now)).toBe(false)
+        expect(shouldSkipTerminalPr({ ...recent, overallStatus: 'pending' }, now)).toBe(false)
+        expect(shouldSkipTerminalPr({ ...recent, overallStatus: null }, now)).toBe(false)
+        expect(shouldSkipTerminalPr(null, now)).toBe(false)
+        expect(shouldSkipTerminalPr(undefined, now)).toBe(false)
+    })
+})
+
+describe('monitor/build-signals 失败源汇总', () => {
+    it('仅取失败信号并按 provider + name + kind 去重', () => {
+        const sources = summarizeFailureSources([
+            makeSignal({ provider: 'github-actions', name: 'Test', state: 'success' }),
+            makeSignal({ provider: 'vercel', name: 'Preview', kind: 'deployment', state: 'failure', rawState: 'failure' }),
+            makeSignal({ provider: 'vercel', name: 'Preview', kind: 'deployment', state: 'error', rawState: 'error' }),
+            makeSignal({ provider: 'vercel', name: 'Preview', kind: 'status', state: 'failure', rawState: 'failure' }),
+            makeSignal({ provider: 'cloudflare-workers-and-pages', name: 'Workers Builds', state: 'failure', rawState: 'failure' }),
+        ])
+        expect(sources).toEqual([
+            { provider: 'vercel', name: 'Preview', kind: 'deployment' },
+            { provider: 'vercel', name: 'Preview', kind: 'status' },
+            { provider: 'cloudflare-workers-and-pages', name: 'Workers Builds', kind: 'check' },
+        ])
+    })
+
+    it('无失败信号 → 空数组；超过上限时截断', () => {
+        expect(summarizeFailureSources([makeSignal({ state: 'success' })])).toEqual([])
+        const many = Array.from({ length: MAX_FAILURE_SOURCES + 5 }, (_, i) =>
+            makeSignal({ name: `fail-${i}`, state: 'failure', rawState: 'failure' }))
+        expect(summarizeFailureSources(many)).toHaveLength(MAX_FAILURE_SOURCES)
+    })
+})
+
+describe('monitor/build-signals 状态映射覆盖', () => {
+    const cases: [string, UnifiedBuildSignalState][] = [
+        ['success', 'success'],
+        ['failure', 'failure'],
+        ['timed_out', 'failure'],
+        ['action_required', 'failure'],
+        ['neutral', 'neutral'],
+        ['cancelled', 'skipped'],
+        ['skipped', 'skipped'],
+        ['stale', 'skipped'],
+    ]
+
+    it.each(cases)('check conclusion %s → state %s', (conclusion, expected) => {
+        const signal = normalizeCheckRun(
+            { id: 1, name: 'Test', status: 'completed', conclusion },
+            observedAt,
+        )
+        expect(signal.state).toBe(expected)
+    })
+})
+
+// ---------------------------------------------------------------------------
+// 归因：平台与 CLI 报告共用 core `classifyCheckFailure`，不出现第二套标签
+// ---------------------------------------------------------------------------
+describe('monitor/build-signals 归因', () => {
+    const checkRun = (conclusion: string, extra: Record<string, unknown> = {}) =>
+        normalizeCheckRun(
+            { id: 1, name: 'Test', status: 'completed', conclusion, app: { slug: 'github-actions' }, ...extra },
+            observedAt,
+        )
+
+    it('Dependabot updater 无更新文本 → external_noise', () => {
+        const signal = normalizeCheckRun(
+            {
+                id: 1,
+                name: 'dependabot[bot] updater',
+                status: 'completed',
+                conclusion: 'failure',
+                output: { summary: 'security_update_not_possible: no patched version' },
+            },
+            observedAt,
+        )
+        expect(signal.attribution).toBe('external_noise')
+    })
+
+    it('镜像 / registry manifest 错误签名 → external_noise（commit status 同口径）', () => {
+        const status = normalizeCommitStatus(
+            { id: 1, context: 'ACR push', state: 'failure', description: 'manifest unknown: tagged v1 not found' },
+            observedAt,
+        )
+        expect(status.attribution).toBe('external_noise')
+    })
+
+    it('cancelled / skipped → cancelled；无签名的硬失败 → unknown', () => {
+        expect(checkRun('cancelled').attribution).toBe('cancelled')
+        expect(checkRun('skipped').attribution).toBe('cancelled')
+        expect(checkRun('failure').attribution).toBe('unknown')
+        expect(checkRun('timed_out').attribution).toBe('unknown')
+    })
+
+    it('未完成 / completed 无 conclusion → 不产出归因', () => {
+        const pending = normalizeCheckRun({ id: 1, name: 'Test', status: 'in_progress', conclusion: null }, observedAt)
+        expect(pending.attribution).toBeUndefined()
+        const nullConclusion = normalizeCheckRun({ id: 2, name: 'Test', status: 'completed', conclusion: null }, observedAt)
+        expect(nullConclusion.attribution).toBeUndefined()
+    })
+
+    it('startup_failure / 未识别结论 → state failure + 归因 unknown（fail-closed）', () => {
+        const startup = checkRun('startup_failure')
+        expect(startup.state).toBe('failure')
+        expect(startup.attribution).toBe('unknown')
+        expect(aggregateOverallStatus([startup])).toBe('failure')
+
+        const future = checkRun('some_future_conclusion')
+        expect(future.state).toBe('failure')
+        expect(future.attribution).toBe('unknown')
+    })
+
+    it('等价性：平台归因 === core `classifyCheckFailure`（同一纯函数）', () => {
+        const fixtures = [
+            { name: 'dependabot[bot] updater', conclusion: 'failure' as const, summary: 'advisory was withdrawn' },
+            { name: 'Publish Docker Image', conclusion: 'failure' as const, summary: 'unknown manifest class' },
+            { name: 'Test', conclusion: 'failure' as const, summary: 'npm run build exited with code 1' },
+            { name: 'Test', conclusion: 'cancelled' as const, summary: null },
+        ]
+        for (const fixture of fixtures) {
+            const signal = normalizeCheckRun(
+                {
+                    id: 1,
+                    name: fixture.name,
+                    status: 'completed',
+                    conclusion: fixture.conclusion,
+                    output: { summary: fixture.summary },
+                },
+                observedAt,
+            )
+            expect(signal.attribution).toBe(classifyCheckFailure({
+                name: fixture.name,
+                conclusion: fixture.conclusion,
+                detail: fixture.summary ?? undefined,
+            }))
+        }
+    })
+
+    it('成功 / 中性信号不产出归因（避免通过项留「未判定」噪音）', () => {
+        expect(checkRun('success').attribution).toBeUndefined()
+        expect(checkRun('neutral').attribution).toBeUndefined()
+        // 成功信号即使文本命中 dependabot 签名也无归因（失败才谈归因）
+        expect(normalizeCheckRun(
+            {
+                id: 9,
+                name: 'dependabot[bot] updater',
+                status: 'completed',
+                conclusion: 'success',
+                output: { summary: 'security_update_not_possible' },
+            },
+            observedAt,
+        ).attribution).toBeUndefined()
+    })
+
+    it('归因文本证据取 output.title + summary（output.text 只作展示，与 CLI 同口径）', () => {
+        const fromTitle = normalizeCheckRun(
+            {
+                id: 1,
+                name: 'Publish Docker Image',
+                status: 'completed',
+                conclusion: 'failure',
+                output: { title: 'unknown manifest class' },
+            },
+            observedAt,
+        )
+        expect(fromTitle.attribution).toBe('external_noise')
+
+        const textOnly = normalizeCheckRun(
+            {
+                id: 2,
+                name: 'Publish Docker Image',
+                status: 'completed',
+                conclusion: 'failure',
+                output: { text: 'unknown manifest class' },
+            },
+            observedAt,
+        )
+        expect(textOnly.attribution).toBe('unknown')
+        // 展示摘要仍取 output.text
+        expect(textOnly.summary).toBe('unknown manifest class')
+    })
+
+    it('commit status / deployment 未识别原始状态 → fail-closed failure', () => {
+        const status = normalizeCommitStatus(
+            { id: 1, context: 'future-ci', state: 'some_future_state' },
+            observedAt,
+        )
+        expect(status.state).toBe('failure')
+        expect(status.attribution).toBe('unknown')
+
+        const deployment = normalizeDeployment(
+            { id: 2, environment: 'Preview' },
+            { state: 'some_future_state' },
+            observedAt,
+        )
+        expect(deployment.state).toBe('failure')
+        expect(deployment.attribution).toBe('unknown')
+    })
+
+    it('deployment 失败无签名 → unknown；pending → 无归因', () => {
+        const failed = normalizeDeployment(
+            { id: 1, environment: 'Preview', creator: { login: 'vercel[bot]' } },
+            { state: 'failure', description: 'build failed' },
+            observedAt,
+        )
+        expect(failed.attribution).toBe('unknown')
+        const pending = normalizeDeployment({ id: 2, environment: 'Preview' }, null, observedAt)
+        expect(pending.attribution).toBeUndefined()
+    })
+})
+
+describe('monitor/build-signals 同名多轮收敛', () => {
+    const runUrl = (runId: number) => `https://github.com/acme/app/actions/runs/${runId}/job/1`
+
+    it('同一 workflow run 的重跑：旧 failure + 新 success → 聚合 success', () => {
+        const signals = [
+            makeSignal({ name: 'Test', sourceId: '100', state: 'failure', rawState: 'failure', targetUrl: runUrl(1000), roundAt: '2026-10-12T00:01:00Z' }),
+            makeSignal({ name: 'Test', sourceId: '200', state: 'success', rawState: 'success', targetUrl: runUrl(1000), roundAt: '2026-10-12T00:09:00Z' }),
+        ]
+        const deduped = dedupeSignalsByLatestRound(signals)
+        expect(deduped).toHaveLength(1)
+        expect(deduped[0]!.state).toBe('success')
+        expect(aggregateOverallStatus(deduped)).toBe('success')
+        expect(deriveWorstConclusion(deduped)).toBe('success')
+    })
+
+    it('同名但不同 workflow run（push 与 pull_request 触发）不合并：任一失败即失败', () => {
+        const signals = [
+            makeSignal({ name: 'Test', sourceId: '100', state: 'failure', rawState: 'failure', targetUrl: runUrl(1000), roundAt: '2026-10-12T00:01:00Z' }),
+            makeSignal({ name: 'Test', sourceId: '200', state: 'success', rawState: 'success', targetUrl: runUrl(2000), roundAt: '2026-10-12T00:09:00Z' }),
+        ]
+        const deduped = dedupeSignalsByLatestRound(signals)
+        expect(deduped).toHaveLength(2)
+        expect(aggregateOverallStatus(deduped)).toBe('failure')
+    })
+
+    it('无 Actions run id 的 check 各自成组（宁可不合并也不掩蔽失败）', () => {
+        const signals = [
+            makeSignal({ name: 'Workers Builds', sourceId: '100', state: 'failure', rawState: 'failure', targetUrl: null }),
+            makeSignal({ name: 'Workers Builds', sourceId: '200', state: 'success', rawState: 'success', targetUrl: null }),
+        ]
+        expect(dedupeSignalsByLatestRound(signals)).toHaveLength(2)
+    })
+
+    it('同一 workflow run 的重跑：旧 failure + 新 pending（re-run 进行中）→ pending', () => {
+        const signals = [
+            makeSignal({ name: 'Test', sourceId: '100', state: 'failure', rawState: 'failure', targetUrl: runUrl(1000), roundAt: '2026-10-12T00:01:00Z' }),
+            makeSignal({ name: 'Test', sourceId: '200', state: 'pending', rawState: null, targetUrl: runUrl(1000), roundAt: '2026-10-12T00:10:00Z' }),
+        ]
+        expect(dedupeSignalsByLatestRound(signals)[0]!.state).toBe('pending')
+    })
+
+    it('新一轮尚无 roundAt（queued）时按 sourceId 判定为最新，不被旧轮压住', () => {
+        const signals = [
+            makeSignal({ name: 'Test', sourceId: '100', state: 'success', rawState: 'success', targetUrl: runUrl(1000), roundAt: '2026-10-12T00:09:00Z' }),
+            makeSignal({ name: 'Test', sourceId: '200', state: 'pending', rawState: null, targetUrl: runUrl(1000), roundAt: null }),
+        ]
+        expect(dedupeSignalsByLatestRound(signals)[0]!.state).toBe('pending')
+    })
+
+    it('commit status 同 context 取最新（状态机语义）；不同 context 不合并', () => {
+        const signals = [
+            makeSignal({ kind: 'status', provider: 'vercel', name: 'Vercel – web', sourceId: '1', state: 'pending', rawState: 'pending', roundAt: '2026-10-12T00:01:00Z' }),
+            makeSignal({ kind: 'status', provider: 'vercel', name: 'Vercel – web', sourceId: '2', state: 'success', rawState: 'success', roundAt: '2026-10-12T00:05:00Z' }),
+            makeSignal({ kind: 'status', provider: 'vercel', name: 'Vercel – docs', sourceId: '3', state: 'failure', rawState: 'failure', roundAt: '2026-10-12T00:02:00Z' }),
+        ]
+        const deduped = dedupeSignalsByLatestRound(signals)
+        expect(deduped).toHaveLength(2)
+        expect(deduped.map((signal) => signal.name)).toEqual(['Vercel – web', 'Vercel – docs'])
+        expect(deduped[0]!.state).toBe('success')
+    })
+
+    it('同 environment 的多次部署只取最新一次（当前状态语义）', () => {
+        const signals = [
+            makeSignal({ kind: 'deployment', provider: 'vercel', name: 'Production', sourceId: '1', state: 'failure', rawState: 'failure', roundAt: '2026-10-12T00:01:00Z' }),
+            makeSignal({ kind: 'deployment', provider: 'vercel', name: 'Production', sourceId: '2', state: 'success', rawState: 'success', roundAt: '2026-10-12T00:09:00Z' }),
+        ]
+        expect(dedupeSignalsByLatestRound(signals)[0]!.state).toBe('success')
+    })
+
+    it('组键含 kind / provider：不同 provider / 不同 kind 不合并', () => {
+        const signals = [
+            makeSignal({ kind: 'check', provider: 'github-actions', name: 'Test', state: 'failure', rawState: 'failure', targetUrl: runUrl(1000), roundAt: '2026-10-12T00:01:00Z' }),
+            makeSignal({ kind: 'check', provider: 'cloudflare', name: 'Test', state: 'success', rawState: 'success', targetUrl: null, roundAt: '2026-10-12T00:09:00Z' }),
+            makeSignal({ kind: 'status', provider: 'github-actions', name: 'Test', state: 'success', rawState: 'success', roundAt: '2026-10-12T00:09:00Z' }),
+        ]
+        expect(dedupeSignalsByLatestRound(signals)).toHaveLength(3)
+    })
+
+    it('历史 signalsJson 行（无 roundAt 字段）不报错，按不可比处理', () => {
+        const legacy = { ...makeSignal({ sourceId: '7', state: 'success' }) } as UnifiedBuildSignal
+        delete (legacy as { roundAt?: string | null }).roundAt
+        expect(dedupeSignalsByLatestRound([legacy])).toHaveLength(1)
+    })
+})

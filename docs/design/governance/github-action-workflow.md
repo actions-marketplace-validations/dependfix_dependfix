@@ -2,7 +2,9 @@
 
 > 对应任务: [T201 创建 Composite Action](../../plan/todo.md)
 >
-> **选型结论**: 使用 GitHub Composite Action（`action.yml`），通过 `uses: dependfix/dependfix@v1` 被其他仓库引用。Composite Action 可组合多个 workflow steps 为单一可复用单元，无需 Docker 或 JavaScript 封装。
+> **输入清单为 T201 设计时点快照**：当前 Action 输入以 [action.yml](../../../action.yml) 为准；AI 入参详见 [quick-start.md §Action 输入参数](../../guide/quick-start.md#action-输入参数)。
+>
+> **选型结论**: 使用 GitHub Composite Action（`action.yml`），通过 `uses: dependfix/dependfix@v0.6.0` 被其他仓库引用。Composite Action 可组合多个 workflow steps 为单一可复用单元，无需 Docker 或 JavaScript 封装。
 
 ---
 
@@ -51,7 +53,11 @@ branding:
 | `code-scanning` | string | `false` | 同时拉取 Code Scanning alerts（与 Dependabot 并行源；需 token 具备 `security-events: read`） |
 | `ai-api-token` | string | `''` | AI API Token（M5 联调，经 GitHub Secrets 传入） |
 | `ai-api-base-url` | string | `''` | AI API Base URL（M5 联调，支持多 AI 提供商） |
-| `commands` | string | `''` | 自定义验证命令（逗号分隔，覆盖默认 `install + lint + build` 链）。Nuxt 项目需先 `nuxt prepare`（lint 依赖 `.nuxt/tsconfig.json` 生成物），否则 eslint 解析失败——run 31552922137 教训。例：`pnpm install --frozen-lockfile, pnpm --filter @dependfix/platform exec nuxt prepare, pnpm lint, pnpm build` |
+| `commands` | string | `''` | 自定义验证命令（逗号分隔，覆盖默认 `install + lint + build + typecheck + test` 链）。Nuxt 项目需先 `nuxt prepare`（lint 依赖 `.nuxt/tsconfig.json` 生成物），否则 eslint 解析失败——run 31552922137 教训。例：`pnpm install --frozen-lockfile, pnpm --filter @dependfix/platform exec nuxt prepare, pnpm lint, pnpm build, pnpm typecheck, pnpm test`。**注意**：`--commands` 是**整链替换**（逐条替换，不做合并），**默认链扩展不会自动跟随**——默认链内的 `typecheck` / `test` 需按该仓库实际验证面显式保留 |
+| `mirror-ci-scripts` | string | `false` | 把目标仓库 CI 独有的 `pnpm/npm/yarn` 脚本追加到默认链之后（最多 3 条、首失败即停；`docker` / `gh` / 任意 shell 与非单一形态只披露不执行；与 `commands` 不叠加）。需目标仓库有 `.github/workflows` 且脚本存在于根 `package.json#scripts`；开销为每仓多跑完整脚本，CI 时长敏感场景慎开 |
+| `retry-failed` | string | `false` | 忽略同告警尝试上限并强制再试（仅 `fix-and-pr`）：同一告警 / 目标版本 / 修复策略连续两次关闭后第 3 次起默认跳过（报告 `Skipped: Repeated failure`），置 `true` 时仍执行并在报告标注人工强制 |
+| `wait-pr-checks` | string | `false` | 创建 PR 后等待 check 终态（仅 `fix-and-pr`）：失败默认评论失败摘要；宽限期后无 check 记 `no_ci_detected`（不判通过）；双预算（per-PR 15 分钟 / per-run 20 分钟，且 ≤ 剩余 job 预算 70%），不改变 exit code |
+| `close-failed-pr` | string | `false` | check 失败且聚合归因 `self_caused` 时关闭 PR 并删除分支（需同时开启 `wait-pr-checks`）；`unknown` / `external_noise` / `pre_existing` 只评论 |
 | `github-token` | string | **必填** | GitHub Token（需 security-events 权限） |
 
 > **M4 接入建议（2026-08-06）**：多仓库治理参数（`owner` / `repo-*` / `max-concurrency` / `max-retries`）已接入 Action 输入。**建议为每个仓库单独配置 action**（而非跨仓库 owner 发现）：
@@ -85,7 +91,7 @@ jobs:
   scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: dependfix/dependfix@v1
+      - uses: dependfix/dependfix@v0.6.0
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
@@ -107,6 +113,8 @@ steps:
 ```
 
 > dogfooding 时 `uses: ./` 的 action_path 即 `$GITHUB_WORKSPACE`；action 内置的 checkout 步骤会再次 checkout 同一仓库（同 ref），行为与改动前一致。
+>
+> **自用链与引擎默认链的一致性门禁**：该 workflow 的 `commands` 回退值是一条自用链（引擎默认链 + `nuxt prepare` 前置）。因 `--commands` 为整链替换，引擎默认链扩展时自用链不会自动跟随，故由 `pnpm run check:verify-chain`（CI Test job 阻断）校验「自用链覆盖默认链全部语义项，差异项须在脚本声明表中登记理由」；判定口径与声明表见 `scripts/check-verify-chain.mjs` 头注释。
 
 ---
 
@@ -167,7 +175,7 @@ permissions:
 | Token 暴露 | 通过 `inputs.github-token` / `inputs.dependabot-alerts-token` 传入，仅在 `env` 中使用（alerts token 不经命令行，避免进程列表泄露） |
 | 输出脱敏 | `sanitizeOutput()` 过滤敏感信息 |
 | 权限最小化 | 消费者按需配置 permissions；Dependabot alerts 用最小权限专用 token（G2 双 token 设计） |
-| Action 来源 | 固定版本标签（`@v1`），避免跟踪 `@master` |
+| Action 来源 | 固定版本标签（当前 `@v0.6.0`；1.0 后切换 `@v1` 滚动 tag），避免跟踪 `@master` |
 | Prompt 防护 | 见 T206（M2 后续） |
 
 ---
@@ -200,7 +208,7 @@ permissions:
 | `GITHUB_TOKEN` 访问 Dependabot alerts | ⚠️ **恒 403 `Resource not accessible by integration`**：Actions App 无 Dependabot alerts 权限，`permissions: security-events` 无法授予（与官方文档矛盾，社区 #60612 未修复）。必须使用带 `security_events`（classic PAT）/ `Dependabot alerts: read`（fine-grained PAT）或 GitHub App token。详见 [G2](../../plan/archive/todo-archive-phases-m2-m55.md#g2-处置记录-github_token-无法访问-dependabot-alerts) |
 | 其他 fetch 权限错误（401/403，非 GITHUB_TOKEN 固有限制） | ✅ 已修复（T-G2-1）：CLI 硬失败退出（无成功 → exit 2），错误信息附 token 指引 |
 | pnpm 构建失败 | workflow 在 build 步骤失败，不执行 CLI |
-| CLI 运行超时 | `timeout-minutes: 15` 触发，workflow 被取消 |
+| CLI 运行超时 | `timeout-minutes: 25`（自举验证链含测试段后由 15 提高，见 `.github/workflows/security-auto-fix.yml`）触发，workflow 被取消 |
 | `fix-and-pr` 模式 | M2 stub：输出提示 "not implemented in M1"，exit 0 |
 | `dry-run=true` | 打印计划操作，不修改文件，报告包含 dry-run 标记 |
 

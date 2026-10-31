@@ -2,7 +2,7 @@
 
 ## 前置要求
 
-- Node.js >= 20
+- Node.js ^22.23.4 || ^24.22.1（2026-10-21 Node 安全公告基线，低于该版本存在未修复的 High 级漏洞；20.x 已 EOL）
 - pnpm（推荐最新稳定版）
 - GitHub Token（用于告警拉取和 PR 创建；**本地无 token 也可用 `--alerts-source pnpm-audit` 回退**，见 [本地无 token 场景](#本地无-token-场景pnpm-audit-回退)）
   - `report-only` / `fix` 模式：需 `security-events: read` 权限
@@ -143,7 +143,7 @@ jobs:
   scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: dependfix/dependfix@v1
+      - uses: dependfix/dependfix@v0.6.0
         with:
           # mode 默认已是 fix-and-pr（可省略），此处显式声明
           mode: fix-and-pr
@@ -186,8 +186,13 @@ jobs:
 | `github-token` | 是 | — | GitHub Token（commit/push/PR 等操作；Dependabot alerts 读取不可用，见下行） |
 | `dependabot-alerts-token` | 否 | `''` | Dependabot alerts 专用最小权限 token（fine-grained PAT，仅 `Dependabot alerts: read`；缺省回退 `github-token`。GITHUB_TOKEN 恒 403） |
 | `code-scanning` | 否 | `false` | 同时拉取 Code Scanning alerts（与 Dependabot 并行源，默认关闭；需 token 具备 `security-events: read`，GITHUB_TOKEN 默认具备） |
-| `ai-api-token` | 否 | `''` | AI API Token（M5 联调） |
-| `ai-api-base-url` | 否 | `''` | AI API Base URL（M5 联调） |
+| `ai` | 否 | `false` | 开启 AI breaking change 研判（需配置 `ai-api-key`；dry-run 不触发、不产生费用） |
+| `ai-api-key` | 否 | `''` | AI API Key（在 workflow 中引用 `secrets.DEEPSEEK_API_KEY` 等 GitHub Secrets 传入；经环境变量传递自动打码） |
+| `ai-provider` | 否 | `openai-compatible` | AI 提供商：`openai-compatible`（默认，DeepSeek 等）/ `anthropic` |
+| `ai-model` | 否 | `deepseek-v4-flash` | AI 模型名 |
+| `ai-base-url` | 否 | `https://api.deepseek.com` | OpenAI 兼容端点（与默认模型配套） |
+| `ai-api-url` | 否 | `''` | Anthropic 兼容端点（缺省用官方端点；自托管/网关可指定） |
+| `ai-trigger` | 否 | `both` | AI 触发范围：`both` / `failure` / `major` |
 
 > **⚠️ M4 建议：为每个仓库单独配置 action（2026-08-06）**：多仓库治理参数虽已接入 Action，但推荐单仓库独立 action：
 > - **权限最小化**：单仓库 action 用 `GITHUB_TOKEN` + 该仓库最小权限的 `dependabot-alerts-token` 即可；owner 发现需要跨仓库读取权限的 PAT，泄露影响面更大。
@@ -198,21 +203,23 @@ jobs:
 
 > dependfix 的核心动作是升级第三方依赖——**执行不可信代码**。更新依赖是为了修复漏洞，但修复过程不能引入新漏洞：dependfix 不能成为恶意依赖扩散的工具。以下为使用侧要点，完整威胁模型与治理见 [沙箱与恶意依赖防护治理](../design/governance/sandbox-security-governance.md)。
 
-- **本地 CLI 模式无隔离**：本地模式下依赖的 install/lint/build 脚本直接在**你的机器**上执行（`--commands` 自定义命令同样如此）。恶意脚本可读取你 shell 环境中的所有变量（`GITHUB_TOKEN`、`DEPENDFIX_AI_API_KEY` 等）。建议：在专用环境（容器 / VM / CI runner）运行，或确认目标仓库与依赖来源可信。fix / fix-and-pr 启动时 CLI 会输出本地执行风险警告；已确认风险可设置 `DEPENDFIX_SUPPRESS_LOCAL_EXECUTION_WARNING=1` 抑制。
+- **本地 CLI 模式无隔离**：本地模式下依赖的 install/lint/build/typecheck/test 脚本直接在**你的机器**上执行（`--commands` 自定义命令同样如此）。恶意脚本可读取你 shell 环境中的所有变量（`GITHUB_TOKEN`、`DEPENDFIX_AI_API_KEY` 等）。建议：在专用环境（容器 / VM / CI runner）运行，或确认目标仓库与依赖来源可信。fix / fix-and-pr 启动时 CLI 会输出本地执行风险警告；已确认风险可设置 `DEPENDFIX_SUPPRESS_LOCAL_EXECUTION_WARNING=1` 抑制。
 - **Token 使用最小权限**：不要给 dependfix 使用全量 scope 的 PAT。推荐组合：`dependabot-alerts-token` 用仅 `Dependabot alerts: read` 的 fine-grained PAT；`github-token` 仅给目标仓库所需的最小权限（`security-events: read` + `contents`/`pull-requests` 写权限）。owner 模式扫描多个仓库时，token 权限面 = 所有被扫描仓库的信任边界。**启动时会对 token 做权限面检查**：检测到 classic PAT 且含 `repo`（全量仓库）权限时输出警告（不阻断运行）——该 token 一旦被恶意脚本窃取即可接管所有可见仓库。
 - **owner 模式扫描范围即信任边界**：`--owner` 发现的仓库会被 clone 并执行其依赖脚本——只扫描可信组织的仓库；对不可信来源先人工 review 再纳入名单（`--repo-include` / `--repo-exclude` 可限制范围）。
 - **PR 合入前人工检查**：跨线升级（PR body 带 ⚠️ Major 标记）以及新增/升级包带 lifecycle scripts 且被仓库批准时（供应链信号披露落地后见报告警示区），合入前应人工确认。
-- **平台部署**：平台容器执行进程已**非 root 降权**（`dependfix` 用户，entrypoint 自动修复数据卷所有权，[C38](../plan/backlog.md)）；部署时勿挂载 `docker.sock`、勿授予特权；`AUTH_SECRET` / `NUXT_ENCRYPTION_KEY` 使用强随机值。
+- **平台部署**：默认拉取已发布镜像（`docker compose pull && docker compose up -d`；仅在需要本地打包时叠加 `docker-compose.build.yml` 覆盖文件构建，见 `apps/platform/docker-compose.yml` 顶部说明）。容器执行进程已**非 root 降权**（默认 `dependfix` 用户 uid 100 / gid 101；可用 `PUID`/`PGID` 对齐宿主机用户以控制数据卷 / `$HOME` 归属，解析为 0 时 fail-closed 拒绝启动，entrypoint 自动修复所有权）；部署时勿挂载 `docker.sock`、勿授予特权；`AUTH_SECRET` / `NUXT_ENCRYPTION_KEY` 使用强随机值。**首次启动自动建表**（compose 默认 `DATABASE_MIGRATIONS_RUN=true`）；完整步骤（环境变量 / 数据卷与权限 / 数据库初始化 / 升级 / 备份恢复 / 故障排查）见 [Docker 部署](./deployment.md)。
 
-#### 启用 rootless sandbox 执行（推荐用于多租户/owner 模式）
+#### sandbox 执行（实验性，当前暂不可用）
 
-> **✅ 状态：M11 T1005 路由接线已就位（2026-08-20）**——`Repository.executorKind` 已接受 `container` / `github-action` / `sandbox` 三值；scan-orchestrator 已接入 sandbox 路由与降级状态机契约（[executor-sandbox.md §7.8 降级状态机契约](../design/governance/executor-sandbox.md)）。平台 Web UI 仓库表单已暴露 sandbox 选项（仓库管理 → 添加/编辑 → 执行方式下拉），管理员可直接在 UI 选择；或经 API 显式指定。
+> **⛔ 当前入口已临时关闭（2026-10-27）**：UI 已禁用 sandbox 选项、API 拒绝新写入；存量 `executorKind=sandbox` 仓库扫描会强制降级到 `container` 并标记 `degraded`（`sandbox_entry_disabled`）。原因：`buildCmd` 仍为最小占位（不启动 dependfix 引擎），真实引擎执行未闭环（[backlog P1](../plan/backlog.md#候选评估中-待评估-本阶段延后项)）。生产修复请使用 `container` 或 `github-action`。
 >
-> **适用范围**：owner/org 多仓库扫描、`--allow-major-upgrade` 跨线升级、对不可信仓库 owner 模式修复——这些场景下恶意依赖脚本在容器内执行的风险显著高于单可信仓库场景，sandbox 执行把执行隔离在独立 rootless 容器内（与平台容器解耦），详见 [executor-sandbox.md §7](../design/governance/executor-sandbox.md#7-sandbox-执行器设计)。
+> **历史状态**：M11 T1005 路由接线已就位（2026-08-20）；平台 Web UI 曾暴露 sandbox 选项（仓库管理 → 添加/编辑 → 执行方式下拉）。以下为真实执行闭环后的设计适用范围。
+>
+> **适用范围（真实执行闭环后）**：owner/org 多仓库扫描、`--allow-major-upgrade` 跨线升级、对不可信仓库 owner 模式修复——这些场景下恶意依赖脚本在容器内执行的风险显著高于单可信仓库场景，sandbox 执行把执行隔离在独立 rootless 容器内（与平台容器解耦），详见 [executor-sandbox.md §7](../design/governance/executor-sandbox-implementation.md#7-sandbox-执行器设计)。
 >
 > **不启用**：单可信仓库 + 本地开发场景下默认 `ContainerExecutor` 即可，无 rootless daemon 启动成本。
 
-**前置条件**：
+**恢复后的前置条件 / 运维预配置**（入口关闭期间不会产生 sandbox 扫描，以下步骤可暂缓）：
 
 - Linux 内核（cgroup v2 推荐 ≥ 5.8；旧内核降级为 Node V8 软限制）
 - 已安装 Docker（≥ 20.10）
@@ -220,7 +227,7 @@ jobs:
 - `/etc/subuid` 与 `/etc/subgid` 中当前用户有 ≥ 65,536 个从属 UID/GID（`grep ^$(whoami): /etc/subuid` 应返回非空）
 - 系统已启用 user namespace（多数发行版默认开启；WSL2 / 容器内运行需额外配置）
 
-**启动 rootless Docker daemon**（参考 [Docker 官方 rootless 文档](https://docs.docker.com/engine/security/rootless/)）：
+**恢复后启动 rootless Docker daemon**（参考 [Docker 官方 rootless 文档](https://docs.docker.com/engine/security/rootless/)）：
 
 ```bash
 # 1. 安装 rootless 工具（Ubuntu/Debian 需 docker-ce-rootless-extras；20.10+ 通常已自带）
@@ -244,29 +251,33 @@ docker --context rootless info --format '{{.SecurityOptions}}'
 # 输出含 `rootless` 字样 → 真正连到 rootless daemon
 ```
 
-**在 dependfix 启用 sandbox 执行**：
+**入口关闭期间不可启用**（以下配置仅在真实执行闭环、入口恢复后适用；当前 UI 已禁用，API 写入 `executorKind=sandbox` 返回 400）：
 
 ```bash
-# 仓库级覆盖：仅对指定仓库启用 sandbox
-curl -X PUT /api/repos/{id} \
-  -H 'Content-Type: application/json' \
-  -d '{"executorKind": "sandbox"}'
+# 恢复后：仓库级覆盖（当前执行会 400）
+# curl -X PUT /api/repos/{id} \
+#   -H 'Content-Type: application/json' \
+#   -d '{"executorKind": "sandbox"}'
 
-# 环境变量扩展白名单（按需添加私有 registry / GitHub Enterprise）
+# 恢复后：出站白名单——默认已含官方 registry + 常见镜像站 + GitHub API/资产域 + rolldown.rs
+# （权威默认清单与判定口径见 安全规范 §5.3.1：docs/standards/security.md）；并自动从 workDir 的
+# pnpm 配置面发现生效 registry host（pnpm config list --json，仅读本地不联网、异常时回退预置清单）。
+# 以下仅用于「预置清单未覆盖」的场景——例如企业私服自带独立 CDN 域（tarball 302 到非预置域）。
 # 生效进程：平台 Node 进程内的拦截代理判定（packages/engine/src/runners/network-audit.ts）；
 # sandbox 容器走 Docker bridge 直出网（本 env 不透传给 sandbox 容器内部）
-export DEPENDFIX_ALLOWED_DOMAINS="registry.internal.example.com,artifacts.example.com"
+# export DEPENDFIX_ALLOWED_DOMAINS="registry.internal.example.com,artifacts.example.com"
 
-# 自定义运行时（默认 runc；如部署了 Sysbox 可切换）——模块级读取，须在平台启动前设置
-export SANDBOX_RUNTIME=sysbox-runc
+# 恢复后：自定义运行时（默认 runc；如部署了 Sysbox 可切换）——模块级读取，须在平台启动前设置
+# export SANDBOX_RUNTIME=sysbox-runc
 ```
 
-**降级行为**（依据 [executor-sandbox.md §7.8 降级状态机契约](../design/governance/executor-sandbox.md)）：
+**当前降级行为（入口关闭期间）**：
 
-- **启动时不可用**（开发机无 Docker / 未启用 rootless / user namespace 受限）→ `sandbox.isAvailable()` 返回 false → 自动降级回 `ContainerExecutor` + `degradedReason` 记录 → **run 标 `degraded`**（业务结果完整，UI info 蓝色提示「未启用 rootless，已自动使用平台容器」）
-- **运行时失败**（daemon 中途挂掉）→ `sandbox.execute()` 抛 errno → **不静默降级**（避免掩盖环境中途变化）→ **run 标 `failed`**（`error.code = 'sandbox_unavailable'`，UI warn 黄色告警「沙箱执行器运行时不可用，环境配置可能已变化，请联系管理员」）
+- 存量 `executorKind=sandbox` 仓库扫描 → 强制 `ContainerExecutor` + `degradedReason.code=sandbox_entry_disabled` → **run 标 `degraded`**（业务结果完整，UI 提示「独立沙箱容器暂不可用，已自动使用平台容器」）。
+- 若平台容器也不可用 → **run 标 `failed`**（`container_unavailable`）。
+- 旧 §7.8 的 `sandbox_unavailable` A/B 场景在入口关闭期间不再发生；真实执行闭环、入口恢复后按 §7.8 契约执行。
 
-A/B 场景差异化见 [executor-sandbox.md §7.8.1](../design/governance/executor-sandbox.md)；治理登记见 [sandbox-security-governance.md §5 G5](../design/governance/sandbox-security-governance.md#5-治理决议与登记) + [§7.1 验收段](../design/governance/sandbox-security-governance.md)。
+A/B 场景差异化见 [executor-sandbox.md §7.8.1](../design/governance/executor-sandbox-implementation.md)（恢复后适用）；治理登记见 [sandbox-security-governance.md §5 G5](../design/governance/sandbox-security-governance.md#5-治理决议与登记) + [§7.1 验收段](../design/governance/sandbox-security-governance.md)。
 
 **反模式（绝对禁止）**：
 
@@ -274,7 +285,7 @@ A/B 场景差异化见 [executor-sandbox.md §7.8.1](../design/governance/execut
 - **DinD `--privileged` 启动 sandbox**：[CVE-2019-5736](https://unit42.paloaltonetworks.com/cve-2019-5736/) runc 覆写 `/proc/self/exe` 逃逸 + [CVE-2024-21626](https://github.com/advisories/GHSA-xfj7-4fh9-h89v) runc `WORKDIR` 文件描述符泄漏——这两条 CVE 与 `--privileged` 强绑定，rootless mode 默认关闭
 - **平台容器启动 rootless daemon 自身作为 sandbox**：破坏"独立 PID/Mount namespace"目的，平台漏洞直接蔓延到 sandbox
 
-完整设计、RuntimeAdapter 抽象、K8s+Helm 部署预留见 [executor-sandbox.md §7](../design/governance/executor-sandbox.md#7-sandbox-执行器设计)；威胁模型与治理登记见 [sandbox-security-governance.md §5 G5](../design/governance/sandbox-security-governance.md#5-治理决议与登记)。
+完整设计、RuntimeAdapter 抽象、K8s+Helm 部署预留见 [executor-sandbox.md §7](../design/governance/executor-sandbox-implementation.md#7-sandbox-执行器设计)；威胁模型与治理登记见 [sandbox-security-governance.md §5 G5](../design/governance/sandbox-security-governance.md#5-治理决议与登记)。
 
 ### Action 输出
 
@@ -310,8 +321,10 @@ A/B 场景差异化见 [executor-sandbox.md §7.8.1](../design/governance/execut
 | `--max-retries` | — | GitHub API 限流重试次数（0-10，默认 3） | `DEPENDFIX_MAX_RETRIES` |
 | `--history` | — | 查询仓库历史运行摘要（读 `dependfix-reports/index.json`，倒序；不执行扫描） | — |
 | `--code-scanning` | — | 同时拉取 Code Scanning alerts（与 Dependabot 并行源；需要 token 具备 `security-events: read`，GITHUB_TOKEN 默认具备） | `false`（env `DEPENDFIX_CODE_SCANNING`） |
-| `--allow-major-upgrade` | — | 跨线告警（推荐版本跨大版本，当前线内无修复版本）显式授权自动升级：仅根 package.json 直接依赖（workspace 成员独占声明维持人工）且 lockfile 单版本的告警自动跨线升级，升级后复核脆弱实例消除、强制完整验证（install+lint+build），失败自动回滚；间接依赖 / 多版本共存跨线告警维持人工处理。**仅 CLI 可用，Action 不支持**（详见下方"跨大版本升级"风险章节） | `false`（**无 env 通道**） |
-| `--commands` | — | 自定义验证命令（逗号分隔） | — |
+| `--allow-major-upgrade` | — | 跨线告警（推荐版本跨大版本，当前线内无修复版本）显式授权自动升级：仅根 package.json 直接依赖（workspace 成员独占声明维持人工）且 lockfile 单版本的告警自动跨线升级，升级后复核脆弱实例消除、强制完整验证（install+lint+build+typecheck+test），失败自动回滚；间接依赖 / 多版本共存跨线告警维持人工处理。**仅 CLI 可用，Action 不支持**（详见下方"跨大版本升级"风险章节） | `false`（**无 env 通道**） |
+| `--commands` | — | 自定义验证命令（逗号分隔）；整链替换默认链（不做合并），默认链内的条目须显式保留 | — |
+| `--rollback-granularity` | — | 验证失败回滚粒度：`unit`（默认，回退最近一个已通过 probe 的变更单元并重验一次）/ `repo`（整仓 `git reset --hard` 逃生） | `DEPENDFIX_ROLLBACK_GRANULARITY`（`unit`） |
+| `--override-protect` | — | overrides 保护名单（按仓库粒度，格式 `repo-glob:pkg1,pkg2;...`）；命中则不写入该包的 override 并记 `OVERRIDE_PROTECTED` 审计（防历史被人工移除的破坏性 override 复发） | —（env `DEPENDFIX_OVERRIDE_PROTECT`） |
 | `--verbose` | — | 详细日志 | `false` |
 
 ### ⚠️ 跨大版本升级（实验性，风险须知）
@@ -322,12 +335,12 @@ A/B 场景差异化见 [executor-sandbox.md §7.8.1](../design/governance/execut
 - ✅ **lockfile 中该包仅一个版本**（单版本场景）
 - ⏭️ 间接依赖 / workspace 成员独占声明 / 多版本共存的跨线告警**仍维持人工处理**（跨线版本化 overrides 会破坏依赖方 range，全局 override 会降级根声明——保守正确）
 
-**处理流程**：改根声明 → `pnpm install` → **升级后实例复核**（确认脆弱实例真实消除；若 workspace 成员同 range / 传递依赖 pin 仍锁旧版本导致残留，则自动回滚并计 failed）→ **强制完整验证**（`pnpm install --frozen-lockfile` + `pnpm lint` + `pnpm build`）→ 全部通过才保留；任一失败自动回滚并计入 failed。
+**处理流程**：改根声明 → `pnpm install` → **升级后实例复核**（确认脆弱实例真实消除；若 workspace 成员同 range / 传递依赖 pin 仍锁旧版本导致残留，则自动回滚并计 failed）→ **强制完整验证**（`pnpm install --frozen-lockfile` + `pnpm lint` + `pnpm build` + `pnpm typecheck` + `pnpm test`）→ 全部通过才保留；任一失败自动回滚并计入 failed。
 
 **已知风险与问题**：
 
-1. **API 破坏面**：跨大版本升级必然引入 breaking change。完整验证能兜底编译/类型/构建错误，但 **lint/build 通过 ≠ 运行时功能正确**——建议在合并前人工审查 PR（PR body 中跨线升级带 ⚠️ Major 标记）。
-2. **验证耗时**：每个跨线包执行一次完整 install + lint + build（逐包串行），耗时显著高于常规 lint-only 组级验证。
+1. **API 破坏面**：跨大版本升级必然引入 breaking change。完整验证能兜底编译/类型/构建错误，但 **install/lint/build/typecheck/test 通过 ≠ 运行时功能正确**——建议在合并前人工审查 PR（PR body 中跨线升级带 ⚠️ Major 标记）。
+2. **验证耗时**：每个跨线包执行一次完整 install + lint + build + typecheck + test（逐包串行），耗时显著高于常规 lint-only 组级验证。
 3. **回滚边界**：快照回滚覆盖 package.json / pnpm-lock.yaml 等受跟踪文件；`node_modules` 不还原（临时目录语义，可接受）。
 4. **语义变化**：跨线升级会改变依赖声明（如 `^5.4.0` → `^6.4.3`），影响面超出漏洞本身——升级后其他 API 用法可能失效。
 5. **Action 不可用**：GitHub Action 刻意**不暴露**该参数，且**无 `DEPENDFIX_ALLOW_MAJOR_UPGRADE` 环境变量通道**（结构性禁用，防止 CI 自动跨线引发意外破坏）。
@@ -391,7 +404,7 @@ dependfix --history your-org/app
 | 场景 | 推荐 |
 |------|------|
 | CLI quickstart（`npx dependfix`）| PAT |
-| GitHub Action（`uses: dependfix/dependfix@v1`）| PAT |
+| GitHub Action（`uses: dependfix/dependfix@v0.6.0`）| PAT |
 | 单仓调试 | PAT（最低摩擦） |
 | 自部署平台多仓 org 巡检 | GitHub App（installation 范围限定） |
 | 自部署平台需要短时 token 轮换 + 真实 `[bot]` 身份 | GitHub App |

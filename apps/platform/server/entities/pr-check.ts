@@ -106,6 +106,32 @@ export class PRCheck extends BaseEntity {
     errorMessage!: string | null
 
     /**
+     * 归一化三源信号快照（JSON 字符串）。
+     *
+     * 口径见 [pr-build-deploy-signals.md §3.2 / §3.7](../../../../docs/design/governance/pr-build-deploy-signals.md)：
+     * 每条含 `kind` / `provider` / `name` / `state` / `rawState` / `sourceId` / `targetUrl` / `logUrl` / `summary` / `observedAt`；
+     * 条数上限由 `MAX_SIGNALS_PER_PR` 约束（写入侧截断）。NULL = 本列上线前采集的历史行。
+     */
+    @Column({ type: 'text', nullable: true })
+    signalsJson!: string | null
+
+    /**
+     * 聚合构建 / 部署状态（`failure` / `pending` / `success`）。
+     *
+     * **告警与自动 ack 判定以本列为准**（`failure` → `alertFiring=true`；`success` → 自动清 ack）。
+     * NULL = 本列上线前采集的历史行（此类行按「非终态」处理，下次轮询会重采并回填）。
+     */
+    @Column({ type: 'varchar', length: 16, nullable: true })
+    overallStatus!: string | null
+
+    /**
+     * 失败源清单（JSON 字符串；`[{ provider, name, kind }]` 去重，上限 `MAX_FAILURE_SOURCES`）。
+     * 供 UI / 筛选直接消费，避免解析整份 `signalsJson`。
+     */
+    @Column({ type: 'text', nullable: true })
+    failureSourcesJson!: string | null
+
+    /**
      * 是否触发 alerts firing。
      * 状态机（关键决策 D3，详见 docs/plan/todo.md §M24.1）：失败时 firing=true → 用户 ack 或回归 success 自动 ack → firing=false。
      * 默认 false；service 在 INSERT/UPDATE 时根据 `conclusion` 推断：
@@ -125,7 +151,13 @@ export class PRCheck extends BaseEntity {
     @Column({ type: 'varchar', length: 36, nullable: true })
     acknowledgedByUserId!: string | null
 
-    /** 最近一次 polling 时间（service 启动 polling 时更新；用于诊断轮询是否健康） */
+    /**
+     * 最近一次 polling 写入时间（service 落库时更新；用于诊断轮询是否健康）。
+     *
+     * **语义（M43.2b 起）**：仅在该 PR 本轮**实际采集并落库**时推进——「终态 + HEAD 未变 + 静默窗口内」
+     * 的 PR 本轮跳过采集（三源 API 降频），故其 `lastPolledAt` 可能早于当前时间；
+     * 陈旧 `lastPolledAt` **不等于**轮询故障（口径见 pr-build-deploy-signals.md §3.7）。
+     */
     @Column({ type: 'datetime' })
     lastPolledAt!: Date
 }

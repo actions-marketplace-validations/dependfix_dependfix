@@ -1,5 +1,6 @@
 import { createMailerTransport } from './transport'
 import { renderTemplate, DEFAULT_LOCALE, type MailTemplateKind, type MailLocale, type MailTemplateData, type RenderedTemplate } from './templates'
+import { logger } from '#server/utils/logger'
 
 /**
  * 邮件发送统一接口（mailer service 入口）。
@@ -10,7 +11,7 @@ import { renderTemplate, DEFAULT_LOCALE, type MailTemplateKind, type MailLocale,
  * - 调用方：apps/platform/server/utils/auth.ts 的 sendVerificationEmail / sendResetPassword / sendChangeEmailConfirmation
  *
  * fail-closed 语义：
- * - SMTP 未配置 → noop：better-auth 邮件回调链路静默通过（保留 console.warn 观测点，便于部署前发现）
+ * - SMTP 未配置 → noop：better-auth 邮件回调链路静默通过（保留统一 logger 的 warn 观测点，便于部署前发现）
  * - SMTP 配置但 sendMail 失败 → throw：better-auth 捕获异常不阻塞流程，但日志详细记录（messageId 缺失 + 错误码）
  */
 
@@ -59,8 +60,8 @@ export async function sendMail(params: SendMailParams): Promise<SendMailResult> 
     })
 
     if (!transport) {
-        // SMTP 未配置：noop 降级（保留 console.warn 观测点）
-        console.warn(`[mailer:noop] SMTP 未配置，邮件未发送：to=${params.to} subject=${params.subject}`)
+        // SMTP 未配置：noop 降级（保留统一 logger 的 warn 观测点）
+        logger.warn(`[mailer:noop] SMTP 未配置，邮件未发送：to=${params.to} subject=${params.subject}`)
         return { delivered: false, mode: 'noop' }
     }
 
@@ -74,7 +75,7 @@ export async function sendMail(params: SendMailParams): Promise<SendMailResult> 
             html: params.html,
             text: params.text,
         })
-        console.info(`[mailer:delivered] to=${params.to} subject=${params.subject} messageId=${info.messageId}`)
+        logger.info(`[mailer:delivered] to=${params.to} subject=${params.subject} messageId=${info.messageId}`)
         return {
             delivered: true,
             mode: 'smtp',
@@ -84,7 +85,7 @@ export async function sendMail(params: SendMailParams): Promise<SendMailResult> 
         // fail-closed：日志详细（含 cause，便于排障），抛 MailerError 给 caller
         // 注意：MailerError.message 仅含 to/subject 等非敏感字段，不透传 SMTP server 错误详情
         // （SMTP server 错误消息可能含客户端标识信息，避免进入应用日志/堆栈）
-        console.error(`[mailer:failed] to=${params.to} subject=${params.subject}`, error)
+        logger.error(`[mailer:failed] to=${params.to} subject=${params.subject}`, { error })
         throw new MailerError(
             'MAIL_SEND_FAILED',
             `Failed to send email to ${params.to}`,

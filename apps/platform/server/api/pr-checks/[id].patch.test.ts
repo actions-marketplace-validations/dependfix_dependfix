@@ -70,7 +70,7 @@ describe('PATCH /api/pr-checks/[id]', () => {
         // 验证时间格式可解析（ISO 8601）
         expect(new Date(acknowledgedAtParsed.value!).getTime()).toBeGreaterThan(0)
         expect(result.acknowledgedByUserId).toBe('u1')
-        // 关键决策 D3：ack 不修改 conclusion（service polling 继续独立判定）
+        // 关键决策：ack 不修改 conclusion（service polling 继续独立判定）
         expect(result.conclusion).toBe('failure')
     })
 

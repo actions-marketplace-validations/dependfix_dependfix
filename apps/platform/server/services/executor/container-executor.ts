@@ -5,9 +5,12 @@ import { promisify } from 'node:util'
 import type { RunResult } from '@dependfix/core'
 import {
     DependfixApp,
+    type DependfixRunResult,
     type RuntimeConfig,
     computeFixFingerprint,
     createFixBranch,
+    GIT_PUSH_HOOKS_ISOLATION_ARGS,
+    GIT_PUSH_SIGNING_ISOLATION_ARGS,
 } from '@dependfix/engine'
 import type { AuthProvider } from '@dependfix/engine/auth'
 import type { ScanExecutor, ScanExecutorContext, ScanExecutorResult } from './types'
@@ -17,7 +20,10 @@ import {
     PlatformDeliveryError,
     createPlatformOctokit,
 } from './platform-delivery'
+import { ABORT_GRACE_MS, ExecutionTimeoutError, settleWithin, withTimeout } from './engine-run'
 import { MemoryLogger } from '#server/utils/memory-logger'
+import { logger as platformLogger } from '#server/utils/logger'
+import { detectSigkill, startResourceMonitor } from '#server/utils/resource-usage'
 import { sanitizeString } from '#server/utils/sanitize'
 
 const execFileAsync = promisify(execFile)
@@ -32,8 +38,19 @@ const DEFAULT_CLONE_MAX_RETRIES = 3
 const CLONE_RETRY_BASE_DELAY_MS = 2000
 
 /**
+ * 单仓库执行超时默认值（30 分钟）。
+ * 作为 `ContainerExecutor.timeoutMs` 的缺省；queue 层 Worker 锁时长与之对齐
+ * （`SCAN_WORKER_LOCK_OPTIONS.lockDuration`，见 scan-worker.ts 与 platform.md §10.5）。
+ * 可通过 `EXECUTION_TIMEOUT_MS` 覆盖（见 {@link resolveExecutionTimeoutMs}）。
+ */
+export const DEFAULT_EXECUTION_TIMEOUT_MS = 30 * 60 * 1000
+
+/**
  * 解析环境变量为正整数（NaN / 负数 / 0 → 返回默认值）。
  * 对齐 queue-mode.ts:79-84 的 parseRetryConfig 模式。
+ *
+ * 已知边界：基于 `parseInt`，尾随非数字字符会被截断接受（如 `'600ms'` → 600）——env 为运维持有，
+ * 保持与 `CLONE_TIMEOUT_MS` 等复用同一函数的一致性，不做严格 `/^\d+$/` 校验。
  */
 export function parsePositiveInt(raw: string | undefined, defaultValue: number): number {
     if (!raw) {
@@ -41,6 +58,26 @@ export function parsePositiveInt(raw: string | undefined, defaultValue: number):
     }
     const value = parseInt(raw, 10)
     return Number.isInteger(value) && value > 0 ? value : defaultValue
+}
+
+/** 单仓库执行超时下限（1 分钟）：低于此值视为非法 → 回退默认 */
+export const MIN_EXECUTION_TIMEOUT_MS = 60_000
+
+/** 单仓库执行超时上限（24 小时）：超出视为非法 → 回退默认（防锁窗口 / 资源占用过长） */
+export const MAX_EXECUTION_TIMEOUT_MS = 24 * 60 * 60 * 1000
+
+/**
+ * 解析单仓库执行超时（`EXECUTION_TIMEOUT_MS` env）。
+ *
+ * 缺省 / 非法（非正整数）/ 越界（< {@link MIN_EXECUTION_TIMEOUT_MS} 或 > {@link MAX_EXECUTION_TIMEOUT_MS}）
+ * → fail-closed 回退 {@link DEFAULT_EXECUTION_TIMEOUT_MS}（30 分钟）。container 执行器构造期读取、
+ * queue Worker 锁参数在模块加载期读取同一解析器 → 二者联动；env 变更需重启进程。
+ */
+export function resolveExecutionTimeoutMs(raw: string | undefined = process.env.EXECUTION_TIMEOUT_MS): number {
+    const value = parsePositiveInt(raw, DEFAULT_EXECUTION_TIMEOUT_MS)
+    return value >= MIN_EXECUTION_TIMEOUT_MS && value <= MAX_EXECUTION_TIMEOUT_MS
+        ? value
+        : DEFAULT_EXECUTION_TIMEOUT_MS
 }
 
 /**
@@ -71,8 +108,12 @@ export async function extractBranchName(workDir: string): Promise<string> {
  *
  * 设计要点：
  * - 凭据走 http.extraheader（base64 basic auth），不进 argv/URL（防 execFile 错误回显泄露）
+ * - 签名隔离：显式传 `-c push.gpgSign=false`（`GIT_PUSH_SIGNING_ISOLATION_ARGS`），避免宿主
+ *   `push.gpgSign=true` 让 push 带 `--signed` 而在服务端不支持时失败（口径见 docs/standards/git.md §3.8）
+ * - hooks 隔离：`push --no-verify`（`GIT_PUSH_HOOKS_ISOLATION_ARGS`）跳过被修复仓库的 `pre-push`，
+ *   避免隔离环境下 hook 非 0 退出把交付链打断为 `push_failed`（同 §3.8）
  * - git push 成功时 stderr 含 "To https://..." 行；任何其他 stderr 视为失败
- * - 与 pushBranch（packages/engine/src/github/pr-creator.ts:200）的语义差异：
+ * - 与 pushBranch（`packages/engine/src/github/pr-creator.ts` 的 `pushBranch`）的语义差异：
  *   本函数为 async + 走 http.extraheader 凭据注入（平台 A 模式需要把 token 重新注入到
  *   平台工作目录的 git config，而 engine 端 pushBranch 依赖该 workDir 已有 origin 凭据）
  *
@@ -106,11 +147,13 @@ export async function pushFixBranch(
         token = ''
     }
 
-    const args = ['push', 'origin', branchName]
-    if (token) {
-        const basic = Buffer.from(`${username}:${token}`).toString('base64')
-        args.unshift('-c', `http.extraheader=Authorization: basic ${basic}`)
-    }
+    const args = [
+        ...GIT_PUSH_SIGNING_ISOLATION_ARGS,
+        ...(token ? ['-c', `http.extraheader=Authorization: basic ${Buffer.from(`${username}:${token}`).toString('base64')}`] : []),
+        'push',
+        ...GIT_PUSH_HOOKS_ISOLATION_ARGS,
+        'origin', branchName,
+    ]
     const { stderr } = await execFileAsync('git', args, { cwd: workDir, timeout: 60_000 })
     if (stderr && !/^To /m.test(stderr)) {
         throw new Error(`git push 失败：${stderr.trim()}`)
@@ -126,11 +169,13 @@ export async function pushFixBranch(
  * 保留为工具函数以备未来需要"严格清理"语义时启用。
  */
 export async function cleanupRemoteBranch(branchName: string, workDir: string, token?: string): Promise<boolean> {
-    const args = ['push', 'origin', '--delete', branchName]
-    if (token) {
-        const basic = Buffer.from(`x-access-token:${token}`).toString('base64')
-        args.unshift('-c', `http.extraheader=Authorization: basic ${basic}`)
-    }
+    const args = [
+        ...GIT_PUSH_SIGNING_ISOLATION_ARGS,
+        ...(token ? ['-c', `http.extraheader=Authorization: basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`] : []),
+        'push',
+        ...GIT_PUSH_HOOKS_ISOLATION_ARGS,
+        'origin', '--delete', branchName,
+    ]
     try {
         await execFileAsync('git', args, { cwd: workDir, timeout: 30_000 })
         return true
@@ -179,7 +224,10 @@ export async function moveToPending(
  *
  * 设计要点（见 executor-sandbox.md §2.2 / §5.1）：
  * - 平台容器即沙箱（进程级隔离）：非 root 运行（镜像 USER）、临时工作目录、凭据最小化、超时
- * - report-only：不 clone（GitHub API 拉取告警，快）；fix/fix-and-pr：先 clone 到 workDir（fix 需操作仓库文件）
+ * - report-only：不 clone、不 commit（GitHub API 拉取告警，快）；fix/fix-and-pr：先 clone 到 workDir（fix 需操作仓库文件）
+ *   - ⚠️ clone 判定与下方引擎 config 覆写必须同源（`isReportOnly`）：report-only 若只跳过 clone 却把引擎降级为
+ *     `fix + commit:true`，引擎会在空 workDir 上执行 `git config user.name` → `fatal: not in a git directory`
+ *     → `COMMIT_FAILED` → 平台 `engine_delivery_failed`（2026-10-11 生产实证）
  * - 凭据来源单一：credential 由 credential service 解密传入，填充 RuntimeConfig.githubToken/alertsToken
  * - 执行结果直接复用 DependfixApp 的 RunResult（扫描结果落库数据源）
  * - A 模式 fix / fix-and-pr 完成后推送修复分支到远程；push 失败归类 `push_failed`
@@ -194,16 +242,19 @@ export class ContainerExecutor implements ScanExecutor {
     private readonly timeoutMs: number
     private readonly cloneTimeoutMs: number
     private readonly cloneMaxRetries: number
+    /** 超时取消后等待引擎落定的宽限期（见 `engine-run.ts` 的 `ABORT_GRACE_MS`）。 */
+    private readonly abortGraceMs: number
 
-    constructor(options: { workRoot: string, timeoutMs?: number, cloneTimeoutMs?: number, cloneMaxRetries?: number } = { workRoot: process.env.DATABASE_PATH ? join(process.env.DATABASE_PATH, '..', 'runs') : 'data/runs' }) {
+    constructor(options: { workRoot: string, timeoutMs?: number, cloneTimeoutMs?: number, cloneMaxRetries?: number, abortGraceMs?: number } = { workRoot: process.env.DATABASE_PATH ? join(process.env.DATABASE_PATH, '..', 'runs') : 'data/runs' }) {
         this.workRoot = options.workRoot
-        this.timeoutMs = options.timeoutMs ?? 30 * 60 * 1000
+        this.timeoutMs = options.timeoutMs ?? resolveExecutionTimeoutMs()
         // clone 超时：优先构造参数 > 环境变量 > 默认值
         this.cloneTimeoutMs = options.cloneTimeoutMs
             ?? parsePositiveInt(process.env.CLONE_TIMEOUT_MS, DEFAULT_CLONE_TIMEOUT_MS)
         // clone 重试次数：优先构造参数 > 环境变量 > 默认值
         this.cloneMaxRetries = options.cloneMaxRetries
             ?? parsePositiveInt(process.env.CLONE_MAX_RETRIES, DEFAULT_CLONE_MAX_RETRIES)
+        this.abortGraceMs = options.abortGraceMs ?? ABORT_GRACE_MS
     }
 
     async isAvailable(): Promise<boolean> {
@@ -217,11 +268,34 @@ export class ContainerExecutor implements ScanExecutor {
     }
 
     async execute(ctx: ScanExecutorContext): Promise<ScanExecutorResult> {
+        const monitor = startResourceMonitor()
+        try {
+            const result = await this.executeRun(ctx)
+            const resource = monitor.stop()
+            resource.sigkillDetected = detectSigkill([
+                ...(result.result?.errors ?? []).map((item) => item.message),
+                result.error?.message,
+            ])
+            result.resource = resource
+            return result
+        } finally {
+            // 异常路径也停止采样；stop 幂等，不覆盖已生成的快照
+            monitor.stop()
+        }
+    }
+
+    private async executeRun(ctx: ScanExecutorContext): Promise<ScanExecutorResult> {
         const startedAt = new Date().toISOString()
         const { owner, name, defaultBranch } = ctx.repository
         const workDir = join(this.workRoot, ctx.runId)
-        // fix / fix-and-pr 模式：app.run() 成功后需推送修复分支到远程
-        const needsPush = ctx.config.mode === 'fix' || ctx.config.mode === 'fix-and-pr'
+        // 扫描模式单一事实源：report-only 为只读扫描（仅拉告警 + 出报告，无 clone / commit / push）；
+        // fix / fix-and-pr 才需要本地仓库文件与交付链路。
+        // ⚠️ needsClone / needsPush / needsPr 与下方引擎 config 覆写（mode / commit）必须同源，
+        // 否则会出现「引擎被降级为 fix + commit:true 却没有 clone」→ 在空目录上 commit → COMMIT_FAILED。
+        const isReportOnly = ctx.config.mode === 'report-only'
+        // 非 report-only：需要本地仓库文件（clone）+ 成功后推送修复分支到远程
+        const needsClone = !isReportOnly
+        const needsPush = !isReportOnly
         // fix-and-pr 模式：push 成功后再创建 PR
         const needsPr = ctx.config.mode === 'fix-and-pr'
         // push 成功 + PR 失败时保留 workDir 24h 供诊断（pendingRoot = workRoot/_pending）
@@ -235,11 +309,13 @@ export class ContainerExecutor implements ScanExecutor {
             maxEntries: 1000,
         })
 
+        // 引擎运行 promise 提升到 try 外：超时路径需要据它等待宽限期（避免与引擎落盘互相踩）
+        let engineRun: Promise<DependfixRunResult> | undefined
+
         try {
             await mkdir(workDir, { recursive: true })
 
-            // fix / fix-and-pr 需要本地仓库文件：clone 到工作目录
-            const needsClone = ctx.config.mode !== 'report-only'
+            // 非 report-only（fix / fix-and-pr）需要本地仓库文件：clone 到工作目录
             if (needsClone) {
                 await this.cloneRepository(owner, name, defaultBranch, workDir, { token: ctx.credential?.token, logger: memLogger })
             }
@@ -248,17 +324,20 @@ export class ContainerExecutor implements ScanExecutor {
             const preRunHead = needsPush ? await readHeadSha(workDir).catch(() => null) : null
 
             // 构造 RuntimeConfig：凭据来自 credential service 解密结果（来源单一，见契约要点 1）
-            // 关键修复（M25）：fix-and-pr 在平台模式下被降级为 `mode: 'fix' + commit: true + createPullRequest: false`，
+            // 平台交付降级口径：fix / fix-and-pr 被降级为 `mode: 'fix' + commit: true + createPullRequest: false`，
             // 让引擎只做本地修复+commit（不动 push/PR），由 [platform-delivery] 接管带凭据的 push + PR
-            // 见 [executor-sandbox.md §8.5 push + PR 链路修复后流程]
+            // 见 [executor-sandbox-implementation.md §8.5 push + PR 链路修复后流程]
+            // report-only：保持原模式与 `commit: false`（只读扫描不产出提交），与上方 needsClone / needsPush 同源
             const config: RuntimeConfig = {
                 ...ctx.config,
-                mode: 'fix',
+                mode: isReportOnly ? ctx.config.mode : 'fix',
                 repositories: [`${owner}/${name}`],
                 githubToken: ctx.credential?.token ?? ctx.config.githubToken,
                 alertsToken: ctx.credential?.token ?? ctx.config.alertsToken,
-                commit: true,
+                commit: !isReportOnly,
                 createPullRequest: false,
+                // 运行截止时间（上层计算、引擎只消费）：预算不足时引擎停止启动新工作
+                deadlineAt: Date.now() + this.timeoutMs,
             }
 
             const app = new DependfixApp({
@@ -266,17 +345,29 @@ export class ContainerExecutor implements ScanExecutor {
                 workDir,
                 reportOutputDir: join(workDir, 'dependfix-reports'),
                 verbose: false,
+                // 仓库级自定义验证命令透传（未配置 → undefined，引擎走 DEFAULT_VERIFY_COMMANDS；见 docs/standards/platform.md §3.8）
+                commands: ctx.repository.verifyCommands?.length ? ctx.repository.verifyCommands : undefined,
                 // 容器内执行属设计内沙箱（非 root + 临时目录），不触发本地模式风险警告
                 executionEnvironment: 'container',
                 // 注入 MemoryLogger 用于捕获执行日志
                 logger: memLogger,
             })
 
-            const { result, exitCode } = await withTimeout(app.run(), this.timeoutMs)
+            if (ctx.repository.verifyCommands?.length) {
+                memLogger.info(`[verify] ${owner}/${name} 使用仓库级自定义验证命令（${ctx.repository.verifyCommands.length} 条），已覆盖引擎默认验证链`)
+            }
+
+            engineRun = app.run()
+            const { result, exitCode } = await withTimeout(engineRun, this.timeoutMs, {
+                // 超时不再只是"放弃等待"：请求运行级取消（终止在跑子进程树 + 停止启动新工作 +
+                // 放弃交付），使引擎不再与后续仓库争抢资源（2026-10-16 内核 OOM 级联的成因）
+                onTimeout: (ms) => app.abort(`execution timeout (${ms / 60000} 分钟上限)`),
+            })
 
             // 平台接管交付：仅当引擎 commit 产生新提交时触发（no-op 扫描不产生空 push）
             // 触发条件比原 `exitCode === 0` 更严格：exitCode 1 也算"有部分成功"，但只有真产生 commit 才推
             let runUrl: string | undefined
+            let prNumber: number | undefined
             if (needsPush && result && ctx.credential?.token) {
                 const hasNewCommit = await checkHasNewCommit(workDir, preRunHead)
                 if (!hasNewCommit) {
@@ -290,7 +381,7 @@ export class ContainerExecutor implements ScanExecutor {
                         const octokit = createPlatformOctokit(ctx.credential.token)
                         const plan = await planFixAndPrDelivery(octokit, owner, name, result)
                         // 创建/切换到 fix 分支（在 HEAD 上，含 commit）
-                        createFixBranch(plan.branchName, workDir)
+                        await createFixBranch(plan.branchName, workDir)
                         const delivery = await deliverFixAndPr({
                             owner,
                             repo: name,
@@ -302,6 +393,7 @@ export class ContainerExecutor implements ScanExecutor {
                             octokit,
                         })
                         runUrl = delivery.runUrl
+                        prNumber = delivery.prNumber
                     } else {
                         // fix 模式（无 PR）：推当前分支（默认分支）即可
                         const branchName = await extractBranchName(workDir)
@@ -348,9 +440,10 @@ export class ContainerExecutor implements ScanExecutor {
             return {
                 exitCode,
                 result,
+                runUrl,
+                prNumber,
                 startedAt,
                 finishedAt: new Date().toISOString(),
-                runUrl,
                 logsJson: memLogger.toJson(),
             }
         } catch (error) {
@@ -369,9 +462,18 @@ export class ContainerExecutor implements ScanExecutor {
                     ? `git clone 超时（${this.cloneTimeoutMs / 1000} 秒上限，可通过 CLONE_TIMEOUT_MS 调整）`
                     : `执行超时（${this.timeoutMs / 60000} 分钟上限）`
             }
+            // 超时路径：取消已请求（终止子进程树），再给引擎一段宽限期落定后才清理工作目录——
+            // 否则会在引擎仍写盘时删除目录，且无法区分"已停止"与"仍在跑"
+            if (isTimeout && engineRun) {
+                const settled = await settleWithin(engineRun, this.abortGraceMs)
+                memLogger.warn(
+                    `[executor] ${owner}/${name}: 超时后已请求运行级取消；引擎${settled ? '已在宽限期内落定' : `在 ${this.abortGraceMs}ms 宽限期内未落定（不再等待）`}`,
+                )
+            }
+
             const executorFailMsg = `[executor] ${owner}/${name} failed: ${errorSource} - ${message}`
             memLogger.error(executorFailMsg)
-            console.error(executorFailMsg)
+            platformLogger.error(executorFailMsg)
 
             let errorCode: string = 'execution_failed'
             if (isTimeout) {
@@ -428,7 +530,7 @@ export class ContainerExecutor implements ScanExecutor {
         // 诊断日志：clone 配置（不含 token）
         const cloneInfo = `[clone] ${owner}/${name} → branch=${branch}, timeout=${this.cloneTimeoutMs}ms, maxRetries=${this.cloneMaxRetries}`
         logger?.info(cloneInfo)
-        console.log(cloneInfo)
+        platformLogger.info(cloneInfo)
 
         let lastError: Error | undefined
         for (let attempt = 1; attempt <= this.cloneMaxRetries; attempt++) {
@@ -445,7 +547,7 @@ export class ContainerExecutor implements ScanExecutor {
                 if (attempt > 1) {
                     const msg = `[clone] ${owner}/${name} succeeded on attempt ${attempt} (${Date.now() - attemptStart}ms)`
                     logger?.info(msg)
-                    console.log(msg)
+                    platformLogger.info(msg)
                 }
                 return
             } catch (err) {
@@ -459,7 +561,7 @@ export class ContainerExecutor implements ScanExecutor {
                 if (isTimeout) {
                     const msg = `[clone] ${owner}/${name} timeout on attempt ${attempt}/${this.cloneMaxRetries} (${elapsed}ms, limit ${this.cloneTimeoutMs}ms)`
                     logger?.warn(msg)
-                    console.warn(msg)
+                    platformLogger.warn(msg)
                     // 最后一次尝试超时 → 抛 ExecutionTimeoutError（让 execute() 正确分类）
                     if (attempt === this.cloneMaxRetries) {
                         throw new ExecutionTimeoutError(this.cloneTimeoutMs, 'clone')
@@ -469,7 +571,7 @@ export class ContainerExecutor implements ScanExecutor {
                     const gitMsg = extractGitErrorMessage(lastError.message)
                     const msg = `[clone] ${owner}/${name} failed on attempt ${attempt}: ${gitMsg}`
                     logger?.warn(msg)
-                    console.warn(msg)
+                    platformLogger.warn(msg)
                     // 认证/权限/不存在类错误重试无意义
                     if (/authentication|401|403|not found|404/i.test(lastError.message)) {
                         throw new Error(`git clone 失败：${gitMsg}`)
@@ -488,35 +590,13 @@ export class ContainerExecutor implements ScanExecutor {
                 const delay = CLONE_RETRY_BASE_DELAY_MS * attempt
                 const retryMsg = `[clone] retrying in ${delay}ms...`
                 logger?.info(retryMsg)
-                console.log(retryMsg)
+                platformLogger.info(retryMsg)
                 await new Promise((r) => setTimeout(r, delay))
             }
         }
 
         // 理论上不会到这里，但防御性抛出
         throw lastError ?? new Error(`git clone 失败：未知错误`)
-    }
-}
-
-/** 带超时的 Promise 包装（超时抛专属错误类供识别，避免字符串匹配误判） */
-class ExecutionTimeoutError extends Error {
-    readonly source: 'clone' | 'execution'
-    constructor(ms: number, source: 'clone' | 'execution' = 'execution') {
-        super(`operation timeout after ${ms}ms`)
-        this.name = 'ExecutionTimeoutError'
-        this.source = source
-    }
-}
-
-async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-    let timer: NodeJS.Timeout | undefined
-    const timeoutPromise = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new ExecutionTimeoutError(ms)), ms)
-    })
-    try {
-        return await Promise.race([promise, timeoutPromise])
-    } finally {
-        clearTimeout(timer)
     }
 }
 

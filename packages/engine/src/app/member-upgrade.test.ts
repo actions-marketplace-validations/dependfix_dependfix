@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import nock from 'nock'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Logger } from '@dependfix/core'
 import { resolveRuntimeConfig } from '../config'
 import { DependfixApp } from './index'
 
@@ -24,10 +25,12 @@ beforeEach(() => {
 // 失败/残留回滚计 failed；降级风险 / 多版本共存维持人工；dry-run 不写盘。
 // ---------------------------------------------------------------------------
 
-const { mockRunVerification, mockUpgradeDependency, mockTryLockfileRepair } = vi.hoisted(() => ({
+const { mockRunVerification, mockUpgradeDependency, mockTryLockfileRepair, mockRunTrackedCommand, mockFamilyResolver } = vi.hoisted(() => ({
     mockRunVerification: vi.fn(),
     mockUpgradeDependency: vi.fn(),
     mockTryLockfileRepair: vi.fn(),
+    mockRunTrackedCommand: vi.fn(),
+    mockFamilyResolver: { resolve: vi.fn(), describe: vi.fn() },
 }))
 
 vi.mock('../runners/verification-runner', async (importOriginal) => {
@@ -52,6 +55,24 @@ vi.mock('./helpers', async (importOriginal) => {
     return {
         ...actual,
         tryLockfileRepair: mockTryLockfileRepair,
+    }
+})
+
+// 家族锁步写入会真实调用 pnpm install —— 在本文件中统一替身为「改写 lockfile 的成功安装」
+vi.mock('../runners/process-control', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('../runners/process-control')>()
+    return {
+        ...actual,
+        runTrackedCommand: mockRunTrackedCommand,
+    }
+})
+
+// 家族成员版本解析走 registry（fetch）——注入替身，避免与 nock / Octokit 的全局 fetch 抢拦截
+vi.mock('../fixers/dependency/family-versions', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('../fixers/dependency/family-versions')>()
+    return {
+        ...actual,
+        getFamilyVersionResolver: () => mockFamilyResolver,
     }
 })
 
@@ -217,6 +238,20 @@ describe('DependfixApp member upgrade (2.0.3)', () => {
             durationMs: 0,
         })
         mockRunVerification.mockResolvedValue(verificationResult(true))
+        mockFamilyResolver.resolve.mockReset()
+        mockFamilyResolver.describe.mockReset()
+        mockRunTrackedCommand.mockReset()
+        mockRunTrackedCommand.mockResolvedValue({
+            started: true,
+            exitCode: 0,
+            signal: null,
+            timedOut: false,
+            aborted: false,
+            errno: null,
+            stdout: '',
+            stderr: '',
+            durationMs: 0,
+        })
     })
 
     afterEach(() => {
@@ -224,7 +259,7 @@ describe('DependfixApp member upgrade (2.0.3)', () => {
         rmSync(workDir, { recursive: true, force: true })
     })
 
-    function runApp(overrides: { env?: Record<string, string>, cliOverrides?: NonNullable<Parameters<typeof resolveRuntimeConfig>[0]>['cliOverrides'] } = {}): Promise<Awaited<ReturnType<DependfixApp['run']>>> {
+    function runApp(overrides: { env?: Record<string, string>, cliOverrides?: NonNullable<Parameters<typeof resolveRuntimeConfig>[0]>['cliOverrides'], logger?: Logger } = {}): Promise<Awaited<ReturnType<DependfixApp['run']>>> {
         const config = resolveRuntimeConfig({
             env: {
                 GITHUB_TOKEN: 'main-token-value',
@@ -234,9 +269,125 @@ describe('DependfixApp member upgrade (2.0.3)', () => {
             },
             cliOverrides: overrides.cliOverrides,
         })
-        const app = new DependfixApp({ config, workDir, reportOutputDir: join(workDir, 'reports') })
+        const app = new DependfixApp({ config, workDir, reportOutputDir: join(workDir, 'reports'), logger: overrides.logger })
         return app.run()
     }
+
+    function makeLogger(): Logger & { warn: ReturnType<typeof vi.fn> } {
+        return {
+            info: vi.fn(),
+            warn: vi.fn(),
+            error: vi.fn(),
+            debug: vi.fn(),
+        } as never
+    }
+
+    it('logs the install failure reason when the member upgrade cannot be applied', async () => {
+        setupMemberWorkspace(workDir)
+        writeSingleVersionLockfile(workDir)
+        nockAlerts([makeViteMemberAlert(1, '5.4.20')])
+        mockUpgradeDependency.mockResolvedValue({
+            packageName: 'vite',
+            fromVersion: '^5.4.0',
+            toVersion: '^5.4.20',
+            isMajor: false,
+            success: false,
+            error: 'pnpm install failed: signal SIGKILL',
+        })
+
+        const logger = makeLogger()
+        const { result } = await runApp({ logger })
+
+        // 失败原因进执行日志，且带成员 manifest 路径（多成员场景可定位到具体文件）
+        expect(logger.warn).toHaveBeenCalledWith(
+            '[member-upgrade] vite (packages/web/package.json): upgrade failed — pnpm install failed: signal SIGKILL',
+        )
+        expect(result.summary.alertsFailed).toBe(1)
+    })
+
+    it('marks environmental install failures on the member path without attributing them', async () => {
+        setupMemberWorkspace(workDir)
+        writeSingleVersionLockfile(workDir)
+        nockAlerts([makeViteMemberAlert(1, '5.4.20')])
+        mockUpgradeDependency.mockResolvedValue({
+            packageName: 'vite',
+            fromVersion: '^5.4.0',
+            toVersion: '^5.4.20',
+            isMajor: false,
+            success: false,
+            error: 'pnpm install failed: timed out',
+            environmental: true,
+        })
+
+        const { exitCode, result } = await runApp()
+
+        expect(exitCode).toBe(0)
+        expect(result.summary.environmentalFailures).toBe(1)
+        expect(result.summary.alertsFailed).toBe(0)
+        expect(result.repositories[0].failed).toBe(0)
+        const memberActions = result.actions.filter((a) => a.strategy === 'member-upgrade')
+        expect(memberActions).toHaveLength(1)
+        expect(memberActions[0]).toMatchObject({ success: false, environmentalFailure: true })
+        expect(result.errors.some((error) => error.category === 'ENVIRONMENT_ERROR')).toBe(true)
+    })
+
+    it('stops remaining member and group installs when a member install fails environmentally', async () => {
+        setupMemberWorkspace(workDir)
+        writeSingleVersionLockfile(workDir)
+        // 成员告警 + 根 manifest 告警：环境性停机后分组链也不得再试装
+        nockAlerts([
+            makeViteMemberAlert(1, '5.4.20'),
+            {
+                number: 2,
+                state: 'open',
+                html_url: 'https://github.com/foo/bar/security/dependabot/2',
+                security_advisory: { ghsa_id: 'GHSA-2', severity: 'high', summary: 'lodash vuln' },
+                security_vulnerability: {
+                    package: { ecosystem: 'npm', name: 'lodash' },
+                    severity: 'high',
+                    vulnerable_version_range: '< 4.17.21',
+                    first_patched_version: { identifier: '4.17.21' },
+                },
+                dependency: { package: { ecosystem: 'npm', name: 'lodash' }, manifest_path: 'package.json' },
+            },
+            // 无修复版本的根告警：跳过分组链后仍须计入 not-fixable（报告 failedResidual 不虚高）
+            {
+                number: 3,
+                state: 'open',
+                html_url: 'https://github.com/foo/bar/security/dependabot/3',
+                security_advisory: { ghsa_id: 'GHSA-3', severity: 'high', summary: 'no patch' },
+                security_vulnerability: {
+                    package: { ecosystem: 'npm', name: 'minimist' },
+                    severity: 'high',
+                    vulnerable_version_range: '< 1.2.6',
+                },
+                dependency: { package: { ecosystem: 'npm', name: 'minimist' }, manifest_path: 'package.json' },
+            },
+        ])
+        mockUpgradeDependency.mockResolvedValue({
+            packageName: 'vite',
+            fromVersion: '^5.4.0',
+            toVersion: '^5.4.20',
+            isMajor: false,
+            success: false,
+            error: 'pnpm install failed: timed out',
+            environmental: true,
+        })
+
+        const logger = makeLogger()
+        const { exitCode, result } = await runApp({ logger })
+
+        expect(exitCode).toBe(0)
+        expect(result.summary.environmentalFailures).toBe(1)
+        expect(result.summary.alertsFailed).toBe(0)
+        // 只有成员链路的那一次安装尝试；分组链被跳过
+        expect(mockUpgradeDependency).toHaveBeenCalledTimes(1)
+        expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('stopped (environmental) — skipping group upgrades'))
+        expect(result.actions.filter((action) => action.strategy !== 'member-upgrade' && action.type === 'dependency-upgrade')).toHaveLength(0)
+        // 整段跳过分组链时 not-fixable 仍记账（记账点在告警分区处，不依赖分组链执行）
+        expect(result.summary.alertsSkippedByReason['not-fixable']).toBe(1)
+        expect(result.summary.alertsSkipped).toBe(1)
+    })
 
     it('upgrades a member manifest direct dependency with lint verification (fixed)', async () => {
         const memberPkgPath = setupMemberWorkspace(workDir)
@@ -442,5 +593,91 @@ describe('DependfixApp member upgrade (2.0.3)', () => {
             ) as { dependencies: Record<string, string> }
             expect(pkg.dependencies.vite).toBe('5.4.14')
         }
+    })
+
+    it('locks family members in the same member manifest to one version line', async () => {
+        // 成员 manifest 内 vitest 3.x + coverage-v8 2.x（半族状态）：vitest 同 major 升级时
+        // 必须把 coverage-v8 一并拉回 3.x，否则 PR 里仍是混装
+        writeFileSync(join(workDir, 'package.json'), JSON.stringify({
+            name: 'fixture-root',
+            version: '1.0.0',
+            scripts: { lint: 'exit 0' },
+        }, null, 2))
+        writeFileSync(join(workDir, 'pnpm-workspace.yaml'), 'packages:\n  - packages/*\n')
+        mkdirSync(join(workDir, 'packages', 'web'), { recursive: true })
+        writeFileSync(join(workDir, 'packages', 'web', 'package.json'), JSON.stringify({
+            name: 'web',
+            version: '1.0.0',
+            devDependencies: { vitest: '^3.2.0', '@vitest/coverage-v8': '^2.0.0' },
+        }, null, 2))
+        writeFileSync(join(workDir, 'pnpm-lock.yaml'), [
+            'lockfileVersion: \'9.0\'',
+            '',
+            '  vitest@3.2.0:',
+            '    resolution: {integrity: sha512-a}',
+            '',
+            '  "@vitest/coverage-v8@2.0.0":',
+            '    resolution: {integrity: sha512-b}',
+            '',
+        ].join('\n'))
+        nockAlerts([{
+            number: 1,
+            state: 'open',
+            html_url: 'https://github.com/foo/bar/security/dependabot/1',
+            security_advisory: { ghsa_id: 'GHSA-family', severity: 'high', summary: 'vitest vuln' },
+            security_vulnerability: {
+                package: { ecosystem: 'npm', name: 'vitest' },
+                severity: 'high',
+                vulnerable_version_range: '< 3.2.4',
+                first_patched_version: { identifier: '3.2.4' },
+            },
+            dependency: { package: { ecosystem: 'npm', name: 'vitest' }, manifest_path: 'packages/web/package.json' },
+        }])
+        mockFamilyResolver.resolve.mockResolvedValue({
+            ok: true,
+            info: { version: '3.2.5', peerDependencies: {} },
+        })
+        mockRunTrackedCommand.mockImplementation(async () => {
+            writeFileSync(join(workDir, 'pnpm-lock.yaml'), [
+                'lockfileVersion: \'9.0\'',
+                '',
+                '  vitest@3.2.4:',
+                '    resolution: {integrity: sha512-a}',
+                '',
+                '  "@vitest/coverage-v8@3.2.5":',
+                '    resolution: {integrity: sha512-b}',
+                '',
+            ].join('\n'))
+            return {
+                started: true,
+                exitCode: 0,
+                signal: null,
+                timedOut: false,
+                aborted: false,
+                errno: null,
+                stdout: '',
+                stderr: '',
+                durationMs: 0,
+            }
+        })
+
+        const { result } = await runApp()
+
+        expect(result.summary.alertsFixed).toBe(1)
+        const memberActions = result.actions.filter((a) => a.strategy === 'member-upgrade')
+        expect(memberActions).toHaveLength(1)
+        expect(memberActions[0]?.success).toBe(true)
+        expect(memberActions[0]?.family).toEqual({
+            id: 'vitest',
+            members: ['vitest', '@vitest/coverage-v8'],
+            skipped: ['@vitest/ui', '@vitest/browser'],
+        })
+        const memberPkg = JSON.parse(
+            readFileSync(join(workDir, 'packages', 'web', 'package.json'), 'utf-8'),
+        ) as { devDependencies: Record<string, string> }
+        expect(memberPkg.devDependencies.vitest).toBe('^3.2.4')
+        expect(memberPkg.devDependencies['@vitest/coverage-v8']).toBe('^3.2.5')
+        // 单包升级路径未被调用（家族写入一次完成）
+        expect(mockUpgradeDependency).not.toHaveBeenCalled()
     })
 })

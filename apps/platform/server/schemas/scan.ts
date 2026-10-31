@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { SANDBOX_EXECUTOR_DISABLED_MESSAGE } from './repository'
 
 /**
  * 扫描请求校验（Zod）。
@@ -24,6 +25,15 @@ export const scanRequestSchema = z.object({
     aiEnabled: z.boolean().optional(),
     /** AI 研判触发范围（运行时 override 仓库默认） */
     aiTrigger: z.enum(['failure', 'major', 'both']).optional(),
+}).superRefine((data, ctx) => {
+    // 2026-10-27 起 sandbox 入口临时关闭：显式请求也不得绕过（存量仓库走编排层降级）。
+    if (data.executorKind === 'sandbox') {
+        ctx.addIssue({
+            code: 'custom',
+            path: ['executorKind'],
+            message: SANDBOX_EXECUTOR_DISABLED_MESSAGE,
+        })
+    }
 })
 
 export type ScanRequestInput = z.infer<typeof scanRequestSchema>

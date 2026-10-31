@@ -2,6 +2,8 @@
 
 > 状态: ✅ M20 已完成（2026-08-31）——ScanResult 已从"per-scan×per-alert"改为"per-alert"，新增 upstreamId / firstSeenAt / lastSeenAt / occurrenceCount / supersededAt 字段；详见 [archive/todo-archive-phases-m19-m21.md §M20](../../plan/archive/todo-archive-phases-m19-m21.md#m20-scanresult-数据模型重构m201m203m205m206m207-全部已闭环--2026-08-31-归档)
 >
+> ✅ 2026-10-30（M51.1）：`ScanResult.fixStatus` 不再是固定 `not-tried`——引擎报告新增 `alertOutcomes`，平台按同一键回写四态结果；见 [§告警级修复结果回写](#告警级修复结果回写m511)
+>
 > 历史：✅ 2026-08-05 修正——`AlertSource` 扩展 `'pnpm-audit'`、`FixStrategy` 增加 `override`，对齐当前实现
 
 ## 标准化告警模型
@@ -97,8 +99,65 @@ export class ScanResult extends BaseEntity {
 
 1. **唯一性**：`UNIQUE (repositoryId, upstreamId)` 保证一个独立告警只存一行
 2. **生命周期自动闭环**：reconcile 扫描完成后，上游消失的告警自动 `supersededAt = NOW()`
-3. **修复成就保留**：`fixStatus='success'` 永不被 supersede（即使上游消失，dashboard "已修复数" 不减少）
+3. **修复成就保留**：`fixStatus='success'` 永不被 supersede（即使上游消失，该行保持 success）。
+   注意：**活跃行**可被后续运行的新结论覆盖（含 `success` → `failed`），故 dashboard「已修复数」非单调——
+   成就保证只作用于「上游消失」这一路径（告警级结果回写口径见 [alert-outcome-writeback.md](../governance/alert-outcome-writeback.md)）。
+   由此 dashboard「活跃告警 / 按严重级别」与 `/api/alerts` 默认视图会把 `success` 行长期计入（本批首次生效，未调整活跃定义）
 4. **跨次计数**：`occurrenceCount` 在每次 reconcile 时 +1；UI 直接显示，无需聚合
+
+## 告警级修复结果回写（M51.1）
+
+`fixStatus` 的取值由「固定 `not-tried`」改为「本次运行的真实结论」，以避免明细与引擎汇总各说一套。
+
+### 报告契约（引擎 → 平台）
+
+```typescript
+// packages/core/src/report/alert-outcomes.ts
+type AlertFixStatus = 'success' | 'converged' | 'failed' | 'skipped' | 'not-tried'
+
+interface AlertFixOutcome {
+  repository: string      // 告警所属仓库（owner/repo 或 local）
+  source: AlertSource     // dependabot / code-scanning / code-quality / pnpm-audit
+  upstreamId: string      // 引擎抓取侧注入（normalizeUpstreamId，per-repo 标识）
+  manifestPath?: string | null
+  status: AlertOutcomeStatus   // success | converged | failed | skipped（不含 not-tried）
+  reason?: string         // failed 取动作 error；skipped 取 SKIP_REASONS 标识
+}
+
+interface RunResult {
+  // ...
+  /** 只列有结论的告警；缺键即 not-tried（存量 run 无该字段 ⇒ 行为与引入前一致） */
+  alertOutcomes?: AlertFixOutcome[]
+}
+```
+
+- **匹配键**：`(repository, source, upstreamId, manifestPath)`，两侧共用 `alertOutcomeKey`（分隔符 `\u0000`，`null`/`undefined` 等价）。`repository` 必需——`upstreamId` 是 **per-repo** 标识（两仓都会出现 `dependabot:42`），单次运行可处理多仓；`manifestPath` 消歧同号位的多清单实例。运行时按 `ALERT_OUTCOME_STATUSES`（4 值，不含 `not-tried`）白名单校验状态值（报告来自 JSON，未知值 / `not-tried` 不写库）。
+- **产出优先级**（`buildAlertOutcomes`，高 → 低）：
+  1. **修复链路的显式记录**（收敛 / 跨 major 跳过 / 清单分区跳过 / 不可修复）：`recordConvergedAlerts` / `recordSkippedAlerts` 写入，代表该**实例**的权威判定；
+  2. `isAlertFixedByActions` → `success`（与 `alertsUnfixed` 同一谓词）；
+  3. Code Scanning `noOp` **且无 `error`**（模板已应用、文件无改动）→ `converged`；带 `error` 的 `noOp`（无模板 / 路径越界等）不判已收敛；
+  4. 同告警失败动作 → `failed`（排除 `environmentalFailure` / `preExisting` / `noOp` / AI 辅助动作；依赖升级的失败归因为**包级**，`FixAction` 无清单维度；Code Quality 不归因）；
+  5. `override-protected` / `repeated-failure` 的 `noOp` 动作 → `skipped`；
+  6. `fixable === false` → `skipped('not-fixable')`；
+  7. 其余不落条目（`not-tried`）。
+
+  显式记录优先于派生 `success` 的原因：包级成功谓词会把「同包另一清单已被主动跳过」的实例误判为已修复（如根清单 `vite` 升级成功、`docs/package.json` 的同一告警属子目录清单跳过），方向是 fail-open（少报未修复）。
+- **可对账口径**：`converged` 明细数与 `RunSummary.alertsConverged` **逐条对齐**（两个收敛点用**同一数组**同时计数与记录）。`alertsSkipped` 是 **action 级**计数（同包多告警可能共用一个 `noOp` 动作），故 `skipped` 明细可多于该计数——不构成不一致，消费方勿据此对账。
+- **触发前提**：`success` / `converged` / `failed` 只在修复链路（`fix` / `fix-and-pr`）产生；`report-only` 无修复动作，不可修复的告警仍以 `skipped('not-fixable')` 落条目（与运行模式无关），其余按缺键 `not-tried`（既有 `success` 行保持原值，不被 `report-only` 重置）。
+- **报告体积**：只列非 `not-tried` 条目；`code-quality` findings 恒 `fixable=false`，会以 `skipped('not-fixable')` 落条目（条目本身极小，且平台据此展示「已跳过」而非「待处理」）；`fixable=true` 但无推荐版本的告警不落条目。
+
+### 平台写入与下游影响
+
+写回规则、优先级取舍与下游通知口径见 [alert-outcome-writeback.md](../governance/alert-outcome-writeback.md)。
+本文件只固定数据契约：
+
+| 场景 | `fixStatus` |
+|:--|:--|
+| 新行 | 本次结论；缺键 `not-tried` |
+| 活跃行 + 有结论 | 本次结论（可覆盖 `success`） |
+| 活跃行 + 无结论 | 保持原值 |
+| 已 supersede 行 | 不参与（只读 `supersededAt IS NULL`） |
+| `config.dryRun` | 不回写 |
 
 ## 严重级别映射
 
@@ -165,5 +224,7 @@ interface RunResult {
   alerts: NormalizedSecurityAlert[]
   actions: FixAction[]
   errors: FixError[]
+  alertOutcomes?: AlertFixOutcome[]   // 告警级处置结果（M51.1）；只列有结论的告警
+  // 其余可选段：ciAlignment / attemptTracking / prCheckWatch / supplyChainWarnings / alertsDisabled
 }
 ```

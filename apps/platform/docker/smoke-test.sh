@@ -1,0 +1,196 @@
+#!/bin/sh
+# dependfix 平台镜像可用性冒烟测试（本地与 CI 通用）。
+#
+# 目的：验证「构建完成的镜像」在**不依赖部署侧 compose 注入 env** 的前提下首次启动即可建表可用，
+# 防止「镜像能启动但数据库从未初始化」这类只能靠用户部署才发现的问题。
+#
+# 用法：
+#   # 对已有镜像跑冒烟
+#   SMOKE_IMAGE=caomeiyouren/dependfix:latest sh apps/platform/docker/smoke-test.sh
+#   # 先本地构建再跑（仓库根执行）
+#   SMOKE_BUILD=1 sh apps/platform/docker/smoke-test.sh
+#
+# 环境变量：
+#   SMOKE_IMAGE   被测镜像（默认 dependfix-smoke:local）
+#   SMOKE_BUILD   非空且为 1 时先 docker build（默认 0）
+#   SMOKE_APK_MIRROR  仅构建时生效，向 Dockerfile 透传 --build-arg APK_MIRROR（受限网络下用镜像源，如 https://mirrors.aliyun.com）
+#   SMOKE_NPM_REGISTRY  仅构建时生效，向 Dockerfile 透传 --build-arg NPM_REGISTRY（受限网络下用镜像源，如 https://registry.npmmirror.com）
+#   SMOKE_PORT    宿主探测端口（默认 3999）
+#   SMOKE_EXPECT_VERSION / SMOKE_EXPECT_COMMIT  期望的版本戳（非空时校验 /api/health 端到端注入值；默认空，仅校验字段存在）
+#
+# 注意：宿主侧断言（场景 0c 的 `[ -d ]`）以**调用者身份**执行——本地常以 root 运行（恒真），
+# 权限类缺陷只在非 root 宿主暴露；复现请用非 root 用户执行本脚本。
+#
+# 断言：
+#   0. Node 运行时 ≥ 安全基线（check-node-version.mjs）
+#   0c. pnpm store 落在数据卷（入口派生默认值；供跨 run 复用）
+#   1. 正常启动（不注入 DATABASE_MIGRATIONS_RUN）→ 日志 migrationsRun=true、无 no such table
+#   2. GET / = 200 且 GET /api/auth/get-session = 200 且 GET /api/health = 200（JSON 含 version/commit/startedAt）
+#   3. 启动日志含版本戳行 `[build] version=...`
+#   4. 业务表 ≥ 13（经容器内 better-sqlite3 读取；当前迁移实测 15）
+#   5. 迁移专用模式（DEPENDFIX_MIGRATIONS_ONLY=true）一次性容器退出码 0 且建表成功
+set -eu
+
+IMAGE="${SMOKE_IMAGE:-dependfix-smoke:local}"
+PORT="${SMOKE_PORT:-3999}"
+BUILD="${SMOKE_BUILD:-0}"
+EXPECT_VERSION="${SMOKE_EXPECT_VERSION:-}"
+EXPECT_COMMIT="${SMOKE_EXPECT_COMMIT:-}"
+CONTAINER="dependfix-smoke-$$"
+DATA_DIR="$(mktemp -d)"
+ONESHOT_DIR="$(mktemp -d)"
+MIN_TABLES=13
+
+log() { printf '[smoke] %s\n' "$*"; }
+fail() { printf '[smoke] FAIL: %s\n' "$*" >&2; exit 1; }
+
+# 数据目录对宿主调用者保持可穿越（755）：入口会把挂载目录 chown 给运行身份（默认 100:101），
+# mktemp 的 700 会让非 root 宿主（CI runner）失去 search 权限——宿主侧断言（`[ -d ]`）恒假。
+# chown 不改 mode，故放开后容器内行为不变（属主 100:101 仍是 owner rwx）；命名卷首次挂载亦为 755。
+# ONESHOT_DIR 无宿主侧断言，保持 mktemp 默认 700（迁移库副本不对同机其它用户开放）。
+chmod 755 "$DATA_DIR"
+
+# 清理前把临时目录所有权交还调用者：入口 chown 后非 root 宿主已无权删除其中条目
+# （`rm -rf` 报 EACCES 并残留目录），用被测镜像的 root 身份改回调用者 uid:gid。
+restore_owner() {
+    [ -d "$DATA_DIR" ] && [ -d "$ONESHOT_DIR" ] || return 0
+    # 镜像不存在时跳过：`docker run` 会触发拉取，清理阶段不应产生额外网络行为
+    docker image inspect "$IMAGE" >/dev/null 2>&1 || return 0
+    docker run --rm --user 0:0 --entrypoint chown \
+        -v "$DATA_DIR":/cleanup-data -v "$ONESHOT_DIR":/cleanup-oneshot "$IMAGE" \
+        -R "$(id -u):$(id -g)" /cleanup-data /cleanup-oneshot >/dev/null 2>&1 || true
+}
+
+cleanup() {
+    docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+    restore_owner
+    rm -rf "$DATA_DIR" "$ONESHOT_DIR" || true
+}
+trap cleanup EXIT
+
+count_tables() {
+    # $1 = 宿主数据目录；经一次性容器内的 better-sqlite3 读取（与被测镜像同一原生模块）。
+    # 以读写方式打开：容器被强杀后可能残留 -wal，需要写权限触发 WAL 恢复才能读到最新 schema。
+    docker run --rm -v "$1":/data --entrypoint node "$IMAGE" -e '
+const Database = require("/app/.output/server/node_modules/better-sqlite3");
+const db = new Database("/data/dependfix.sqlite");
+const row = db.prepare("SELECT count(*) AS c FROM sqlite_master WHERE type = '"'"'table'"'"' AND name LIKE '"'"'dependfix_%'"'"'").get();
+process.stdout.write(String(row.c));
+'
+}
+
+if [ "$BUILD" = "1" ]; then
+    SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+    REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../../.." && pwd)
+    log "构建镜像 $IMAGE（context=$REPO_ROOT）"
+    # 用位置参数拼接可选 build-arg，避免字符串词分割（空值不传参）
+    set --
+    if [ -n "${SMOKE_APK_MIRROR:-}" ]; then
+        set -- "$@" --build-arg "APK_MIRROR=$SMOKE_APK_MIRROR"
+    fi
+    if [ -n "${SMOKE_NPM_REGISTRY:-}" ]; then
+        set -- "$@" --build-arg "NPM_REGISTRY=$SMOKE_NPM_REGISTRY"
+    fi
+    docker build "$@" -f "$REPO_ROOT/apps/platform/Dockerfile" -t "$IMAGE" "$REPO_ROOT"
+fi
+
+docker image inspect "$IMAGE" >/dev/null 2>&1 || fail "镜像不存在：$IMAGE（可设 SMOKE_BUILD=1 本地构建）"
+
+# ── 场景 0：Node 运行时安全基线（CVE-2026-111497 / 105483 / 106069 等）────────────
+# 基础镜像回退或误用旧 digest 时，冒烟必须先于推送拦下；版本口径见 check-node-version.mjs。
+docker run --rm --entrypoint node "$IMAGE" /usr/local/bin/dependfix-check-node-version.mjs \
+    || fail "镜像 Node 运行时低于安全基线（修复版本见 Node.js 2026-10-21 安全公告）"
+
+# ── 场景 0b：目标仓库原生模块回退编译所需的最小工具链 ─────────────────────────────
+# 单个 `command -v a b c` 在 busybox ash 下部分缺失仍可能 exit 0，必须逐个断言。
+for tool in python3 make g++; do
+    docker run --rm --entrypoint sh "$IMAGE" -c "command -v $tool >/dev/null" || fail "镜像缺少工具链：$tool"
+done
+log "工具链 python3/make/g++ 可用"
+
+# ── 场景 0c：pnpm store 落数据卷（入口派生的默认值）────────────────────────────
+# 走完整入口（root → chown → 探针判定 → 降权）而非 --entrypoint：验证默认值不依赖 compose 注入。
+# 入口先输出 `[entrypoint] pnpm store: …`，pnpm 的实际输出在其后：分别断言日志行与最后一行
+store_out=$(docker run --rm -v "$DATA_DIR":/app/data "$IMAGE" pnpm store path) \
+    || fail "容器内 pnpm store path 执行失败"
+printf '%s\n' "$store_out" | grep -q '^\[entrypoint\] pnpm store: ' || { printf '%s\n' "$store_out"; fail "入口未输出 pnpm store 日志行"; }
+store_path=$(printf '%s\n' "$store_out" | grep -E '^/app/data/pnpm-store/' | tail -n 1)
+case "$store_path" in
+    /app/data/pnpm-store/*) log "pnpm store 落在数据卷：$store_path" ;;
+    *) fail "pnpm store 未落在持久目录：$store_path（期望 /app/data/pnpm-store/v*）" ;;
+esac
+[ -d "$DATA_DIR/pnpm-store" ] || {
+    ls -ld "$DATA_DIR" "$DATA_DIR/pnpm-store" 2>&1 || true
+    fail "数据卷内未创建 pnpm store 目录"
+}
+
+# ── 场景 1：正常启动，不注入 DATABASE_MIGRATIONS_RUN（验证镜像级默认）──────────────
+log "场景 1：正常启动（不注入 DATABASE_MIGRATIONS_RUN）"
+docker run -d --name "$CONTAINER" \
+    -e NUXT_AUTH_SECRET=smoke-test-secret \
+    -e DATABASE_PATH=/app/data/dependfix.sqlite \
+    -v "$DATA_DIR":/app/data \
+    -p "127.0.0.1:${PORT}:3000" \
+    "$IMAGE" >/dev/null
+
+i=0
+until curl -fsS "http://127.0.0.1:${PORT}/" >/dev/null 2>&1; do
+    i=$((i + 1))
+    [ "$i" -gt 60 ] && { docker logs "$CONTAINER" 2>&1 | tail -40; fail "60s 内未就绪"; }
+    if [ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null || echo false)" != "true" ]; then
+        docker logs "$CONTAINER" 2>&1 | tail -40
+        fail "容器提前退出"
+    fi
+    sleep 1
+done
+log "HTTP 就绪（等待 ${i}s）"
+
+logfile="$(docker logs "$CONTAINER" 2>&1)"
+printf '%s\n' "$logfile" | grep -q 'migrationsRun=true' || { printf '%s\n' "$logfile" | tail -40; fail "日志未显示 migrationsRun=true（镜像默认未生效）"; }
+if printf '%s\n' "$logfile" | grep -q 'no such table'; then
+    printf '%s\n' "$logfile" | tail -40
+    fail "日志出现 no such table"
+fi
+
+for path in / /api/auth/get-session /api/health; do
+    code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${PORT}${path}")
+    [ "$code" = "200" ] || { docker logs "$CONTAINER" 2>&1 | tail -40; fail "GET ${path} = ${code}（期望 200）"; }
+    log "GET ${path} = ${code}"
+done
+
+# 版本戳健康端点：返回 JSON 且含 version / commit / startedAt（构建期未注入时为 unknown）
+health_json=$(curl -fsS "http://127.0.0.1:${PORT}/api/health")
+printf '%s\n' "$health_json" | grep -q '"version"' || fail "/api/health 缺 version：$health_json"
+printf '%s\n' "$health_json" | grep -q '"commit"' || fail "/api/health 缺 commit：$health_json"
+printf '%s\n' "$health_json" | grep -q '"startedAt"' || fail "/api/health 缺 startedAt：$health_json"
+# 端到端注入校验：构建期 --build-arg → 容器 ENV → runtimeConfig → 端点返回值。
+# 仅当调用方给出期望值（CI 用固定哨兵 build-arg）时校验，避免本地 SMOKE_BUILD 无 arg 时误判。
+if [ -n "$EXPECT_VERSION" ]; then
+    printf '%s\n' "$health_json" | grep -q "\"version\":\"${EXPECT_VERSION}\"" || fail "version 期望 ${EXPECT_VERSION}，实际：$health_json"
+fi
+if [ -n "$EXPECT_COMMIT" ]; then
+    printf '%s\n' "$health_json" | grep -q "\"commit\":\"${EXPECT_COMMIT}\"" || fail "commit 期望 ${EXPECT_COMMIT}，实际：$health_json"
+fi
+printf '%s\n' "$logfile" | grep -q '\[build\] version=' || { printf '%s\n' "$logfile" | tail -40; fail "启动日志缺版本戳行"; }
+log "GET /api/health = ${health_json}"
+
+docker rm -f "$CONTAINER" >/dev/null
+
+tables=$(count_tables "$DATA_DIR")
+[ "$tables" -ge "$MIN_TABLES" ] || fail "业务表 = ${tables}（期望 ≥ ${MIN_TABLES}）"
+log "业务表 = ${tables}"
+
+# ── 场景 2：迁移专用一次性容器 ────────────────────────────────────────────────
+log "场景 2：迁移专用模式（DEPENDFIX_MIGRATIONS_ONLY=true）"
+docker run --rm \
+    -e DEPENDFIX_MIGRATIONS_ONLY=true \
+    -e DATABASE_MIGRATIONS_RUN=true \
+    -e DATABASE_PATH=/app/data/dependfix.sqlite \
+    -v "$ONESHOT_DIR":/app/data \
+    "$IMAGE" >/dev/null 2>&1 || fail "迁移专用容器退出码非 0"
+
+oneshot_tables=$(count_tables "$ONESHOT_DIR")
+[ "$oneshot_tables" -ge "$MIN_TABLES" ] || fail "迁移专用模式业务表 = ${oneshot_tables}（期望 ≥ ${MIN_TABLES}）"
+log "迁移专用模式业务表 = ${oneshot_tables}"
+
+log "PASS：镜像首次启动自动建表可用（$IMAGE）"

@@ -1,0 +1,411 @@
+import type { APIRequestContext } from '@playwright/test'
+import { type FixturesPayload, seedCustomFixtures } from '../../e2e/helpers/fixtures.helper'
+
+/**
+ * 视觉回归专属 fixtures 数据集。
+ *
+ * 为什么不复用 e2e 的 `ALERTS_ROWGROUP_FIXTURES`：
+ * - e2e 数据集不含仓库标签，`repos` 页「标签」列只能落空态（视觉基线失去该列的兜底能力）；
+ * - e2e 数据集的 `firstSeenAt` / `lastSeenAt` 缺省 → fixtures 端点填 `now()`，每次运行不同；
+ *   视觉基线需要**逐像素可复现**，故本数据集显式钉死时间戳。
+ *
+ * 数据规模遵循 minimum fixture 原则：3 仓库（2 个带标签 + 1 个无标签）+ 4 次扫描（3 成功 + 1 transient 失败）
+ * + 9 条告警 + 5 条 PRCheck（pr-checks 页行级基线）。
+ *
+ * 数据集含一个**跨 severity 的包**（nodemailer = high + medium），用于锁定「一个包一组」契约：
+ * alerts 页默认按 severity 降序，若按**行级** severity 排序，同包跨档行会被拆到不同 severity 区块、
+ * 分组头重复出现（修复前的缺陷）。修复后「严重级别」列排序取值 = 组排序键，nodemailer
+ * 只渲染一个分组头。其余包保持单档（lodash=high / node-fetch=medium / axios=critical / minimist=low），
+ * 视觉基线取「分组连续」的形态，覆盖分组头 + 展开行 + 4 档 severity 标签 + 4 种 source +
+ * 5 种 fixStatus 呈现。不要扩展本集合，除非新增视觉用例确实需要。
+ *
+ * **浮层落点页（schedules 表单 / scans 弹窗 / alerts 运行抽屉 / pr-checks Toast）另需确定性取值**：
+ * 运行主键（以短 ID 渲染）、`createdAt`（列表排序 + 「最近运行」统计）、`startedAt` / `finishedAt`
+ * （列表 / 弹窗 / 抽屉的时间与时长列）全部显式钉死，否则基线随注入时刻逐次漂移。第 4 个运行是
+ * **transient 失败**（clone 阶段超时），作用是让运行列表首行（按 `createdAt` 降序）为「失败 · 仓库克隆」，
+ * 用例据此锁定时间戳覆盖已生效；其失败归因块与受约束重试入口 / 二次确认层**本轮未覆盖**
+ * （见 `tests/visual/README.md`「已知盲区」）。
+ */
+export const VISUAL_FIXTURES: FixturesPayload = {
+    repos: [
+        { owner: 'acme', name: 'web-app', tags: ['frontend', 'critical'] },
+        { owner: 'acme', name: 'api-gateway', tags: ['backend'] },
+        { owner: 'acme', name: 'unlabeled-tool' },
+    ],
+    scanRuns: [
+        {
+            id: '19b1c2d3e4f5a001',
+            repositoryOwner: 'acme',
+            repositoryName: 'web-app',
+            mode: 'fix-and-pr',
+            severityThreshold: 'high',
+            executorKind: 'container',
+            status: 'completed',
+            // run 0 同时覆盖「未修复 20 / 总数 26」（含 6 截断、4 跨大版本）、环境性失败与退出码，
+            // 使运行详情弹窗基线包含结果可信度与跳过 / 截断分组（前置断言见 visual 用例）。
+            summary: {
+                alertsFound: 20,
+                alertsFixed: 0,
+                alertsUnfixed: 20,
+                alertsConverged: 0,
+                environmentalFailures: 1,
+                alertsSkipped: 4,
+                alertsSkippedByReason: { 'cross-major': 4 },
+                alertsTruncated: 6,
+                alertsTruncatedBySeverity: { critical: 2, high: 4 },
+            },
+            exitCode: 1,
+            environmentalFailureCount: 1,
+            createdAt: '2026-08-20T01:59:50.000Z',
+            startedAt: '2026-08-20T02:00:00.000Z',
+            finishedAt: '2026-08-20T02:00:12.000Z',
+        },
+        {
+            id: '19b1c2d3e4f5a002',
+            repositoryOwner: 'acme',
+            repositoryName: 'api-gateway',
+            mode: 'report-only',
+            severityThreshold: 'medium',
+            executorKind: 'container',
+            status: 'completed',
+            summary: { alertsFound: 2, alertsFixed: 0 },
+            createdAt: '2026-08-21T03:00:00.000Z',
+            startedAt: '2026-08-21T03:00:00.000Z',
+            finishedAt: '2026-08-21T03:00:05.000Z',
+        },
+        {
+            id: '19b1c2d3e4f5a003',
+            repositoryOwner: 'acme',
+            repositoryName: 'unlabeled-tool',
+            mode: 'report-only',
+            severityThreshold: 'low',
+            executorKind: 'container',
+            status: 'completed',
+            summary: { alertsFound: 1, alertsFixed: 0 },
+            createdAt: '2026-08-22T04:00:00.000Z',
+            startedAt: '2026-08-22T04:00:00.000Z',
+            finishedAt: '2026-08-22T04:00:02.000Z',
+        },
+        // 第 4 个运行：transient 失败（列表按 createdAt 降序 → 该行是 runs 分区首行），
+        // 覆盖运行详情弹窗的失败归因块（阶段 / 处置建议 / 失败码 / 执行级错误）与重试二次确认
+        {
+            id: '19b1c2d3e4f5a004',
+            repositoryOwner: 'acme',
+            repositoryName: 'web-app',
+            mode: 'fix-and-pr',
+            severityThreshold: 'high',
+            executorKind: 'container',
+            status: 'failed',
+            failureCode: 'ETIMEDOUT',
+            failureStage: 'clone',
+            failureKind: 'transient',
+            error: { code: 'ETIMEDOUT', message: '连接 GitHub 拉取仓库超时' },
+            createdAt: '2026-08-23T05:00:00.000Z',
+            startedAt: '2026-08-23T05:00:00.000Z',
+            finishedAt: '2026-08-23T05:00:30.000Z',
+        },
+    ],
+    scanResults: [
+        // 每条告警钉死 `createdAt`（取同条 `firstSeenAt`）：alerts 页「原始列表」视图按 `createdAt DESC`
+        // 排序，缺省（插入时刻）会让同批次插入落在同一毫秒形成排序并列 → 行序随数据库返回顺序漂移，
+        // 视觉基线（alerts 运行抽屉浮层的背景表格）逐次抖动。firstSeenAt 已钉死且互不相同，取同值即稳定。
+        // run 0 / web-app：lodash 三档 source（dependabot / code-scanning / code-quality），统一 high
+        {
+            scanRunIndex: 0,
+            upstreamId: 'dependabot:lodash-001',
+            source: 'dependabot',
+            severity: 'high',
+            packageName: 'lodash',
+            manifestPath: 'package.json',
+            ruleId: null,
+            summary: 'prototype pollution',
+            fixable: true,
+            fixStrategy: 'upgrade',
+            recommendedVersion: '4.18.0',
+            fixStatus: 'success',
+            occurrenceCount: 2,
+            createdAt: '2026-08-01T02:00:00.000Z',
+            firstSeenAt: '2026-08-01T02:00:00.000Z',
+            lastSeenAt: '2026-08-20T02:00:00.000Z',
+        },
+        {
+            scanRunIndex: 0,
+            upstreamId: 'code-scanning:lodash-001',
+            source: 'code-scanning',
+            severity: 'high',
+            packageName: 'lodash',
+            manifestPath: 'src/utils/sanitize.ts',
+            ruleId: 'js/incomplete-sanitization',
+            summary: 'incomplete sanitization',
+            fixable: false,
+            fixStrategy: 'manual',
+            fixStatus: 'failed',
+            occurrenceCount: 1,
+            createdAt: '2026-08-02T02:00:00.000Z',
+            firstSeenAt: '2026-08-02T02:00:00.000Z',
+            lastSeenAt: '2026-08-21T02:00:00.000Z',
+        },
+        {
+            scanRunIndex: 0,
+            upstreamId: 'code-quality:lodash-001',
+            source: 'code-quality',
+            severity: 'high',
+            packageName: 'lodash',
+            manifestPath: 'src/utils/lodash-helper.ts',
+            ruleId: 'typescript:S1854',
+            summary: 'useless assignment',
+            fixable: false,
+            fixStrategy: null,
+            fixStatus: 'pending',
+            occurrenceCount: 3,
+            createdAt: '2026-08-03T02:00:00.000Z',
+            firstSeenAt: '2026-08-03T02:00:00.000Z',
+            lastSeenAt: '2026-08-22T02:00:00.000Z',
+        },
+        // run 0 / web-app：node-fetch（medium，覆盖 medium 档标签与 converged 状态）
+        {
+            scanRunIndex: 0,
+            upstreamId: 'dependabot:node-fetch-001',
+            source: 'dependabot',
+            severity: 'medium',
+            packageName: 'node-fetch',
+            manifestPath: 'package.json',
+            ruleId: null,
+            summary: 'SSRF',
+            fixable: true,
+            fixStrategy: 'lock',
+            fixStatus: 'converged',
+            occurrenceCount: 1,
+            createdAt: '2026-08-04T02:00:00.000Z',
+            firstSeenAt: '2026-08-04T02:00:00.000Z',
+            lastSeenAt: '2026-08-23T02:00:00.000Z',
+        },
+        // run 1 / api-gateway：axios 两条（critical）
+        {
+            scanRunIndex: 1,
+            upstreamId: 'pnpm-audit:axios-001',
+            source: 'pnpm-audit',
+            severity: 'critical',
+            packageName: 'axios',
+            manifestPath: 'package.json',
+            ruleId: null,
+            summary: 'CVE-2026-0001',
+            fixable: true,
+            fixStrategy: 'upgrade',
+            recommendedVersion: '1.7.5',
+            fixStatus: 'pending',
+            occurrenceCount: 1,
+            createdAt: '2026-08-05T02:00:00.000Z',
+            firstSeenAt: '2026-08-05T02:00:00.000Z',
+            lastSeenAt: '2026-08-24T02:00:00.000Z',
+        },
+        {
+            scanRunIndex: 1,
+            upstreamId: 'dependabot:axios-001',
+            source: 'dependabot',
+            severity: 'critical',
+            packageName: 'axios',
+            manifestPath: 'package.json',
+            ruleId: null,
+            summary: 'SSRF',
+            fixable: true,
+            fixStrategy: 'upgrade',
+            recommendedVersion: '1.7.5',
+            fixStatus: 'success',
+            occurrenceCount: 4,
+            createdAt: '2026-08-06T02:00:00.000Z',
+            firstSeenAt: '2026-08-06T02:00:00.000Z',
+            lastSeenAt: '2026-08-25T02:00:00.000Z',
+        },
+        // run 2 / unlabeled-tool：minimist（low + not-tried）
+        {
+            scanRunIndex: 2,
+            upstreamId: 'pnpm-audit:minimist-001',
+            source: 'pnpm-audit',
+            severity: 'low',
+            packageName: 'minimist',
+            manifestPath: 'package.json',
+            ruleId: null,
+            summary: 'prototype pollution',
+            fixable: true,
+            fixStrategy: 'wait-upstream',
+            fixStatus: 'not-tried',
+            occurrenceCount: 1,
+            createdAt: '2026-08-07T02:00:00.000Z',
+            firstSeenAt: '2026-08-07T02:00:00.000Z',
+            lastSeenAt: '2026-08-26T02:00:00.000Z',
+        },
+        // run 0 / web-app：nodemailer 跨档（high + medium）——锁定「一个包一组」契约
+        {
+            scanRunIndex: 0,
+            upstreamId: 'dependabot:nodemailer-001',
+            source: 'dependabot',
+            severity: 'high',
+            packageName: 'nodemailer',
+            manifestPath: 'package.json',
+            ruleId: null,
+            summary: 'SMTP command injection',
+            fixable: true,
+            fixStrategy: 'upgrade',
+            recommendedVersion: '6.9.9',
+            fixStatus: 'pending',
+            occurrenceCount: 1,
+            createdAt: '2026-08-08T02:00:00.000Z',
+            firstSeenAt: '2026-08-08T02:00:00.000Z',
+            lastSeenAt: '2026-08-27T02:00:00.000Z',
+        },
+        {
+            scanRunIndex: 0,
+            upstreamId: 'pnpm-audit:nodemailer-001',
+            source: 'pnpm-audit',
+            severity: 'medium',
+            packageName: 'nodemailer',
+            manifestPath: 'package.json',
+            ruleId: null,
+            summary: 'CVE-2026-0002',
+            fixable: true,
+            fixStrategy: 'upgrade',
+            recommendedVersion: '6.9.9',
+            fixStatus: 'not-tried',
+            occurrenceCount: 1,
+            createdAt: '2026-08-09T02:00:00.000Z',
+            firstSeenAt: '2026-08-09T02:00:00.000Z',
+            lastSeenAt: '2026-08-28T02:00:00.000Z',
+        },
+    ],
+    /**
+     * pr-checks 页行级基线：5 行覆盖「结论标签四档色」+「Alert 状态三态」+ ack 按钮。
+     *
+     * - #101 `failure` + firing → 结论 danger 标签 + 「仅 firing」danger 标签 + ack 按钮
+     * - #102 `timed_out` + 已 ack（`acknowledgedAt` 非空）→ 结论 danger + 「仅已 ack」neutral 标签
+     * - #103 `success` → 结论 success 标签 + 「OK」success 标签
+     * - #104 `pending` → 结论 warning 标签 + 「OK」success 标签
+     * - #105 `cancelled` → 结论 primary 标签（补齐 `conclusionTagTone` 的第四档）+ 「OK」success 标签
+     *
+     * 标签色来源务必区分：结论列四档 = danger / success / warning / primary；Alert 状态列三态
+     * = danger（firing）/ neutral（已 ack）/ success（OK）——`neutral` 只出现在状态列。
+     *
+     * `lastPolledAt` 显式钉死（页面默认按该列降序）：时间列渲染走 `Date#toLocaleString()`，
+     * 而视觉环境已在 `playwright.visual.config.ts` 固定 `locale: zh-CN` + `timezoneId: Asia/Shanghai`，
+     * 故无需 `data-visual-mask` 遮蔽即可逐像素可复现（决策依据见 todo.md §M33.4）。
+     */
+    prChecks: [
+        {
+            repositoryOwner: 'acme',
+            repositoryName: 'web-app',
+            prNumber: 101,
+            headSha: '1111111111111111111111111111111111111111',
+            authorLogin: 'dependfix[bot]',
+            conclusion: 'failure',
+            checkRunId: '900000101',
+            detailsUrl: 'https://github.com/acme/web-app/pull/101',
+            errorMessage: 'Test workflow failed on shard 2',
+            alertFiring: true,
+            lastPolledAt: '2026-08-28T02:00:00.000Z',
+            overallStatus: 'failure',
+            signals: [
+                {
+                    kind: 'check',
+                    provider: 'github-actions',
+                    name: 'Test',
+                    state: 'failure',
+                    rawState: 'failure',
+                    sourceId: '900000101',
+                    targetUrl: 'https://github.com/acme/web-app/runs/900000101',
+                    summary: 'Test workflow failed on shard 2',
+                },
+                {
+                    kind: 'deployment',
+                    provider: 'vercel',
+                    name: 'Preview',
+                    state: 'failure',
+                    rawState: 'failure',
+                    sourceId: '500000101',
+                    targetUrl: 'https://web-app-git-preview.vercel.app',
+                    logUrl: 'https://vercel.com/acme/web-app/logs',
+                    summary: 'Deployment failed',
+                },
+            ],
+        },
+        {
+            repositoryOwner: 'acme',
+            repositoryName: 'web-app',
+            prNumber: 102,
+            headSha: '2222222222222222222222222222222222222222',
+            authorLogin: 'dependabot[bot]',
+            conclusion: 'timed_out',
+            checkRunId: '900000102',
+            detailsUrl: 'https://github.com/acme/web-app/pull/102',
+            errorMessage: 'Timed out after 60 minutes',
+            alertFiring: false,
+            acknowledgedAt: '2026-08-27T03:00:00.000Z',
+            lastPolledAt: '2026-08-27T02:00:00.000Z',
+        },
+        {
+            repositoryOwner: 'acme',
+            repositoryName: 'web-app',
+            prNumber: 103,
+            headSha: '3333333333333333333333333333333333333333',
+            authorLogin: 'dependfix[bot]',
+            conclusion: 'success',
+            checkRunId: '900000103',
+            detailsUrl: 'https://github.com/acme/web-app/pull/103',
+            lastPolledAt: '2026-08-26T02:00:00.000Z',
+            overallStatus: 'success',
+            signals: [
+                {
+                    kind: 'check',
+                    provider: 'github-actions',
+                    name: 'Test',
+                    state: 'success',
+                    rawState: 'success',
+                    sourceId: '900000103',
+                    targetUrl: 'https://github.com/acme/web-app/runs/900000103',
+                },
+            ],
+        },
+        {
+            repositoryOwner: 'acme',
+            repositoryName: 'web-app',
+            prNumber: 104,
+            headSha: '4444444444444444444444444444444444444444',
+            authorLogin: 'dependfix[bot]',
+            conclusion: 'pending',
+            checkRunId: '900000104',
+            detailsUrl: 'https://github.com/acme/web-app/pull/104',
+            lastPolledAt: '2026-08-25T02:00:00.000Z',
+        },
+        {
+            repositoryOwner: 'acme',
+            repositoryName: 'web-app',
+            prNumber: 105,
+            headSha: '5555555555555555555555555555555555555555',
+            authorLogin: 'dependfix[bot]',
+            conclusion: 'cancelled',
+            checkRunId: '900000105',
+            detailsUrl: 'https://github.com/acme/web-app/pull/105',
+            lastPolledAt: '2026-08-24T02:00:00.000Z',
+        },
+    ],
+}
+
+/**
+ * 重置视觉回归数据集：先按 owner/name 级联清理（幂等），再注入。
+ *
+ * 清理是**逐像素可复现**的前提：`scanRuns` 每次注入都是新记录，
+ * 不清理会让分组行数 / 扫描历史随运行次数漂移。
+ * 复用 e2e 的 `seedCustomFixtures`（同一 fixtures 端点与重试口径），仅数据集不同。
+ */
+export async function resetVisualFixtures(request: APIRequestContext): Promise<void> {
+    const deleteResponse = await request.delete('/api/e2e/fixtures', {
+        data: { repos: VISUAL_FIXTURES.repos.map(({ owner, name }) => ({ owner, name })) },
+        maxRetries: 2,
+    })
+    if (!deleteResponse.ok()) {
+        const body = await deleteResponse.text().catch(() => '')
+        throw new Error(
+            `[visual fixtures] DELETE /api/e2e/fixtures failed: ${deleteResponse.status()} ${deleteResponse.statusText()}${body ? ` body=${body}` : ''}`,
+        )
+    }
+    await seedCustomFixtures(request, VISUAL_FIXTURES)
+}

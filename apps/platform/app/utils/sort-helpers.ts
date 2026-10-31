@@ -1,7 +1,7 @@
 /**
  * 表格排序辅助工具：枚举字段业务语义排序键 + map helper。
  *
- * 背景：PrimeVue DataTable `<Column sortable field="x">` 默认按字段值字符串字典序比较；
+ * 背景：迁移前的 DataTable `<Column sortable field="x">` 默认按字段值字符串字典序比较；
  * 但 severity / status / role / fixStatus 等枚举字段按字典序排序不符合用户直觉
  * （如字典序会把 unknown 排第一，但用户期望 critical 排第一）。
  *
@@ -30,7 +30,7 @@ export const STATUS_RANK: Record<string, number> = {
 }
 
 /** 单次运行（runs.vue）排序键：覆盖 pending / dispatched / running / completed / failed 全集。
- * RG-W03 修复：runs.vue 状态全集比 batch-runs 多（pending/dispatched），共享 STATUS_RANK 会
+ * runs.vue 状态全集比 batch-runs 多（pending/dispatched），共享 STATUS_RANK 会
  * 让 runs 页面 pending 落到 0、与其他状态无序。独立常量确保业务语义。 */
 export const RUN_STATUS_RANK: Record<string, number> = {
     pending: 0,
@@ -117,7 +117,7 @@ export function withEnvEventSeverityRank<T extends { severity: string }>(items: 
 
 /**
  * 更新单个对象的 status + _statusRank（用于 fetchDetail 等运行时状态变更路径）。
- * RG-B07 修复：batch-runs 详情同步 status 时必须同步派生 _statusRank，否则 DataTable
+ * batch-runs 详情同步 status 时必须同步派生 _statusRank，否则 DataTable
  * sortable 排序引用陈旧 rank 导致业务语义错位。
  */
 export function updateStatusRank<T extends { status: string }>(item: T & { _statusRank?: number }, status: string): T & { _statusRank: number } {
@@ -137,7 +137,7 @@ export function updateRunStatusRank<T extends { status: string }>(item: T & { _s
 
 /**
  * 更新单个对象的 role + _roleRank（用于 setRole 等运行时角色变更路径）。
- * RG-B07 修复：users.vue setRole 修改 user.role 时必须同步派生 _roleRank。
+ * users.vue setRole 修改 user.role 时必须同步派生 _roleRank。
  */
 export function updateRoleRank<T extends { role: string | null | undefined }>(item: T & { _roleRank?: number }, role: string | null): T & { _roleRank: number } {
     item.role = role

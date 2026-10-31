@@ -5,6 +5,9 @@ import { ensureDatabaseInitialized } from '#server/database'
 import { requireAuth, requireRole, requireOrgResource } from '#server/utils/guard'
 import { createLocalizedError } from '#server/utils/localized-error'
 import { EMPTY_BATCH_SUMMARY } from '#server/services/batch/batch-aggregate'
+import { getQueueService } from '#server/services/queue/queue.service'
+import { releaseOrphanQueueJobs } from '#server/services/queue/orphan-job-release'
+import { applyFailureClassification } from '#server/services/run-failure-classify'
 
 /**
  * POST /api/batch-runs/[id]/force-fail：手动强制结束批量运行。
@@ -44,6 +47,8 @@ export default defineEventHandler(async (event) => {
             alreadyTerminated: true,
             status: batchRun.status,
             finishedAt: batchRun.finishedAt,
+            // 已终态批次不触碰队列；与主路径的 null 语义对齐
+            queueReleased: null,
         }
     }
 
@@ -59,10 +64,12 @@ export default defineEventHandler(async (event) => {
     for (const run of staleRuns) {
         run.status = 'failed'
         run.finishedAt = now
-        run.errorJson = JSON.stringify({
+        const forceFailure = {
             code: 'force_failed',
             message: 'admin 手动强制结束',
-        })
+        }
+        run.errorJson = JSON.stringify(forceFailure)
+        applyFailureClassification(run, { status: 'failed', error: forceFailure })
     }
     if (staleRuns.length > 0) {
         await scanRepo.save(staleRuns)
@@ -76,11 +83,30 @@ export default defineEventHandler(async (event) => {
     }
     await batchRepo.save(batchRun)
 
+    // 同步释放队列去重键：只改 DB 不释放 job 时，新触发仍会被 SCAN_PENDING_MERGED 合并
+    // （手动"强制完成"后仍无法重新执行的实测根因）。队列不可用 / 同步模式仅记录告警，不阻断。
+    let queueReleased: { removed: number, skipped: number } | null = null
+    if (staleRuns.length > 0) {
+        try {
+            const queueService = await getQueueService()
+            if (queueService.mode === 'async' && queueService.queue) {
+                queueReleased = await releaseOrphanQueueJobs(
+                    queueService.queue,
+                    staleRuns.map((run) => ({ repositoryId: run.repositoryId, runId: run.id })),
+                )
+            }
+        } catch (error) {
+            console.warn(`[batch-runs] force-fail 释放队列 job 失败（不影响批次终态）:`, error)
+        }
+    }
+
     return {
         batchRunId: batchRun.id,
         scanRunsFailed: staleRuns.length,
         alreadyTerminated: false,
         status: 'failed',
         finishedAt: batchRun.finishedAt,
+        // null = 同步模式 / 队列不可用 / 无待释放 run；否则为实际释放统计
+        queueReleased,
     }
 })

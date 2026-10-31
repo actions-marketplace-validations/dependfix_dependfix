@@ -3,15 +3,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getQueueService } from './queue.service'
 
 // 外部依赖 mock（真实 Redis/BullMQ 不可控）
-const { createRedisClient, probeRedis, createScanQueue, createScanWorker } = vi.hoisted(() => ({
+const { createRedisClient, probeRedis, createScanQueue, createScanWorker, logWarnMock } = vi.hoisted(() => ({
     createRedisClient: vi.fn(),
     probeRedis: vi.fn(),
     createScanQueue: vi.fn(),
     createScanWorker: vi.fn(),
+    logWarnMock: vi.fn(),
 }))
 vi.mock('./redis', () => ({ createRedisClient, probeRedis }))
 vi.mock('./scan-queue', () => ({ createScanQueue }))
 vi.mock('./scan-worker', () => ({ createScanWorker }))
+vi.mock('#server/utils/logger', () => ({
+    logger: { debug: vi.fn(), info: vi.fn(), warn: logWarnMock, error: vi.fn() },
+}))
 
 const QUEUE_GLOBAL_KEY = '__dependfix_queue_service__'
 
@@ -37,7 +41,7 @@ describe('getQueueService', () => {
         resetSingleton()
         vi.clearAllMocks()
         createRedisClient.mockReturnValue({ disconnect: vi.fn() })
-        createScanQueue.mockReturnValue({ close: vi.fn(), add: vi.fn() })
+        createScanQueue.mockReturnValue({ close: vi.fn(), add: vi.fn(), getJob: vi.fn() })
         createScanWorker.mockReturnValue({ close: vi.fn() })
     })
 
@@ -68,7 +72,7 @@ describe('getQueueService', () => {
     it('warns about failover when QUEUE_ENABLED=true but Redis is down', async () => {
         stubConfig({ queueEnabled: 'true' })
         probeRedis.mockResolvedValue({ available: false, reason: 'unreachable', version: null })
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+        const warnSpy = logWarnMock
         const service = await getQueueService()
         expect(service.mode).toBe('sync')
         expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('QUEUE_ENABLED=true'))
@@ -77,20 +81,39 @@ describe('getQueueService', () => {
     it('warns when Redis version is too old for BullMQ (>= 5.0)', async () => {
         stubConfig({ queueEnabled: 'auto' })
         probeRedis.mockResolvedValue({ available: false, reason: 'version_too_old', version: '3.0.0' })
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+        const warnSpy = logWarnMock
         const service = await getQueueService()
         expect(service.mode).toBe('sync')
         expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Redis 版本 3.0.0 低于 BullMQ'))
     })
 
-    it('creates async queue without worker when in-process worker disabled', async () => {
-        stubConfig({ queueEnabled: 'auto' })
+    it('degrades to sync (with warn) when auto mode has no in-process worker', async () => {
+        stubConfig({ queueEnabled: 'auto', inProcessWorker: false })
         probeRedis.mockResolvedValue({ available: true, reason: null, version: '7.4.1' })
+        const warnSpy = logWarnMock
+        const service = await getQueueService()
+        expect(service.mode).toBe('sync')
+        expect(service.queue).toBeNull()
+        expect(createScanQueue).not.toHaveBeenCalled()
+        expect(createScanWorker).not.toHaveBeenCalled()
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('自动模式降级同步'))
+        // 降级提示须指向两条可用路径（单进程 in-process / 容器独立 worker 进程）
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('未启用独立 worker 进程'))
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('DEPENDFIX_QUEUE_WORKER=1'))
+    })
+
+    it('keeps async (with warn) when QUEUE_ENABLED=true forces async without in-process worker', async () => {
+        stubConfig({ queueEnabled: 'true', inProcessWorker: false })
+        probeRedis.mockResolvedValue({ available: true, reason: null, version: '7.4.1' })
+        const warnSpy = logWarnMock
         const service = await getQueueService()
         expect(service.mode).toBe('async')
         expect(service.queue).not.toBeNull()
-        expect(createScanQueue).toHaveBeenCalledWith(expect.anything(), { retriesRaw: undefined, backoffMsRaw: undefined })
+        expect(createScanQueue).toHaveBeenCalled()
         expect(createScanWorker).not.toHaveBeenCalled()
+        // 独立 worker 进程形态（DEPENDFIX_QUEUE_WORKER=1）下本进程为纯 producer，warn 指引该开关
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('强制异步但本进程不消费队列'))
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('DEPENDFIX_QUEUE_WORKER=1'))
     })
 
     it('starts in-process worker when IN_PROCESS_WORKER=true', async () => {
@@ -99,6 +122,9 @@ describe('getQueueService', () => {
         const service = await getQueueService()
         expect(service.mode).toBe('async')
         expect(createScanWorker).toHaveBeenCalledOnce()
+        // 注入 queue.getJob 供事件观测补全 runId（BullMQ Worker 不暴露 getJob）
+        const injected = createScanWorker.mock.calls[0]?.[1] as { getJob?: unknown } | undefined
+        expect(typeof injected?.getJob).toBe('function')
     })
 
     it('close cleans up queue, worker and connections', async () => {

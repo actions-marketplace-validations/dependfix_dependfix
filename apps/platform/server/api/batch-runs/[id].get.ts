@@ -5,13 +5,15 @@ import { ScanResult } from '#server/entities/scan-result'
 import { ensureDatabaseInitialized } from '#server/database'
 import { requireAuth, requireOrgResource } from '#server/utils/guard'
 import { createLocalizedError } from '#server/utils/localized-error'
-import { aggregateScanRuns, shouldWriteBackStatus } from '#server/services/batch/batch-aggregate'
+import { aggregateScanRuns, isUndecidedZeroChildRunning } from '#server/services/batch/batch-aggregate'
+import { persistBatchAggregation } from '#server/services/batch/batch-writeback'
+import { notifyBatchTerminal } from '#server/services/notification/batch-notification.service'
 
 /**
  * GET /api/batch-runs/[id]：批量运行详情（含聚合统计 + 下属 ScanRun 列表）。
- * 聚合更新策略（设计 §5.2 方案 A 轮询更新）：查询下属 ScanRun 实时聚合统计并写回 BatchRun
- * （状态/计数/summary/finishedAt；状态流转 running → completed 时落 finishedAt），
- * 前端轮询本端点即触发进度收敛——不引入 Worker 回调机制。
+ * 聚合更新策略（设计 §5.2）：查询下属 ScanRun 实时聚合统计并写回 BatchRun
+ * （状态/计数/summary/finishedAt；状态流转 running → completed 时落 finishedAt = max(子项 finishedAt)），
+ * 用户查看时即时收敛；未被查看的批次由周期兜底对账（batch-reconciler.ts）收敛。
  */
 export default defineEventHandler(async (event) => {
     await requireAuth(event)
@@ -23,7 +25,7 @@ export default defineEventHandler(async (event) => {
 
     const ds = await ensureDatabaseInitialized()
     const batchRepo = ds.getRepository(BatchRun)
-    const batchRun = await batchRepo.findOne({ where: { id } })
+    let batchRun = await batchRepo.findOne({ where: { id } })
     if (!batchRun) {
         throw createLocalizedError(event, { statusCode: 404, code: 'BATCH_RUN_NOT_FOUND' })
     }
@@ -38,32 +40,32 @@ export default defineEventHandler(async (event) => {
         ? await ds.getRepository(ScanResult).find({ where: { scanRunId: In(runs.map((r) => r.id)) } })
         : []
 
-    // 实时聚合 → 写回（轮询更新策略：仅值变化时落库，避免无谓写放大）
+    // 实时聚合 → 条件写回（用户查看时收敛；周期兜底见 batch-reconciler.ts，两者共用 persistBatchAggregation）
     // failed 终态保护：failed 是 executor 显式落库的终态（async 全部入队失败，无下属 run），
-    // 聚合只产出 completed/running——用 shouldWriteBackStatus 判定流转，failed 保持 executor 终态
+    // 条件写回以「读取时状态」为乐观锁——并发 admin force-fail 抢先时跳过，不覆盖 failed。
+    // 未落库（含「无字段变化」）一律重读库中状态，保证响应与库一致（含瞬时窗口）。
     const aggregation = aggregateScanRuns(runs, results)
-    const statusWriteBack = shouldWriteBackStatus(batchRun.status, aggregation.status)
-    if (statusWriteBack
-        || aggregation.finishedCount !== batchRun.finishedCount
-        || aggregation.completedCount !== batchRun.completedCount
-        || aggregation.failedCount !== batchRun.failedCount
-        || aggregation.pendingCount !== batchRun.pendingCount) {
-        if (statusWriteBack) {
-            batchRun.status = aggregation.status
-        }
-        batchRun.finishedCount = aggregation.finishedCount
-        batchRun.completedCount = aggregation.completedCount
-        batchRun.failedCount = aggregation.failedCount
-        batchRun.pendingCount = aggregation.pendingCount
-        batchRun.summaryJson = JSON.stringify(aggregation.summary)
-        if (aggregation.status === 'completed' && !batchRun.finishedAt) {
-            batchRun.finishedAt = new Date()
-        }
-        await batchRepo.save(batchRun)
+    const { persisted } = await persistBatchAggregation(batchRepo, batchRun, aggregation, runs)
+    if (persisted && batchRun.status !== 'running') {
+        void notifyBatchTerminal(batchRun).catch((notifyError) => {
+            console.error('[notification] batch terminal notify failed:', notifyError)
+        })
+    }
+    if (!persisted) {
+        // 未落库（无字段变化，或条件写回被并发终态保护性跳过）：以库中实际状态为准。
+        // 否则「无字段变化 + 并发 force-fail」下响应会停留在读取时的旧状态（库已 failed，响应仍 running）
+        batchRun = await batchRepo.findOne({ where: { id } }) ?? batchRun
     }
 
-    // 对外状态：failed 终态取存储值（聚合无法表达）；其余取实时聚合值
-    const effectiveStatus = batchRun.status === 'failed' ? 'failed' : aggregation.status
+    // 对外状态：failed 终态取存储值（聚合无法表达）；「零子项 + running」是终态未定
+    // （async 正在建子项窗口 / 孤儿），保持 running 交由周期对账按阈值处理；其余取实时聚合值
+    let effectiveStatus: string = aggregation.status
+    if (isUndecidedZeroChildRunning(batchRun.status, runs.length)) {
+        effectiveStatus = 'running'
+    }
+    if (batchRun.status === 'failed') {
+        effectiveStatus = 'failed'
+    }
 
     return {
         id: batchRun.id,

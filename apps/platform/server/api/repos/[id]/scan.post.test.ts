@@ -89,7 +89,7 @@ describe('POST /api/repos/[id]/scan', () => {
     it('runs scan synchronously when queue is in sync mode', async () => {
         const result = await call({ mode: 'fix', severityThreshold: 'high' }, { id: repositoryId }) as Record<string, unknown>
         expect(result).toMatchObject({ id: 'run-1', status: 'completed', summary: { alertsTotal: 2 } })
-        expect(runScanForRepository).toHaveBeenCalledWith(repositoryId, { mode: 'fix', severityThreshold: 'high' })
+        expect(runScanForRepository).toHaveBeenCalledWith(repositoryId, { mode: 'fix', severityThreshold: 'high' }, { triggeredByUserId: 'u1' })
         expect(createPendingScanRun).not.toHaveBeenCalled()
     })
 
@@ -104,7 +104,7 @@ describe('POST /api/repos/[id]/scan', () => {
 
         const result = await call({ mode: 'fix', severityThreshold: 'high' }, { id: repositoryId }) as Record<string, unknown>
         expect(result).toMatchObject({ id: 'pending-1', status: 'pending' })
-        expect(createPendingScanRun).toHaveBeenCalledWith(repositoryId, { mode: 'fix', severityThreshold: 'high' })
+        expect(createPendingScanRun).toHaveBeenCalledWith(repositoryId, { mode: 'fix', severityThreshold: 'high' }, { triggeredByUserId: 'u1' })
         expect(queue.add).toHaveBeenCalledWith(repositoryId, { mode: 'fix', severityThreshold: 'high' }, expect.objectContaining({ priority: 1 }))
     })
 
@@ -125,6 +125,12 @@ describe('POST /api/repos/[id]/scan', () => {
         const result = await call({ mode: 'fix', severityThreshold: 'high' }, { id: repositoryId }) as Record<string, unknown>
         expect(result).toMatchObject({ id: 'pending-2', status: 'failed' })
         expect(result.error).toMatchObject({ code: 'SCAN_PENDING_MERGED' })
+        // 新建路径的「已合并」提示同时以顶层字段暴露（与复用路径同源，前端可直接消费）
+        expect(result.merged).toMatchObject({ code: 'SCAN_PENDING_MERGED' })
+        // 落库的失败分类（去重合并 → runtime + deterministic）
+        const persisted = await ds.getRepository(ScanRun).findOne({ where: { id: 'pending-2' } })
+        expect(persisted?.failureStage).toBe('runtime')
+        expect(persisted?.failureKind).toBe('deterministic')
     })
 
     it('fails over to synchronous execution when queue add throws', async () => {
@@ -138,7 +144,48 @@ describe('POST /api/repos/[id]/scan', () => {
 
         const result = await call({ mode: 'fix', severityThreshold: 'high' }, { id: repositoryId }) as Record<string, unknown>
         expect(result).toMatchObject({ id: 'run-1', status: 'completed' })
-        expect(runScanForRepository).toHaveBeenCalledWith(repositoryId, { mode: 'fix', severityThreshold: 'high' }, { runId: 'pending-3' })
+        expect(runScanForRepository).toHaveBeenCalledWith(
+            repositoryId,
+            { mode: 'fix', severityThreshold: 'high' },
+            { runId: 'pending-3', reuse: false, triggeredByUserId: 'u1' },
+        )
+    })
+
+    /**
+     * 入队失败 failover 降级路径须透传 reuse（与入队成功路径 / 同步路径同源）。
+     * 场景：复用「终态 run」（入队前校验允许 status != running）+ `queue.add` 抛错 → 降级同步执行。
+     * 若未透传 reuse，orchestrator 的终态校验会抛「已处于终态」（该 message 会被上游转 409），
+     * 与同步路径 / 入队成功路径语义不一致。本用例锁定三条路径同源透传。
+     */
+    it('fails over with reuse flag when queue add throws on a reused terminal run', async () => {
+        const ds = await ensureDatabaseInitialized()
+        const existing = await ds.getRepository(ScanRun).save(ds.getRepository(ScanRun).create({
+            repositoryId,
+            mode: 'report-only',
+            severityThreshold: 'high',
+            executorKind: 'container',
+            status: 'completed',
+            summaryJson: JSON.stringify({ alertsFound: 1, alertsFixed: 0 }),
+        }))
+        const queue = { add: vi.fn().mockRejectedValue(new Error('queue down')) }
+        getQueueService.mockResolvedValue({ mode: 'async', queue })
+        runScanForRepository.mockResolvedValue(mockRun({ id: existing.id, status: 'completed' }))
+
+        const result = await call({
+            mode: 'fix',
+            severityThreshold: 'high',
+            reuseScanRunId: existing.id,
+        }, { id: repositoryId }) as Record<string, unknown>
+
+        expect(result).toMatchObject({ id: existing.id, status: 'completed' })
+        // 关键断言：降级路径透传 reuse=true（与入队成功路径 queue.add 的 reuse 取值同源）
+        expect(runScanForRepository).toHaveBeenCalledWith(
+            repositoryId,
+            { mode: 'fix', severityThreshold: 'high', reuseScanRunId: existing.id },
+            { runId: existing.id, reuse: true, triggeredByUserId: 'u1' },
+        )
+        // 复用路径不新建 pending run
+        expect(createPendingScanRun).not.toHaveBeenCalled()
     })
 
     /**
@@ -172,7 +219,7 @@ describe('POST /api/repos/[id]/scan', () => {
         expect(runScanForRepository).toHaveBeenCalledWith(
             repositoryId,
             { mode: 'fix', severityThreshold: 'high', reuseScanRunId: existing.id },
-            { runId: existing.id, reuse: true },
+            { runId: existing.id, reuse: true, triggeredByUserId: 'u1' },
         )
         expect(createPendingScanRun).not.toHaveBeenCalled()
     })
@@ -205,6 +252,50 @@ describe('POST /api/repos/[id]/scan', () => {
         )
         // 不应新建 pending run
         expect(createPendingScanRun).not.toHaveBeenCalled()
+    })
+
+    /**
+     * 复用既有终态 run + `queue.add` 命中同仓库去重合并（`reused: true`）叠加时，
+     * **既有 run 记录必须保持不变**（用户指定的历史结果不得被推翻、不得落 failed），
+     * 仅回应「已合并」提示——该组合曾把 reuseScanRunId 指向的 run 置 failed。
+     */
+    it('keeps the reused run untouched when the queue dedupes', async () => {
+        const ds = await ensureDatabaseInitialized()
+        const summary = JSON.stringify({ alertsFound: 3, alertsFixed: 0 })
+        const existing = await ds.getRepository(ScanRun).save(ds.getRepository(ScanRun).create({
+            repositoryId,
+            mode: 'report-only',
+            severityThreshold: 'high',
+            executorKind: 'container',
+            status: 'completed',
+            finishedAt: new Date('2026-10-01T00:00:00.000Z'),
+            summaryJson: summary,
+        }))
+        const queue = { add: vi.fn().mockResolvedValue({ reused: true }) }
+        getQueueService.mockResolvedValue({ mode: 'async', queue })
+
+        const result = await call({
+            mode: 'fix',
+            severityThreshold: 'high',
+            reuseScanRunId: existing.id,
+        }, { id: repositoryId }) as Record<string, unknown>
+
+        // 响应：仍指向既有 run、原终态保持、携带「已合并」提示；不新建 pending run
+        expect(result).toMatchObject({ id: existing.id, status: 'completed' })
+        expect(result.merged).toMatchObject({ code: 'SCAN_PENDING_MERGED' })
+        expect(createPendingScanRun).not.toHaveBeenCalled()
+        expect(queue.add).toHaveBeenCalledWith(
+            repositoryId,
+            expect.objectContaining({ reuseScanRunId: existing.id }),
+            expect.objectContaining({ runId: existing.id, reuse: true }),
+        )
+
+        // 落库记录未被改动（状态 / 摘要 / finishedAt / error 均原样）
+        const persisted = await ds.getRepository(ScanRun).findOne({ where: { id: existing.id } })
+        expect(persisted?.status).toBe('completed')
+        expect(persisted?.summaryJson).toBe(summary)
+        expect(persisted?.errorJson ?? null).toBeNull()
+        expect(persisted?.finishedAt?.toISOString()).toBe('2026-10-01T00:00:00.000Z')
     })
 
     it('rejects reuseScanRunId with 404 when run does not exist', async () => {

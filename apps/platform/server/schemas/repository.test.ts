@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { repositorySchema, repositoryUpdateSchema } from './repository'
-import { parseSandboxLimits } from '#server/entities/repository'
+import { repositorySchema, repositoryUpdateSchema, SANDBOX_EXECUTOR_DISABLED_MESSAGE } from './repository'
+import { parseSandboxLimits, parseTags, parseVerifyCommands } from '#server/entities/repository'
 
 describe('repository schemas', () => {
     it('创建：owner/name 必填，默认值生效', () => {
@@ -35,7 +35,25 @@ describe('repository schemas', () => {
         expect(repositoryUpdateSchema.safeParse({ actionWorkflowFile: 'ci.yml' }).success).toBe(true)
     })
 
-    describe('sandboxLimits（M11 T1005-B 沙箱资源限额覆盖）', () => {
+    it('创建：sandbox 执行器已临时关闭 → fail', () => {
+        const bad = repositorySchema.safeParse({ owner: 'a', name: 'b', executorKind: 'sandbox' })
+        expect(bad.success).toBe(false)
+        if (!bad.success) {
+            const issue = bad.error.issues.find((item) => item.path[0] === 'executorKind')
+            expect(issue?.message).toBe(SANDBOX_EXECUTOR_DISABLED_MESSAGE)
+        }
+    })
+
+    it('更新：sandbox 执行器已临时关闭 → fail（存量仓库走编排层降级）', () => {
+        const bad = repositoryUpdateSchema.safeParse({ executorKind: 'sandbox' })
+        expect(bad.success).toBe(false)
+        if (!bad.success) {
+            const issue = bad.error.issues.find((item) => item.path[0] === 'executorKind')
+            expect(issue?.message).toBe(SANDBOX_EXECUTOR_DISABLED_MESSAGE)
+        }
+    })
+
+    describe('sandboxLimits（沙箱资源限额覆盖）', () => {
         it('创建：sandboxLimits 缺省 → 默认 undefined（走平台 SANDBOX_DEFAULTS）', () => {
             const ok = repositorySchema.safeParse({ owner: 'a', name: 'b' })
             expect(ok.success).toBe(true)
@@ -126,9 +144,66 @@ describe('repository schemas', () => {
             const bad = repositoryUpdateSchema.safeParse({ sandboxLimits: { memoryMb: 100000 } })
             expect(bad.success).toBe(false)
         })
+
+        it('创建 / 更新：含未知键（如 gpu）→ fail（strict，避免「配了但静默不生效」）', () => {
+            const created = repositorySchema.safeParse({
+                owner: 'a',
+                name: 'b',
+                sandboxLimits: { memoryMb: 2048, gpu: 1 },
+            })
+            expect(created.success).toBe(false)
+            expect(!created.success && created.error.issues.some((issue) => issue.code === 'unrecognized_keys')).toBe(true)
+            expect(repositoryUpdateSchema.safeParse({ sandboxLimits: { cpu: 1, gpu: 1 } }).success).toBe(false)
+        })
     })
 
-    describe('parseSandboxLimits（实体辅助函数，M11 T1005-B）', () => {
+    describe('tags（仓库标签）', () => {
+        it('创建：逐项 trim 并去重（保序，重复项不占额度）', () => {
+            const ok = repositorySchema.safeParse({
+                owner: 'a',
+                name: 'b',
+                tags: [' frontend ', 'frontend', 'critical', 'critical'],
+            })
+            expect(ok.success).toBe(true)
+            expect(ok.success && ok.data.tags).toEqual(['frontend', 'critical'])
+        })
+
+        it('创建：去重后超过 20 个 → fail（重复项不计入容量）', () => {
+            const twentyUniqueWithDuplicates = [
+                ...Array.from({ length: 20 }, (_, i) => `tag-${i}`),
+                'tag-0',
+            ]
+            expect(repositorySchema.safeParse({ owner: 'a', name: 'b', tags: twentyUniqueWithDuplicates }).success).toBe(true)
+
+            const bad = repositorySchema.safeParse({
+                owner: 'a',
+                name: 'b',
+                tags: Array.from({ length: 21 }, (_, i) => `tag-${i}`),
+            })
+            expect(bad.success).toBe(false)
+        })
+
+        it('创建：空白项 / 超长标签 → fail', () => {
+            expect(repositorySchema.safeParse({ owner: 'a', name: 'b', tags: ['   '] }).success).toBe(false)
+            expect(repositorySchema.safeParse({ owner: 'a', name: 'b', tags: ['x'.repeat(51)] }).success).toBe(false)
+        })
+
+        it('更新：undefined = 不修改 / null 或 [] = 清空', () => {
+            expect(repositoryUpdateSchema.safeParse({}).success).toBe(true)
+            expect(repositoryUpdateSchema.safeParse({ tags: null }).success).toBe(true)
+            expect(repositoryUpdateSchema.safeParse({ tags: [] }).success).toBe(true)
+            expect(repositoryUpdateSchema.safeParse({ tags: ['prod'] }).success).toBe(true)
+        })
+
+        it('parseTags：与写入侧同源归一（trim + 去重）——存量脏数据读回即重写结果', () => {
+            expect(parseTags('[" prod ","prod","  ","critical"]')).toEqual(['prod', 'critical'])
+            expect(parseTags(null)).toEqual([])
+            expect(parseTags('not-json')).toEqual([])
+            expect(parseTags('{"a":1}')).toEqual([])
+        })
+    })
+
+    describe('parseSandboxLimits（实体辅助函数）', () => {
         it('null / undefined / 空串 → undefined（走平台 SANDBOX_DEFAULTS）', () => {
             expect(parseSandboxLimits(null)).toBeUndefined()
             expect(parseSandboxLimits(undefined)).toBeUndefined()
@@ -170,6 +245,167 @@ describe('repository schemas', () => {
 
         it('所有字段都无效 → undefined（避免返回空对象误导下游）', () => {
             expect(parseSandboxLimits('{"memoryMb":"x","cpu":"y"}')).toBeUndefined()
+        })
+    })
+
+    describe('verifyCommands（平台侧自定义验证命令）', () => {
+        it('创建：缺省 → undefined（走引擎默认验证链）', () => {
+            const ok = repositorySchema.safeParse({ owner: 'a', name: 'b' })
+            expect(ok.success).toBe(true)
+            expect(ok.success && ok.data.verifyCommands).toBeUndefined()
+        })
+
+        it('创建：命令数组 → success（逐项 trim）', () => {
+            const ok = repositorySchema.safeParse({
+                owner: 'a',
+                name: 'b',
+                verifyCommands: ['pnpm install --frozen-lockfile', '  pnpm test  '],
+            })
+            expect(ok.success).toBe(true)
+            expect(ok.success && ok.data.verifyCommands).toEqual(['pnpm install --frozen-lockfile', 'pnpm test'])
+        })
+
+        it('创建：null / 空数组 → success（清空语义，走默认链）', () => {
+            expect(repositorySchema.safeParse({ owner: 'a', name: 'b', verifyCommands: null }).success).toBe(true)
+            expect(repositorySchema.safeParse({ owner: 'a', name: 'b', verifyCommands: [] }).success).toBe(true)
+        })
+
+        it('创建：超过 20 条 → fail（容量上限）', () => {
+            const bad = repositorySchema.safeParse({
+                owner: 'a',
+                name: 'b',
+                verifyCommands: Array.from({ length: 21 }, (_, i) => `pnpm cmd${i}`),
+            })
+            expect(bad.success).toBe(false)
+        })
+
+        it('创建：含空白项 → fail（拒绝空命令，防误提交空行）', () => {
+            const bad = repositorySchema.safeParse({ owner: 'a', name: 'b', verifyCommands: ['pnpm lint', '   '] })
+            expect(bad.success).toBe(false)
+        })
+
+        it('创建：含换行 / 控制字符 → fail（保持「一项 = 一条命令行」不变量）', () => {
+            expect(repositorySchema.safeParse({ owner: 'a', name: 'b', verifyCommands: ['pnpm lint\nrm -rf /'] }).success).toBe(false)
+            expect(repositorySchema.safeParse({ owner: 'a', name: 'b', verifyCommands: ['pnpm\tlint'] }).success).toBe(false)
+        })
+
+        it('创建：单条超过 500 字符 → fail', () => {
+            const bad = repositorySchema.safeParse({ owner: 'a', name: 'b', verifyCommands: [`pnpm ${'x'.repeat(500)}`] })
+            expect(bad.success).toBe(false)
+        })
+
+        it('更新：undefined = 不修改 / null 或 [] = 清空（与 tags 同语义）', () => {
+            expect(repositoryUpdateSchema.safeParse({}).success).toBe(true)
+            expect(repositoryUpdateSchema.safeParse({ verifyCommands: null }).success).toBe(true)
+            expect(repositoryUpdateSchema.safeParse({ verifyCommands: [] }).success).toBe(true)
+            expect(repositoryUpdateSchema.safeParse({ verifyCommands: ['pnpm test'] }).success).toBe(true)
+        })
+    })
+
+    describe('parseVerifyCommands（实体辅助函数）', () => {
+        it('null / undefined / 空串 → 空数组（走引擎默认验证链）', () => {
+            expect(parseVerifyCommands(null)).toEqual([])
+            expect(parseVerifyCommands(undefined)).toEqual([])
+            expect(parseVerifyCommands('')).toEqual([])
+        })
+
+        it('合法 JSON 数组 → 命令数组', () => {
+            expect(parseVerifyCommands('["pnpm lint","pnpm test"]')).toEqual(['pnpm lint', 'pnpm test'])
+        })
+
+        it('非法 JSON → 空数组（容错不抛错）', () => {
+            expect(parseVerifyCommands('not-json')).toEqual([])
+            expect(parseVerifyCommands('{unclosed')).toEqual([])
+        })
+
+        it('非数组（对象 / 字符串 / 数字）→ 空数组', () => {
+            expect(parseVerifyCommands('{"a":1}')).toEqual([])
+            expect(parseVerifyCommands('"pnpm lint"')).toEqual([])
+            expect(parseVerifyCommands('123')).toEqual([])
+        })
+
+        it('数组内含非字符串 / 空串项 → 被裁剪，命令项 trim 归一（仅保留有效命令）', () => {
+            expect(parseVerifyCommands('["pnpm lint",null,42,"","   ","pnpm test"]')).toEqual(['pnpm lint', 'pnpm test'])
+            expect(parseVerifyCommands('["  pnpm test  "]')).toEqual(['pnpm test'])
+        })
+    })
+
+    describe('prCheckFocus（PR Check 告警关注集）', () => {
+        it('创建：缺省 / null → success（未配置 = 现状）', () => {
+            const ok = repositorySchema.safeParse({ owner: 'a', name: 'b' })
+            expect(ok.success).toBe(true)
+            expect(ok.success && ok.data.prCheckFocus).toBeUndefined()
+            expect(repositorySchema.safeParse({ owner: 'a', name: 'b', prCheckFocus: null }).success).toBe(true)
+        })
+
+        it('创建：三维白名单 → success（逐项 trim）', () => {
+            const ok = repositorySchema.safeParse({
+                owner: 'a',
+                name: 'b',
+                prCheckFocus: {
+                    providers: [' GitHub-Actions ', 'vercel'],
+                    names: [' Test '],
+                    kinds: ['check', 'deployment'],
+                },
+            })
+            expect(ok.success).toBe(true)
+            expect(ok.success && ok.data.prCheckFocus).toEqual({
+                providers: ['GitHub-Actions', 'vercel'],
+                names: ['Test'],
+                kinds: ['check', 'deployment'],
+            })
+        })
+
+        it('创建：部分维度缺省 → success（空维度 = 不限）', () => {
+            expect(repositorySchema.safeParse({
+                owner: 'a',
+                name: 'b',
+                prCheckFocus: { providers: ['vercel'] },
+            }).success).toBe(true)
+        })
+
+        it('创建：单维度超过 20 项 → fail', () => {
+            const bad = repositorySchema.safeParse({
+                owner: 'a',
+                name: 'b',
+                prCheckFocus: { names: Array.from({ length: 21 }, (_, i) => `check-${i}`) },
+            })
+            expect(bad.success).toBe(false)
+        })
+
+        it('创建：空白条目 / 超长条目 → fail', () => {
+            expect(repositorySchema.safeParse({
+                owner: 'a', name: 'b', prCheckFocus: { providers: ['   '] },
+            }).success).toBe(false)
+            expect(repositorySchema.safeParse({
+                owner: 'a', name: 'b', prCheckFocus: { names: ['x'.repeat(201)] },
+            }).success).toBe(false)
+        })
+
+        it('创建：非法 kind → fail（仅接受三源枚举）', () => {
+            expect(repositorySchema.safeParse({
+                owner: 'a', name: 'b', prCheckFocus: { kinds: ['bogus'] },
+            }).success).toBe(false)
+        })
+
+        it('创建：kind 允许前后空白与重复项（宽容输入，写入侧归一 / 去重）', () => {
+            const ok = repositorySchema.safeParse({
+                owner: 'a', name: 'b', prCheckFocus: { kinds: [' check ', 'check', 'status'] },
+            })
+            expect(ok.success).toBe(true)
+            expect(ok.success && ok.data.prCheckFocus?.kinds).toEqual(['check', 'check', 'status'])
+        })
+
+        it('创建：未知维度（如 state）→ fail（strict，避免「配了但静默不生效」）', () => {
+            expect(repositorySchema.safeParse({
+                owner: 'a', name: 'b', prCheckFocus: { names: ['Test'], state: ['failure'] },
+            }).success).toBe(false)
+        })
+
+        it('更新：undefined = 不修改 / null = 清空 / 白名单 = 设置', () => {
+            expect(repositoryUpdateSchema.safeParse({}).success).toBe(true)
+            expect(repositoryUpdateSchema.safeParse({ prCheckFocus: null }).success).toBe(true)
+            expect(repositoryUpdateSchema.safeParse({ prCheckFocus: { names: ['Test'] } }).success).toBe(true)
         })
     })
 })

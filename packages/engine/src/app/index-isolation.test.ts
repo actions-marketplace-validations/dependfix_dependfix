@@ -237,6 +237,34 @@ describe('DependfixApp per-source error isolation', () => {
         expect(result.errors.length).toBeGreaterThanOrEqual(1)
         expect(exitCode).not.toBe(0)
     })
+
+    it('全部启用源失败：只保留 per-source FETCH_FAILED，不追加无 source 的仓库级重复信号', async () => {
+        nock('https://api.github.com')
+            .get('/repos/foo/bar/dependabot/alerts')
+            .query({ state: 'open', per_page: '100' })
+            .reply(500, { message: 'boom' })
+        nock('https://api.github.com')
+            .get('/repos/foo/bar/code-scanning/alerts')
+            .query({ state: 'open', per_page: '100' })
+            .reply(500, { message: 'boom' })
+
+        const config = resolveRuntimeConfig({
+            env: {
+                GITHUB_TOKEN: 'main-token-value',
+                DEPENDFIX_REPOSITORIES: 'foo/bar',
+                DEPENDFIX_CODE_SCANNING: 'true',
+            },
+        })
+
+        const app = new DependfixApp({ config, workDir, reportOutputDir: join(workDir, 'reports') })
+        const { result } = await app.run()
+
+        const fetchErrors = result.errors.filter((e) => e.stage === 'fetch' && e.category === 'FETCH_FAILED')
+        // 两个启用源各一条（带 source）；不含无 source 的仓库级重复信号（否则日志汇总会归入 unknown 分组）
+        expect(fetchErrors.map((e) => e.source).sort()).toEqual(['code-scanning', 'dependabot'])
+        expect(fetchErrors.every((e) => Boolean(e.source))).toBe(true)
+        expect(result.errors.filter((e) => e.stage === 'fetch' && !e.source)).toHaveLength(0)
+    })
 })
 
 // ---------------------------------------------------------------------------
@@ -301,6 +329,169 @@ describe('DependfixApp converged alert counting', () => {
 
         expect(result.summary.alertsConverged).toBe(1)
         expect(result.summary.alertsSkipped).toBe(0)
+        // 报告中「已收敛」明细与计数可对账（平台据此回写 ScanResult.fixStatus=converged）
+        expect(result.alertOutcomes).toEqual([
+            {
+                repository: 'foo/bar',
+                source: 'dependabot',
+                upstreamId: 'dependabot:1',
+                manifestPath: 'pnpm-lock.yaml',
+                status: 'converged',
+                reason: 'all locked versions >= target',
+            },
+        ])
+    })
+
+    it('counts all same-package converged alerts at alert level', async () => {
+        const alert = (number: number) => ({
+            number,
+            state: 'open',
+            security_advisory: { ghsa_id: `GHSA-f8p3-7c7w-${number}`, severity: 'high' },
+            security_vulnerability: {
+                package: { ecosystem: 'npm', name: 'fast-uri' },
+                severity: 'high',
+                vulnerable_version_range: '< 3.1.5',
+                first_patched_version: { identifier: '3.1.5' },
+            },
+            dependency: { package: { ecosystem: 'npm', name: 'fast-uri' }, manifest_path: 'pnpm-lock.yaml' },
+        })
+        nock('https://api.github.com')
+            .get('/repos/foo/bar/dependabot/alerts')
+            .query({ state: 'open', per_page: '100' })
+            .reply(200, [alert(1), alert(2)])
+        nock('https://api.github.com')
+            .get('/repos/foo/bar')
+            .reply(200, { default_branch: 'main' })
+
+        const config = resolveRuntimeConfig({
+            env: {
+                GITHUB_TOKEN: 'main-token-value',
+                DEPENDFIX_MODE: 'fix',
+                DEPENDFIX_REPOSITORIES: 'foo/bar',
+                DEPENDFIX_DRY_RUN: 'true',
+            },
+        })
+
+        const app = new DependfixApp({ config, workDir, reportOutputDir: join(workDir, 'reports') })
+        const { result } = await app.run()
+
+        expect(result.summary.alertsConverged).toBe(2)
+        expect(result.summary.alertsUnfixed).toBe(0)
+        expect(result.summary.alertsSkipped).toBe(0)
+        // 同包多告警逐条落结果：明细条数 = alertsConverged（提醒口径可对账）
+        expect(result.alertOutcomes?.map((outcome) => outcome.upstreamId).sort())
+            .toEqual(['dependabot:1', 'dependabot:2'])
+        expect(result.alertOutcomes?.filter((outcome) => outcome.status === 'converged')).toHaveLength(2)
+    })
+
+    it('does not count lower-major instances as converged', async () => {
+        // 最高版本 3.1.5 已达标，但 2.0.0 实例仍在：不能报「已收敛」
+        writeFileSync(join(workDir, 'pnpm-lock.yaml'), [
+            'lockfileVersion: \'9.0\'',
+            '',
+            '  fast-uri@2.0.0:',
+            '    resolution: {integrity: sha512-a}',
+            '',
+            '  fast-uri@3.1.5:',
+            '    resolution: {integrity: sha512-b}',
+            '',
+        ].join('\n'))
+        nock('https://api.github.com')
+            .get('/repos/foo/bar/dependabot/alerts')
+            .query({ state: 'open', per_page: '100' })
+            .reply(200, [{
+                number: 1,
+                state: 'open',
+                security_advisory: { ghsa_id: 'GHSA-f8p3-7c7w-h6x4', severity: 'high' },
+                security_vulnerability: {
+                    package: { ecosystem: 'npm', name: 'fast-uri' },
+                    severity: 'high',
+                    vulnerable_version_range: '< 3.1.5',
+                    first_patched_version: { identifier: '3.1.5' },
+                },
+                dependency: { package: { ecosystem: 'npm', name: 'fast-uri' }, manifest_path: 'pnpm-lock.yaml' },
+            }])
+        nock('https://api.github.com')
+            .get('/repos/foo/bar')
+            .reply(200, { default_branch: 'main' })
+
+        const config = resolveRuntimeConfig({
+            env: {
+                GITHUB_TOKEN: 'main-token-value',
+                DEPENDFIX_MODE: 'fix',
+                DEPENDFIX_REPOSITORIES: 'foo/bar',
+                DEPENDFIX_DRY_RUN: 'true',
+            },
+        })
+
+        const app = new DependfixApp({ config, workDir, reportOutputDir: join(workDir, 'reports') })
+        const { result } = await app.run()
+
+        expect(result.summary.alertsConverged).toBe(0)
+        expect(result.summary.alertsSkipped).toBe(1)
+        // 低版本实例残留 → 不是已收敛，明细记 skipped（系统内仍计未修复）
+        expect(result.alertOutcomes).toEqual([
+            {
+                repository: 'foo/bar',
+                source: 'dependabot',
+                upstreamId: 'dependabot:1',
+                manifestPath: 'pnpm-lock.yaml',
+                status: 'skipped',
+                reason: 'cross-major',
+            },
+        ])
+    })
+
+    it('still upgrades when the highest locked instance is below target', async () => {
+        // 回归：低版本是「需要升级」，不是「人工 review」
+        writeFileSync(join(workDir, 'pnpm-lock.yaml'), [
+            'lockfileVersion: \'9.0\'',
+            '',
+            '  fast-uri@3.1.0:',
+            '    resolution: {integrity: sha512-a}',
+            '',
+        ].join('\n'))
+        nock('https://api.github.com')
+            .get('/repos/foo/bar/dependabot/alerts')
+            .query({ state: 'open', per_page: '100' })
+            .reply(200, [{
+                number: 1,
+                state: 'open',
+                security_advisory: { ghsa_id: 'GHSA-f8p3-7c7w-h6x4', severity: 'high' },
+                security_vulnerability: {
+                    package: { ecosystem: 'npm', name: 'fast-uri' },
+                    severity: 'high',
+                    vulnerable_version_range: '< 3.1.5',
+                    first_patched_version: { identifier: '3.1.5' },
+                },
+                // 必须走常规分组路径（parent manifest），不能落到 lockfile 版本化 override 分流
+                dependency: { package: { ecosystem: 'npm', name: 'fast-uri' }, manifest_path: 'package.json' },
+            }])
+        nock('https://api.github.com')
+            .get('/repos/foo/bar')
+            .reply(200, { default_branch: 'main' })
+
+        const config = resolveRuntimeConfig({
+            env: {
+                GITHUB_TOKEN: 'main-token-value',
+                DEPENDFIX_MODE: 'fix',
+                DEPENDFIX_REPOSITORIES: 'foo/bar',
+                DEPENDFIX_DRY_RUN: 'true',
+            },
+        })
+
+        const app = new DependfixApp({ config, workDir, reportOutputDir: join(workDir, 'reports') })
+        const { result } = await app.run()
+
+        expect(result.summary.alertsFixed).toBe(1)
+        expect(result.summary.alertsConverged).toBe(0)
+        expect(result.summary.alertsSkipped).toBe(0)
+        expect(result.actions.some((a) => (
+            a.type === 'dependency-upgrade'
+            && a.target === 'fast-uri'
+            && a.success
+            && a.strategy === undefined
+        ))).toBe(true)
     })
 })
 

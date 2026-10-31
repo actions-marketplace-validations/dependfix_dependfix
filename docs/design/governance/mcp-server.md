@@ -1,18 +1,20 @@
 # MCP Server 设计（`@dependfix/mcp`）
 
+> 状态：✅ 已落地（`@dependfix/mcp` 0.2.0 已发布；当前 8 个 tool）。
+
 > 通过 [Model Context Protocol](https://modelcontextprotocol.io/) 将 dependfix 的能力暴露给 AI 编程助手（Claude、Copilot、Cursor 等），实现 CLI + Skills 自动化闭环。
 
 ---
 
 ## 1. 定位
 
-`@dependfix/mcp` 是一个 MCP Server，运行后向 AI 助手注册 4 个 tool。AI 助手可通过工具调用直接拉取告警、执行修复、获取报告，无需用户手动输入 CLI 命令。
+`@dependfix/mcp` 是一个 MCP Server，运行后向 AI 助手注册 8 个 tool。AI 助手可通过工具调用直接拉取告警、执行修复、获取报告，无需用户手动输入 CLI 命令。
 
 ```
 用户："检查这个仓库的安全告警"
   → AI Agent 调用 mcp_dependfix_fetch_alerts
     → 返回标准化告警列表
-  → AI Agent 调用 mcp_dependfix_scan
+  → AI Agent 调用 mcp_dependfix_run_scan
     → 执行修复流程
   → AI Agent 返回结构化的修复摘要
 ```
@@ -23,10 +25,14 @@
 
 | Tool | 功能 | 输入 Schema | 输出 |
 |:-----|:-----|:-----|:-----|
-| `fetch_alerts` | 拉取 Dependabot 告警 | `repo: string`, `severity?: string` | `NormalizedSecurityAlert[]` |
-| `fix_dependency` | 修复单个依赖 | `workDir: string`, `packageName: string`, `targetVersion: string` | `DependencyFixResult` |
-| `run_scan` | 执行完整扫描修复 | `repo: string`, `mode?: 'report-only' \| 'fix' \| 'fix-and-pr'`, `severity?: string` | `RunResult` |
-| `get_last_report` | 读取最近一次 JSON 报告 | — | `RunResult \| null` |
+| `fetch_alerts` | 拉取 Dependabot / Code Scanning 告警（只读） | `repo`, `severity?`, `code_scanning?` | 告警列表 |
+| `discover_repos` | 按 owner / org 自动发现仓库（只读） | `owner[]`, `topics?`, `include?`, `exclude?`, `probe_dependabot?`, `max_repos?` | 仓库列表 |
+| `run_scan` | 执行完整扫描 / 修复 | `repo`, `mode?`, `severity?`, `code_scanning?`, `max_alerts?`, `max_concurrency?`, `dry_run?`, `allow_major_upgrade?`, `ai_enabled?`, `ai_provider?`, `ai_model?`, `ai_trigger?` | `RunResult` |
+| `fix_dependency` | 修复单个依赖或 lockfile | `workDir`, `fix_type?`, `packageName?`, `targetVersion?` | 修复结果 |
+| `cleanup_branches` | 清理已合并 / 已关闭的 dependfix 分支 | `repo`, `dry_run?` | 清理结果 |
+| `history` | 查询仓库历史运行摘要（只读） | `repo` | 历史摘要 |
+| `get_last_report` | 读取最近一次 JSON 报告（只读） | — | `RunResult \| null` |
+| `pnpm_audit` | 本地 pnpm audit 回退数据源（只读；复用 `GITHUB_TOKEN` 检查） | `workDir`, `repository` | 告警列表 |
 
 ---
 
@@ -39,9 +45,9 @@
                │ JSON-RPC (stdio)
 ┌──────────────▼──────────────────────┐
 │  @dependfix/mcp                     │
-│  ├── server.ts    # MCP Server 启动 │
-│  ├── tools/       # 4 个 tool 实现  │
-│  └── transport.ts # stdio 传输层    │
+│  ├── index.ts     # server / stdio  │
+│  ├── tools/       # 8 tools         │
+│  └── bin.ts       # entry           │
 └──────────────┬──────────────────────┘
                │ 直接调用（无网络）
 ┌──────────────▼──────────────────────┐
@@ -108,7 +114,7 @@ MCP Server 不依赖 CLI args 解析，直接走程序化 API。这要求 `Depen
 
 ### 4.3 认证
 
-MCP Server 本身不管理凭据。`GITHUB_TOKEN` 和 `AI_API_KEY` 从环境变量读取：
+MCP Server 本身不管理凭据。`GITHUB_TOKEN` 和 `DEPENDFIX_AI_API_KEY` 从环境变量读取：
 
 ```
 mcpServer.connect(transport)
@@ -166,7 +172,7 @@ Agent: 用户对话 → Skill 编排 → MCP 执行 → 报告
 
 | 阶段 | 内容 |
 |:-----|:-----|
-| **M6 T605** | MCP Server（`@dependfix/mcp`）：骨架 + `fetch_alerts` / `get_last_report` 只读 tool + `run_scan` / `fix_dependency` 写入 tool + CLI 一致性断言（2026-08-07 规划：原 T605/T606 合并，见 [todo-archive.md §M6 规划决策](../../plan/archive/todo-archive-phases-m6-m7-t711.md#m6-最小平台-mvp已归档)） |
+| **M6 T605** | MCP Server（`@dependfix/mcp`）：骨架 + `fetch_alerts` / `get_last_report` 只读 tool + `run_scan` / `fix_dependency` 写入 tool + CLI 一致性断言（2026-08-07 规划：原 T605/T606 合并，见 [M6 规划决策](../../plan/archive/todo-archive-phases-m6-m7-t711.md#m6-最小平台-mvp已归档)） |
 | **M7 T706** | MCP Server 发布 npm + 集成到 `dependfix-remediator` skill 双后端 |
 
 ---
@@ -201,9 +207,9 @@ Agent: 用户对话 → Skill 编排 → MCP 执行 → 报告
 
 > 后续登记（审计 suggest，非阻塞）：`ai_api_url` 透传（provider=anthropic 时兼容端点不可注入）；cleanup_branches 状态批量查询 `Promise.all` 全并发，仓库分支量大时可加并发上限（对齐 probeConcurrency 风格）。
 
-### 8.4 P3 — 远期目标（登记不实施）
+### 8.4 P3 — 部分交付 / 远期目标
 
-- pnpm-audit 本地扫描 tool（需 workDir 语义，等本地场景真实需求）
+- ✅ 已交付（`@dependfix/mcp` 0.2.0 / dependfix 0.5.0）：pnpm-audit 本地扫描 tool（`pnpm_audit`，需 `workDir` + `repository`）
 - 统一错误包装 helper（token 检查 + try/catch → ok:false 模板代码收口）
 - 返回结构对齐完整 `RunResult`（当前简化映射，保持 + 文档声明）
 

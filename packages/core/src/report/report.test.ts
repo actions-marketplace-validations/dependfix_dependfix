@@ -256,6 +256,9 @@ describe('createEmptyRunSummary', () => {
         const s = createEmptyRunSummary()
         expect(s.repositoriesScanned).toBe(0)
         expect(s.alertsFixed).toBe(0)
+        expect(s.alertsUnfixed).toBe(0)
+        expect(s.alertsSkippedByReason).toEqual({})
+        expect(s.alertsTruncatedBySeverity).toEqual({})
     })
 })
 

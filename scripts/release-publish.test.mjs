@@ -1,13 +1,25 @@
-import { execSync } from 'node:child_process'
+import { execFileSync, execSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { buildFinalizePlan, buildPublishPlan, main, resolveAnchorVersion, tagOnly, tagRecovered } from './release-publish.mjs'
+import {
+    DEFAULT_PUBLISH_REGISTRY,
+    buildFinalizePlan,
+    buildPublishArgs,
+    buildPublishCommand,
+    buildPublishPlan,
+    main,
+    parsePublishArgs,
+    resolveAnchorVersion,
+    tagOnly,
+    tagRecovered,
+    validateRegistry,
+} from './release-publish.mjs'
 import { readPackageVersion } from './tag-released-versions.mjs'
 
 // main()/publishOne/finalizeRelease 依赖真实 git 命令与文件写入，统一 mock
 // （finalizeRelease 会写 repoRoot/release-publish-result.json，必须 mock writeFileSync 防污染工作区；
 //  readFileSync 保留真实实现——依赖链中 readPackageVersion 需读真实 package.json）
-vi.mock('node:child_process', () => ({ execSync: vi.fn() }))
+vi.mock('node:child_process', () => ({ execSync: vi.fn(), execFileSync: vi.fn() }))
 vi.mock('node:fs', async (importOriginal) => {
     const actual = await importOriginal()
     return { ...actual, writeFileSync: vi.fn() }
@@ -252,6 +264,7 @@ describe('main', () => {
     beforeEach(() => {
         // HEAD 锚点命中 + 本地无 tag + 发布命令成功
         vi.mocked(execSync).mockReset()
+        vi.mocked(execFileSync).mockReset()
         vi.mocked(execSync).mockImplementation((cmd) => {
             const c = String(cmd)
             if (c.includes('rev-parse HEAD')) {
@@ -262,9 +275,6 @@ describe('main', () => {
             }
             if (c.includes('rev-parse --verify')) {
                 throw new Error('tag not found')
-            }
-            if (c.includes('pnpm --filter')) {
-                return ''
             }
             return ''
         })
@@ -284,9 +294,8 @@ describe('main', () => {
 
         expect(console.log).toHaveBeenCalledWith(expect.stringContaining('[dry-run] would publish'))
         expect(console.log).toHaveBeenCalledWith(expect.stringContaining('dry-run 完成'))
-        // 无 pnpm publish / git tag 执行
-        const calls = vi.mocked(execSync).mock.calls.map((c) => String(c[0]))
-        expect(calls.filter((c) => c.includes('pnpm --filter'))).toHaveLength(0)
+        // 无 pnpm publish 执行
+        expect(vi.mocked(execFileSync).mock.calls).toHaveLength(0)
     })
 
     it('publishes 5 npm packages + tag-only platform, creates tags and finalizes v tag', async () => {
@@ -298,8 +307,8 @@ describe('main', () => {
         await main()
 
         const calls = vi.mocked(execSync).mock.calls.map((c) => String(c[0]))
-        // 5 包 pnpm publish（platform 跳过 pnpm）
-        expect(calls.filter((c) => c.includes('pnpm --filter'))).toHaveLength(5)
+        // 5 包 pnpm publish（platform 跳过 pnpm；execFileSync 数组参数）
+        expect(vi.mocked(execFileSync).mock.calls).toHaveLength(5)
         // 5 包 npm tag + 1 platform tag + 1 v tag = 7
         expect(calls.filter((c) => c.includes('git tag -a'))).toHaveLength(7)
         expect(console.log).toHaveBeenCalledWith(
@@ -395,5 +404,76 @@ describe('main', () => {
         expect(console.log).toHaveBeenCalledWith(expect.stringContaining('npm 查询失败，保守跳过'))
         const calls = vi.mocked(execSync).mock.calls.map((c) => String(c[0]))
         expect(calls.filter((c) => c.includes('pnpm --filter'))).toHaveLength(0)
+    })
+})
+
+
+describe('发布参数与命令（本地 2FA 发布）', () => {
+    it('解析 --otp / --registry / --dry-run（等号与空格）', () => {
+        expect(parsePublishArgs(['--dry-run'])).toEqual({ dryRun: true, otp: null, registry: DEFAULT_PUBLISH_REGISTRY })
+        expect(parsePublishArgs(['--otp', '123456'])).toMatchObject({ otp: '123456' })
+        expect(parsePublishArgs(['--otp=654321'])).toMatchObject({ otp: '654321' })
+        expect(parsePublishArgs(['--registry', 'https://registry.npmjs.org/'])).toMatchObject({ registry: 'https://registry.npmjs.org/' })
+    })
+
+    it('OTP 非 6-8 位数字 / registry 非 https / 缺值均报错', () => {
+        expect(() => parsePublishArgs(['--otp', 'abc'])).toThrow(/6-8 位数字/)
+        expect(() => parsePublishArgs(['--otp'])).toThrow(/缺少取值/)
+        expect(() => parsePublishArgs(['--registry', 'http://mirror.local'])).toThrow(/https/)
+        expect(() => parsePublishArgs(['--registry'])).toThrow(/缺少取值/)
+    })
+
+    it('发布参数数组固定显式 registry，并按需附加 otp（不经 shell）', () => {
+        expect(buildPublishArgs('@dependfix/core')).toEqual([
+            '--filter', '@dependfix/core', 'publish', '--no-git-checks', '--registry', 'https://registry.npmjs.org/',
+        ])
+        expect(buildPublishArgs('@dependfix/core', { otp: '123456' }).at(-2)).toBe('--otp')
+        expect(buildPublishCommand('@dependfix/core')).toContain('--registry https://registry.npmjs.org/')
+        expect(() => buildPublishArgs('@dependfix/core', { otp: 'x' })).toThrow(/6-8 位数字/)
+    })
+
+    it('registry 校验拒绝非 https / 内嵌凭据 / 空白', () => {
+        expect(validateRegistry('https://registry.npmjs.org/')).toBe('https://registry.npmjs.org/')
+        expect(() => validateRegistry('http://mirror.local')).toThrow(/https/)
+        expect(() => validateRegistry('https://user:pass@registry.npmjs.org/')).toThrow(/内嵌凭据/)
+        expect(() => validateRegistry('https://registry.npmjs.org/ path')).toThrow(/空白/)
+    })
+
+    it('未知参数 fail-closed（防 --otpp / 拼写错误静默丢参数）', () => {
+        expect(() => parsePublishArgs(['--otpp', '123456'])).toThrow(/未知参数/)
+        expect(() => parsePublishArgs(['--dryRun'])).toThrow(/未知参数/)
+    })
+
+    it('main 透传 otp 到内层 pnpm publish', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ status: 404, ok: false }))
+        vi.mocked(execSync).mockReset()
+        vi.mocked(execSync).mockImplementation((cmd) => {
+            const command = String(cmd)
+            if (command.includes('rev-parse HEAD') || command.includes('log -1')) {
+                return 'abc1234'
+            }
+            if (command.includes('rev-parse --verify')) {
+                throw new Error('tag not found')
+            }
+            return ''
+        })
+        vi.spyOn(console, 'log').mockImplementation(() => {})
+        const realArgv = process.argv
+        process.argv = ['node', 'release-publish.mjs', '--otp', '123456']
+        try {
+            await main()
+            const publishCalls = vi.mocked(execFileSync).mock.calls.filter(([file]) => file === 'pnpm')
+            expect(publishCalls.length).toBe(5)
+            for (const [, args] of publishCalls) {
+                expect(args).toContain('--registry')
+                expect(args).toContain('https://registry.npmjs.org/')
+                expect(args).toContain('--otp')
+                expect(args).toContain('123456')
+            }
+        } finally {
+            process.argv = realArgv
+            vi.unstubAllGlobals()
+            vi.restoreAllMocks()
+        }
     })
 })

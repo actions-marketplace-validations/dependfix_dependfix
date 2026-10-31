@@ -22,13 +22,23 @@ export default defineConfig({
         // 必须使用绝对路径：pnpm --filter <pkg> test 在包目录运行 vitest，root=cwd=包目录，
         // 相对路径会解析到 <pkg>/apps/platform/tests/... 导致全部测试初始化失败
         setupFiles: [resolve(import.meta.dirname, 'apps/platform/tests/setup-nuxt-server.ts')],
-        // e2e 测试由 Playwright 运行（apps/platform/tests/e2e），vitest 不扫描
+        // e2e / 视觉回归测试由 Playwright 运行（apps/platform/tests/e2e、tests/visual），vitest 不扫描
         exclude: [
             '**/node_modules/**',
             '**/dist/**',
             '**/.nuxt/**',
             '**/.output/**',
             '**/tests/e2e/**',
+            '**/tests/visual/**',
+            // 平台运行时数据目录（gitignored，见 apps/platform/.gitignore）：扫描 run 会把目标仓库
+            // 克隆与产物落在 apps/platform/data/runs/<runId>/，其中的测试文件会被收集并大量失败
+            // （与环境无关的本地噪声；CI 为干净检出，不受影响）。
+            '**/apps/platform/data/**',
+            // 包目录内运行（pnpm --filter 时 root = 包目录）下同一目录的相对形态；
+            // 不用 `**/data/**`：`data` 是通用名，过宽模式会误伤同名正常测试目录。
+            // 残留风险：`data/**` 本身比仓库根模式宽（包级相对），当前仅 apps/platform 有 data/ 目录；
+            // 若未来某包出现**合法**的 data/ 测试目录，会被静默排除——届时改为包级精确路径。
+            'data/**',
         ],
         // 控制并行 worker 数：全量测试含大量真实 git 命令与子进程（cli 集成测试），
         // 默认 worker = CPU 核数 - 1，Windows 全量并发时 CPU 竞争导致 git/子进程测试超时 flaky

@@ -19,7 +19,7 @@ test.describe('批量扫描（sync 降级模式）', () => {
         // 浏览器上下文就绪后，构造会话 Cookie header 供 API 请求使用
         await page.goto('/repos')
         await waitForHydration(page)
-        await expect(page.locator('.p-datatable')).toBeVisible({ timeout: 15000 })
+        await expect(page.locator('.caomei-data-table')).toBeVisible({ timeout: 15000 })
         const cookieHeader = (await page.context().cookies())
             .map((c) => `${c.name}=${c.value}`)
             .join('; ')
@@ -45,12 +45,12 @@ test.describe('批量扫描（sync 降级模式）', () => {
         // 重新导航（带唯一 query 强制全新加载）→ 新仓库恒排最前（createdAt DESC）
         await page.goto(`/repos?r=${stamp}`)
         await waitForHydration(page)
-        await expect(page.locator('.p-datatable')).toBeVisible({ timeout: 15000 })
-        const rows = page.locator('.p-datatable-tbody tr')
-        // 本轮创建的 2 个仓库是列表前 2 行；行选择 checkbox 为原生 input（无显式 role 属性）
+        await expect(page.locator('.caomei-data-table')).toBeVisible({ timeout: 15000 })
+        const rows = page.locator('.caomei-data-table__row')
+        // 本轮创建的 2 个仓库是列表前 2 行；行选择控件为 caomei Checkbox（button.caomei-checkbox__control，role=checkbox）
         await expect(rows.nth(0)).toContainText(owner, { timeout: 15000 })
-        await rows.nth(0).locator('input.p-checkbox-input').click()
-        await rows.nth(1).locator('input.p-checkbox-input').click()
+        await rows.nth(0).locator('.caomei-checkbox__control').click()
+        await rows.nth(1).locator('.caomei-checkbox__control').click()
 
         // 批量扫描按钮随勾选激活
         const batchButton = page.locator('button:has-text("批量扫描")')
@@ -58,30 +58,30 @@ test.describe('批量扫描（sync 降级模式）', () => {
 
         // 打开批量扫描弹窗（参数默认 report-only / high）→ 确认开始
         await batchButton.click()
-        await expect(page.locator('.p-dialog-header')).toContainText('批量扫描（2 个仓库）')
+        await expect(page.locator('.caomei-dialog__header')).toContainText('批量扫描（2 个仓库）')
         await page.locator('.batch-form button:has-text("开始扫描")').click()
 
         // 提交后跳转批量运行页（sync 模式 POST 返回时下属 run 已全部终态）
         await page.waitForURL(/\/batch-runs/, { timeout: 120000 })
 
         // 列表出现手动批量记录
-        const firstRow = page.locator('.p-datatable-tbody tr').first()
+        const firstRow = page.locator('.caomei-data-table__row').first()
         await expect(firstRow).toContainText('手动批量', { timeout: 30000 })
 
         // 展开首行 → 详情（GET /api/batch-runs/[id] 实时聚合写回）
-        // 行展开按钮：PrimeVue 4 DataTable 为 button.p-datatable-row-toggle-button
-        await firstRow.locator('button.p-datatable-row-toggle-button').click()
+        // 行展开按钮：caomei DataTable 为 button.caomei-data-table__row-expander（含 aria-expanded）
+        await firstRow.locator('button.caomei-data-table__row-expander').click()
         await expect(page.locator('.batch-runs__detail')).toBeVisible({ timeout: 15000 })
 
         // 聚合统计：状态收敛为已完成（整体完成含部分失败）+ 统计卡片渲染
         await expect(page.locator('.batch-runs__detail')).toContainText('告警总数', { timeout: 15000 })
         await expect(page.locator('.batch-runs__detail')).toContainText('成功/完成')
-        await expect(page.locator('.p-datatable-tbody tr').first()).toContainText('已完成', { timeout: 15000 })
+        await expect(page.locator('.caomei-data-table__row').first()).toContainText('已完成', { timeout: 15000 })
 
         // 下属 ScanRun 明细（2 个仓库；无凭据时容器执行器交付阶段失败 → engine_delivery_failed → run failed）
         // stats 卡片终态聚合："0/2成功/完成"（两个 run 均因 engine_delivery_failed 标记为 failed）
         await expect(page.locator('.batch-runs__detail')).toContainText('0/2成功/完成', { timeout: 15000 })
-        await expect(page.locator('.batch-runs__detail .p-datatable-tbody tr')).toHaveCount(2)
+        await expect(page.locator('.batch-runs__detail .caomei-data-table__row')).toHaveCount(2)
         await expect(page.locator('.batch-runs__detail')).toContainText(owner)
     })
 
@@ -100,21 +100,21 @@ test.describe('批量扫描（sync 降级模式）', () => {
         await expect(refreshButton).toBeVisible()
         await expect(refreshButton).toBeEnabled()
 
-        // 点击刷新：PrimeVue Button.loading 反馈 → fetchBatchRuns → reconcileBatchRuns → 列表恢复
+        // 点击刷新：caomei Button loading 反馈 → fetchBatchRuns → reconcileBatchRuns → 列表恢复
         const clickPromise = refreshButton.click()
-        // 锚定 loading 真的曾出现（PrimeVue 4 渲染 .p-button-loading-icon）—— 防止 refactor 误删
+        // 锚定 loading 真的曾出现（caomei 渲染 .caomei-button__spinner + .caomei-button--loading）—— 防止 refactor 误删
         // loading.value=true 后断言无法 catch 的回归；极短请求可能错过，catch 兜底
-        await expect(refreshButton.locator('.p-button-loading-icon')).toBeVisible({ timeout: 500 }).catch(() => { /* 极短请求 catch 掉,主路径靠 toBeEnabled 兜底 */ })
+        await expect(refreshButton.locator('.caomei-button__spinner')).toBeVisible({ timeout: 500 }).catch(() => { /* 极短请求 catch 掉,主路径靠 toBeEnabled 兜底 */ })
         // 请求期间按钮 loading 状态短暂可见（5000ms 内必恢复，无 batch run 时几乎瞬时）
         await expect(refreshButton).toBeEnabled({ timeout: 5000 })
         await clickPromise
 
         // DataTable 容器仍可见（refresh 不破坏页面——首屏骨架已折叠，loading 不影响 DataTable）
-        await expect(page.locator('.p-datatable')).toBeVisible({ timeout: 5000 })
+        await expect(page.locator('.caomei-data-table')).toBeVisible({ timeout: 5000 })
 
         // 连续点击不破坏页面状态（in-flight 守卫保证不并发堆叠）
         await refreshButton.click()
         await refreshButton.click().catch(() => { /* 守卫期间点击可能抛错，吞掉 */ })
-        await expect(page.locator('.p-datatable')).toBeVisible({ timeout: 5000 })
+        await expect(page.locator('.caomei-data-table')).toBeVisible({ timeout: 5000 })
     })
 })

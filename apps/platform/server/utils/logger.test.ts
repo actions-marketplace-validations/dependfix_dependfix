@@ -1,20 +1,15 @@
 /**
- * logger.ts 单测（M27.3 / 2026-09-10）
+ * logger.ts 单测
  *
- * 重构后 logger.ts 暴露纯函数 + mockable 副作用入口；本测试覆盖所有 export。
- *
- * vitest mock 模板（参考 scripts/i18n/distill-wisdom.test.mjs L1-9）：
- * - import node: 内置模块在前
- * - vi.mock(...) 在 import 块之后（vitest 自动 hoist）
- * - 第三方 vitest
- * - sibling 脚本
- *
- * 覆盖矩阵（与重构后 exports 一一对应）：
- * - sanitizeLogData (re-export from ./sanitize)
- * - readEnv / resolveLogDir / tryInitLogDir / buildFileFormat / buildConsoleFormat
- * - pickConsoleFormat / tryLoadAxiomTransport / createWinstonLogger
+ * 覆盖矩阵（与 exports 一一对应）：
+ * - parseLogLevel / readEnv / resolveLogDir / tryInitLogDir
+ * - buildFileMetaLine / buildConsoleMetaLine / buildFileFormatLine / buildConsoleFormatLine
+ * - buildFileFormat / buildConsoleFormat / pickConsoleFormat / buildAuditFilePath
+ * - createWinstonLogger / getLoggerState / formatLogStartupLine
  * - initLogger / getWinstonLogger / winstonLogger (Proxy)
- * - createPlatformLogger / logger / isDirectExecution
+ * - createPlatformLogger / logger / isDirectExecution / sanitizeLogData
+ *
+ * 真实文件落盘（命名 / 轮转参数 / 错误文件）见 logger.files.test.ts（不 mock node:fs）。
  */
 
 import fs from 'node:fs'
@@ -31,6 +26,7 @@ vi.mock('node:fs', () => ({
         mkdirSync: vi.fn(),
         writeFileSync: vi.fn(),
         unlinkSync: vi.fn(),
+        appendFileSync: vi.fn(),
     },
 }))
 
@@ -57,6 +53,7 @@ vi.mock('winston', () => {
                 info: vi.fn(),
                 warn: vi.fn(),
                 error: vi.fn(),
+                close: vi.fn(),
             })),
         },
     }
@@ -67,12 +64,8 @@ vi.mock('winston-daily-rotate-file', () => ({
     default: vi.fn(),
 }))
 
-// Mock @axiomhq/winston（默认 require 成功路径；个别 case 用 vi.doMock 覆盖失败路径）
-vi.mock('@axiomhq/winston', () => ({
-    WinstonTransport: vi.fn(),
-}))
-
 import {
+    buildAuditFilePath,
     buildConsoleFormat,
     buildConsoleFormatLine,
     buildConsoleMetaLine,
@@ -81,16 +74,22 @@ import {
     buildFileMetaLine,
     createPlatformLogger,
     createWinstonLogger,
+    formatLogStartupLine,
+    getLoggerState,
     getWinstonLogger,
     initLogger,
     isDirectExecution,
+    isUnsupportedLogDir,
+    LOG_LEVELS,
     logger,
+    parseLogFiles,
+    parseLogLevel,
     pickConsoleFormat,
     readEnv,
     resolveLogDir,
+    safeStringify,
     sanitizeLogData,
     tryInitLogDir,
-    tryLoadAxiomTransport,
     winstonLogger,
 } from './logger'
 import { sanitizeDeep } from './sanitize'
@@ -98,6 +97,14 @@ import { sanitizeDeep } from './sanitize'
 const mockedFs = vi.mocked(fs)
 const mockedWinston = vi.mocked(winston)
 const mockedDailyRotate = vi.mocked(DailyRotateFile)
+
+const consoleTransportOptions = (): Record<string, unknown> =>
+    (mockedWinston.transports.Console as unknown as { mock: { calls: [Record<string, unknown>][] } })
+        .mock.calls.map(([options]) => options)[0]!
+
+const rotateOptions = (): Record<string, unknown>[] =>
+    (mockedDailyRotate as unknown as { mock: { calls: [Record<string, unknown>][] } })
+        .mock.calls.map(([options]) => options)
 
 beforeEach(() => {
     vi.clearAllMocks()
@@ -118,7 +125,34 @@ describe('sanitizeLogData', () => {
 
     it('sanitizes nested tokens in context', () => {
         const result = sanitizeLogData({ token: 'abc123', nested: { password: 'secret' } }) as Record<string, unknown>
-        expect(result).not.toEqual({ token: 'abc123', nested: { password: 'secret' } })
+        expect(result.token).toBe('***')
+        expect((result.nested as Record<string, unknown>).password).toBe('***')
+    })
+})
+
+// ---------------------------------------------------------------------------
+// parseLogLevel
+// ---------------------------------------------------------------------------
+
+describe('parseLogLevel', () => {
+    it('accepts every supported level', () => {
+        for (const level of LOG_LEVELS) {
+            expect(parseLogLevel(level)).toEqual({ level, invalid: null })
+        }
+    })
+
+    it('normalizes case and surrounding whitespace', () => {
+        expect(parseLogLevel('  WARN ')).toEqual({ level: 'warn', invalid: null })
+    })
+
+    it('falls back to info and reports the raw value when unknown', () => {
+        expect(parseLogLevel('verbose+')).toEqual({ level: 'info', invalid: 'verbose+' })
+    })
+
+    it('treats empty / undefined as unset (no warn)', () => {
+        expect(parseLogLevel(undefined)).toEqual({ level: 'info', invalid: null })
+        expect(parseLogLevel('')).toEqual({ level: 'info', invalid: null })
+        expect(parseLogLevel('   ')).toEqual({ level: 'info', invalid: null })
     })
 })
 
@@ -130,10 +164,10 @@ describe('readEnv', () => {
     it('returns defaults when env is empty', () => {
         const env = readEnv({})
         expect(env.LOG_LEVEL).toBe('info')
+        expect(env.LOG_LEVEL_INVALID).toBeNull()
         expect(env.LOG_DIR).toBe('data/logs')
         expect(env.LOGFILES).toBe(true)
-        expect(env.AXIOM_DATASET).toBeUndefined()
-        expect(env.AXIOM_TOKEN).toBeUndefined()
+        expect(env.PROCESS_ROLE).toBe('server')
         expect(env.__PROD__).toBe(false)
         expect(env.__DEV__).toBe(false)
     })
@@ -142,8 +176,24 @@ describe('readEnv', () => {
         expect(readEnv({ LOG_LEVEL: 'debug' }).LOG_LEVEL).toBe('debug')
     })
 
+    it('exposes invalid LOG_LEVEL for the caller to warn about', () => {
+        const env = readEnv({ LOG_LEVEL: 'nope' })
+        expect(env.LOG_LEVEL).toBe('info')
+        expect(env.LOG_LEVEL_INVALID).toBe('nope')
+    })
+
+    it('exposes invalid LOGFILES too (no silent fallback)', () => {
+        expect(readEnv({}).LOGFILES_INVALID).toBeNull()
+        expect(readEnv({ LOGFILES: 'true' }).LOGFILES_INVALID).toBeNull()
+        expect(readEnv({ LOGFILES: 'maybe' }).LOGFILES_INVALID).toBe('maybe')
+    })
+
     it('honors LOG_DIR override', () => {
         expect(readEnv({ LOG_DIR: '/var/log/app' }).LOG_DIR).toBe('/var/log/app')
+    })
+
+    it('treats empty LOG_DIR as unset', () => {
+        expect(readEnv({ LOG_DIR: '' }).LOG_DIR).toBe('data/logs')
     })
 
     it('LOGFILES=false disables file logging', () => {
@@ -154,25 +204,69 @@ describe('readEnv', () => {
         expect(readEnv({ LOGFILES: 'true' }).LOGFILES).toBe(true)
     })
 
-    it('LOGFILES=anything-other-than-false enables file logging (default behavior)', () => {
-        expect(readEnv({ LOGFILES: '0' }).LOGFILES).toBe(true)
-        expect(readEnv({ LOGFILES: 'no' }).LOGFILES).toBe(true)
+    it('LOGFILES accepts 1/0 · yes/no · on/off (case + whitespace tolerant)', () => {
+        expect(readEnv({ LOGFILES: '1' }).LOGFILES).toBe(true)
+        expect(readEnv({ LOGFILES: 'YES' }).LOGFILES).toBe(true)
+        expect(readEnv({ LOGFILES: ' On ' }).LOGFILES).toBe(true)
+        expect(readEnv({ LOGFILES: '0' }).LOGFILES).toBe(false)
+        expect(readEnv({ LOGFILES: 'no' }).LOGFILES).toBe(false)
+        expect(readEnv({ LOGFILES: 'Off' }).LOGFILES).toBe(false)
     })
 
-    it('captures AXIOM_DATASET + AXIOM_TOKEN', () => {
-        const env = readEnv({ AXIOM_DATASET: 'ds', AXIOM_TOKEN: 'tok' })
-        expect(env.AXIOM_DATASET).toBe('ds')
-        expect(env.AXIOM_TOKEN).toBe('tok')
+    it('LOGFILES unknown values fall back to the default and surface the raw value', () => {
+        const env = readEnv({ LOGFILES: 'flase' })
+        expect(env.LOGFILES).toBe(true)
+        expect(env.LOGFILES_INVALID).toBe('flase')
+        expect(readEnv({ NODE_ENV: 'test', LOGFILES: 'flase' }).LOGFILES).toBe(false)
+    })
+
+    it('LOGFILES empty string falls back to the environment default', () => {
+        expect(readEnv({ LOGFILES: '' }).LOGFILES).toBe(true)
+    })
+
+    it('defaults LOGFILES off under NODE_ENV=test (avoid writing repo data/)', () => {
+        expect(readEnv({ NODE_ENV: 'test' }).LOGFILES).toBe(false)
+    })
+
+    it('explicit LOGFILES=true still wins under NODE_ENV=test', () => {
+        expect(readEnv({ NODE_ENV: 'test', LOGFILES: 'true' }).LOGFILES).toBe(true)
+    })
+
+    it('reads process role for audit file isolation', () => {
+        expect(readEnv({ DEPENDFIX_ROLE: 'worker' }).PROCESS_ROLE).toBe('worker')
+        expect(readEnv({ DEPENDFIX_ROLE: 'WORKER' }).PROCESS_ROLE).toBe('worker')
+        expect(readEnv({ DEPENDFIX_ROLE: 'server' }).PROCESS_ROLE).toBe('server')
+        expect(readEnv({ DEPENDFIX_ROLE: 'typo' }).PROCESS_ROLE).toBe('server')
     })
 
     it('NODE_ENV=production sets __PROD__ true', () => {
         expect(readEnv({ NODE_ENV: 'production' }).__PROD__).toBe(true)
-        expect(readEnv({ NODE_ENV: 'production' }).__DEV__).toBe(false)
     })
 
     it('NODE_ENV=development sets __DEV__ true', () => {
         expect(readEnv({ NODE_ENV: 'development' }).__DEV__).toBe(true)
-        expect(readEnv({ NODE_ENV: 'development' }).__PROD__).toBe(false)
+    })
+})
+
+describe('parseLogFiles', () => {
+    it('treats undefined / blank as unset (env default wins)', () => {
+        expect(parseLogFiles(undefined, true)).toEqual({ enabled: true, invalid: null })
+        expect(parseLogFiles('', false)).toEqual({ enabled: false, invalid: null })
+        expect(parseLogFiles('   ', true)).toEqual({ enabled: true, invalid: null })
+    })
+
+    it('maps every accepted spelling', () => {
+        for (const raw of ['true', 'TRUE', '1', 'yes', 'on']) {
+            expect(parseLogFiles(raw, false).enabled).toBe(true)
+        }
+        for (const raw of ['false', '0', 'no', 'off']) {
+            expect(parseLogFiles(raw, true).enabled).toBe(false)
+        }
+    })
+
+    it('reports unknown spellings instead of silently keeping file logging on', () => {
+        expect(parseLogFiles('flase', true)).toEqual({ enabled: true, invalid: 'flase' })
+        expect(parseLogFiles('flase', false)).toEqual({ enabled: false, invalid: 'flase' })
     })
 })
 
@@ -195,16 +289,51 @@ describe('resolveLogDir', () => {
 })
 
 // ---------------------------------------------------------------------------
-// tryInitLogDir
+// isUnsupportedLogDir / tryInitLogDir
 // ---------------------------------------------------------------------------
+
+describe('isUnsupportedLogDir', () => {
+    it('rejects /proc and /sys subtrees (recursive mkdir 会阻塞)', () => {
+        expect(isUnsupportedLogDir('/proc/logs')).toBe(true)
+        expect(isUnsupportedLogDir('/proc')).toBe(true)
+        expect(isUnsupportedLogDir('/sys/fs/logs')).toBe(true)
+    })
+
+    it('accepts normal paths, including lookalike prefixes', () => {
+        expect(isUnsupportedLogDir('/app/data/logs')).toBe(false)
+        expect(isUnsupportedLogDir('/var/log/process-logs')).toBe(false)
+        expect(isUnsupportedLogDir('data/logs')).toBe(false)
+    })
+})
 
 describe('tryInitLogDir', () => {
     it('returns true when log dir exists and is writable', () => {
         mockedFs.existsSync.mockReturnValue(true)
         const result = tryInitLogDir('/tmp/logs')
         expect(result).toBe(true)
-        expect(mockedFs.writeFileSync).toHaveBeenCalledWith(path.join('/tmp/logs', '.write-test'), 'test')
-        expect(mockedFs.unlinkSync).toHaveBeenCalledWith(path.join('/tmp/logs', '.write-test'))
+        const probe = mockedFs.writeFileSync.mock.calls[0]![0] as string
+        expect(probe.startsWith(path.join('/tmp/logs', '.write-test-'))).toBe(true)
+        expect(mockedFs.unlinkSync).toHaveBeenCalledWith(probe)
+    })
+
+    it('uses a per-process / per-instant probe name (双进程同名探针会互删)', () => {
+        mockedFs.existsSync.mockReturnValue(true)
+        const nowSpy = vi.spyOn(Date, 'now').mockReturnValueOnce(1_000).mockReturnValueOnce(2_000)
+        tryInitLogDir('/tmp/logs')
+        tryInitLogDir('/tmp/logs')
+        nowSpy.mockRestore()
+
+        const [first, second] = mockedFs.writeFileSync.mock.calls.map(([file]) => String(file))
+        expect(first).toBe(path.join('/tmp/logs', `.write-test-${process.pid}-1000`))
+        expect(second).toBe(path.join('/tmp/logs', `.write-test-${process.pid}-2000`))
+    })
+
+    it('keeps the directory writable when the probe file cannot be removed', () => {
+        mockedFs.existsSync.mockReturnValue(true)
+        mockedFs.unlinkSync.mockImplementation(() => {
+            throw new Error('EPERM')
+        })
+        expect(tryInitLogDir('/tmp/logs')).toBe(true)
     })
 
     it('creates log dir when missing', () => {
@@ -255,6 +384,24 @@ describe('buildFileMetaLine', () => {
         expect(result).toMatch(/^\s/)
         expect(result).toContain('"key":"value"')
         expect(result).toContain('"num":42')
+    })
+})
+
+describe('safeStringify', () => {
+    it('serializes BigInt as text instead of throwing', () => {
+        expect(safeStringify({ n: 10n })).toBe('{"n":"10n"}')
+    })
+
+    it('returns a placeholder when serialization throws (circular / toJSON)', () => {
+        const circular: Record<string, unknown> = {}
+        circular.self = circular
+        expect(safeStringify(circular)).toBe('[unserializable]')
+        const throwing = {
+            toJSON: () => {
+                throw new Error('nope')
+            },
+        }
+        expect(safeStringify(throwing)).toBe('[unserializable]')
     })
 })
 
@@ -344,13 +491,17 @@ describe('pickConsoleFormat', () => {
 })
 
 // ---------------------------------------------------------------------------
-// tryLoadAxiomTransport
+// buildAuditFilePath
 // ---------------------------------------------------------------------------
 
-describe('tryLoadAxiomTransport', () => {
-    it('returns transport when require succeeds (vitest interop fallback path)', () => {
-        const result = tryLoadAxiomTransport()
-        expect(result === null || typeof result === 'function').toBe(true)
+describe('buildAuditFilePath', () => {
+    it('isolates audit files by process role and file kind', () => {
+        const serverLog = buildAuditFilePath('/app/data/logs', 'server', 'combined')
+        const serverErrors = buildAuditFilePath('/app/data/logs', 'server', 'errors')
+        const workerLog = buildAuditFilePath('/app/data/logs', 'worker', 'combined')
+        expect(new Set([serverLog, serverErrors, workerLog]).size).toBe(3)
+        expect(serverLog).toBe(path.join('/app/data/logs', '.server-combined-audit.json'))
+        expect(workerLog).toBe(path.join('/app/data/logs', '.worker-combined-audit.json'))
     })
 })
 
@@ -363,85 +514,133 @@ describe('createWinstonLogger', () => {
         const result = createWinstonLogger({ env: readEnv({ LOGFILES: 'false' }) })
         expect(result).toBeDefined()
         expect(mockedWinston.transports.Console).toHaveBeenCalledTimes(1)
+        expect(consoleTransportOptions()).toMatchObject({ stderrLevels: ['error'] })
         expect(mockedDailyRotate).not.toHaveBeenCalled()
+        expect(getLoggerState().fileLogging).toBe(false)
     })
 
     it('adds 2 DailyRotateFile transports when LOGFILES=true and fs ok', () => {
         mockedFs.existsSync.mockReturnValue(true)
-        const result = createWinstonLogger({ env: readEnv({ LOGFILES: 'true' }) })
-        expect(result).toBeDefined()
-        expect(mockedWinston.transports.Console).toHaveBeenCalledTimes(1)
+        createWinstonLogger({ env: readEnv({ LOGFILES: 'true', LOG_DIR: '/tmp/logs' }) })
         expect(mockedDailyRotate).toHaveBeenCalledTimes(2)
+        const [combined, errors] = rotateOptions()
+        expect(combined).toMatchObject({
+            dirname: '/tmp/logs',
+            filename: '%DATE%.log',
+            datePattern: 'YYYY-MM-DD',
+            maxFiles: '31d',
+            zippedArchive: false,
+            auditFile: buildAuditFilePath('/tmp/logs', 'server', 'combined'),
+        })
+        expect(errors).toMatchObject({
+            filename: '%DATE%.errors.log',
+            level: 'error',
+            auditFile: buildAuditFilePath('/tmp/logs', 'server', 'errors'),
+        })
     })
 
-    it('skips DailyRotateFile when fs write fails', () => {
-        // eslint-disable-next-line @typescript-eslint/no-empty-function
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    it('separates audit files per role so HTTP / worker processes do not share them', () => {
+        mockedFs.existsSync.mockReturnValue(true)
+        createWinstonLogger({ env: readEnv({ LOGFILES: 'true', LOG_DIR: '/tmp/logs', DEPENDFIX_ROLE: 'worker' }) })
+        const [combined] = rotateOptions()
+        expect(combined!.auditFile).toBe(buildAuditFilePath('/tmp/logs', 'worker', 'combined'))
+    })
+
+    it('enables compression only in production', () => {
+        mockedFs.existsSync.mockReturnValue(true)
+        createWinstonLogger({ env: readEnv({ LOGFILES: 'true', LOG_DIR: '/tmp/logs', NODE_ENV: 'production' }) })
+        for (const options of rotateOptions()) {
+            expect(options.zippedArchive).toBe(true)
+        }
+    })
+
+    it('skips DailyRotateFile when fs write fails (fallback to console only, no throw)', () => {
         mockedFs.writeFileSync.mockImplementation(() => {
             throw new Error('EACCES')
         })
-        const result = createWinstonLogger({ env: readEnv({ LOGFILES: 'true' }) })
-        expect(result).toBeDefined()
+        // eslint-disable-next-line @typescript-eslint/no-empty-function
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+        createWinstonLogger({ env: readEnv({ LOGFILES: 'true' }) })
+        expect(mockedDailyRotate).not.toHaveBeenCalled()
+        expect(getLoggerState().fileLogging).toBe(false)
+        expect(warnSpy).toHaveBeenCalled()
+        warnSpy.mockRestore()
+    })
+
+    it('disables file logging for /proc and /sys without touching the filesystem', () => {
+        // eslint-disable-next-line @typescript-eslint/no-empty-function
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+        createWinstonLogger({ env: readEnv({ LOGFILES: 'true', LOG_DIR: '/proc/dependfix/logs' }) })
+        expect(mockedDailyRotate).not.toHaveBeenCalled()
+        expect(mockedFs.mkdirSync).not.toHaveBeenCalled()
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('伪文件系统'))
+        expect(getLoggerState().fileLogging).toBe(false)
+        warnSpy.mockRestore()
+    })
+
+    it('warns once when LOG_LEVEL is unknown and falls back to info', () => {
+        // eslint-disable-next-line @typescript-eslint/no-empty-function
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+        createWinstonLogger({ env: readEnv({ LOGFILES: 'false', LOG_LEVEL: 'loud' }) })
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('LOG_LEVEL="loud"'))
+        expect(consoleTransportOptions()).toMatchObject({ level: 'info' })
+        warnSpy.mockRestore()
+    })
+
+    it('warns about unknown LOGFILES and keeps the default', () => {
+        // eslint-disable-next-line @typescript-eslint/no-empty-function
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+        createWinstonLogger({ env: readEnv({ LOGFILES: 'flase', NODE_ENV: 'test' }) })
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('LOGFILES="flase"'))
         expect(mockedDailyRotate).not.toHaveBeenCalled()
         warnSpy.mockRestore()
     })
 
-    it('adds Axiom transport when AXIOM_DATASET + AXIOM_TOKEN provided', () => {
-        const axiomCtor = vi.fn() as never
-        const result = createWinstonLogger({
-            env: readEnv({ AXIOM_DATASET: 'ds', AXIOM_TOKEN: 'tok' }),
-            axiomTransport: axiomCtor,
-        })
-        expect(result).toBeDefined()
-        expect(axiomCtor).toHaveBeenCalledWith({
-            dataset: 'ds',
-            token: 'tok',
-            level: 'info',
-        })
+    it('uses LOG_LEVEL override', () => {
+        createWinstonLogger({ env: readEnv({ LOGFILES: 'false', LOG_LEVEL: 'debug' }) })
+        expect(consoleTransportOptions()).toMatchObject({ level: 'debug' })
     })
 
-    it('skips Axiom transport when axiomTransport is null', () => {
-        const result = createWinstonLogger({
-            env: readEnv({ AXIOM_DATASET: 'ds', AXIOM_TOKEN: 'tok' }),
-            axiomTransport: null,
-        })
-        expect(result).toBeDefined()
-        expect(mockedWinston.createLogger).toHaveBeenCalled()
-    })
-
-    it('uses tryLoadAxiomTransport when options.axiomTransport is undefined (default)', () => {
-        const result = createWinstonLogger({
-            env: readEnv({ AXIOM_DATASET: 'ds', AXIOM_TOKEN: 'tok' }),
-        })
-        expect(result).toBeDefined()
-    })
-
-    it('skips Axiom transport when AXIOM_DATASET missing even with token', () => {
-        const result = createWinstonLogger({
-            env: readEnv({ AXIOM_TOKEN: 'tok' }),
-        })
-        expect(result).toBeDefined()
+    it('uses file format when __DEV__=false (prod/test)', () => {
+        createWinstonLogger({ env: readEnv({ LOGFILES: 'false', NODE_ENV: 'production' }) })
+        expect(mockedWinston.format.colorize).not.toHaveBeenCalled()
     })
 
     it('passes exitOnError: false to createLogger', () => {
         createWinstonLogger({ env: readEnv({ LOGFILES: 'false' }) })
-        expect(mockedWinston.createLogger).toHaveBeenCalledWith(
-            expect.objectContaining({ exitOnError: false }),
-        )
+        expect(mockedWinston.createLogger).toHaveBeenCalledWith(expect.objectContaining({ exitOnError: false }))
     })
+})
 
-    it('uses LOG_LEVEL override', () => {
-        createWinstonLogger({ env: readEnv({ LOGFILES: 'false', LOG_LEVEL: 'debug' }) })
-        expect(mockedWinston.transports.Console).toHaveBeenCalledWith(
-            expect.objectContaining({ level: 'debug' }),
-        )
+// ---------------------------------------------------------------------------
+// getLoggerState / formatLogStartupLine
+// ---------------------------------------------------------------------------
+
+describe('getLoggerState', () => {
+    it('reflects the most recent initialization', () => {
+        mockedFs.existsSync.mockReturnValue(true)
+        createWinstonLogger({ env: readEnv({ LOGFILES: 'true', LOG_DIR: '/tmp/logs', DEPENDFIX_ROLE: 'worker' }) })
+        const state = getLoggerState()
+        expect(state.logDir).toBe('/tmp/logs')
+        expect(state.fileLogging).toBe(true)
+        expect(state.env.PROCESS_ROLE).toBe('worker')
     })
+})
 
-    it('uses file format when __DEV__=false (prod/test)', () => {
-        createWinstonLogger({
-            env: readEnv({ LOGFILES: 'false', NODE_ENV: 'production' }),
+describe('formatLogStartupLine', () => {
+    it('prints the log directory when file logging is active', () => {
+        const line = formatLogStartupLine({
+            env: readEnv({ LOG_LEVEL: 'debug', DEPENDFIX_ROLE: 'worker' }),
+            logDir: '/app/data/logs',
+            fileLogging: true,
         })
-        expect(mockedWinston.format.colorize).not.toHaveBeenCalled()
+        expect(line).toBe('[logger] files=/app/data/logs level=debug role=worker')
+    })
+
+    it('prints disabled when file logging is off', () => {
+        const line = formatLogStartupLine({ env: readEnv({}), logDir: '/tmp/logs', fileLogging: false })
+        expect(line).toContain('files=disabled')
+        expect(line).toContain('role=server')
     })
 })
 
@@ -452,9 +651,8 @@ describe('createWinstonLogger', () => {
 describe('initLogger', () => {
     it('replaces internal winstonLoggerInstance', () => {
         const before = getWinstonLogger()
-        const fresh = initLogger({ env: readEnv({ LOGFILES: 'false' }) })
+        initLogger({ env: readEnv({ LOGFILES: 'false' }) })
         const after = getWinstonLogger()
-        expect(after).toBe(fresh)
         expect(after).not.toBe(before)
     })
 })
@@ -462,9 +660,10 @@ describe('initLogger', () => {
 describe('winstonLogger Proxy', () => {
     it('proxies .log to current winstonLoggerInstance', () => {
         const target = getWinstonLogger()
-        const spy = vi.spyOn(target, 'log')
+        const logSpy = vi.spyOn(target, 'log')
         winstonLogger.log('info', 'msg')
-        expect(spy).toHaveBeenCalledWith('info', 'msg')
+        expect(logSpy).toHaveBeenCalledWith('info', 'msg')
+        logSpy.mockRestore()
     })
 })
 
@@ -477,48 +676,81 @@ describe('createPlatformLogger', () => {
         initLogger({ env: readEnv({ LOGFILES: 'false' }) })
     })
 
+    const lastCall = (): unknown[] => {
+        const logSpy = getWinstonLogger().log as unknown as { mock: { calls: unknown[][] } }
+        return logSpy.mock.calls.at(-1)!
+    }
+
     it('debug forwards to winstonLogger.log with prefix', () => {
-        const log = createPlatformLogger('test')
-        const target = getWinstonLogger()
-        const spy = vi.spyOn(target, 'log')
-        log.debug('hello')
-        expect(spy).toHaveBeenCalledWith('debug', '[test] hello', {})
+        createPlatformLogger('test').debug('hello')
+        expect(lastCall()).toEqual(['debug', '[test] hello', {}])
     })
 
-    it('info forwards with sanitized context', () => {
-        const log = createPlatformLogger('test')
-        const target = getWinstonLogger()
-        const spy = vi.spyOn(target, 'log')
-        log.info('hello', { token: 'abc', data: 'public' })
-        const ctxArg = (spy.mock.calls[0] as unknown as [string, string, Record<string, unknown>] | undefined)?.[2]
-        expect((spy.mock.calls[0] as unknown as [string, string, string] | undefined)?.[1]).toBe('[test] hello')
-        expect(ctxArg).not.toEqual({ token: 'abc', data: 'public' })
+    it('info forwards with context', () => {
+        createPlatformLogger('test').info('hello', { runId: 'r1' })
+        expect(lastCall()).toEqual(['info', '[test] hello', { runId: 'r1' }])
     })
 
-    it('warn forwards without context → empty object', () => {
-        const log = createPlatformLogger('test')
-        const target = getWinstonLogger()
-        const spy = vi.spyOn(target, 'log')
-        log.warn('hello')
-        expect(spy).toHaveBeenCalledWith('warn', '[test] hello', {})
+    it('warn forwards to warn level', () => {
+        createPlatformLogger('test').warn('careful')
+        expect(lastCall()[0]).toBe('warn')
     })
 
-    it('error forwards with sanitized context', () => {
-        const log = createPlatformLogger('test')
-        const target = getWinstonLogger()
-        const spy = vi.spyOn(target, 'log')
-        log.error('boom', { password: 'secret' })
-        const ctxArg = (spy.mock.calls[0] as unknown as [string, string, Record<string, unknown>] | undefined)?.[2]
-        expect(ctxArg).not.toEqual({ password: 'secret' })
+    it('error forwards to error level', () => {
+        createPlatformLogger('test').error('boom')
+        expect(lastCall()[0]).toBe('error')
     })
-})
 
-describe('logger constant', () => {
-    it('is a PlatformLogger instance with all 4 methods', () => {
-        expect(typeof logger.debug).toBe('function')
-        expect(typeof logger.info).toBe('function')
-        expect(typeof logger.warn).toBe('function')
-        expect(typeof logger.error).toBe('function')
+    it('sanitizes context', () => {
+        createPlatformLogger('test').info('hello', { token: 'abc123' })
+        expect(lastCall()[2]).toEqual({ token: '***' })
+    })
+
+    it('sanitizes the message itself (凭据可能拼在消息里)', () => {
+        createPlatformLogger('test').info('clone https://x-access-token:ghp_abc123@github.com/o/r.git')
+        expect(String(lastCall()[1])).toContain('https://***@github.com')
+    })
+
+    it('expands Error context instead of collapsing it to {}', () => {
+        createPlatformLogger('test').error('failed', { error: new Error('boom') })
+        const context = lastCall()[2] as { error: { name: string, message: string, stack?: string } }
+        expect(context.error.name).toBe('Error')
+        expect(context.error.message).toBe('boom')
+        expect(context.error.stack).toBeTruthy()
+    })
+
+    it('normalizes newlines in the message (防日志注入)', () => {
+        createPlatformLogger('test').info('line1\nline2\r\nline3\r2026-01-01 ERROR forged')
+        const message = String(lastCall()[1])
+        expect(message).not.toContain('\n')
+        expect(message).not.toContain('\r')
+        expect(message).toContain('line1\\nline2\\nline3\\n2026-01-01 ERROR forged')
+    })
+
+    it('never throws on circular Error causes (环状 cause 不得冒泡到调用点)', () => {
+        const error = new Error('loop')
+        error.cause = error
+        expect(() => createPlatformLogger('test').error('failed', { error })).not.toThrow()
+    })
+
+    it('never throws when the transport throws (降级到 console)', () => {
+        const instance = getWinstonLogger()
+        vi.spyOn(instance, 'log').mockImplementation(() => {
+            throw new Error('transport broken')
+        })
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+        expect(() => createPlatformLogger('test').info('still-safe')).not.toThrow()
+        expect(errorSpy).toHaveBeenCalled()
+        errorSpy.mockRestore()
+    })
+
+    it('keeps logger usable with BigInt context (格式化不抛错)', () => {
+        expect(() => createPlatformLogger('test').info('bigint', { n: 10n })).not.toThrow()
+    })
+
+    it('exposes a default platform logger', () => {
+        logger.info('default')
+        expect(String(lastCall()[1])).toBe('[platform] default')
     })
 })
 
@@ -527,21 +759,16 @@ describe('logger constant', () => {
 // ---------------------------------------------------------------------------
 
 describe('isDirectExecution', () => {
-    it('returns true when importMetaUrl matches argvEntry pathToFileURL', () => {
-        const entry = '/tmp/cli.mjs'
-        const url = pathToFileURL(entry).href
-        expect(isDirectExecution(url, entry)).toBe(true)
+    it('returns false without argv entry', () => {
+        expect(isDirectExecution('file:///a.mjs', undefined)).toBe(false)
     })
 
-    it('returns false when argvEntry is undefined', () => {
-        expect(isDirectExecution('file:///x.mjs', undefined)).toBe(false)
+    it('returns true when argv entry resolves to the module url', () => {
+        const file = path.resolve('/tmp/x/logger.mjs')
+        expect(isDirectExecution(pathToFileURL(file).href, file)).toBe(true)
     })
 
-    it('returns false when importMetaUrl does not match argvEntry', () => {
-        expect(isDirectExecution('file:///x.mjs', '/tmp/cli.mjs')).toBe(false)
-    })
-
-    it('returns false in vitest environment (argvEntry is vitest runner, not logger.ts)', () => {
-        expect(isDirectExecution('file:///logger.ts', process.argv[1])).toBe(false)
+    it('returns false for a different entry', () => {
+        expect(isDirectExecution('file:///a.mjs', '/tmp/b.mjs')).toBe(false)
     })
 })

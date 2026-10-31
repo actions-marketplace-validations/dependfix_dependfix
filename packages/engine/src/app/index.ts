@@ -1,14 +1,13 @@
 import type { Octokit } from '@octokit/rest'
 import {
     createLogger,
-    filterAlerts,
-    prioritizeAlerts,
-    limitAlerts,
     generateMarkdownReport,
     generateJsonReport,
     writeReport,
     createEmptyRunSummary,
     toErrorMessage,
+    type AlertsDisabledRecord,
+    type CiAlignmentRecord,
     type Logger,
     type NormalizedSecurityAlert,
     type RunResult,
@@ -16,8 +15,11 @@ import {
     type RepositoryResult,
     type FixAction,
     type FixError,
+    type RepeatedAttemptRecord,
+    type PrCheckWatchReport,
+    type DeliverySkipRecord,
 } from '@dependfix/core'
-import { fromPat } from '../auth'
+import { fromApp, type AuthProvider } from '../auth'
 import {
     createFixBranch,
     stageAndCommit,
@@ -27,10 +29,10 @@ import {
     computeFixFingerprint,
     computeFixAndPrPlan,
     findDependfixOpenPR,
-    commentOnPullRequest,
-    addLabelToPullRequest,
-    type DependfixOpenPR,
-    createGitHubClient,
+    ClosedAttemptIndex,
+    collectAttemptMarkers,
+    CommitScopeError,
+    collectDeclaredPaths,
     discoverRepositories,
     mergeRepositories,
     filterExplicitRepositories,
@@ -41,29 +43,42 @@ import { runWithConcurrency } from '../multirepo/scheduler'
 import { writeArchive } from '../report/archiver'
 import type { RuntimeConfig } from '../config'
 import { enforceVerificationGate } from '../runners/verification-gate'
+import { requestAbort, resetProcessControlState } from '../runners/process-control'
 import { collectSupplyChainWarnings } from '../supply-chain'
 import { loadRulesConfigFromEnv, resetActiveRulesConfig, setActiveRulesConfig } from '../code-scanning/rule-config'
-import { fetchRepoAlerts, fetchDefaultBranch, truncatedWarning } from './repo-alerts'
+import type { CommandResult } from '../runners/verification-runner'
+import type { VerificationCheckpoint } from './verification-checkpoint'
+import { createConfiguredGitHubClient, createConfiguredGitHubClientOrNull } from './github-client'
+import { formatEngineBuildLine, resolveRunBuildInfo, type RunBuildInfo } from './build-info'
+import { fetchDefaultBranch } from './repo-alerts'
+import { abortAwareRepoTask, abortBlocksDelivery, logSkippedRepos, recordRunAbort } from './abort'
+import { processRepoForReport } from './repo-report'
 import { processRepoFix, type AiUsageRef } from './repo-fix'
+import { applyRepoConfig } from './repo-config'
 import {
     buildCommitMessage,
     buildPrTitle,
     buildRunResult,
     closeSupersededPRs,
-    codeScanningAlertsTokenHint,
     commitLocalChanges,
     computeExitCode,
     computeSummary,
-    dependabotAlertsTokenHint,
     ensureGitignore,
     hasGitChanges,
-    pullRequestCreationHint,
+    isGitRepository,
     reportCleanupCandidates,
     autoCleanupMergedBranches,
     resolveAlertRepositories,
     runBranchCleanupForRepo,
     type AppContext,
 } from './helpers'
+import { findInstallBlockedReposWithFixes, hasDeliverableFixes } from './delivery'
+import { prepareDeliveryHygiene } from './git-exclude'
+import { runPrCheckWatch } from './pr-check-watch-run'
+import { handleBaselineRedDelivery, rollbackForSkippedDelivery } from './skipped-delivery'
+import { logPartialSourceFailureSummary } from './source-failure-summary'
+import { pullRequestCreationHint } from './token-hints'
+import { handleDuplicatePRs } from './duplicate-prs'
 
 // 仅 re-export 平台直接调用的辅助函数（PR 创建在平台 A 模式复用）
 export { buildPrTitle } from './helpers'
@@ -105,65 +120,14 @@ export interface DependfixRunResult {
     exitCode: number
 }
 
-// ---------------------------------------------------------------------------
-// Per-source 错误隔离汇总（todo.md §M19.5 C8）
-// ---------------------------------------------------------------------------
-
-/**
- * 输出"部分源拉取失败"汇总（todo.md §M19.5 C8 per-source 错误隔离）。
- *
- * 触发条件（必须全部满足，避免与"全部源失败"语义重叠）：
- * 1. allErrors 至少包含一个 `stage='fetch' + category='FETCH_FAILED'` 错误（per-source 失败）
- * 2. **至少一个仓库成功拉取了部分告警**（isAnyRepoSuccessful = true）——
- *    否则就是"全部源失败"语义，已由 processRepoForReport catch + logger.error 单独处理，
- *    本函数聚焦"warn + 保留成功源"场景的汇总输出，避免重复提示。
- *
- * 汇总按 source 分组（'dependabot' / 'code-scanning' / 'code-quality' / 'pnpm-audit'），
- * 列出每个源失败的仓库数 + 示例错误消息，便于用户快速定位是 token 权限还是网络问题。
- */
-export function logPartialSourceFailureSummary(
-    allErrors: FixError[],
-    logger: Logger,
-    isAnyRepoSuccessful: boolean,
-): void {
-    const fetchErrors = allErrors.filter((e) => e.stage === 'fetch' && e.category === 'FETCH_FAILED')
-    if (fetchErrors.length === 0) {
-        return
-    }
-    if (!isAnyRepoSuccessful) {
-        // 全部源失败：避免与 fetchRepoAlerts 抛错路径的 logger.error 重复提示
-        return
-    }
-
-    // 按 source 分组
-    const bySource = new Map<string, { repos: Set<string>, sampleMessage: string }>()
-    for (const err of fetchErrors) {
-        const source = err.source ?? 'unknown'
-        const existing = bySource.get(source)
-        if (existing) {
-            existing.repos.add(err.repository)
-        } else {
-            bySource.set(source, {
-                repos: new Set([err.repository]),
-                sampleMessage: err.message,
-            })
-        }
-    }
-
-    const summary = [...bySource.entries()]
-        .map(([source, { repos, sampleMessage }]) => `${source}（${repos.size} 个仓库: ${[...repos].slice(0, 3).join(', ')}${repos.size > 3 ? '...' : ''}）: ${sampleMessage}`)
-        .join('\n  - ')
-
-    logger.warn(
-        `[alerts] 部分源拉取失败（M19.5 per-source 错误隔离）— 成功源已保留继续处理，详细如下：\n  - ${summary}`,
-    )
-}
+export { logPartialSourceFailureSummary } from './source-failure-summary'
 
 // ---------------------------------------------------------------------------
 // DependfixApp
 // ---------------------------------------------------------------------------
 
 export class DependfixApp {
+    /** 运行时配置；构造期按「中央配置优先」合并目标仓库专属配置后单次赋值（见 applyRepoConfig） */
     private readonly config: RuntimeConfig
     private readonly workDir: string
     private readonly reportOutputDir: string
@@ -172,10 +136,16 @@ export class DependfixApp {
     private readonly customCommands?: string[]
     private readonly executionEnvironment: 'local' | 'container'
     private readonly runId: string
+    /** GitHub App 认证提供者（用于 commit author 真实 bot 身份；仅 fix/fix-and-pr 模式生效） */
+    private readonly githubAppAuth?: AuthProvider
+    /** 运行构建版本回执（`[build]` 启动行；平台注入优先，CLI 回退包版本） */
+    private readonly buildInfo: RunBuildInfo
 
     private readonly allAlerts: NormalizedSecurityAlert[] = []
     private readonly allActions: FixAction[] = []
     private readonly allErrors: FixError[] = []
+    /** alerts 功能未启用记录（未启用 ≠ 失败，不计入 allErrors / exitCode） */
+    private readonly alertsDisabled: AlertsDisabledRecord[] = []
     private readonly repoResults: RepositoryResult[] = []
     private readonly summary: RunSummary = createEmptyRunSummary()
     /** run 级 AI 用量聚合（--ai 实际调用时填充；报告 aiUsage 段数据源；由 repo-fix 管线步骤回写） */
@@ -184,9 +154,29 @@ export class DependfixApp {
     private finishedAt: string = ''
     /** 运行前工作区是否已有未提交改动（验证门禁回滚保护：避免销毁用户本地工作） */
     private preExistingDirty = false
+    /** 运行级修复前基线（跨仓库复用；惰性首采，零告警不采样）。 */
+    private verificationBaseline: { value?: CommandResult[] } = {}
+    /** 单元回滚 checkpoint（单元 probe 开始前记录，跨仓库传递）。 */
+    private readonly verificationCheckpoints: VerificationCheckpoint[] = []
+    /** 验证链口径记录（run 级；`verifyProject` 写入，报告与 PR 正文消费） */
+    private readonly ciAlignment: CiAlignmentRecord[] = []
+    /** 最近关闭 PR 的尝试索引（run 级缓存；仅 fix-and-pr 模式参与判定） */
+    private readonly attemptIndex: ClosedAttemptIndex
+    /** 同告警尝试记录（run 级；报告与 PR 正文标记数据源） */
+    private readonly attemptTracking: RepeatedAttemptRecord[] = []
+    /** PR 落点仓库（第一个仓库；尝试标记只能写进该仓库的 PR） */
+    private attemptRepo: string | undefined
+    /** PR check 回环结果（run 级；仅在 `--wait-pr-checks` 且创建 PR 时递增） */
+    private readonly prCheckWatchReport: PrCheckWatchReport = { attempts: [], runBudgetExhausted: false }
+    /** 交付跳过记录（基线红；`computeSummary` 据此派生 summary 计数） */
+    private readonly deliverySkips: NonNullable<AppContext['deliverySkips']> = []
+    /** 已记录的预算跳过（`stage:work`；逐包命中不刷审计） */
+    private readonly budgetSkips = new Set<string>()
+    /** `draft` 档的跳过记录（sanity: PR 创建后回填载体编号） */
+    private baselineRedDraft?: DeliverySkipRecord
+    private readonly alertOutcomes: NonNullable<AppContext['alertOutcomes']> = new Map()
 
     constructor(options: DependfixAppOptions) {
-        this.config = options.config
         this.workDir = options.workDir ?? process.cwd()
         this.reportOutputDir = options.reportOutputDir ?? './dependfix-reports'
         this.verbose = options.verbose ?? false
@@ -200,14 +190,28 @@ export class DependfixApp {
             minLevel: this.verbose ? 'debug' : 'info',
         })
 
+        // 目标仓库专属配置（`.github/dependfix.yml`）：workDir 即目标仓库检出（平台在 clone 之后才构造本 app），
+        // 读取后按「中央配置优先」合并（当前仅 overrideProtect）。需在 logger 之后（降级 / 生效告警走 logger），
+        // 且合并结果作为**唯一 config 来源**单次赋值（保持 readonly 不可变语义）；非法配置一律降级不中断运行。
+        this.config = applyRepoConfig(options.config, this.workDir, this.logger)
+        // 构建版本回执：平台注入值（容器镜像构建期）优先，本地执行回退引擎包版本
+        this.buildInfo = resolveRunBuildInfo(this.config)
+
+        // GitHub App 认证提供者（用于 commit author 真实 bot 身份）
+        if (this.config.githubApp) {
+            this.githubAppAuth = fromApp(this.config.githubApp)
+        }
+
+        // 同告警尝试索引：运行级缓存（每仓库每轮只查一次已关闭 PR）
+        this.attemptIndex = new ClosedAttemptIndex({ logger: this.logger })
+
         // Code Scanning 规则分类配置：env `CODE_SCANNING_RULES_CONFIG_PATH`
         // 指向的 JSON 文件加载并替换默认分类表；env 未设 / 文件缺失 / 解析失败
         // 均降级默认（向后兼容）。错误信息已由 loadRulesConfigFromEnv 写入 stderr，
         // 此处不重复（避免双写）。
         //
-        // 进程级状态生命周期：active config 是模块级单例，每次构造 DependfixApp
-        // 先 reset 再按需 set，避免前一个 app 残留配置污染当前 run
-        // （同一进程多次 new DependfixApp 场景，如 cli 测试 / 多 batch 调度）。
+        // 进程级状态生命周期：active config 是模块级单例，每次构造 DependfixApp 先 reset 再按需 set，
+        // 避免前一个 app 残留配置污染当前 run（同一进程多次 new DependfixApp 场景，如 cli 测试 / 多 batch 调度）。
         resetActiveRulesConfig()
         const ruleConfig = loadRulesConfigFromEnv(process.env)
         if (ruleConfig) {
@@ -217,6 +221,23 @@ export class DependfixApp {
                 suggestedCount: ruleConfig.suggested.size,
             })
         }
+
+        // 进程级状态生命周期（同 `resetActiveRulesConfig` 口径）：运行级取消状态与受管子进程登记
+        // 是模块级单例，每次构造 app 先复位，避免同一进程内的前一次运行状态污染本次运行
+        // （同一进程多次 new DependfixApp 场景：cli 测试 / 平台多 batch 调度）。
+        resetProcessControlState()
+    }
+
+    /**
+     * 请求中止本次运行（平台执行超时 / 运维中止的接入点；协作式、可重复调用）。
+     *
+     * 语义与留痕口径见 [app/abort.ts](./abort.ts) 的 `recordRunAbort`；核心三步：
+     * ① 立即终止在跑子进程树；② 不再启动新工作（仓库边界 / 验证链 / 安装命令三重短路）；
+     * ③ 放弃交付（半成品不落地）。不抛错、不中断调用栈。
+     */
+    abort(reason = 'abort requested'): void {
+        requestAbort(reason)
+        recordRunAbort(this.ctx, reason)
     }
 
     /** 供辅助方法使用的状态切片。 */
@@ -230,10 +251,21 @@ export class DependfixApp {
             allAlerts: this.allAlerts,
             allActions: this.allActions,
             allErrors: this.allErrors,
+            alertsDisabled: this.alertsDisabled,
             repoResults: this.repoResults,
             summary: this.summary,
             startedAt: this.startedAt,
             finishedAt: this.finishedAt,
+            authProvider: this.githubAppAuth,
+            ciAlignment: this.ciAlignment,
+            attemptTracking: this.attemptTracking,
+            attemptIndex: this.attemptIndex,
+            attemptRepo: this.attemptRepo,
+            prCheckWatch: this.prCheckWatchReport,
+            alertOutcomes: this.alertOutcomes,
+            deliverySkips: this.deliverySkips,
+            deadlineAt: this.config.deadlineAt,
+            budgetSkips: this.budgetSkips,
         }
     }
 
@@ -246,8 +278,14 @@ export class DependfixApp {
         this.startedAt = new Date().toISOString()
         // 启动安全自检（best-effort，失败不阻断运行）
         await this.runStartupSecurityChecks()
-        // 记录运行前工作区状态（验证门禁回滚时保护用户已有未提交改动）
-        this.preExistingDirty = hasGitChanges(this.workDir)
+        // 记录运行前工作区状态（验证门禁回滚时保护用户已有未提交改动）。
+        // 显式前置 `isGitRepository`（纵深防御，不依赖 `hasGitChanges` 的内部守卫）：非仓库目录
+        // ⇒ 视为「无既有改动」；门禁在非仓库下另跳过回滚（无可回滚工作树），故两处语义自洽。
+        this.preExistingDirty = isGitRepository(this.workDir) && hasGitChanges(this.workDir)
+        // 提交卫生：安装产物不得进入交付提交。必须在安装 / 验证前落盘（只写 .git/info/exclude，幂等）
+        prepareDeliveryHygiene(this.workDir, this.config, this.logger)
+        // 构建版本回执：先于业务日志输出，让「线上构建旧 / 代码路径未覆盖」可判读（口径见 app/build-info.ts）
+        this.logger.info(formatEngineBuildLine(this.buildInfo))
         this.logger.info(`Starting dependfix run ${this.runId}`, {
             mode: this.config.mode,
             repositories: this.config.repositories,
@@ -305,6 +343,8 @@ export class DependfixApp {
         }
         // 部分源拉取失败汇总（todo.md §M19.5 C8）：
         // 仅当至少 1 个源成功 + 至少 1 个源失败时输出（避免与"全部源失败"语义重叠）。
+        // 注：此处 `verificationPassed === true` 是「该仓库产出了结果」的启发式（仅用于日志汇总门控），
+        // 不是失败判定——与 `computeExitCode` 的归因口径（`isRepoVerificationBlocked`）分工不同，刻意保留原始口径。
         const isAnyRepoSuccessful = this.repoResults.some((r) =>
             r.alertsCount > 0 || r.fixed > 0 || r.verificationPassed === true,
         )
@@ -329,7 +369,7 @@ export class DependfixApp {
             && (this.config.mode === 'fix' || this.config.mode === 'fix-and-pr')
         if (isLocalFix && process.env.DEPENDFIX_SUPPRESS_LOCAL_EXECUTION_WARNING !== '1') {
             this.logger.warn(
-                '[local-exec] 本地模式将直接执行目标仓库的依赖安装/验证脚本（install/lint/build 钩子，属不可信代码）'
+                '[local-exec] 本地模式将直接执行目标仓库的依赖安装/验证脚本（install/lint/build/typecheck/test 钩子，属不可信代码）'
                 + '——若仓库或依赖被恶意控制，脚本可读取本机环境变量（含 GITHUB_TOKEN）。'
                 + '建议：使用专用低权限 token，并在专用环境（容器/VM/CI runner）运行；'
                 + '已确认风险可设置 DEPENDFIX_SUPPRESS_LOCAL_EXECUTION_WARNING=1 抑制本提示'
@@ -338,7 +378,7 @@ export class DependfixApp {
         }
 
         if (this.config.alertSource === 'github-dependabot' && this.config.githubToken) {
-            const result = await checkTokenPermissions(this.createClient(), {
+            const result = await checkTokenPermissions(createConfiguredGitHubClient(this.config), {
                 codeScanningEnabled: this.config.codeScanningEnabled,
             })
             if (result.ok && result.warnings.length > 0) {
@@ -375,61 +415,9 @@ export class DependfixApp {
     // -----------------------------------------------------------------------
 
     private async executeReportMode(): Promise<void> {
-        const client = this.githubClientOrNull()
+        const client = createConfiguredGitHubClientOrNull(this.config)
         const repositories = await this.resolveRepositories(client)
-        await this.runRepoPipeline(repositories, (repo) => this.processRepoForReport(client, repo))
-    }
-
-    private async processRepoForReport(client: Octokit | null, repo: string): Promise<void> {
-        const startTime = Date.now()
-        const [owner, name] = repo.split('/')
-
-        try {
-            const alerts = await fetchRepoAlerts(this.ctx, repo)
-            const { filtered } = filterAlerts(alerts, { severityThreshold: this.config.severityThreshold })
-            const prioritized = prioritizeAlerts(filtered)
-            const { limited, truncated } = limitAlerts(prioritized, this.config.maxAlertsPerRepository)
-            if (truncated.length > 0) {
-                this.summary.alertsTruncated += truncated.length
-                this.logger.warn(truncatedWarning(this.config, truncated.length))
-            }
-
-            const defaultBranch = await fetchDefaultBranch(client, owner, name)
-
-            this.allAlerts.push(...limited)
-            this.repoResults.push({
-                repository: repo,
-                defaultBranch,
-                alertsCount: limited.length,
-                fixable: limited.filter((a) => a.fixable).length,
-                fixed: 0,
-                failed: 0,
-                lockfileRepaired: false,
-                durationMs: Date.now() - startTime,
-            })
-
-            this.logger.info(`Fetched ${limited.length} alerts for ${repo}`)
-        } catch (error: unknown) {
-            const message = toErrorMessage(error)
-            const hint = dependabotAlertsTokenHint(error) ?? codeScanningAlertsTokenHint(error)
-            this.logger.error(`Failed to fetch alerts for ${repo}: ${message}${hint ? ` — ${hint}` : ''}`)
-            this.allErrors.push({
-                repository: repo,
-                stage: 'fetch',
-                category: 'FETCH_FAILED',
-                message: hint ? `${message}（${hint}）` : message,
-            })
-            this.repoResults.push({
-                repository: repo,
-                defaultBranch: '',
-                alertsCount: 0,
-                fixable: 0,
-                fixed: 0,
-                failed: 0,
-                lockfileRepaired: false,
-                durationMs: Date.now() - startTime,
-            })
-        }
+        await this.runRepoPipeline(repositories, (repo) => processRepoForReport(this.ctx, client, repo))
     }
 
     // -----------------------------------------------------------------------
@@ -437,26 +425,32 @@ export class DependfixApp {
     // -----------------------------------------------------------------------
 
     private async executeFixMode(): Promise<void> {
-        const client = this.githubClientOrNull()
+        const client = createConfiguredGitHubClientOrNull(this.config)
         const repositories = await this.resolveRepositories(client)
         await this.runRepoPipeline(repositories, (repo) => this.processRepoForFix(client, repo))
 
         // 修复完成后，按需在本地当前分支直接提交（不推送、不创建 PR）
         if (this.config.commit) {
+            // 运行级取消：不交付半成品
+            if (abortBlocksDelivery(this.ctx, 'local commit')) {
+                return
+            }
             // 验证门禁：任一仓库验证失败 → 回滚，不提交坏改动
-            if (enforceVerificationGate(this.ctx, { preExistingDirty: this.preExistingDirty, action: 'commit' })) {
+            if (await enforceVerificationGate(this.ctx, { preExistingDirty: this.preExistingDirty, action: 'commit' })) {
                 return
             }
 
             try {
-                commitLocalChanges(this.ctx)
+                await commitLocalChanges(this.ctx)
             } catch (error: unknown) {
                 const message = toErrorMessage(error)
                 this.logger.error(`Local commit failed: ${message}`)
+                const isScopeError = error instanceof CommitScopeError
                 this.allErrors.push({
                     repository: '*',
-                    stage: 'fix',
-                    category: 'COMMIT_FAILED',
+                    // 提交集合不合法统一记交付阶段（与 PR 路径一致），其余仍为 fix 阶段的 COMMIT_FAILED
+                    stage: isScopeError ? 'report' : 'fix',
+                    category: isScopeError ? error.category : 'COMMIT_FAILED',
                     message,
                 })
             }
@@ -464,7 +458,17 @@ export class DependfixApp {
     }
 
     private async processRepoForFix(client: Octokit | null, repo: string): Promise<void> {
-        await processRepoFix({ ...this.ctx, aiUsageRef: this.aiUsageRef }, client, repo)
+        await processRepoFix(
+            {
+                ...this.ctx,
+                aiUsageRef: this.aiUsageRef,
+                verificationBaseline: this.verificationBaseline,
+                verificationCheckpoints: this.verificationCheckpoints,
+                preExistingDirty: this.preExistingDirty,
+            },
+            client,
+            repo,
+        )
     }
 
     // -----------------------------------------------------------------------
@@ -480,8 +484,10 @@ export class DependfixApp {
      *   新 PR 创建失败时保留旧 PR，避免出现"无 PR 窗口"
      */
     private async executeFixAndPrMode(): Promise<void> {
-        const client = this.createClient()
+        const client = createConfiguredGitHubClient(this.config)
         const repositories = await this.resolveRepositories(client)
+        // PR 落点仓库 = 第一个仓库（尝试标记只能写进它的 PR；其余仓库不参与尝试计数）
+        this.attemptRepo = repositories[0]
 
         // 1. Run fix pipeline for all repos (same as fix mode)
         // （config 校验已保证 fix-and-pr 仅 github-dependabot 源，client 恒非 null）
@@ -501,7 +507,39 @@ export class DependfixApp {
         }
 
         // 2. Verification gate：任一仓库验证失败 → 回滚修复改动并跳过 PR 创建
-        if (enforceVerificationGate(this.ctx, { preExistingDirty: this.preExistingDirty, action: 'pr' })) {
+        if (abortBlocksDelivery(this.ctx, 'PR creation')) {
+            return
+        }
+        if (await enforceVerificationGate(this.ctx, { preExistingDirty: this.preExistingDirty, action: 'pr' })) {
+            return
+        }
+
+        // 2.5 交付正确性守卫（2026-10-18）：修复后安装仍既有失败 / 零修复时不建普通 PR。
+        // 放在门禁之后：先让「本次新引入」的失败按原语义回滚，再处理非归因的安装红与零修复。
+        const installBlockedRepos = findInstallBlockedReposWithFixes(this.allActions)
+        if (installBlockedRepos.length > 0) {
+            const outcome = await handleBaselineRedDelivery({
+                ctx: this.ctx,
+                config: this.config,
+                client,
+                repositories,
+                installBlockedRepos,
+                workDir: this.workDir,
+                preExistingDirty: this.preExistingDirty,
+            })
+            if (!outcome.continueAsDraft) {
+                return
+            }
+            this.baselineRedDraft = outcome.record
+        }
+        if (!hasDeliverableFixes(this.allActions)) {
+            this.logger.info('No deliverable fixes produced — skipping PR creation')
+            await rollbackForSkippedDelivery({
+                logger: this.logger,
+                workDir: this.workDir,
+                preExistingDirty: this.preExistingDirty,
+                reason: 'no deliverable fixes',
+            })
             return
         }
 
@@ -535,6 +573,7 @@ export class DependfixApp {
                 this.logger.info(
                     `Open PR #${plan.sameContentPR.number} already contains identical fixes — skipping PR creation`,
                 )
+                this.summary.prsSkippedByFingerprint += 1
                 this.allActions.push({
                     type: 'dependency-upgrade',
                     repository: firstRepo,
@@ -559,14 +598,38 @@ export class DependfixApp {
 
             // 5. Create fix branch (content-addressed) + commit + push
             const branchName = `dependfix/auto-fix-${fingerprint}`
-            createFixBranch(branchName, this.workDir)
+            await createFixBranch(branchName, this.workDir)
             this.logger.info(`Creating fix branch: ${branchName}`)
 
             this.logger.info('Staging and committing changes')
-            stageAndCommit(buildCommitMessage(this.allActions), this.workDir)
+            const author = this.githubAppAuth?.getCommitAuthor()
+            try {
+                const scope = await stageAndCommit(buildCommitMessage(this.allActions), this.workDir, author, {
+                    declaredPaths: collectDeclaredPaths(this.allActions),
+                })
+                if (scope.ignored.length > 0) {
+                    this.logger.info(`Not committing ${scope.ignored.length} generated / undeclared path(s): ${scope.ignored.join(', ')}`)
+                }
+                if (scope.missing.length > 0) {
+                    this.logger.warn(`Declared path(s) had no changes in the worktree: ${scope.missing.join(', ')}`)
+                }
+            } catch (error: unknown) {
+                if (error instanceof CommitScopeError) {
+                    // 提交集合不合法：记录专属类别（平台据 category 判 deliver 失败），不进入 push / PR
+                    this.logger.error(`Staging rejected (${error.category}): ${error.message}`)
+                    this.allErrors.push({
+                        repository: firstRepo,
+                        stage: 'report',
+                        category: error.category,
+                        message: error.message,
+                    })
+                    return
+                }
+                throw error
+            }
 
             this.logger.info(`Pushing branch: ${branchName}`)
-            pushBranch(branchName, this.workDir)
+            await pushBranch(branchName, this.workDir)
 
             // 6. Create PR (one PR covering all repos)
             const defaultBranch = await fetchDefaultBranch(client, owner, repo)
@@ -578,6 +641,7 @@ export class DependfixApp {
             const prBody = generatePRBody(
                 runResult,
                 plan.supersedePRs.map((pr) => pr.number),
+                collectAttemptMarkers(this.attemptTracking, this.allActions),
             )
             const prTitle = buildPrTitle(this.summary, this.allActions)
 
@@ -589,9 +653,19 @@ export class DependfixApp {
                 baseBranch: defaultBranch,
                 title: prTitle,
                 body: prBody,
+                // 基线红：草稿 PR（CI 会以既有失败为红，先不进人工 review 队列）
+                draft: this.baselineRedDraft !== undefined,
             })
 
             this.logger.info(`PR created: ${pr.htmlUrl}`)
+            this.summary.prsOpened += 1
+            if (this.baselineRedDraft) {
+                this.baselineRedDraft.carrier.draftPr = { number: pr.number, htmlUrl: pr.htmlUrl }
+                this.logger.warn(
+                    `Draft PR created for pre-existing install failure: ${pr.htmlUrl} `
+                    + '— fix the repository install chain, then mark it ready for review',
+                )
+            }
 
             // Record PR as a fix action before closing superseded PRs,
             // so a close failure never hides the successfully created PR
@@ -609,10 +683,25 @@ export class DependfixApp {
             // 6.5 Duplicate PR handling: comment + label on the new PR
             // pointing to the superseded PRs (avoid manual dedup by users).
             // Requires `issues: write` token scope; failure is logged but not fatal.
-            await this.handleDuplicatePRs(client, owner, repo, pr.number, plan.supersedePRs)
+            await handleDuplicatePRs({
+                client,
+                owner,
+                repo,
+                newPRNumber: pr.number,
+                supersededPRs: plan.supersedePRs,
+                logger: this.logger,
+            })
 
             // 7. Close superseded PRs only after new PR created successfully
             await closeSupersededPRs(this.ctx, client, owner, repo, plan.supersedePRs)
+
+            if (this.config.waitPrChecks && this.baselineRedDraft) {
+                this.logger.info(
+                    'Skipping PR check watch: draft delivery is expected to fail on the pre-existing install failure',
+                )
+            } else if (this.config.waitPrChecks) {
+                await runPrCheckWatch({ ctx: this.ctx, octokit: client, owner, repo, pr, branchName })
+            }
         } catch (error: unknown) {
             const message = toErrorMessage(error)
             const hint = pullRequestCreationHint(error)
@@ -639,66 +728,9 @@ export class DependfixApp {
      * - dry-run 模式仅列清单并打印 "would delete"，不执行删除
      */
     private async executeCleanupBranchesMode(): Promise<void> {
-        const client = this.createClient()
+        const client = createConfiguredGitHubClient(this.config)
         for (const repo of this.config.repositories) {
             await runBranchCleanupForRepo(this.ctx, client, repo)
-        }
-    }
-
-    /**
-     * 重复 PR 处理：在新 PR 上添加评论指向被取代的旧 PR + 添加 `duplicate` label。
-     *
-     * 失败仅记录 warning（家务活 best-effort），不阻断主流程：
-     * - 新 PR 已创建成功，用户已可访问
-     * - 评论失败不影响 PR 本身的可用性
-     * - 但需要 `issues: write` token scope（比 `pull-requests: write` 宽）；
-     *   若 token 权限不足，error 会被记录但不阻塞
-     */
-    private async handleDuplicatePRs(
-        client: Octokit,
-        owner: string,
-        repo: string,
-        newPRNumber: number,
-        supersededPRs: DependfixOpenPR[],
-    ): Promise<void> {
-        if (supersededPRs.length === 0) {
-            return
-        }
-
-        const supersededLinks = supersededPRs
-            .map((pr) => `- [#${pr.number}](${pr.htmlUrl})`)
-            .join('\n')
-
-        const commentBody = [
-            '## ⚠️ Duplicate PR Notice',
-            '',
-            'This PR supersedes the following dependfix PR(s) with different content:',
-            '',
-            supersededLinks,
-            '',
-            'The superseded PR(s) have been closed. Please review this PR as the new canonical fix.',
-        ].join('\n')
-
-        try {
-            await commentOnPullRequest(client, owner, repo, newPRNumber, commentBody)
-            this.logger.info(`Added duplicate notice comment to PR #${newPRNumber}`)
-        } catch (error: unknown) {
-            const message = toErrorMessage(error)
-            this.logger.warn(
-                `Failed to add duplicate notice comment to PR #${newPRNumber}: ${message}`
-                + '（token may lack `issues: write` scope）',
-            )
-        }
-
-        try {
-            await addLabelToPullRequest(client, owner, repo, newPRNumber, ['duplicate'])
-            this.logger.info(`Added 'duplicate' label to PR #${newPRNumber}`)
-        } catch (error: unknown) {
-            const message = toErrorMessage(error)
-            this.logger.warn(
-                `Failed to add 'duplicate' label to PR #${newPRNumber}: ${message}`
-                + '（token may lack `issues: write` scope）',
-            )
         }
     }
 
@@ -738,10 +770,15 @@ export class DependfixApp {
             )
         }
 
+        /** 因运行级取消而未处理的仓库（显式计数，避免静默跳过）。 */
+        const abortedRepos: string[] = []
+
         await runWithConcurrency({
             items: repositories,
             concurrency: this.config.maxConcurrency,
-            task,
+            // 运行级取消：中止后不再启动新仓库（也不抓告警 / 不装依赖），避免"僵尸运行"与后续
+            // 队列任务争抢资源；被跳过的仓库显式计数并汇总告警（不静默）
+            task: abortAwareRepoTask(task, abortedRepos),
             logger: this.logger,
             // 防御兜底：task 内部未捕获异常 → 记录审计错误，不中断整体
             onError: (repo, error) => {
@@ -755,6 +792,8 @@ export class DependfixApp {
                 })
             },
         })
+
+        logSkippedRepos(this.logger, abortedRepos)
     }
 
     /**
@@ -774,6 +813,7 @@ export class DependfixApp {
             include: this.config.repoInclude,
             exclude: this.config.repoExclude,
             topicsExclude: this.config.repoTopicsExclude,
+            overrideProtect: this.config.overrideProtect,
         }
 
         if (!client || !owner || owner.length === 0) {
@@ -812,29 +852,5 @@ export class DependfixApp {
             // 发现失败不阻塞显式列表（显式优先语义；显式列表仍受 exclude 约束）
             return filterExplicitRepositories(policy, this.config.repositories)
         }
-    }
-
-    // -----------------------------------------------------------------------
-    // GitHub helpers
-    // -----------------------------------------------------------------------
-
-    /** pnpm-audit 模式不创建 GitHub client（无 token）；github-dependabot 模式返回主 token client。 */
-    private githubClientOrNull(): Octokit | null {
-        if (this.config.alertSource === 'pnpm-audit') {
-            return null
-        }
-        return this.createClient()
-    }
-
-    private createClient(token: string = this.config.githubToken): Octokit {
-        return createGitHubClient({
-            auth: fromPat(token, {
-                // 429 / rate limit 指数退避重试（0 可关闭；退避上限可配）
-                retry: {
-                    maxRetries: this.config.maxRetries,
-                    maxBackoffMs: this.config.maxBackoffMs,
-                },
-            }),
-        })
     }
 }

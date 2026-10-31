@@ -1,6 +1,6 @@
 # M26 阶段归档：平台 AI 研判应用层 + 批量导入 Resource owner 化 + 文档站 i18n + License 收口 + 经验沉淀
 
-> **2026-09-10 M26 归档批次迁出**：本分片包含 M26 阶段 7 原子条目（M26.1 + M26.2 + M26.3 + M26.4a + M26.4b + M26.4c + M26.5）共 **23 atomic commits 实施 + 13 配套 commits（re-audit 修复 + docs 收口 + 治理补丁 + CI Coverage 修复）= 36 commits 全部 ahead=0 已推送至 origin/master** 的完整实施记录 + 关键经验 + 待迁移经验。主窗口 [todo-archive.md §M26](../todo-archive.md#m26-平台-ai-研判应用层--批量导入-resource-owner-化--文档站-i18n--license-收口--经验沉淀m261m262m263m264m264bm264cm265-全部已闭环--2026-09-10-归档) 仅保留导航指针 + 关键 commit 实证。
+> **2026-09-10 M26 归档批次迁出**：本分片包含 M26 阶段 7 原子条目（M26.1 + M26.2 + M26.3 + M26.4a + M26.4b + M26.4c + M26.5）共 **23 atomic commits 实施 + 13 配套 commits（re-audit 修复 + docs 收口 + 治理补丁 + CI Coverage 修复）= 36 commits 全部 ahead=0 已推送至 origin/master** 的完整实施记录 + 关键经验 + 待迁移经验。分片索引：本分片 仅保留导航指针 + 关键 commit 实证。
 
 ## 阶段摘要
 
@@ -219,7 +219,7 @@ CI Test workflow #664 Coverage job Branches 79.7% < 80% 失败。PDTFC+ 修复�
 - **A 阶段**：code-auditor quick depth Pass（0 blocker / 0 warning / 2 suggest）
 - **F 阶段**：conventional-committer atomic commit `a4a5680`
 
-**教训**：session 验证矩阵必须包含 pnpm test:coverage 不能只跑 pnpm test；新增 scripts/**.mjs CLI 工具必须配套 .test.mjs + 加 isDirectExecution 守卫 + 导出核心函数让 vitest 可 import 测试。已挂 [testing.md §6](../../standards/testing.md) + [ai-collaboration.md §2.0 PDTFC+ coverage 验证步骤](../../standards/ai-collaboration.md) + [code-auditor 主责边界](../../.github/agents/code-auditor.agent.md)「session 验证矩阵完整性必查项」。
+**教训**：session 验证矩阵必须包含 pnpm test:coverage 不能只跑 pnpm test；新增 `scripts/**.mjs` CLI 工具必须配套 .test.mjs + 加 isDirectExecution 守卫 + 导出核心函数让 vitest 可 import 测试。已挂 [testing.md §6](../../standards/testing.md) + [ai-collaboration.md §2.0 PDTFC+ coverage 验证步骤](../../standards/ai-collaboration.md) + [code-auditor 主责边界](../../.github/agents/code-auditor.agent.md)「session 验证矩阵完整性必查项」。
 
 ### 8. anchor 实证 + looseNorm 规则（M26 P 阶段规划 实证）
 

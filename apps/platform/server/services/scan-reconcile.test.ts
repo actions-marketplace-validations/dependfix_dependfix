@@ -104,6 +104,8 @@ describe('scan-reconcile', () => {
             superseded: 0,
             preservedSuccess: 0,
             unchanged: 0,
+            outcomesApplied: 0,
+            outcomesUnmatched: 0,
         })
 
         const ds = await ensureDatabaseInitialized()
@@ -141,6 +143,8 @@ describe('scan-reconcile', () => {
             superseded: 0,
             preservedSuccess: 0,
             unchanged: 0,
+            outcomesApplied: 0,
+            outcomesUnmatched: 0,
         })
 
         const refreshed = await ds.getRepository(ScanResult).findOne({ where: { upstreamId: 'dependabot:300' } })
@@ -277,6 +281,8 @@ describe('scan-reconcile', () => {
             superseded: 0,
             preservedSuccess: 0,
             unchanged: 0,
+            outcomesApplied: 0,
+            outcomesUnmatched: 0,
         })
 
         const rows = await ds.getRepository(ScanResult).find({ where: { repositoryId } })
@@ -291,5 +297,221 @@ describe('scan-reconcile', () => {
             // @ts-expect-error 测试运行时防御：upstreamId 缺省时抛 TypeError
             newAlerts: [{ ...alert({ upstreamId: undefined as unknown as string }), upstreamId: undefined }],
         })).rejects.toThrow(/reconcileAlerts: alert missing upstreamId/)
+    })
+
+    describe('告警级修复结果回写（outcomes）', () => {
+        /** 构造与 alert() 同键的结果条目 */
+        const outcome = (
+            upstreamId: string,
+            status: 'success' | 'converged' | 'failed' | 'skipped',
+            reason?: string,
+        ) => ({
+            repository: 'demo/app',
+            source: 'dependabot' as const,
+            upstreamId,
+            manifestPath: 'package.json',
+            status,
+            reason,
+        })
+
+        it('writes the reported status on insert (三态 + 缺键 not-tried)', async () => {
+            const ds = await ensureDatabaseInitialized()
+            const stats = await reconcileAlerts({
+                repositoryId,
+                newRunId: runId1,
+                newAlerts: [
+                    alert({ upstreamId: 'dependabot:700' }),
+                    alert({ upstreamId: 'dependabot:701' }),
+                    alert({ upstreamId: 'dependabot:702' }),
+                    alert({ upstreamId: 'dependabot:703' }),
+                ],
+                outcomes: [
+                    outcome('dependabot:700', 'converged', 'all locked versions >= target'),
+                    outcome('dependabot:701', 'failed', 'ERESOLVE unable to resolve'),
+                    outcome('dependabot:702', 'skipped', 'cross-major'),
+                ],
+            })
+
+            expect(stats.inserted).toBe(4)
+            expect(stats.outcomesApplied).toBe(3)
+            expect(stats.outcomesUnmatched).toBe(0)
+
+            const rows = await ds.getRepository(ScanResult).find({ where: { repositoryId } })
+            const byId = new Map(rows.map((row) => [row.upstreamId, row]))
+            expect(byId.get('dependabot:700')?.fixStatus).toBe('converged')
+            expect(byId.get('dependabot:700')?.errorMessage).toBeNull()
+            expect(byId.get('dependabot:701')?.fixStatus).toBe('failed')
+            expect(byId.get('dependabot:701')?.errorMessage).toBe('ERESOLVE unable to resolve')
+            expect(byId.get('dependabot:702')?.fixStatus).toBe('skipped')
+            // 缺键 → not-tried（与引入前一致）
+            expect(byId.get('dependabot:703')?.fixStatus).toBe('not-tried')
+        })
+
+        it('rewrites an active row from not-tried to the reported status', async () => {
+            const ds = await ensureDatabaseInitialized()
+            await reconcileAlerts({
+                repositoryId,
+                newRunId: runId1,
+                newAlerts: [alert({ upstreamId: 'dependabot:710' })],
+            })
+
+            const stats = await reconcileAlerts({
+                repositoryId,
+                newRunId: runId2,
+                newAlerts: [alert({ upstreamId: 'dependabot:710' })],
+                outcomes: [outcome('dependabot:710', 'converged')],
+            })
+
+            expect(stats.refreshed).toBe(1)
+            expect(stats.outcomesApplied).toBe(1)
+            const row = await ds.getRepository(ScanResult).findOne({ where: { upstreamId: 'dependabot:710' } })
+            expect(row?.fixStatus).toBe('converged')
+            expect(row?.supersededAt).toBeNull()
+        })
+
+        it('overwrites an earlier success with the latest result (告警仍活跃，最新结论为准)', async () => {
+            const ds = await ensureDatabaseInitialized()
+            await reconcileAlerts({
+                repositoryId,
+                newRunId: runId1,
+                newAlerts: [alert({ upstreamId: 'dependabot:720' })],
+                outcomes: [outcome('dependabot:720', 'success')],
+            })
+
+            await reconcileAlerts({
+                repositoryId,
+                newRunId: runId2,
+                newAlerts: [alert({ upstreamId: 'dependabot:720' })],
+                outcomes: [outcome('dependabot:720', 'failed', 'registry 5xx')],
+            })
+
+            const row = await ds.getRepository(ScanResult).findOne({ where: { upstreamId: 'dependabot:720' } })
+            expect(row?.fixStatus).toBe('failed')
+            expect(row?.errorMessage).toBe('registry 5xx')
+        })
+
+        it('rewrites failed → converged and clears the stale error message', async () => {
+            const ds = await ensureDatabaseInitialized()
+            await reconcileAlerts({
+                repositoryId,
+                newRunId: runId1,
+                newAlerts: [alert({ upstreamId: 'dependabot:725' })],
+                outcomes: [outcome('dependabot:725', 'failed', 'boom')],
+            })
+
+            await reconcileAlerts({
+                repositoryId,
+                newRunId: runId2,
+                newAlerts: [alert({ upstreamId: 'dependabot:725' })],
+                outcomes: [outcome('dependabot:725', 'converged')],
+            })
+
+            const row = await ds.getRepository(ScanResult).findOne({ where: { upstreamId: 'dependabot:725' } })
+            expect(row?.fixStatus).toBe('converged')
+            expect(row?.errorMessage).toBeNull()
+        })
+
+        it('keeps the existing status when this run has no outcome for the alert', async () => {
+            const ds = await ensureDatabaseInitialized()
+            await reconcileAlerts({
+                repositoryId,
+                newRunId: runId1,
+                newAlerts: [alert({ upstreamId: 'dependabot:730' })],
+                outcomes: [outcome('dependabot:730', 'failed', 'boom')],
+            })
+
+            const stats = await reconcileAlerts({
+                repositoryId,
+                newRunId: runId2,
+                newAlerts: [alert({ upstreamId: 'dependabot:730' })],
+            })
+
+            expect(stats.outcomesApplied).toBe(0)
+            const row = await ds.getRepository(ScanResult).findOne({ where: { upstreamId: 'dependabot:730' } })
+            expect(row?.fixStatus).toBe('failed')
+        })
+
+        it('is idempotent and never touches superseded rows', async () => {
+            const ds = await ensureDatabaseInitialized()
+            await reconcileAlerts({
+                repositoryId,
+                newRunId: runId1,
+                newAlerts: [
+                    alert({ upstreamId: 'dependabot:740' }),
+                    alert({ upstreamId: 'dependabot:741' }),
+                ],
+            })
+            // dependabot:741 上游消失 → supersede（fixStatus 仍为 not-tried）
+            await reconcileAlerts({
+                repositoryId,
+                newRunId: runId2,
+                newAlerts: [alert({ upstreamId: 'dependabot:740' })],
+            })
+
+            // 合成输入：为已 supersede 的告警也传结论，验证它不会被回写（真实流水线不会产生该条目）
+            const outcomes = [outcome('dependabot:740', 'converged'), outcome('dependabot:741', 'success')]
+            const first = await reconcileAlerts({
+                repositoryId,
+                newRunId: runId2,
+                newAlerts: [alert({ upstreamId: 'dependabot:740' })],
+                outcomes,
+            })
+            const second = await reconcileAlerts({
+                repositoryId,
+                newRunId: runId2,
+                newAlerts: [alert({ upstreamId: 'dependabot:740' })],
+                outcomes,
+            })
+
+            expect(first.outcomesApplied).toBe(1)
+            expect(first.outcomesUnmatched).toBe(1)
+            expect(second.outcomesApplied).toBe(1)
+            expect(second.outcomesUnmatched).toBe(1)
+
+            const rows = await ds.getRepository(ScanResult).find({ where: { repositoryId } })
+            const byId = new Map(rows.map((row) => [row.upstreamId, row]))
+            expect(byId.get('dependabot:740')?.fixStatus).toBe('converged')
+            expect(byId.get('dependabot:741')?.fixStatus).toBe('not-tried')
+            expect(byId.get('dependabot:741')?.supersededAt).not.toBeNull()
+        })
+
+        it('rejects malformed / unknown-status / not-tried entries instead of writing them', async () => {
+            const ds = await ensureDatabaseInitialized()
+            const stats = await reconcileAlerts({
+                repositoryId,
+                newRunId: runId1,
+                newAlerts: [alert({ upstreamId: 'dependabot:750' })],
+                outcomes: [
+                    // @ts-expect-error 运行时防御：缺 upstreamId 的脏条目跳过
+                    { repository: 'demo/app', source: 'dependabot', status: 'success' },
+                    // @ts-expect-error 运行时防御：未知状态值不得落库（否则静默退出所有告警查询）
+                    outcome('dependabot:750', 'pending'),
+                    // @ts-expect-error 运行时防御：not-tried 不是结论状态——显式回退会抹掉既有结论
+                    outcome('dependabot:750', 'not-tried'),
+                ],
+            })
+            expect(stats.inserted).toBe(1)
+            expect(stats.outcomesApplied).toBe(0)
+            expect(stats.outcomesUnmatched).toBe(3)
+            const row = await ds.getRepository(ScanResult).findOne({ where: { upstreamId: 'dependabot:750' } })
+            expect(row?.fixStatus).toBe('not-tried')
+        })
+
+        it('ignores outcomes in dry-run (计划态不落修复记录)', async () => {
+            const ds = await ensureDatabaseInitialized()
+            const stats = await reconcileAlerts({
+                repositoryId,
+                newRunId: runId1,
+                newAlerts: [alert({ upstreamId: 'dependabot:760' })],
+                outcomes: [outcome('dependabot:760', 'success')],
+                dryRun: true,
+            })
+
+            expect(stats.inserted).toBe(1)
+            expect(stats.outcomesApplied).toBe(0)
+            expect(stats.outcomesUnmatched).toBe(0)
+            const row = await ds.getRepository(ScanResult).findOne({ where: { upstreamId: 'dependabot:760' } })
+            expect(row?.fixStatus).toBe('not-tried')
+        })
     })
 })

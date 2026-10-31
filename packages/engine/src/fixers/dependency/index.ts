@@ -2,17 +2,35 @@ import { execSync } from 'node:child_process'
 import { copyFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { NormalizedSecurityAlert } from '@dependfix/core'
-import YAML from 'yaml'
 import {
     cleanupBackups,
     execPnpmInstall,
     failResult,
     formatInstallFailure,
-    getStderr,
+    describeInstallError,
+    isInstallEnvironmentalFailure,
     rollback,
     rollbackOverrideWrite,
     writeWorkspaceOverride,
+    type VersionedOverridesApplyResult,
+    type VersionedOverridesPlan,
 } from './overrides-io'
+
+export type { VersionedOverridesApplyResult, VersionedOverridesPlan } from './overrides-io'
+import { upsertOverride } from './override-key'
+import { parseMajorVersion } from './semver'
+import { readLockfileVersion, readLockfileVersions } from './lockfile-versions'
+import { remainingVersionsBelowTarget, verifyVersionedOverridesApplied } from './override-verification'
+import { ensurePnpmOverrides, extractPrefix, findDependencyVersion, type PackageJson } from './manifest'
+import { applyManifestUpgrades, type ManifestUpgradeApplied } from './manifest-upgrades'
+import { applyWorkspaceOverrides, readOverridesSection, readWorkspaceDocument, rollbackWorkspaceOverrides } from './workspace-yaml'
+
+export { normalizeOverrideKey, normalizeOverrideSelector, upsertOverride } from './override-key'
+export { compareSemver, isNonSemverDeclaration, parseMajorVersion } from './semver'
+export { readLockfileVersion, readLockfileVersions } from './lockfile-versions'
+export type { OverrideUpsert } from './override-key'
+export { ensurePnpmOverrides, extractPrefix, findDependencyVersion, type PackageJson } from './manifest'
+export type { ManifestUpgradeApplied } from './manifest-upgrades'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -48,24 +66,19 @@ export interface DependencyFixResult {
     error?: string
     /** 成功但存在需要用户注意的附加信息（如 overrides 写入位置可能被 pnpm 忽略） */
     warning?: string
+    /**
+     * 失败是否由安装环境问题导致（信号终止 / 超时 / 无 stderr 诊断）。
+     * 调用方据此停止后续安装尝试——同一环境下逐包重试只会重复失败并耗尽运行预算。
+     */
+    environmental?: boolean
 }
 
-export interface PackageJson {
-    name?: string
-    dependencies?: Record<string, string>
-    devDependencies?: Record<string, string>
-    optionalDependencies?: Record<string, string>
-    peerDependencies?: Record<string, string>
-    pnpm?: {
-        overrides?: Record<string, string>
-        [key: string]: unknown
-    }
-    [key: string]: unknown
-}
-
-interface DependencyInfo {
-    group: 'dependencies' | 'devDependencies' | 'optionalDependencies'
-    version: string
+/** 家族锁步升级结果：`updates` 在安装失败时也保留已尝试的声明，便于报告展示。 */
+export interface FamilyUpgradeDependenciesResult {
+    success: boolean
+    updates: ManifestUpgradeApplied[]
+    error?: string
+    environmental?: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -91,102 +104,68 @@ export async function upgradeDependency(
     params: UpgradeDependencyParams,
 ): Promise<DependencyFixResult> {
     const { packageName, targetVersion, workDir, manifestDir } = params
-    const pkgPath = join(workDir, manifestDir ?? '.', 'package.json')
-    const lockfilePath = join(workDir, 'pnpm-lock.yaml')
+    const outcome = await applyManifestUpgrades({
+        workDir,
+        manifestDir,
+        requests: [{ packageName, targetVersion }],
+    })
+    const applied = outcome.updates[0]
 
-    // ---- 1. 读取 package.json ----
-    if (!existsSync(pkgPath)) {
-        return failResult(packageName, targetVersion, '', `${pkgPath}: file not found`)
+    if (!outcome.success) {
+        // 校验类早退（未写盘）保留既有 `toVersion` 口径：目标版本裸串（无原前缀）
+        const error = outcome.error ?? 'unknown error'
+        return applied && outcome.failurePhase === 'install'
+            ? {
+                packageName,
+                fromVersion: applied.fromVersion,
+                toVersion: applied.toVersion,
+                isMajor: applied.isMajor,
+                success: false,
+                error,
+                ...(outcome.environmental !== undefined ? { environmental: outcome.environmental } : {}),
+            }
+            : failResult(packageName, targetVersion, applied?.fromVersion ?? '', error)
     }
-
-    let pkg: PackageJson
-    try {
-        pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as PackageJson
-    } catch {
-        return failResult(packageName, targetVersion, '', `${pkgPath}: invalid JSON`)
-    }
-
-    // ---- 2. 查找目标包 ----
-    const dep = findDependencyVersion(pkg, packageName)
-    if (!dep) {
-        return failResult(
-            packageName,
-            targetVersion,
-            '',
-            `package "${packageName}" not found in dependencies / devDependencies / optionalDependencies`,
-        )
-    }
-
-    // ---- 2.5 非 semver 声明防护 ----
-    // `workspace:` / `catalog:` / `link:` 等协议声明无法安全改写为 semver range
-    // （extractPrefix 会将其误归为 `^`，导致声明被不可逆改写），明确失败计 failed。
-    if (isNonSemverDeclaration(dep.version)) {
-        return failResult(
-            packageName,
-            targetVersion,
-            dep.version,
-            `package "${packageName}" has a non-semver declaration "${dep.version}" (workspace:/catalog:/link:/etc.); manual upgrade required`,
-        )
-    }
-
-    const fromVersion = dep.version
-    const prefix = extractPrefix(fromVersion)
-    const toVersion = `${prefix}${targetVersion}`
-    const isMajor = parseMajorVersion(fromVersion) !== parseMajorVersion(toVersion)
-        && parseMajorVersion(fromVersion) !== -1
-        && parseMajorVersion(toVersion) !== -1
-
-    // ---- 3. 备份 ----
-    const pkgBackup = `${pkgPath}.bak`
-    const lockBackup = `${lockfilePath}.bak`
-
-    try {
-        copyFileSync(pkgPath, pkgBackup)
-        if (existsSync(lockfilePath)) {
-            copyFileSync(lockfilePath, lockBackup)
-        }
-    } catch {
-        return failResult(packageName, targetVersion, fromVersion, 'failed to create backup files')
-    }
-
-    // ---- 4. 修改 package.json ----
-    const deps = pkg[dep.group]
-    if (!deps) {
-        // 不应发生: findDependencyVersion 已确认该组存在且包含目标包
-        return failResult(packageName, targetVersion, fromVersion, `dependency group "${dep.group}" is missing`)
-    }
-    deps[packageName] = toVersion
-    writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`, 'utf-8')
-
-    // ---- 5. 执行 pnpm install ----
-    try {
-        await execPnpmInstall(workDir)
-    } catch (installErr: unknown) {
-        // 回滚
-        rollback(pkgPath, pkgBackup, lockfilePath, lockBackup)
-
-        // 回滚后清理备份
-        cleanupBackups({ pkgBackup, lockBackup })
-
-        return {
-            packageName,
-            fromVersion,
-            toVersion,
-            isMajor,
-            success: false,
-            error: formatInstallFailure(getStderr(installErr)),
-        }
-    }
-
-    // 成功 — 清理备份文件
-    cleanupBackups({ pkgBackup, lockBackup })
 
     return {
         packageName,
-        fromVersion,
-        toVersion,
-        isMajor,
+        fromVersion: applied.fromVersion,
+        toVersion: applied.toVersion,
+        isMajor: applied.isMajor,
         success: true,
+    }
+}
+
+/**
+ * 家族锁步升级：一次写盘 + 一次安装，失败整体回滚（含 lockfile）。
+ *
+ * 与 [upgradeDependency] 的区别只有写盘条数：族成员的 manifest 声明全部改完再执行
+ * 一次 `pnpm install`，任一成员校验失败 / 安装失败 / 回滚失败都按「整族失败」返回，
+ * 不产生半族状态。成员清单由 [planFamilyUpgrade] 决定（含触发包）。
+ *
+ * @param params - 工作目录、可选成员目录、待写盘成员（包名 + 目标版本）
+ */
+export async function upgradeFamilyDependencies(
+    params: {
+        workDir: string
+        manifestDir?: string
+        updates: ReadonlyArray<{ packageName: string, targetVersion: string }>
+    },
+): Promise<FamilyUpgradeDependenciesResult> {
+    const { workDir, manifestDir, updates } = params
+    if (updates.length === 0) {
+        return { success: false, updates: [], error: 'no family member updates provided' }
+    }
+    const outcome = await applyManifestUpgrades({
+        workDir,
+        manifestDir,
+        requests: updates.map((update) => ({ packageName: update.packageName, targetVersion: update.targetVersion })),
+    })
+    return {
+        success: outcome.success,
+        updates: outcome.updates,
+        ...(outcome.error !== undefined ? { error: outcome.error } : {}),
+        ...(outcome.environmental !== undefined ? { environmental: outcome.environmental } : {}),
     }
 }
 
@@ -266,17 +245,28 @@ export async function overrideTransitiveDependency(
 
     // ---- 6. 写入 overrides ----
     let oldOverride: string | undefined
+    // 实际写入的 override key：归一化可能命中既有写法（`vite@1` → `vite@^1`），回滚必须用实际 key
+    let overrideKey = packageName
     // 无 workspace.yaml 且 pnpm v10+ → package.json overrides 可能被忽略（假成功风险）
     let pkgJsonOverrideWarning: string | undefined
-    let verifyOverrideTookEffect = false
 
     if (usesWorkspaceYaml) {
-        oldOverride = writeWorkspaceOverride(workspaceYamlPath, packageName, toVersion)
+        const writeResult = writeWorkspaceOverride(workspaceYamlPath, packageName, toVersion)
+        if (!writeResult.ok) {
+            cleanupBackups({ pkgBackup, lockBackup, workspaceBackup })
+            return failResult(
+                packageName,
+                targetVersion,
+                fromVersion,
+                `pnpm-workspace.yaml kept unchanged: ${writeResult.error ?? 'unknown write failure'}`,
+            )
+        }
+        oldOverride = writeResult.oldValue
+        overrideKey = writeResult.key ?? packageName
     } else {
         const pnpmMajor = detectPnpmMajor(workDir)
         if (pnpmMajor !== null && pnpmMajor >= 10) {
             pkgJsonOverrideWarning = `pnpm v${pnpmMajor} may ignore package.json#pnpm.overrides without pnpm-workspace.yaml — if the lockfile does not update to >= ${targetVersion}, create pnpm-workspace.yaml with the override instead`
-            verifyOverrideTookEffect = true
         }
         const overrides = ensurePnpmOverrides(pkg)
         oldOverride = overrides[packageName]
@@ -293,6 +283,7 @@ export async function overrideTransitiveDependency(
             usesWorkspaceYaml,
             workspaceYamlPath,
             packageName,
+            overrideKey,
             oldOverride,
             pkg,
             pkgPath,
@@ -302,42 +293,46 @@ export async function overrideTransitiveDependency(
             workspaceBackup,
         })
 
-        const stderr = getStderr(installErr)
+        const installFailure = describeInstallError(installErr)
         return {
             packageName,
             fromVersion,
             toVersion,
             isMajor,
             success: false,
-            error: formatInstallFailure(stderr),
+            error: formatInstallFailure(installFailure),
+            environmental: isInstallEnvironmentalFailure(installErr),
         }
     }
 
-    // ---- 7.5 生效校验：仅"无 workspace.yaml + pnpm v10+"风险场景——
-    // install 后 lockfile 版本必须达到目标，否则判定假成功：回滚 + 报错 ----
-    if (verifyOverrideTookEffect) {
-        const afterVersion = readLockfileVersion(lockfilePath, packageName)
-        if (afterVersion !== null && compareSemver(afterVersion, targetVersion) < 0) {
-            rollbackOverrideWrite({
-                usesWorkspaceYaml,
-                workspaceYamlPath,
-                packageName,
-                oldOverride,
-                pkg,
-                pkgPath,
-                pkgBackup,
-                lockfilePath,
-                lockBackup,
-                workspaceBackup,
-            })
-            return {
-                packageName,
-                fromVersion,
-                toVersion,
-                isMajor,
-                success: false,
-                error: `override did not take effect: lockfile still at ${afterVersion} (< ${targetVersion}). pnpm v10+ may ignore package.json#pnpm.overrides without pnpm-workspace.yaml — changes rolled back; create pnpm-workspace.yaml with the override and retry.`,
-            }
+    // ---- 7.5 生效校验：所有 override 写入路径（含 pnpm-workspace.yaml）——
+    // install 后回读**全部**锁定实例；只要仍有实例低于目标，就判定 override 未生效：
+    // 回滚 + 报错。不能只看最高版本：通用 override 已存在、但被路径级规则压过时，
+    // pnpm install 可能认为 lockfile 已最新而不重解析（2026-10-18 cmyr-skills-agents
+    // undici 7.28.0 实证：日志报升级成功、实际无 diff、commit 被跳过）。
+    const remaining = remainingVersionsBelowTarget(lockfilePath, packageName, targetVersion)
+    if (remaining.length > 0) {
+        rollbackOverrideWrite({
+            usesWorkspaceYaml,
+            workspaceYamlPath,
+            packageName,
+            overrideKey,
+            oldOverride,
+            pkg,
+            pkgPath,
+            pkgBackup,
+            lockfilePath,
+            lockBackup,
+            workspaceBackup,
+        })
+        return {
+            packageName,
+            fromVersion,
+            toVersion,
+            isMajor,
+            success: false,
+            error: `override did not take effect: locked instance(s) ${remaining.join(', ')} remain below ${targetVersion}`
+                + `${pkgJsonOverrideWarning ? ` (${pkgJsonOverrideWarning})` : ''}; changes rolled back`,
         }
     }
 
@@ -380,17 +375,20 @@ export async function overrideTransitiveDependency(
  * @param params - 包名、overrides 映射（`pkg@major` 或 `pkg` → `^target`）、工作目录
  * @returns 修复结果（fromVersion 为空字符串，表示多实例无单一来源版本）
  */
-export async function applyVersionedOverrides(
+/**
+ * 批量应用版本化 overrides：**一次写盘 + 一次安装**，失败整体回滚（含 lockfile）。
+ * 动机：逐包应用使单仓安装次数 = 可修包数（实测大仓 7–8 次），是资源受限主机 OOM 的放大器之一；
+ * [applyVersionedOverrides] 为单包薄包装，与本函数共用实现。调用方应过滤 `overrides` 为空的条目。
+ */
+export async function applyVersionedOverridesBatch(
     params: {
-        packageName: string
-        versionedOverrides: Record<string, string>
         workDir: string
+        plans: VersionedOverridesPlan[]
     },
-): Promise<DependencyFixResult> {
-    const { packageName, versionedOverrides, workDir } = params
-    const entries = Object.entries(versionedOverrides)
-    if (entries.length === 0) {
-        return failResult(packageName, '', '', 'no versioned overrides provided')
+): Promise<VersionedOverridesApplyResult> {
+    const { workDir, plans } = params
+    if (plans.length === 0) {
+        return { success: false, error: 'no versioned overrides provided', failurePhase: 'precheck' }
     }
 
     const pkgPath = join(workDir, 'package.json')
@@ -401,14 +399,14 @@ export async function applyVersionedOverrides(
 
     // ---- 1. 读取 package.json ----
     if (!existsSync(pkgPath)) {
-        return failResult(packageName, '', '', `${pkgPath}: file not found`)
+        return { success: false, error: `${pkgPath}: file not found`, failurePhase: 'precheck' }
     }
 
     let pkg: PackageJson
     try {
         pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as PackageJson
     } catch {
-        return failResult(packageName, '', '', `${pkgPath}: invalid JSON`)
+        return { success: false, error: `${pkgPath}: invalid JSON`, failurePhase: 'precheck' }
     }
 
     // ---- 2. 备份 ----
@@ -425,42 +423,50 @@ export async function applyVersionedOverrides(
             copyFileSync(lockfilePath, lockBackup)
         }
     } catch {
-        return failResult(packageName, '', '', 'failed to create backup files')
+        return { success: false, error: 'failed to create backup files', failurePhase: 'precheck' }
     }
 
     // ---- 3. 记录旧值并写入版本化 overrides ----
+    // 语义等价 key 复用已有写法（如已有 `pkg@^1` 时不再新增 `pkg@1`，见 override-key.ts）
     const oldValues = new Map<string, string | undefined>()
+    const writtenKeys = new Set<string>()
     let pkgJsonOverrideWarning: string | undefined
 
     if (usesWorkspaceYaml) {
-        let doc: Record<string, unknown>
-        try {
-            const raw = readFileSync(workspaceYamlPath, 'utf-8')
-            doc = YAML.parse(raw) as Record<string, unknown> ?? {}
-        } catch {
-            doc = {}
+        // 定点编辑：只改目标键（保留注释 / 引号风格 / 键序）；解析失败不落盘
+        const updates = plans.flatMap((plan) => Object.entries(plan.overrides).map(([key, value]) => ({ key, value })))
+        const writeResult = applyWorkspaceOverrides(workspaceYamlPath, updates)
+        if (!writeResult.ok) {
+            cleanupBackups({ pkgBackup, lockBackup, workspaceBackup })
+            return {
+                success: false,
+                error: `pnpm-workspace.yaml kept unchanged: ${writeResult.error ?? 'unknown write failure'}`,
+                failurePhase: 'precheck',
+            }
         }
-        const overrides = (doc.overrides ?? {}) as Record<string, string>
-        for (const [key, target] of entries) {
-            oldValues.set(key, overrides[key])
-            overrides[key] = target
+        for (const [key, oldValue] of writeResult.applied) {
+            oldValues.set(key, oldValue)
+            writtenKeys.add(key)
         }
-        doc.overrides = overrides
-        writeFileSync(workspaceYamlPath, YAML.stringify(doc), 'utf-8')
     } else {
         const pnpmMajor = detectPnpmMajor(workDir)
         if (pnpmMajor !== null && pnpmMajor >= 10) {
             pkgJsonOverrideWarning = `pnpm v${pnpmMajor} may ignore package.json#pnpm.overrides without pnpm-workspace.yaml — verify the lockfile actually updated; create pnpm-workspace.yaml with the overrides if not`
         }
         const overrides = ensurePnpmOverrides(pkg)
-        for (const [key, target] of entries) {
-            oldValues.set(key, overrides[key])
-            overrides[key] = target
+        for (const plan of plans) {
+            for (const [key, target] of Object.entries(plan.overrides)) {
+                const { key: actualKey, oldValue } = upsertOverride(overrides, key, target)
+                if (!oldValues.has(actualKey)) {
+                    oldValues.set(actualKey, oldValue)
+                }
+                writtenKeys.add(actualKey)
+            }
         }
         writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`, 'utf-8')
     }
 
-    // ---- 4. 执行 pnpm install ----
+    // ---- 4. 执行 pnpm install（单次；失败整体回滚） ----
     try {
         await execPnpmInstall(workDir)
     } catch (installErr: unknown) {
@@ -469,7 +475,7 @@ export async function applyVersionedOverrides(
         // 既有 key 恢复旧值，其余保留原样。
         const restoreOverrides = (map: Record<string, string>): Record<string, string> => {
             const removed = new Set(
-                entries.filter(([key]) => oldValues.get(key) === undefined).map(([key]) => key),
+                [...writtenKeys].filter((key) => oldValues.get(key) === undefined),
             )
             const next: Record<string, string> = {}
             for (const [key, value] of Object.entries(map)) {
@@ -481,47 +487,94 @@ export async function applyVersionedOverrides(
             }
             return next
         }
-        if (usesWorkspaceYaml) {
-            try {
-                const raw = readFileSync(workspaceYamlPath, 'utf-8')
-                const doc = YAML.parse(raw) as Record<string, unknown> ?? {}
-                doc.overrides = restoreOverrides((doc.overrides ?? {}) as Record<string, string>)
-                writeFileSync(workspaceYamlPath, YAML.stringify(doc), 'utf-8')
-            } catch {
-                // 回滚失败时由下方 rollback(workspaceBackup) 兜底
-            }
-        } else {
+        // 备份还原为权威路径（字节级）；仅在备份缺失 / 复制失败时退回内存 / 定点恢复，
+        // 避免兜底路径自身出错时连带跳过还原与备份清理（留下脏写与 `.bak`）。
+        const pkgRestored = rollback(pkgPath, pkgBackup, lockfilePath, lockBackup)
+        const workspaceRestored = usesWorkspaceYaml
+            ? workspaceBackup !== null && rollback(workspaceYamlPath, workspaceBackup, lockfilePath, null)
+            : true
+        if (!pkgRestored && !usesWorkspaceYaml) {
             const pnpm = pkg.pnpm ?? {}
             pnpm.overrides = restoreOverrides(pnpm.overrides ?? {})
-            writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`, 'utf-8')
+            try {
+                writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`, 'utf-8')
+            } catch {
+                // 备份已缺失：尽最大努力，失败不再二次抛错（保持原有「回滚不中断」语义）
+            }
         }
+        if (usesWorkspaceYaml && !workspaceRestored) {
+            rollbackWorkspaceOverrides(workspaceYamlPath, oldValues)
+        }
+        cleanupBackups({ pkgBackup, lockBackup, workspaceBackup })
+
+        return {
+            success: false,
+            error: formatInstallFailure(describeInstallError(installErr)),
+            failurePhase: 'install',
+            environmental: isInstallEnvironmentalFailure(installErr),
+        }
+    }
+
+    // ---- 5. 生效校验：回读 lockfile，确认每条 override 覆盖的实例都达到目标 ----
+    // 与单包 override 同族：pnpm install 成功 ≠ override 真正生效（已存在 / 被更具体规则压过时
+    // lockfile 可能保持旧版本）。未满足则整体回滚，不能把「无改动」当成功。
+    const verifyFailure = verifyVersionedOverridesApplied(lockfilePath, plans)
+    if (verifyFailure) {
         rollback(pkgPath, pkgBackup, lockfilePath, lockBackup)
         if (usesWorkspaceYaml && workspaceBackup) {
             rollback(workspaceYamlPath, workspaceBackup, lockfilePath, null)
         }
         cleanupBackups({ pkgBackup, lockBackup, workspaceBackup })
-
-        const stderr = getStderr(installErr)
         return {
-            packageName,
-            fromVersion: '',
-            toVersion: entries.map((entry) => entry[1]).join(', '),
-            isMajor: false,
             success: false,
-            error: formatInstallFailure(stderr),
+            error: `versioned override did not take effect: ${verifyFailure}; changes rolled back`,
+            failurePhase: 'verify',
         }
     }
 
     // 成功 — 清理备份文件
     cleanupBackups({ pkgBackup, lockBackup, workspaceBackup })
 
+    return { success: true, warning: pkgJsonOverrideWarning }
+}
+
+/**
+ * 应用单个包的版本化 overrides（内部委托 [applyVersionedOverridesBatch]）。
+ * 写入位置：有 `pnpm-workspace.yaml` 时写其 `overrides`，否则写 `package.json#pnpm.overrides`；
+ * 失败自动回滚（含 lockfile），不执行验证（由上层负责）。
+ */
+export async function applyVersionedOverrides(
+    params: {
+        packageName: string
+        versionedOverrides: Record<string, string>
+        workDir: string
+    },
+): Promise<DependencyFixResult> {
+    const { packageName, versionedOverrides, workDir } = params
+    const entries = Object.entries(versionedOverrides)
+    if (entries.length === 0) {
+        return failResult(packageName, '', '', 'no versioned overrides provided')
+    }
+
+    const result = await applyVersionedOverridesBatch({
+        workDir,
+        plans: [{ packageName, overrides: versionedOverrides }],
+    })
+
+    // toVersion 口径保持既有语义：校验 / 备份类早退（未写盘）为空串，安装失败与成功为目标版本串
+    const toVersion = result.success || result.failurePhase === 'install'
+        ? entries.map((entry) => entry[1]).join(', ')
+        : ''
+
     return {
         packageName,
         fromVersion: '',
-        toVersion: entries.map((entry) => entry[1]).join(', '),
+        toVersion,
         isMajor: false,
-        success: true,
-        warning: pkgJsonOverrideWarning,
+        success: result.success,
+        ...(result.error !== undefined ? { error: result.error } : {}),
+        ...(result.warning !== undefined ? { warning: result.warning } : {}),
+        ...(result.environmental !== undefined ? { environmental: result.environmental } : {}),
     }
 }
 
@@ -529,195 +582,6 @@ export async function applyVersionedOverrides(
 // ---------------------------------------------------------------------------
 // Exported helpers (for unit testing)
 // ---------------------------------------------------------------------------
-
-/**
- * 从版本声明中提取前缀（^ / ~ / 空）。
- *
- * @example
- * extractPrefix('^4.17.20')  // '^'
- * extractPrefix('~4.17.0')   // '~'
- * extractPrefix('4.17.20')   // ''
- * extractPrefix('*')         // '^'  (默认)
- */
-export function extractPrefix(version: string): string {
-    const trimmed = version.trim()
-    if (/^\d/.test(trimmed)) {
-        return ''
-    }
-    if (trimmed.startsWith('^')) {
-        return '^'
-    }
-    if (trimmed.startsWith('~')) {
-        return '~'
-    }
-    // 复杂 range / * / latest → 默认 ^
-    return '^'
-}
-
-/**
- * 检测版本声明是否包含包管理器协议前缀
- * （`workspace:` / `catalog:` / `link:` / `file:` / `npm:` / `github:` /
- * `gitlab:` / `bitbucket:` / `gist:` / `git:` / `git+ssh:` / `git+https:` /
- * `git+http:` / `git+file:` / `https:` / `ssh:` 等）。
- *
- * 这类声明不是 semver range，`extractPrefix` 会将其误归为 `^` 导致声明被
- * 不可逆改写（如 `catalog:` → `^x.y.z`、`git+ssh:` 来源从 fork/私有源静默
- * 切回 registry），升级前必须拒绝。
- *
- * @example
- * isNonSemverDeclaration('^4.17.20')      // false
- * isNonSemverDeclaration('workspace:*')   // true
- * isNonSemverDeclaration('catalog:')      // true
- * isNonSemverDeclaration('link:../pkg')   // true
- * isNonSemverDeclaration('git+ssh://...') // true
- * isNonSemverDeclaration('gitlab:...')    // true
- * isNonSemverDeclaration('https://...tgz') // true
- */
-export function isNonSemverDeclaration(version: string): boolean {
-    const trimmed = version.trim()
-    return /^(workspace|catalog|link|file|npm|github|gitlab|bitbucket|gist|git(?:\+ssh|\+https|\+http|\+file)?|portal|patch|https?|ssh)\s*:/.test(trimmed)
-}
-
-/**
- * 从版本声明中提取主版本号（major）。
- * 去除前缀后匹配第一个 semver 段。
- *
- * @example
- * parseMajorVersion('^4.17.20')   // 4
- * parseMajorVersion('~2.0.0')     // 2
- * parseMajorVersion('1.2.3')      // 1
- * parseMajorVersion('*')          // -1
- */
-export function parseMajorVersion(version: string): number {
-    const cleaned = version.replace(/^\s*[\^~>=<]*\s*/, '')
-    const match = /^(\d+)\.\d+\.\d+/.exec(cleaned)
-    return match ? Number.parseInt(match[1], 10) : -1
-}
-
-/**
- * 比较两个语义化版本（`x.y.z`，可选 pre-release 后缀）。
- *
- * - `a > b` 返回正数，`a < b` 返回负数，相等返回 0
- * - 非 semver 字符串按 0 处理（保守：不参与大小比较）
- * - 仅比较主/次/补丁段，pre-release 后缀忽略（如 `1.0.0-beta` 视为 `1.0.0`）
- *
- * @example
- * compareSemver('4.18.0', '4.17.21')  // 1
- * compareSemver('5.4.20', '6.4.3')    // -1
- * compareSemver('1.2.3', '1.2.3')     // 0
- */
-export function compareSemver(a: string, b: string): number {
-    const parse = (v: string): number[] => {
-        const match = /^v?(\d+)\.(\d+)\.(\d+)/.exec(v.trim())
-        return match ? [Number.parseInt(match[1], 10), Number.parseInt(match[2], 10), Number.parseInt(match[3], 10)] : [0, 0, 0]
-    }
-
-    const [aMajor, aMinor, aPatch] = parse(a)
-    const [bMajor, bMinor, bPatch] = parse(b)
-
-    if (aMajor !== bMajor) {
-        return aMajor - bMajor
-    }
-    if (aMinor !== bMinor) {
-        return aMinor - bMinor
-    }
-    return aPatch - bPatch
-}
-
-/**
- * 在 `package.json` 的 `dependencies` / `devDependencies` / `optionalDependencies` 中按顺序查找包。
- */
-export function findDependencyVersion(
-    pkg: PackageJson,
-    packageName: string,
-): DependencyInfo | null {
-    const groups = ['dependencies', 'devDependencies', 'optionalDependencies'] as const
-    for (const group of groups) {
-        const deps = pkg[group]
-        if (deps && typeof deps === 'object' && packageName in deps) {
-            return { group, version: deps[packageName] }
-        }
-    }
-    return null
-}
-
-/**
- * 确保 `package.json` 中存在 `pnpm.overrides` 对象，若不存在则创建。
- * 返回 `overrides` 对象的引用，调用方可直接写入。
- */
-export function ensurePnpmOverrides(pkg: PackageJson): Record<string, string> {
-    if (!pkg.pnpm) {
-        pkg.pnpm = {}
-    }
-    if (!pkg.pnpm.overrides) {
-        pkg.pnpm.overrides = {}
-    }
-    return pkg.pnpm.overrides
-}
-
-/**
- * 从 `pnpm-lock.yaml` 中读取指定包的**所有**锁定版本实例。
- *
- * 支持两种 lockfile 键格式：
- * 1. v9 早期格式（lockfileVersion 9.0 起）：`/package-name/version:`
- * 2. pnpm v10+/v11 snapshot 格式：`package-name@version:` 或
- *    `package-name@version(peer@x)(peer2@y):`（peer 后缀条目）
- *
- * 同一包在 lockfile 中可能共存多个版本（如 vite@5.4.14 与 vite@8.2.0），
- * 多版本共存是「版本化 overrides（pkg@version: ^target）」修复策略的前提。
- *
- * @returns 去重后的版本列表（如 `['5.4.14', '8.2.0']`），未找到返回 `[]`
- */
-export function readLockfileVersions(lockfilePath: string, packageName: string): string[] {
-    if (!existsSync(lockfilePath)) {
-        return []
-    }
-
-    try {
-        const content = readFileSync(lockfilePath, 'utf-8')
-        const escapedName = escapeRegExp(packageName)
-        const versionCapture = '(\\d+(?:\\.\\d+(?:\\.\\d+)?(?:-[a-zA-Z0-9.]+)?))'
-        const versions = new Set<string>()
-
-        // 1. v9 格式：/packageName/version:
-        // 包名不转义：fast-uri → /fast-uri/5.0.0:；@babel/traverse → /@babel/traverse/7.26.0:
-        // 真实 pnpm v9 lockfile 的 packages 键带两空格缩进（fixtures 曾用列 0 合成数据）
-        const v9Pattern = new RegExp(`^\\s*/${escapedName}/${versionCapture}:`, 'gm')
-        for (const match of content.matchAll(v9Pattern)) {
-            versions.add(match[1])
-        }
-
-        // 2. pnpm v10+/v11 snapshot 格式：
-        //    - 普通包：pkg@version: 或 pkg@version(peer...):
-        //    - scoped 包：'@types/node@26.1.2':（键带单引号，右引号在冒号前）
-        //    版本后边界允许 `:` / `(`（peer 后缀）/ `'`（引号键右引号）
-        const snapshotPattern = new RegExp(`^\\s*'?${escapedName}@${versionCapture}(?:[(:'])`, 'gm')
-        for (const match of content.matchAll(snapshotPattern)) {
-            versions.add(match[1])
-        }
-
-        return [...versions].sort(compareSemver)
-    } catch {
-        return []
-    }
-}
-
-/**
- * 从 `pnpm-lock.yaml` 中读取指定包的当前锁定版本。
- *
- * 多版本并存时（如同一包同时被根与子目录 manifest 引用），取**最高版本**
- * （保守：不降级保护依赖此语义，如根 vite@8.2.0 与 docs vite@5.4.14 并存）。
- *
- * @returns 锁定版本字符串（如 `'5.0.0'`），未找到返回 `null`
- */
-export function readLockfileVersion(lockfilePath: string, packageName: string): string | null {
-    const versions = readLockfileVersions(lockfilePath, packageName)
-    if (versions.length === 0) {
-        return null
-    }
-    // 多版本并存 → 取最高（不降级保护语义）
-    return versions[versions.length - 1]
-}
 
 /**
  * 读取当前已生效的 pnpm overrides 映射（与写入位置保持一致）：
@@ -728,15 +592,18 @@ export function readLockfileVersion(lockfilePath: string, packageName: string): 
  * 条目取 max 合并，不丢不改写已有条目（2026-08-09 复盘：此前生成侧不感知
  * 已有条目，导致 `pkg: ^x` 与 `pkg@major: ^y` 并存分裂）。
  *
- * @returns 已有 overrides 映射（key → 版本声明）；无配置或解析失败返回 {}
+ * @returns 已有 overrides 映射（key → 版本声明）；无配置、解析失败或 `overrides` 形态非法返回 {}
  */
 export function readExistingOverrides(workDir: string): Record<string, string> {
     const workspaceYamlPath = join(workDir, 'pnpm-workspace.yaml')
     try {
         if (existsSync(workspaceYamlPath)) {
-            const raw = readFileSync(workspaceYamlPath, 'utf-8')
-            const doc = YAML.parse(raw) as Record<string, unknown> ?? {}
-            return (doc.overrides ?? {}) as Record<string, string>
+            // 与写入侧同一校验口径：非映射 / 非标量 / 别名文档一律按「无既有 overrides」处理
+            const parsed = readWorkspaceDocument(workspaceYamlPath)
+            if (!parsed.ok) {
+                return {}
+            }
+            return readOverridesSection(parsed.doc) ?? {}
         }
         const pkgPath = join(workDir, 'package.json')
         if (existsSync(pkgPath)) {
@@ -747,13 +614,6 @@ export function readExistingOverrides(workDir: string): Record<string, string> {
     } catch {
         return {}
     }
-}
-
-/**
- * 转义正则表达式特殊字符。
- */
-function escapeRegExp(str: string): string {
-    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 // ---------------------------------------------------------------------------

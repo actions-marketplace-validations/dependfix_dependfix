@@ -1,5 +1,32 @@
 # @dependfix/core
 
+# [0.6.0](https://github.com/dependfix/dependfix/compare/@dependfix/core@0.5.0...@dependfix/core@0.6.0) (2026-10-28)
+
+
+### ✨ 新功能
+
+* **core:** NormalizedSecurityAlert 新增 dependencyPath 可选字段 ([a2e3669](https://github.com/dependfix/dependfix/commit/a2e3669))
+* **core:** 在运行汇总中新增环境性失败计数 ([c313255](https://github.com/dependfix/dependfix/commit/c313255))
+* **core:** 报告 Repositories 渲染 dependencyPath 依赖链 ([e83347a](https://github.com/dependfix/dependfix/commit/e83347a))
+* **core:** 报告新增 check 归因小节 ([9ebadc1](https://github.com/dependfix/dependfix/commit/9ebadc1))
+* **core:** 报告新增既有失败归因字段与标注 ([dbf9066](https://github.com/dependfix/dependfix/commit/dbf9066))
+* **core:** 新增 CI check 失败归因分类纯函数 ([cce39c0](https://github.com/dependfix/dependfix/commit/cce39c0))
+* **core:** 新增 CI 脚本镜像契约与验证来源标注 ([f28e480](https://github.com/dependfix/dependfix/commit/f28e480))
+* **core:** 新增同告警尝试记录契约与跳过原因 ([1ee3cef](https://github.com/dependfix/dependfix/commit/1ee3cef))
+* **core:** 新增家族锁步记录与报告摘要 ([251c392](https://github.com/dependfix/dependfix/commit/251c392))
+* **core:** 新增跳过与截断分组统计 ([9003494](https://github.com/dependfix/dependfix/commit/9003494))
+* **core:** 新增验证链与目标仓库 CI 口径模型与渲染 ([384d2a2](https://github.com/dependfix/dependfix/commit/384d2a2))
+* **engine:** 区分 Dependabot alerts 未启用与获取失败 ([6fd6aad](https://github.com/dependfix/dependfix/commit/6fd6aad))
+* **engine:** 接入 PR check 回环与报告字段 ([ff8fa60](https://github.com/dependfix/dependfix/commit/ff8fa60))
+* **engine:** 新增交付提交集合判定与路径白名单 ([71ccef1](https://github.com/dependfix/dependfix/commit/71ccef1))
+
+
+### 🐛 Bug 修复
+
+* **core:** 报告未启用告警的开启指引改为源无关 ([c7e5cce](https://github.com/dependfix/dependfix/commit/c7e5cce))
+* **engine:** 容器内安装失败保留进程级信号并改判环境性失败不归因 ([4fee403](https://github.com/dependfix/dependfix/commit/4fee403))
+* **engine:** 环境性安装失败不再归因目标仓库 ([0d1dd45](https://github.com/dependfix/dependfix/commit/0d1dd45))
+
 # [0.5.0](https://github.com/dependfix/dependfix/compare/@dependfix/core@0.4.0...@dependfix/core@0.5.0) (2026-09-18)
 
 

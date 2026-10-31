@@ -14,14 +14,12 @@ import { AuditEvent } from '#server/entities/audit-event'
 // 外部执行器 mock（真实执行会跑引擎/触发 GitHub Action）
 // class 实例的 execute/fetch 字段指向共享 mock（实例在 runScanForRepository 执行时才创建，
 // 测试须在调用前即可设置行为）
-const { ContainerExecutorMock, SandboxExecutorMock, ActionTriggerExecutorMock, ActionResultFetcherMock, containerExecute, sandboxExecute, sandboxIsAvailable, actionExecute, fetcherFetch, notifyEnvEvent } = vi.hoisted(() => ({
+const { ContainerExecutorMock, ActionTriggerExecutorMock, ActionResultFetcherMock, containerIsAvailable, containerExecute, actionExecute, fetcherFetch, notifyEnvEvent } = vi.hoisted(() => ({
     ContainerExecutorMock: vi.fn(),
-    SandboxExecutorMock: vi.fn(),
     ActionTriggerExecutorMock: vi.fn(),
     ActionResultFetcherMock: vi.fn(),
+    containerIsAvailable: vi.fn(),
     containerExecute: vi.fn(),
-    sandboxExecute: vi.fn(),
-    sandboxIsAvailable: vi.fn(),
     actionExecute: vi.fn(),
     fetcherFetch: vi.fn(),
     notifyEnvEvent: vi.fn(),
@@ -32,17 +30,16 @@ vi.mock('./executor/container-executor', () => ({
             ContainerExecutorMock(...args)
         }
 
+        isAvailable = containerIsAvailable
         execute = containerExecute
     },
 }))
+// 回归护栏：sandbox 入口关闭期间编排层不得实例化 SandboxExecutor（防止未来误恢复占位执行器）。
 vi.mock('./executor/sandbox-executor', () => ({
     SandboxExecutor: class {
-        constructor(...args: unknown[]) {
-            SandboxExecutorMock(...args)
+        constructor() {
+            throw new Error('SandboxExecutor must not be instantiated while sandbox entry is disabled')
         }
-
-        isAvailable = sandboxIsAvailable
-        execute = sandboxExecute
     },
 }))
 vi.mock('./executor/action-trigger-executor', () => ({
@@ -74,8 +71,8 @@ vi.mock('./notification', () => ({
     notifyEnvEvent: (...args: unknown[]) => notifyEnvEvent(...args),
 }))
 
-// M20.1 引擎侧注入 upstreamId 字段；测试 fixtures 必须同步（否则 reconcileAlerts 防御性 TypeError）
-// M20.3 reconcile 模型下，upstreamId 跨测试持久化（in-memory DB 共享 beforeAll/afterAll），
+// 引擎侧注入 upstreamId 字段；测试 fixtures 必须同步（否则 reconcileAlerts 防御性 TypeError）
+// reconcile 模型下，upstreamId 跨测试持久化（in-memory DB 共享 beforeAll/afterAll），
 // 使用 random 唯一化避免 occurrenceCount 跨测试污染（前面测试 INSERT 后本测试 reconcile 会 UPDATE）
 let upstreamCounter = 0
 const makeResult = (overrides: Record<string, unknown> = {}) => {
@@ -105,6 +102,22 @@ describe('scan-orchestrator.service', () => {
 
     const createRepo = async (overrides: Record<string, unknown> = {}) => {
         const suffix = Math.random().toString(36).slice(2, 8)
+        // 生产 schema 已拒绝 sandbox（2026-10-27 入口临时关闭）；测试存量仓库时直接落库，
+        // 走与真实 legacy 数据相同的编排层降级路径。
+        if (overrides.executorKind === 'sandbox') {
+            const ds = await ensureDatabaseInitialized()
+            const legacy = ds.getRepository(Repository).create({
+                owner: 'demo',
+                name: `app-${suffix}`,
+                platform: 'github',
+                packageManager: 'pnpm',
+                defaultBranch: 'main',
+                executorKind: 'sandbox',
+                credentialId,
+            })
+            await ds.getRepository(Repository).save(legacy)
+            return legacy.id
+        }
         const created = await reposIndexHandler(makeEvent('POST', '/api/repos', {
             owner: 'demo',
             name: `app-${suffix}`,
@@ -120,7 +133,7 @@ describe('scan-orchestrator.service', () => {
 
     beforeAll(async () => {
         setupMemoryDatabase()
-        // 注：M18.x 治理批次 S-5 — 删除 `process.env.ENCRYPTION_KEY` 死代码；
+        // 注：删除 `process.env.ENCRYPTION_KEY` 死代码；
         // stub 默认值由 `apps/platform/tests/setup-nuxt-server.ts:26` 全局 useRuntimeConfig 提供
         const ds = await ensureDatabaseInitialized()
         const cred = await ds.getRepository(Credential).save(ds.getRepository(Credential).create({
@@ -135,19 +148,19 @@ describe('scan-orchestrator.service', () => {
 
     afterAll(() => {
         teardownMemoryDatabase()
-        // 注：M18.x 治理批次 S-5 — 删除 `delete process.env.ENCRYPTION_KEY` 死代码
+        // 注：删除 `delete process.env.ENCRYPTION_KEY` 死代码
     })
 
     beforeEach(() => {
         vi.clearAllMocks()
         // 共享 mock 需重置实现，防止新用例漏设时静默复用上一用例行为
+        // container.isAvailable 默认 true（多数用例关注 execute；环境不可用场景显式设 false）
+        containerIsAvailable.mockReset()
+        containerIsAvailable.mockResolvedValue(true)
         containerExecute.mockReset()
-        sandboxExecute.mockReset()
-        sandboxIsAvailable.mockReset()
         actionExecute.mockReset()
         fetcherFetch.mockReset()
         ContainerExecutorMock.mockReset()
-        SandboxExecutorMock.mockReset()
         ActionTriggerExecutorMock.mockReset()
         ActionResultFetcherMock.mockReset()
     })
@@ -163,6 +176,17 @@ describe('scan-orchestrator.service', () => {
             expect(run.id).toBeTruthy()
         })
 
+        it('persists triggeredByUserId for notification routing', async () => {
+            const run = await createPendingScanRun(
+                repositoryId,
+                { mode: 'fix', severityThreshold: 'high' },
+                { triggeredByUserId: 'user-1' },
+            )
+            const ds = await ensureDatabaseInitialized()
+            const persisted = await ds.getRepository(ScanRun).findOne({ where: { id: run.id } })
+            expect(persisted?.triggeredByUserId).toBe('user-1')
+        })
+
         it('resolves github-action executor from explicit request', async () => {
             const run = await createPendingScanRun(repositoryId, { mode: 'report-only', severityThreshold: 'all', executorKind: 'github-action' })
             expect(run.executorKind).toBe('github-action')
@@ -174,9 +198,31 @@ describe('scan-orchestrator.service', () => {
             expect(run.executorKind).toBe('github-action')
         })
 
-        it('resolves sandbox executor from explicit request', async () => {
+        it('stores sandbox for legacy data (public scan schema rejects new explicit sandbox)', async () => {
             const run = await createPendingScanRun(repositoryId, { mode: 'fix', severityThreshold: 'high', executorKind: 'sandbox' })
             expect(run.executorKind).toBe('sandbox')
+        })
+
+        // 「受约束重试入口」来源落库（口径见 docs/design/governance/run-failure-taxonomy.md §5.5）：
+        // 断言到 DB 列，避免只钉住调用参数而漏掉「服务层是否真的写库」
+        it('persists retriedFromRunId when provided', async () => {
+            const run = await createPendingScanRun(
+                repositoryId,
+                { mode: 'fix', severityThreshold: 'high' },
+                { retriedFromRunId: 'source-run-1' },
+            )
+
+            const ds = await ensureDatabaseInitialized()
+            const persisted = await ds.getRepository(ScanRun).findOne({ where: { id: run.id } })
+            expect(persisted?.retriedFromRunId).toBe('source-run-1')
+        })
+
+        it('leaves retriedFromRunId null for non-retry triggers', async () => {
+            const run = await createPendingScanRun(repositoryId, { mode: 'fix', severityThreshold: 'high' })
+
+            const ds = await ensureDatabaseInitialized()
+            const persisted = await ds.getRepository(ScanRun).findOne({ where: { id: run.id } })
+            expect(persisted?.retriedFromRunId ?? null).toBeNull()
         })
     })
 
@@ -195,6 +241,10 @@ describe('scan-orchestrator.service', () => {
             expect(run.status).toBe('completed')
             expect(run.summaryJson).toContain('alertsTotal')
             expect(run.finishedAt).toBeTruthy()
+            // 非失败终态不写失败分类三列
+            expect(run.failureCode).toBeNull()
+            expect(run.failureStage).toBeNull()
+            expect(run.failureKind).toBeNull()
 
             // 结果明细落库
             const ds = await ensureDatabaseInitialized()
@@ -206,12 +256,194 @@ describe('scan-orchestrator.service', () => {
             expect(repo?.lastScanAt).toBeTruthy()
         })
 
+        it('persists exitCode and environmental failure count as queryable outcome facts', async () => {
+            containerExecute.mockResolvedValue({
+                result: makeResult({ summary: { alertsFound: 3, alertsFixed: 1, environmentalFailures: 2 } }),
+                error: undefined,
+                exitCode: 1,
+                resource: {
+                    memoryMaxBytes: 8 * 1024 ** 3,
+                    peakRssBytes: 6 * 1024 ** 3,
+                    oomKilled: true,
+                    source: 'cgroup-v2',
+                    samples: 3,
+                },
+            })
+
+            const run = await runScanForRepository(repositoryId, { mode: 'fix', severityThreshold: 'high' })
+            expect(run.status).toBe('completed')
+            expect(run.exitCode).toBe(1)
+            expect(run.environmentalFailureCount).toBe(2)
+
+            const ds = await ensureDatabaseInitialized()
+            const persisted = await ds.getRepository(ScanRun).findOne({ where: { id: run.id } })
+            expect(persisted?.exitCode).toBe(1)
+            expect(persisted?.environmentalFailureCount).toBe(2)
+            expect(persisted).toMatchObject({
+                memoryMaxBytes: 8 * 1024 ** 3,
+                peakRssBytes: 6 * 1024 ** 3,
+                oomKilled: true,
+            })
+            expect(JSON.parse(persisted?.resourceJson ?? '{}')).toMatchObject({ source: 'cgroup-v2', samples: 3 })
+        })
+
+        it('keeps outcome columns null for a failed run without result', async () => {
+            containerExecute.mockResolvedValue({
+                result: undefined,
+                error: { code: 'execution_timeout', message: '执行超时' },
+                // 真实执行器在无 result 的执行级失败时返回合成码 2；不得落库为引擎进程码
+                exitCode: 2,
+            })
+
+            const run = await runScanForRepository(repositoryId, { mode: 'fix', severityThreshold: 'high' })
+            expect(run.status).toBe('failed')
+            expect(run.exitCode).toBeNull()
+            expect(run.environmentalFailureCount).toBeNull()
+            expect(run.memoryMaxBytes).toBeNull()
+            expect(run.peakRssBytes).toBeNull()
+            expect(run.oomKilled).toBeNull()
+            expect(JSON.parse(run.resourceJson ?? '{}')).toMatchObject({
+                source: 'none',
+                degradedReason: 'container executor did not return resource usage',
+            })
+            // 超时分类保留（UI「结果缺失」不覆盖失败归因）
+            expect(run.failureCode).toBe('execution_timeout')
+            expect(run.failureStage).toBe('runtime')
+        })
+
+        it('clears outcome columns when reusing a terminal run for a new execution', async () => {
+            containerExecute.mockResolvedValue({
+                result: makeResult({ summary: { alertsFound: 1, environmentalFailures: 4 } }),
+                error: undefined,
+                exitCode: 1,
+            })
+            const first = await runScanForRepository(repositoryId, { mode: 'fix', severityThreshold: 'high' })
+            expect(first.environmentalFailureCount).toBe(4)
+
+            const ds = await ensureDatabaseInitialized()
+            const runRepo = ds.getRepository(ScanRun)
+            const terminal = await runRepo.findOne({ where: { id: first.id } })
+            expect(terminal).not.toBeNull()
+            terminal!.status = 'completed'
+            terminal!.finishedAt = new Date()
+            await runRepo.save(terminal!)
+
+            // 复用后、执行 outcome 写入前抛错 → 只有 reuse 分支的清空能让旧值不残留；
+            // 若删掉清空逻辑，catch-all 保存会把上一次的 exitCode/count 带到新执行。
+            containerExecute.mockRejectedValue(new Error('executor exploded'))
+            const second = await runScanForRepository(
+                repositoryId,
+                { mode: 'fix', severityThreshold: 'high' },
+                { runId: first.id, reuse: true },
+            )
+            expect(second.id).toBe(first.id)
+            expect(second.status).toBe('failed')
+            expect(second.exitCode).toBeNull()
+            expect(second.environmentalFailureCount).toBeNull()
+        })
+
+        // 同步新建路径同样落「重试来源」；runId 续用（worker / 队列续跑）不得覆写历史来源
+        it('persists retriedFromRunId on the synchronously created run', async () => {
+            containerExecute.mockResolvedValue({ result: makeResult(), error: undefined })
+
+            const run = await runScanForRepository(
+                repositoryId,
+                { mode: 'fix', severityThreshold: 'high' },
+                { retriedFromRunId: 'source-run-2' },
+            )
+
+            const ds = await ensureDatabaseInitialized()
+            const persisted = await ds.getRepository(ScanRun).findOne({ where: { id: run.id } })
+            expect(persisted?.retriedFromRunId).toBe('source-run-2')
+        })
+
+        it('does not overwrite the existing retry source when continuing an existing run', async () => {
+            containerExecute.mockResolvedValue({ result: makeResult(), error: undefined })
+            const created = await createPendingScanRun(
+                repositoryId,
+                { mode: 'fix', severityThreshold: 'high' },
+                { retriedFromRunId: 'source-run-3' },
+            )
+
+            await runScanForRepository(repositoryId, { mode: 'fix', severityThreshold: 'high' }, { runId: created.id })
+
+            const ds = await ensureDatabaseInitialized()
+            const persisted = await ds.getRepository(ScanRun).findOne({ where: { id: created.id } })
+            expect(persisted?.retriedFromRunId).toBe('source-run-3')
+        })
+
+        it('passes repository verifyCommands into executor context', async () => {
+            containerExecute.mockResolvedValue({ result: makeResult(), error: undefined })
+            const withCommands = await createRepo({ verifyCommands: ['pnpm install --frozen-lockfile', 'pnpm test'] })
+
+            await runScanForRepository(withCommands, { mode: 'fix', severityThreshold: 'high' })
+
+            const ctx = containerExecute.mock.calls[0]![0] as { repository: { verifyCommands?: string[] } }
+            expect(ctx.repository.verifyCommands).toEqual(['pnpm install --frozen-lockfile', 'pnpm test'])
+        })
+
+        it('defaults repository verifyCommands to empty array when not configured', async () => {
+            containerExecute.mockResolvedValue({ result: makeResult(), error: undefined })
+
+            await runScanForRepository(repositoryId, { mode: 'fix', severityThreshold: 'high' })
+
+            const ctx = containerExecute.mock.calls[0]![0] as { repository: { verifyCommands?: string[] } }
+            expect(ctx.repository.verifyCommands).toEqual([])
+        })
+
         it('marks run failed when executor returns error', async () => {
             containerExecute.mockResolvedValue({ result: undefined, error: { code: 'exec_failed', message: '容器执行失败' } })
 
             const run = await runScanForRepository(repositoryId, { mode: 'fix', severityThreshold: 'high' })
             expect(run.status).toBe('failed')
             expect(run.errorJson).toContain('exec_failed')
+            // 失败分类落库：未映射码保留 code，阶段 / 处置建议归 unknown
+            expect(run.failureCode).toBe('exec_failed')
+            expect(run.failureStage).toBe('unknown')
+            expect(run.failureKind).toBe('unknown')
+        })
+
+        it('persists partial summary snapshot when failed with engine result (alertsFound 如实 / alertsFixed 归零)', async () => {
+            // engine_delivery_failed（COMMIT_FAILED）：result 存在但交付失败 → failed
+            containerExecute.mockResolvedValue({
+                result: makeResult({
+                    summary: { alertsFound: 5, alertsFixed: 3, alertsConverged: 1, alertsUnfixed: 2, environmentalFailures: 2 },
+                    errors: [{ repository: 'demo/app', stage: 'fix', category: 'COMMIT_FAILED', message: 'git commit failed' }],
+                }),
+                error: undefined,
+                exitCode: 2,
+            })
+
+            const run = await runScanForRepository(repositoryId, { mode: 'fix', severityThreshold: 'high' })
+            expect(run.status).toBe('failed')
+            const summary = JSON.parse(String(run.summaryJson ?? '{}')) as Record<string, number>
+            // 失败前已扫到的告警数如实落库；已修复归零（失败未交付，fixStatus 不可信）
+            expect(summary.alertsFound).toBe(5)
+            expect(summary.alertsFixed).toBe(0)
+            // 失败未交付：未修复数按 found − converged 重算，不能沿用引擎内存值
+            expect(summary.alertsUnfixed).toBe(4)
+            // 环境性失败计数随 summary 快照保留（失败未交付也不丢可见性）
+            expect(summary.environmentalFailures).toBe(2)
+            // 仅快照：failed 分支不调用 reconcileAlerts，无告警明细写入
+            const ds = await ensureDatabaseInitialized()
+            const alerts = await ds.getRepository(ScanResult).find({ where: { scanRunId: run.id } })
+            expect(alerts).toHaveLength(0)
+        })
+
+        it('persists summary snapshot when failed via exitCode=2 (no engine errors)', async () => {
+            // 进程级兜底：exitCode=2 + result 存在且无 engine 交付失败 errors → failed
+            containerExecute.mockResolvedValue({
+                result: makeResult({ summary: { alertsFound: 2, alertsFixed: 1, alertsUnfixed: 1 } }),
+                error: undefined,
+                exitCode: 2,
+            })
+
+            const run = await runScanForRepository(repositoryId, { mode: 'fix', severityThreshold: 'high' })
+            expect(run.status).toBe('failed')
+            const summary = JSON.parse(String(run.summaryJson ?? '{}')) as Record<string, number>
+            expect(summary.alertsFound).toBe(2)
+            expect(summary.alertsFixed).toBe(0)
+            expect(summary.alertsUnfixed).toBe(2)
         })
 
         it('captures runUrl from container executor (fix mode push succeed)', async () => {
@@ -237,6 +469,10 @@ describe('scan-orchestrator.service', () => {
             expect(run.status).toBe('failed')
             expect(run.errorJson).toContain('push_failed')
             expect(run.runUrl).toBeNull()
+            // push_failed 细分需看 message（网络 vs 权限），保守归 deliver + unknown
+            expect(run.failureCode).toBe('push_failed')
+            expect(run.failureStage).toBe('deliver')
+            expect(run.failureKind).toBe('unknown')
         })
 
         it('marks dispatched when container pr_creation_failed (branch pushed, PR failed)', async () => {
@@ -251,6 +487,9 @@ describe('scan-orchestrator.service', () => {
             expect(run.status).toBe('dispatched')
             expect(run.runUrl).toBe('https://github.com/demo/app/tree/dependfix/auto-fix-abc12345')
             expect(run.errorJson).toContain('pr_creation_failed')
+            // dispatched（分支已推、PR 未建）计入失败分类：deliver + deterministic
+            expect(run.failureStage).toBe('deliver')
+            expect(run.failureKind).toBe('deterministic')
         })
 
         it('marks run failed with orchestration error when executor throws', async () => {
@@ -260,6 +499,17 @@ describe('scan-orchestrator.service', () => {
             expect(run.status).toBe('failed')
             expect(run.errorJson).toContain('orchestration_failed')
             expect(run.errorJson).toContain('disk full')
+            // 编排 catch-all 失败同样落分类：runtime + unknown
+            expect(run.failureCode).toBe('orchestration_failed')
+            expect(run.failureStage).toBe('runtime')
+            expect(run.failureKind).toBe('unknown')
+            expect(run.memoryMaxBytes).toBeNull()
+            expect(run.peakRssBytes).toBeNull()
+            expect(run.oomKilled).toBeNull()
+            expect(JSON.parse(run.resourceJson ?? '{}')).toMatchObject({
+                source: 'none',
+                degradedReason: 'orchestration failed before resource snapshot',
+            })
         })
 
         it('throws 404 when runId references missing run', async () => {
@@ -299,8 +549,12 @@ describe('scan-orchestrator.service', () => {
                 summaryJson: JSON.stringify({ alertsFound: 3 }),
                 errorJson: null,
                 runUrl: null,
+                // 上次执行残留的失败分类（reuse 时应被清空）
+                failureCode: 'VERIFICATION_FAILED',
+                failureStage: 'verify',
+                failureKind: 'deterministic',
             }))
-            // seed 旧 ScanResult 模拟 report-only 模式留下的告警（M20.3 per-alert 模型：
+            // seed 旧 ScanResult 模拟 report-only 模式留下的告警（per-alert 模型：
             // repositoryId / upstreamId / firstSeenAt / lastSeenAt / occurrenceCount 必填）
             const seededNow = new Date('2026-08-12T00:01:00Z')
             await ds.getRepository(ScanResult).save([
@@ -367,6 +621,10 @@ describe('scan-orchestrator.service', () => {
             expect(summary.alertsTotal).toBe(1)
             // errorJson 重置为 null
             expect(result.errorJson).toBeNull()
+            // 失败分类三列随复用清空（不残留上次执行的 stage / kind）
+            expect(result.failureCode).toBeNull()
+            expect(result.failureStage).toBeNull()
+            expect(result.failureKind).toBeNull()
             // M20.3 reconcile 行为（todo.md §M20.3 决策 1-4）：
             // - 新 alert（mock executor 输出 dependabot:<counter>）→ INSERT（scanRunId=terminal.id, occurrenceCount=1）
             // - 旧 2 条 alert（fixStatus=pending，未在新告警列表中）→ supersededAt=NOW()（仍保留行，scanRunId 仍指向 terminal）
@@ -403,126 +661,57 @@ describe('scan-orchestrator.service', () => {
         })
     })
 
-    describe('runScanForRepository (sandbox executor)', () => {
+    describe('runScanForRepository (legacy sandbox → container fallback)', () => {
         const sandboxRepo = async () => createRepo({ executorKind: 'sandbox' })
 
-        it('runs sandbox executor when isAvailable() returns true', async () => {
+        it('forces container fallback and marks degraded (sandbox entry disabled)', async () => {
             const repoId = await sandboxRepo()
-            sandboxIsAvailable.mockResolvedValue(true)
-            sandboxExecute.mockResolvedValue({ result: makeResult(), error: undefined })
-
-            const run = await runScanForRepository(repoId, { mode: 'fix', severityThreshold: 'high' })
-            expect(run.status).toBe('completed')
-            expect(sandboxIsAvailable).toHaveBeenCalledTimes(1)
-            expect(sandboxExecute).toHaveBeenCalledTimes(1)
-            expect(containerExecute).not.toHaveBeenCalled()
-        })
-
-        it('marks degraded when sandbox isAvailable() returns false and ContainerExecutor fallback succeeds (A 场景)', async () => {
-            const repoId = await sandboxRepo()
-            sandboxIsAvailable.mockResolvedValue(false)
             containerExecute.mockResolvedValue({ result: makeResult(), error: undefined })
 
-            // 避免降级路径上 sandbox 真实 isAvailable 探测抛错
-            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => { /* 静默降级 warn */ })
-
             const run = await runScanForRepository(repoId, { mode: 'fix', severityThreshold: 'high' })
-            // T1005-C：启动时降级 → degraded（业务完整 + 路径偏离；区别于 B 场景运行时失败→failed）
             expect(run.status).toBe('degraded')
-            expect(run.errorJson).toContain('sandbox_unavailable')
+            expect(run.errorJson).toContain('sandbox_entry_disabled')
             expect(run.summaryJson).toContain('alertsTotal')
             expect(run.finishedAt).toBeTruthy()
-            expect(sandboxIsAvailable).toHaveBeenCalledTimes(1)
-            expect(sandboxExecute).not.toHaveBeenCalled()
             expect(containerExecute).toHaveBeenCalledTimes(1)
-            expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('[sandbox]'))
-            expect(warnSpy.mock.calls[0]?.[0]).toContain('daemon unavailable')
-            expect(warnSpy.mock.calls[0]?.[0]).toContain('falling back to container')
-
-            warnSpy.mockRestore()
         })
 
-        it('preserves runUrl from ContainerExecutor fallback in degraded state (fix mode push succeed)', async () => {
+        it('preserves runUrl from container fallback in degraded state (fix mode push succeed)', async () => {
             const repoId = await sandboxRepo()
-            sandboxIsAvailable.mockResolvedValue(false)
             containerExecute.mockResolvedValue({
                 result: makeResult(),
                 error: undefined,
                 runUrl: 'https://github.com/demo/app/tree/dependfix/auto-fix-abc12345',
             })
 
-            vi.spyOn(console, 'warn').mockImplementation(() => { /* 静默 */ })
-
             const run = await runScanForRepository(repoId, { mode: 'fix-and-pr', severityThreshold: 'high' })
             expect(run.status).toBe('degraded')
             expect(run.runUrl).toBe('https://github.com/demo/app/tree/dependfix/auto-fix-abc12345')
-            expect(run.errorJson).toContain('sandbox_unavailable')
+            expect(run.errorJson).toContain('sandbox_entry_disabled')
         })
 
-        it('propagates sandbox_unavailable error from sandbox.execute (runtime failure, no fallback)', async () => {
-            // 运行时偶发故障：isAvailable() 通过 → sandbox.execute() 失败（sandbox_unavailable）
-            // 此场景不静默降级（避免掩盖真实错误）—— 标记 failed
+        it('persists logsJson from container fallback in degraded state', async () => {
             const repoId = await sandboxRepo()
-            sandboxIsAvailable.mockResolvedValue(true)
-            sandboxExecute.mockResolvedValue({
-                result: undefined,
-                error: { code: 'sandbox_unavailable', message: 'docker daemon stopped during scan' },
+            containerExecute.mockResolvedValue({
+                result: makeResult(),
+                error: undefined,
+                logsJson: JSON.stringify({ logs: ['[container] fallback log line'] }),
             })
 
             const run = await runScanForRepository(repoId, { mode: 'fix', severityThreshold: 'high' })
+            expect(run.status).toBe('degraded')
+            expect(run.logsJson).toContain('fallback log line')
+            expect(containerExecute).toHaveBeenCalledTimes(1)
+        })
+
+        it('fails with container_unavailable when fallback target is unavailable', async () => {
+            const repoId = await sandboxRepo()
+            containerIsAvailable.mockResolvedValue(false)
+
+            const run = await runScanForRepository(repoId, { mode: 'fix', severityThreshold: 'high' })
             expect(run.status).toBe('failed')
-            expect(run.errorJson).toContain('sandbox_unavailable')
+            expect(run.errorJson).toContain('container_unavailable')
             expect(containerExecute).not.toHaveBeenCalled()
-        })
-
-        it('passes repository.sandboxLimits to SandboxExecutor (M11 T1005-B 透传)', async () => {
-            // M11 T1005-B：仓库级 sandboxLimits 透传到 SandboxExecutor 实例化选项
-            // 限额优先级：仓库级 > 沙箱级 > 平台默认（sandbox-executor.ts:107）
-            const repoId = await createRepo({
-                executorKind: 'sandbox',
-                sandboxLimits: { memoryMb: 4096, cpu: 2.0 },
-            })
-            sandboxIsAvailable.mockResolvedValue(true)
-            sandboxExecute.mockResolvedValue({ result: makeResult(), error: undefined })
-
-            await runScanForRepository(repoId, { mode: 'fix', severityThreshold: 'high' })
-            // SandboxExecutor 构造函数收到的第二参数应包含 sandboxLimits
-            expect(SandboxExecutorMock).toHaveBeenCalledTimes(1)
-            const options = SandboxExecutorMock.mock.calls[0]?.[0] as { workRoot?: string, sandboxLimits?: { memoryMb?: number, cpu?: number } }
-            expect(options.sandboxLimits).toEqual({ memoryMb: 4096, cpu: 2.0 })
-        })
-
-        it('passes undefined sandboxLimits when repository has none (走平台 SANDBOX_DEFAULTS)', async () => {
-            // M11 T1005-B：仓库级 sandboxLimits 缺省 → parseSandboxLimits 返回 undefined
-            // SandboxExecutor 收到 undefined → 走 sandbox-executor.ts:61 `?? {}` → 内部 spec 不带限额
-            // runtime-adapter.ts:180 走 `?? SANDBOX_DEFAULTS.memoryMb` 平台默认
-            const repoId = await createRepo({
-                executorKind: 'sandbox',
-                // 不带 sandboxLimits 字段
-            })
-            sandboxIsAvailable.mockResolvedValue(true)
-            sandboxExecute.mockResolvedValue({ result: makeResult(), error: undefined })
-
-            await runScanForRepository(repoId, { mode: 'fix', severityThreshold: 'high' })
-            expect(SandboxExecutorMock).toHaveBeenCalledTimes(1)
-            const options = SandboxExecutorMock.mock.calls[0]?.[0] as { sandboxLimits?: unknown }
-            expect(options.sandboxLimits).toBeUndefined()
-        })
-
-        it('passes partial sandboxLimits (only memoryMb)', async () => {
-            // 部分字段：cpu 缺省 → parseSandboxLimits 返回 { memoryMb: 4096 }（仅 memoryMb）
-            // SandboxExecutor 收到 options 后 buildSpec 时 cpu=undefined → runtime-adapter 走 SANDBOX_DEFAULTS.cpu
-            const repoId = await createRepo({
-                executorKind: 'sandbox',
-                sandboxLimits: { memoryMb: 8192 },
-            })
-            sandboxIsAvailable.mockResolvedValue(true)
-            sandboxExecute.mockResolvedValue({ result: makeResult(), error: undefined })
-
-            await runScanForRepository(repoId, { mode: 'fix', severityThreshold: 'high' })
-            const options = SandboxExecutorMock.mock.calls[0]?.[0] as { sandboxLimits?: { memoryMb?: number, cpu?: number } }
-            expect(options.sandboxLimits).toEqual({ memoryMb: 8192 })
-            expect(options.sandboxLimits?.cpu).toBeUndefined()
         })
     })
 
@@ -565,7 +754,8 @@ describe('scan-orchestrator.service', () => {
 
     // 跨模块集成测试——scan A/B 场景 → audit_event 落库 + notify 触发
     describe('scan → audit_event + notify 集成', () => {
-        // sandboxRepo 每次返回新 name（避免 Repository 列级复合 unique 索引 bug 导致第二次 insert 冲突）
+        // 存量 sandbox 仓库：生产 schema 已拒绝新写入（2026-10-27 入口临时关闭），
+        // 这里直接落库模拟 legacy 数据，验证编排层强制降级路径。
         let sandboxCounter = 0
         const sandboxRepo = async (): Promise<string> => {
             sandboxCounter += 1
@@ -586,15 +776,13 @@ describe('scan-orchestrator.service', () => {
             notifyEnvEvent.mockResolvedValue(undefined)
         })
 
-        it('A 场景 sandbox.isAvailable()=false → audit_event sandbox_degraded 落库 + notify 触发', async () => {
+        it('存量 sandbox → container 降级 → audit_event sandbox_degraded 落库但不通知', async () => {
             const repoId = await sandboxRepo()
-            sandboxIsAvailable.mockResolvedValue(false)
             containerExecute.mockResolvedValue({ result: makeResult(), error: undefined, runUrl: 'https://github.com/demo/sandbox-app/tree/dependfix-fix-xxx' })
 
             const run = await runScanForRepository(repoId, { mode: 'fix', severityThreshold: 'high' })
             expect(run.status).toBe('degraded')
 
-            // 验证 audit_event 落库
             const ds = await ensureDatabaseInitialized()
             const events = await ds.getRepository(AuditEvent).find({
                 where: { scanRunId: run.id },
@@ -603,47 +791,66 @@ describe('scan-orchestrator.service', () => {
             expect(events[0]?.type).toBe('sandbox_degraded')
             expect(events[0]?.severity).toBe('warn')
             expect(events[0]?.notified).toBe(false) // notify 触发后由 channel 异步更新
-            // payload 应包含 degradedReason + fallback
             const payload = JSON.parse(events[0]?.payloadJson ?? '{}') as Record<string, unknown>
-            expect(payload.degradedReason).toMatchObject({ code: 'sandbox_unavailable' })
+            expect(payload.degradedReason).toMatchObject({ code: 'sandbox_entry_disabled' })
             expect(payload.fallback).toBe('container')
+            expect(payload.notificationSuppressed).toBe(true)
 
-            // 验证 notify 触发（fire-and-forget，所以 .catch 不抛错就视为触发）
-            expect(notifyEnvEvent).toHaveBeenCalledOnce()
+            // 入口关闭是预期配置状态：只落库、不通知，避免噪声
+            expect(notifyEnvEvent).not.toHaveBeenCalled()
         })
 
-        it('B 场景 sandbox.execute 抛 sandbox_unavailable → audit_event sandbox_unavailable 落库 + notify 触发', async () => {
+        it('降级目标 container 亦不可用 → audit_event container_unavailable 落库（不落 sandbox_degraded）', async () => {
             const repoId = await sandboxRepo()
-            sandboxIsAvailable.mockResolvedValue(true)
-            sandboxExecute.mockResolvedValue({
-                result: undefined,
-                error: { code: 'sandbox_unavailable', message: 'docker daemon stopped during scan' },
-            })
+            containerIsAvailable.mockResolvedValue(false)
 
             const run = await runScanForRepository(repoId, { mode: 'fix', severityThreshold: 'high' })
             expect(run.status).toBe('failed')
+            expect(run.errorJson).toContain('container_unavailable')
+            // 降级目标环境不可用 → 不进入 execute
+            expect(containerExecute).not.toHaveBeenCalled()
 
-            // 验证 audit_event 落库（B 场景）
+            const ds = await ensureDatabaseInitialized()
+            const events = await ds.getRepository(AuditEvent).find({ where: { scanRunId: run.id } })
+            expect(events).toHaveLength(1)
+            // 根因为 container 环境不可用（而非 sandbox 降级）
+            expect(events[0]?.type).toBe('container_unavailable')
+            expect(events[0]?.severity).toBe('error')
+            expect(notifyEnvEvent).toHaveBeenCalledOnce()
+        })
+
+        it('C 场景 container.isAvailable()=false → audit_event container_unavailable 落库 + notify 触发 + run failed', async () => {
+            const repoId = await createRepo()
+            containerIsAvailable.mockResolvedValue(false)
+
+            const run = await runScanForRepository(repoId, { mode: 'fix', severityThreshold: 'high' })
+            expect(run.status).toBe('failed')
+            expect(run.errorJson).toContain('container_unavailable')
+            // 环境不可用 → 不进入 execute（避免以 execution_failed 掩盖环境根因）
+            expect(containerExecute).not.toHaveBeenCalled()
+            // 失败分类落 runtime / transient
+            expect(run.failureCode).toBe('container_unavailable')
+            expect(run.failureStage).toBe('runtime')
+            expect(run.failureKind).toBe('transient')
+
             const ds = await ensureDatabaseInitialized()
             const events = await ds.getRepository(AuditEvent).find({
                 where: { scanRunId: run.id },
             })
             expect(events).toHaveLength(1)
-            expect(events[0]?.type).toBe('sandbox_unavailable')
+            expect(events[0]?.type).toBe('container_unavailable')
             expect(events[0]?.severity).toBe('error')
             const payload = JSON.parse(events[0]?.payloadJson ?? '{}') as Record<string, unknown>
-            // payload 应包含 errno + message（B 场景补 code/adapter）
-            expect(payload.errno).toBe('sandbox_unavailable')
-            expect(payload.message).toContain('docker daemon')
+            expect(payload.code).toBe('container_unavailable')
+            expect(payload.executor).toBe('container')
+            expect(String(payload.message)).toContain('工作根')
 
-            // 验证 notify 触发
             expect(notifyEnvEvent).toHaveBeenCalledOnce()
         })
 
         it('正常完成（无降级 / 无错误）不写 audit_event，不触发 notify', async () => {
-            const repoId = await sandboxRepo()
-            sandboxIsAvailable.mockResolvedValue(true)
-            sandboxExecute.mockResolvedValue({ result: makeResult(), error: undefined })
+            const repoId = await createRepo()
+            containerExecute.mockResolvedValue({ result: makeResult(), error: undefined })
 
             const run = await runScanForRepository(repoId, { mode: 'fix', severityThreshold: 'high' })
             expect(run.status).toBe('completed')
@@ -657,23 +864,21 @@ describe('scan-orchestrator.service', () => {
         })
 
         it('notifyEnvEvent 失败不阻塞扫描主流程（fire-and-forget）', async () => {
-            const repoId = await sandboxRepo()
-            sandboxIsAvailable.mockResolvedValue(false)
-            containerExecute.mockResolvedValue({ result: makeResult(), error: undefined })
+            const repoId = await createRepo()
+            containerIsAvailable.mockResolvedValue(false)
             // 模拟 notify 抛出异常
             notifyEnvEvent.mockRejectedValue(new Error('notification service down'))
 
             const run = await runScanForRepository(repoId, { mode: 'fix', severityThreshold: 'high' })
-            // 扫描仍正常完成（degraded 状态，notify 失败仅日志）
-            expect(run.status).toBe('degraded')
+            // 容器环境不可用 → failed；notify 失败仅日志，不影响落库
+            expect(run.status).toBe('failed')
 
-            // 验证 audit_event 仍落库（即使 notify 失败）
             const ds = await ensureDatabaseInitialized()
             const events = await ds.getRepository(AuditEvent).find({
                 where: { scanRunId: run.id },
             })
             expect(events).toHaveLength(1)
-            expect(events[0]?.type).toBe('sandbox_degraded')
+            expect(events[0]?.type).toBe('container_unavailable')
         })
     })
 })

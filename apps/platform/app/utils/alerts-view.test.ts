@@ -1,16 +1,17 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
     alertsFixStatusLabel,
-    alertsRuleIdTagSeverity,
-    alertsRunStatusSeverity,
-    alertsSeverityTagSeverity,
+    alertsRuleIdTone,
+    alertsRunStatusTone,
+    alertsSeverityTone,
     alertsStatusLabel,
     buildAlertsQuery,
+    summarizePackageGroups,
     type AlertsFilters,
 } from './alerts-view'
 
 /**
- * alerts 视图 Tag 颜色 + 文案工具测试（todo.md §M16.2 抽出）。
+ * alerts 视图 Tag 颜色 + 文案工具测试。
  *
  * 设计：4 个 switch 函数 + 1 个对象映射函数，覆盖每个分支（含 default）。
  * 同目录其它 utility（cron-preview / dashboard-charts / sort-helpers 等）均采用
@@ -18,67 +19,67 @@ import {
  */
 
 describe('alerts-view 纯函数', () => {
-    describe('alertsSeverityTagSeverity', () => {
-        it('critical → danger（PrimeVue Tag severity）', () => {
-            expect(alertsSeverityTagSeverity('critical')).toBe('danger')
+    describe('alertsSeverityTone', () => {
+        it('critical → danger（caomei Tag tone）', () => {
+            expect(alertsSeverityTone('critical')).toBe('danger')
         })
 
-        it('high → warn', () => {
-            expect(alertsSeverityTagSeverity('high')).toBe('warn')
+        it('high → warning', () => {
+            expect(alertsSeverityTone('high')).toBe('warning')
         })
 
-        it('medium → info', () => {
-            expect(alertsSeverityTagSeverity('medium')).toBe('info')
+        it('medium → primary', () => {
+            expect(alertsSeverityTone('medium')).toBe('primary')
         })
 
-        it('low / unknown 等非枚举值 → secondary（default 分支）', () => {
-            expect(alertsSeverityTagSeverity('low')).toBe('secondary')
-            expect(alertsSeverityTagSeverity('unknown')).toBe('secondary')
-            expect(alertsSeverityTagSeverity('')).toBe('secondary')
+        it('low / unknown 等非枚举值 → neutral（default 分支）', () => {
+            expect(alertsSeverityTone('low')).toBe('neutral')
+            expect(alertsSeverityTone('unknown')).toBe('neutral')
+            expect(alertsSeverityTone('')).toBe('neutral')
         })
     })
 
-    describe('alertsRuleIdTagSeverity（按 source 区分 GHSA/CVE/CodeQL 等 ruleId Tag 颜色）', () => {
+    describe('alertsRuleIdTone（按 source 区分 GHSA/CVE/CodeQL 等 ruleId Tag 颜色）', () => {
         it('dependabot → success', () => {
-            expect(alertsRuleIdTagSeverity('dependabot')).toBe('success')
+            expect(alertsRuleIdTone('dependabot')).toBe('success')
         })
 
-        it('pnpm-audit → warn', () => {
-            expect(alertsRuleIdTagSeverity('pnpm-audit')).toBe('warn')
+        it('pnpm-audit → warning', () => {
+            expect(alertsRuleIdTone('pnpm-audit')).toBe('warning')
         })
 
-        it('code-scanning → info', () => {
-            expect(alertsRuleIdTagSeverity('code-scanning')).toBe('info')
+        it('code-scanning → primary', () => {
+            expect(alertsRuleIdTone('code-scanning')).toBe('primary')
         })
 
-        it('code-quality → contrast', () => {
-            expect(alertsRuleIdTagSeverity('code-quality')).toBe('contrast')
+        it('code-quality → neutral', () => {
+            expect(alertsRuleIdTone('code-quality')).toBe('neutral')
         })
 
-        it('未知 source → secondary（default 分支，防御未来新增 source 类型）', () => {
-            expect(alertsRuleIdTagSeverity('unknown-source')).toBe('secondary')
-            expect(alertsRuleIdTagSeverity('')).toBe('secondary')
+        it('未知 source → neutral（default 分支，防御未来新增 source 类型）', () => {
+            expect(alertsRuleIdTone('unknown-source')).toBe('neutral')
+            expect(alertsRuleIdTone('')).toBe('neutral')
         })
     })
 
-    describe('alertsRunStatusSeverity（dedupe 详情侧栏 RunDetailView 状态映射）', () => {
+    describe('alertsRunStatusTone（dedupe 详情侧栏 RunDetailView 状态映射）', () => {
         it('completed → success', () => {
-            expect(alertsRunStatusSeverity('completed')).toBe('success')
+            expect(alertsRunStatusTone('completed')).toBe('success')
         })
 
         it('failed → danger', () => {
-            expect(alertsRunStatusSeverity('failed')).toBe('danger')
+            expect(alertsRunStatusTone('failed')).toBe('danger')
         })
 
-        it('dispatched → info', () => {
-            expect(alertsRunStatusSeverity('dispatched')).toBe('info')
+        it('dispatched → primary', () => {
+            expect(alertsRunStatusTone('dispatched')).toBe('primary')
         })
 
-        it('pending / running / degraded 等非枚举值 → warn（default 分支）', () => {
-            expect(alertsRunStatusSeverity('pending')).toBe('warn')
-            expect(alertsRunStatusSeverity('running')).toBe('warn')
-            expect(alertsRunStatusSeverity('degraded')).toBe('warn')
-            expect(alertsRunStatusSeverity('')).toBe('warn')
+        it('pending / running / degraded 等非枚举值 → warning（default 分支）', () => {
+            expect(alertsRunStatusTone('pending')).toBe('warning')
+            expect(alertsRunStatusTone('running')).toBe('warning')
+            expect(alertsRunStatusTone('degraded')).toBe('warning')
+            expect(alertsRunStatusTone('')).toBe('warning')
         })
     })
 
@@ -109,7 +110,7 @@ describe('alerts-view 纯函数', () => {
         })
     })
 
-    describe('buildAlertsQuery（todo.md §M16.4 useAsyncData handler 共用）', () => {
+    describe('buildAlertsQuery（useAsyncData handler 共用）', () => {
         // 默认筛选：所有字段为 'all' / includeSuperseded=false，用于验证各 viewMode 行为
         const defaultFilters: AlertsFilters = {
             repositoryId: 'all',
@@ -123,7 +124,7 @@ describe('alerts-view 纯函数', () => {
             expect(query).not.toHaveProperty('groupBy')
         })
 
-        it('viewMode="package" 携带 groupBy=package（PrimeVue rowGroup subheader 预排序）', () => {
+        it('viewMode="package" 携带 groupBy=package（rowGroup subheader 预排序）', () => {
             const query = buildAlertsQuery('package', defaultFilters)
             expect(query.groupBy).toBe('package')
         })
@@ -188,7 +189,7 @@ describe('alerts-view 纯函数', () => {
         })
     })
 
-    describe('alertsStatusLabel（todo.md §M20.6 状态列：fixStatus + supersededAt → 文案）', () => {
+    describe('alertsStatusLabel（状态列：fixStatus + supersededAt → 文案）', () => {
         // 简化的 translator mock：直接返回 key，便于断言 i18n key 调用正确性
         // 真实 i18n 文案在 apps/platform/i18n/locales/*.json 维护，本测试只验证映射
         const t = vi.fn((key: string) => `t(${key})`) as unknown as (key: string) => string
@@ -217,6 +218,60 @@ describe('alerts-view 纯函数', () => {
             // 防御：API 老数据可能不带 supersededAt 字段（undefined）
             expect(alertsStatusLabel({ fixStatus: 'skipped' }, t))
                 .toBe('t(common.fixStatus.skipped)')
+        })
+    })
+
+    describe('summarizePackageGroups（按包分组：组内最高 severity + 组排序键）', () => {
+        it('跨档 severity 取组内最高（lodash high + medium → high / rank 4）', () => {
+            const summary = summarizePackageGroups([
+                { packageName: 'lodash', severity: 'medium' },
+                { packageName: 'lodash', severity: 'high' },
+                { packageName: 'lodash', severity: 'medium' },
+            ])
+            expect(summary.get('lodash')?.severity).toBe('high')
+            expect(summary.get('lodash')?.rank).toBe(4)
+        })
+
+        it('组排序键按 desc 排序 = 最高级别降序 → 包名升序（默认契约）', () => {
+            const summary = summarizePackageGroups([
+                { packageName: 'lodash', severity: 'high' },
+                { packageName: 'axios', severity: 'critical' },
+                { packageName: 'node-fetch', severity: 'medium' },
+                { packageName: 'nodemailer', severity: 'high' },
+                { packageName: 'minimist', severity: 'low' },
+            ])
+            // 模拟「严重级别」列 desc 排序：按 sortKey 降序
+            const order = [...summary.entries()]
+                .sort((a, b) => b[1].sortKey - a[1].sortKey)
+                .map(([name]) => name)
+            // axios(critical) → lodash/nodemailer(high, 包名升序) → node-fetch(medium) → minimist(low)
+            expect(order).toEqual(['axios', 'lodash', 'nodemailer', 'node-fetch', 'minimist'])
+        })
+
+        it('组排序键组间唯一（同 rank 不同包 key 不同 → 次排序键只在组内生效）', () => {
+            const summary = summarizePackageGroups([
+                { packageName: 'lodash', severity: 'high' },
+                { packageName: 'nodemailer', severity: 'high' },
+            ])
+            expect(summary.get('lodash')?.rank).toBe(summary.get('nodemailer')?.rank)
+            expect(summary.get('lodash')?.sortKey).not.toBe(summary.get('nodemailer')?.sortKey)
+            // 序号差值 = 1（同 rank 内相邻包）
+            expect(Math.abs((summary.get('lodash')?.sortKey ?? 0) - (summary.get('nodemailer')?.sortKey ?? 0)))
+                .toBe(1)
+        })
+
+        it('包名序号使 rank 主导：低 rank 的高序号包仍排在更低 rank 之前', () => {
+            const summary = summarizePackageGroups([
+                { packageName: 'high-pkg', severity: 'high' },
+                { packageName: 'critical-pkg', severity: 'critical' },
+            ])
+            // critical(rank 5) 即使包名序号大，sortKey 仍高于 high(rank 4)
+            expect(summary.get('critical-pkg')?.sortKey).toBeGreaterThan(summary.get('high-pkg')?.sortKey ?? 0)
+        })
+
+        it('未知 severity → rank 0；空输入 → 空 Map', () => {
+            expect(summarizePackageGroups([{ packageName: 'x', severity: 'n/a' }]).get('x')?.rank).toBe(0)
+            expect(summarizePackageGroups([]).size).toBe(0)
         })
     })
 })

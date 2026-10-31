@@ -18,12 +18,17 @@ import { requireAuth } from '#server/utils/guard'
  *
  * groupBy 参数（todo.md §C65-D3）：
  * - `package`：按 packageName 排序，前端 DataTable rowGroupMode="subheader" 按包分组
- *   （PrimeVue 4 要求数据按 groupRowsBy 字段预排序，相邻行字段值变化触发 subheader）
+ *   （迁移前组件库 4.x 要求数据按 groupRowsBy 字段预排序，相邻行字段值变化触发 subheader）
  * - `repository`：按关联 Repository owner + name 排序，前端按项目分组
  * - 不传 / 其他值：原始列表，按 createdAt DESC（默认）
  *
- * rowGroup 语义：用户切换其他列排序时，PrimeVue 多列排序模式会自动把 groupRowsBy 保留为第一排序键，
- * 避免 group 顺序被破坏（参考 primefaces/primevue DataTable.vue sortSingle/sortMultiple 实现）。
+ * 并列兜底（2026-10-30）：主排序键相同的行（同毫秒 `createdAt` / 同 `packageName`）此前
+ * 行序取决于数据库返回顺序，同一查询两次可能不同。三种模式统一追加主键 `result.id DESC`
+ * 作次键，只保证**行序确定**；视觉基线的**意图顺序**仍由 fixtures 逐条钉死 `createdAt`
+ * 提供（主防线），二者不要互相替代。
+ *
+ * rowGroup 语义：用户切换其他列排序时，迁移前组件库多列排序模式会自动把 groupRowsBy 保留为第一排序键，
+ * 避免 group 顺序被破坏（上游多列排序实现约定，实证见迁移评估 §15.10）。
  *
  * dedupe 参数（M20.5 移除）：
  * - 旧实现（[archive/todo-archive-phases-m13.md §M13.2 / T1306](../archive/todo-archive-phases-m13.md#m132-网络治理--告警去重-)）按 fingerprint (repositoryId + packageName + ruleId) 应用层聚合
@@ -58,7 +63,7 @@ export default defineEventHandler(async (event) => {
         .leftJoinAndSelect('scanRun.repository', 'repository')
         .take(500)
     if (repositoryId && repositoryId !== 'all') {
-        // M20.3 新增 repositoryId 列后直接走 result.repositoryId 过滤（无需再 JOIN scanRun 推断）
+        // 新增 repositoryId 列后直接走 result.repositoryId 过滤（无需再 JOIN scanRun 推断）
         qb.andWhere('result.repositoryId = :repositoryId', { repositoryId })
     }
     if (severity && severity !== 'all') {
@@ -67,8 +72,8 @@ export default defineEventHandler(async (event) => {
     if (source && source !== 'all') {
         qb.andWhere('result.source = :source', { source })
     }
-    // 默认 supersededAt IS NULL（M20.5）：alerts 视图只显示活跃告警
-    // includeSuperseded=true 时不过滤（前端"显示已解决"开关使用——M20.6）
+    // 默认 supersededAt IS NULL：alerts 视图只显示活跃告警
+    // includeSuperseded=true 时不过滤（前端"显示已解决"开关使用）
     if (!includeSuperseded) {
         qb.andWhere('result.supersededAt IS NULL')
     }
@@ -76,16 +81,19 @@ export default defineEventHandler(async (event) => {
     if (groupBy === 'package') {
         qb.orderBy('result.packageName', 'ASC')
     } else if (groupBy === 'repository') {
-        // repository 模式：跨 repo 排序 + 同一 repo 内按 packageName ASC（保证 PrimeVue rowGroup subheader 相邻行字段值变化）
+        // repository 模式：跨 repo 排序 + 同一 repo 内按 packageName ASC（保证迁移前的 rowGroup subheader 相邻行字段值变化）
         qb.orderBy('repository.owner', 'ASC').addOrderBy('repository.name', 'ASC').addOrderBy('result.packageName', 'ASC')
     } else {
         qb.orderBy('result.createdAt', 'DESC')
     }
+    // 并列兜底：主排序键相同（同毫秒 createdAt / 同 packageName）时按主键 DESC，
+    // 避免行序依赖数据库返回顺序（同一查询两次不一致 → 视觉基线抖动）
+    qb.addOrderBy('result.id', 'DESC')
 
     const results = await qb.getMany()
 
-    // M20.3 per-alert 模型：每行已是独立告警，occurrenceCount/firstSeenAt/lastSeenAt 字段直接来自 ScanResult，
-    // 无需应用层 fingerprint 聚合（旧 M13.2 跨次扫描去重逻辑由 M20.3 per-alert 模型替代）
+    // per-alert 模型：每行已是独立告警，occurrenceCount/firstSeenAt/lastSeenAt 字段直接来自 ScanResult，
+    // 无需应用层 fingerprint 聚合（旧的跨次扫描去重逻辑由 per-alert 模型替代）
     return results.map((r) => ({
         id: r.id,
         runId: r.scanRunId,
@@ -102,7 +110,7 @@ export default defineEventHandler(async (event) => {
         htmlUrl: r.htmlUrl,
         fixStatus: r.fixStatus,
         errorMessage: r.errorMessage,
-        // M20.3 新增字段（直接来自 ScanResult）
+        // 新增字段（直接来自 ScanResult）
         upstreamId: r.upstreamId,
         occurrenceCount: r.occurrenceCount,
         firstSeenAt: r.firstSeenAt.toISOString(),

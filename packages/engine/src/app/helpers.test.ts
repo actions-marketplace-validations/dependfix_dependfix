@@ -1,4 +1,5 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { execSync } from 'node:child_process'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -7,14 +8,14 @@ import type { FixAction, NormalizedSecurityAlert } from '@dependfix/core'
 /**
  * packages/engine/src/app/helpers.test.ts
  *
- * runCodeScanningFixes 批处理（M28.2）测试覆盖：
+ * runCodeScanningFixes 批处理测试覆盖：
  * - batchSize 默认 10 + 可配置
  * - N=10/11/25 触发 1/2/3 次 lint
  * - 批内 lint 失败时所有批内告警 rollback + 标记 failed
  * - dry-run 跳过 lint
  * - 单个告警快照失败不影响其他批内告警
  *
- * 关联：M28.2 baseline bench（commit 395ee29）+ 批处理 commit（M28.2 第二阶段）
+ * 关联：baseline bench（commit 395ee29）+ 批处理第二阶段
  */
 
 // ---------------------------------------------------------------------------
@@ -47,7 +48,7 @@ vi.mock('../helpers', async (importOriginal) => {
     }
 })
 
-import { runCodeScanningFixes } from './helpers'
+import { commitLocalChanges, ensureGitignore, hasGitChanges, isGitRepository, normalizeGitignoreEntry, runCodeScanningFixes } from './helpers'
 
 // ---------------------------------------------------------------------------
 // 测试辅助
@@ -101,7 +102,7 @@ function makeCtx(workDir: string) {
 // 测试
 // ---------------------------------------------------------------------------
 
-describe('runCodeScanningFixes batch processing (M28.2)', () => {
+describe('runCodeScanningFixes batch processing', () => {
     let workDir: string
 
     beforeEach(() => {
@@ -256,5 +257,379 @@ describe('runCodeScanningFixes batch processing (M28.2)', () => {
         // 仅 2 个 cs 告警（cs-0 + cs-1）→ 末尾 flushBatch 触发 1 次 lint
         expect(mockQuickVerifyProject).toHaveBeenCalledTimes(1)
         expect(result).toEqual({ fixed: 2, failed: 0 })
+    })
+})
+
+// ---------------------------------------------------------------------------
+// ensureGitignore / .gitignore 幂等判定归一化
+// ---------------------------------------------------------------------------
+
+describe('normalizeGitignoreEntry', () => {
+    it('normalizes equivalent directory-ignore forms to the plain name', () => {
+        const equivalents = [
+            'dependfix-reports',
+            '/dependfix-reports',
+            'dependfix-reports/',
+            '/dependfix-reports/',
+            '**/dependfix-reports/',
+            'dependfix-reports/**',
+            'dependfix-reports/*',
+            '/dependfix-reports/**',
+        ]
+        for (const line of equivalents) {
+            expect(normalizeGitignoreEntry(line)).toBe('dependfix-reports')
+        }
+    })
+
+    it('treats a mid-line hash as a literal character (git only treats a leading hash as a comment)', () => {
+        // `dir/ # note` 与 `dir#suffix` 在 git 中并不生效（行中 `#` 属模式本身）→ 不得判为已忽略
+        expect(normalizeGitignoreEntry('dependfix-reports/ # report dir')).toBe('dependfix-reports/ # report dir')
+        expect(normalizeGitignoreEntry('dependfix-reports#suffix')).toBe('dependfix-reports#suffix')
+    })
+
+    it('does not normalize leading whitespace (git only strips trailing whitespace)', () => {
+        expect(normalizeGitignoreEntry(' dependfix-reports/')).toBe(' dependfix-reports')
+    })
+
+    it('strips trailing spaces and CR but keeps a trailing tab (matching git)', () => {
+        expect(normalizeGitignoreEntry('dependfix-reports/ ')).toBe('dependfix-reports')
+        expect(normalizeGitignoreEntry('dependfix-reports/\r')).toBe('dependfix-reports')
+        // git 不把尾随 tab 视为空白 → 保留后不再是「目录标记」形态，不得判为已忽略
+        expect(normalizeGitignoreEntry('dependfix-reports/\t')).toBe('dependfix-reports/\t')
+    })
+
+    it('does not treat a slash-wrapped content glob as the directory itself', () => {
+        // `dir/**/` 只忽略目录内层级、不忽略目录自身 → 不得判为已忽略
+        expect(normalizeGitignoreEntry('dependfix-reports/**/')).toBe('dependfix-reports/**')
+    })
+
+    it('returns undefined for lines that do not ignore anything', () => {
+        expect(normalizeGitignoreEntry('')).toBeUndefined()
+        expect(normalizeGitignoreEntry('   ')).toBeUndefined()
+        expect(normalizeGitignoreEntry('# dependfix')).toBeUndefined()
+        // 取反行不构成忽略
+        expect(normalizeGitignoreEntry('!dependfix-reports/')).toBeUndefined()
+    })
+
+    it('keeps unrelated entries intact', () => {
+        expect(normalizeGitignoreEntry('node_modules')).toBe('node_modules')
+        expect(normalizeGitignoreEntry('/dist/')).toBe('dist')
+    })
+})
+
+describe('ensureGitignore', () => {
+    let dir: string
+
+    beforeEach(() => {
+        dir = mkdtempSync(join(tmpdir(), 'dependfix-gitignore-'))
+        mkdirSync(join(dir, '.git'))
+    })
+
+    afterEach(() => {
+        rmSync(dir, { recursive: true, force: true })
+    })
+
+    const readGitignore = () => readFileSync(join(dir, '.gitignore'), 'utf-8')
+
+    it.each([
+        '/dependfix-reports',
+        'dependfix-reports',
+        '/dependfix-reports/',
+        '**/dependfix-reports/',
+        'dependfix-reports/**',
+        'dependfix-reports/*',
+    ])('skips appending when "%s" already ignores the directory', (line) => {
+        writeFileSync(join(dir, '.gitignore'), `node_modules\n${line}\n`, 'utf-8')
+        const before = readGitignore()
+
+        ensureGitignore(dir)
+
+        // 语义等价写法 → 幂等跳过（原内容字节级不变）
+        expect(readGitignore()).toBe(before)
+    })
+
+    it.each([
+        'dependfix-reports/ # keep reports out',
+        'dependfix-reports#suffix',
+        ' dependfix-reports/',
+        'dependfix-reports/**/',
+        'my-dependfix-reports/',
+        'foo/dependfix-reports/',
+        'dependfix-reports/\t',
+    ])('still appends when "%s" does not actually ignore the directory', (line) => {
+        writeFileSync(join(dir, '.gitignore'), `node_modules\n${line}\n`, 'utf-8')
+
+        ensureGitignore(dir)
+
+        // 这些写法在 git 中并不忽略目标目录 → 必须追加（漏追加会让报告被 git add 提交）
+        expect(readGitignore()).toContain('# dependfix\ndependfix-reports/\n')
+    })
+
+    it('appends the canonical entry once when the directory is not ignored', () => {
+        writeFileSync(join(dir, '.gitignore'), 'node_modules\n', 'utf-8')
+
+        ensureGitignore(dir)
+
+        expect(readGitignore()).toBe('node_modules\n# dependfix\ndependfix-reports/\n')
+    })
+
+    it('creates .gitignore when missing', () => {
+        ensureGitignore(dir)
+        expect(readGitignore()).toBe('# dependfix\ndependfix-reports/\n')
+    })
+
+    it('is idempotent across repeated calls', () => {
+        writeFileSync(join(dir, '.gitignore'), 'node_modules', 'utf-8')
+
+        ensureGitignore(dir)
+        const once = readGitignore()
+        ensureGitignore(dir)
+
+        expect(readGitignore()).toBe(once)
+        expect(once.match(/dependfix-reports\//g)).toHaveLength(1)
+    })
+
+    it('does nothing outside a git repository', () => {
+        const plain = mkdtempSync(join(tmpdir(), 'dependfix-nogit-'))
+        try {
+            ensureGitignore(plain)
+            expect(existsSync(join(plain, '.gitignore'))).toBe(false)
+        } finally {
+            rmSync(plain, { recursive: true, force: true })
+        }
+    })
+})
+
+// ---------------------------------------------------------------------------
+// isGitRepository / commitLocalChanges（非 git 工作目录防御）
+// ---------------------------------------------------------------------------
+
+describe('hasGitChanges', () => {
+    let dir: string
+
+    beforeEach(() => {
+        dir = mkdtempSync(join(tmpdir(), 'dependfix-haschanges-'))
+    })
+
+    afterEach(() => {
+        rmSync(dir, { recursive: true, force: true })
+    })
+
+    /** 建一个干净的 git 仓库（含一次提交） */
+    const initRepo = () => {
+        execSync('git init -q', { cwd: dir })
+        execSync('git config user.name test', { cwd: dir })
+        execSync('git config user.email test@test', { cwd: dir })
+        writeFileSync(join(dir, 'tracked.txt'), 'v1\n', 'utf-8')
+        execSync('git add . && git commit -qm init', { cwd: dir })
+    }
+
+    it('非 git 仓库返回 false（不再把「git 命令失败」当「有变更」）', () => {
+        writeFileSync(join(dir, 'package.json'), '{}', 'utf-8')
+
+        expect(hasGitChanges(dir)).toBe(false)
+    })
+
+    it('不存在的路径返回 false', () => {
+        expect(hasGitChanges(join(dir, 'missing'))).toBe(false)
+    })
+
+    it('干净的 git 仓库返回 false', () => {
+        initRepo()
+
+        expect(hasGitChanges(dir)).toBe(false)
+    })
+
+    it('有未暂存变更时返回 true', () => {
+        initRepo()
+        writeFileSync(join(dir, 'tracked.txt'), 'v2\n', 'utf-8')
+
+        expect(hasGitChanges(dir)).toBe(true)
+    })
+
+    it('仅暂存变更（无未暂存变更）时返回 true', () => {
+        initRepo()
+        writeFileSync(join(dir, 'tracked.txt'), 'v2\n', 'utf-8')
+        execSync('git add .', { cwd: dir })
+
+        expect(hasGitChanges(dir)).toBe(true)
+    })
+})
+
+describe('isGitRepository', () => {
+    let dir: string
+
+    beforeEach(() => {
+        dir = mkdtempSync(join(tmpdir(), 'dependfix-isrepo-'))
+    })
+
+    afterEach(() => {
+        rmSync(dir, { recursive: true, force: true })
+    })
+
+    it('returns true for a git work tree', () => {
+        execSync('git init -q', { cwd: dir })
+        expect(isGitRepository(dir)).toBe(true)
+    })
+
+    it('returns false for a plain directory (no .git)', () => {
+        writeFileSync(join(dir, 'package.json'), '{}', 'utf-8')
+        expect(isGitRepository(dir)).toBe(false)
+    })
+
+    it('returns false for a non-existent path', () => {
+        expect(isGitRepository(join(dir, 'missing'))).toBe(false)
+    })
+})
+
+describe('commitLocalChanges', () => {
+    let dir: string
+
+    beforeEach(() => {
+        dir = mkdtempSync(join(tmpdir(), 'dependfix-commit-'))
+    })
+
+    afterEach(() => {
+        rmSync(dir, { recursive: true, force: true })
+    })
+
+    /** ctx 携带可断言的 logger（`warn` 用于防御分支） */
+    function makeCommitCtx(workDir: string, allActions: FixAction[] = []) {
+        const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+        return {
+            ctx: {
+                workDir,
+                logger: logger as never,
+                allActions,
+                authProvider: undefined,
+            },
+            logger,
+        }
+    }
+
+    function deliverableAction(): FixAction {
+        return {
+            type: 'dependency-upgrade',
+            repository: 'foo/bar',
+            target: 'lodash',
+            fromVersion: '4.17.20',
+            toVersion: '4.17.21',
+            success: true,
+            durationMs: 1,
+        }
+    }
+
+    it('skips with a warning when workDir is not a git repository (no throw)', async () => {
+        // 回归：非 git 目录下 hasGitChanges 误报 true → 旧实现继续走到 stageAndCommit，
+        // 以 `git config user.name` 抛 `fatal: not in a git directory` → 记 COMMIT_FAILED
+        const { ctx, logger } = makeCommitCtx(dir)
+
+        await expect(commitLocalChanges(ctx)).resolves.toBeUndefined()
+        expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('不是 git 仓库'))
+        expect(logger.info).not.toHaveBeenCalled()
+    })
+
+    it('skips informational when a git repository has no changes', async () => {
+        execSync('git init -q', { cwd: dir })
+        execSync('git config user.name test', { cwd: dir })
+        execSync('git config user.email test@test', { cwd: dir })
+        const { ctx, logger } = makeCommitCtx(dir)
+
+        await commitLocalChanges(ctx)
+
+        expect(logger.info).toHaveBeenCalledWith('No changes to commit — skipping local commit')
+    })
+
+    it('commits tracked whitelisted changes in a git repository', async () => {
+        execSync('git init -q', { cwd: dir })
+        execSync('git config user.name test', { cwd: dir })
+        execSync('git config user.email test@test', { cwd: dir })
+        writeFileSync(join(dir, 'package.json'), '{ "name": "v1" }\n', 'utf-8')
+        execSync('git add . && git commit -qm init', { cwd: dir })
+        writeFileSync(join(dir, 'package.json'), '{ "name": "v2" }\n', 'utf-8')
+
+        const { ctx, logger } = makeCommitCtx(dir, [deliverableAction()])
+
+        await commitLocalChanges(ctx)
+
+        expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('Committed fix changes to current branch'))
+        // 提交落在本地当前分支（改动已入 HEAD）
+        expect(execSync('git show HEAD:package.json', { cwd: dir, encoding: 'utf-8' })).toBe('{ "name": "v2" }\n')
+    })
+
+    it('rejects undeclared tracked changes with UNEXPECTED_CHANGES (no commit)', async () => {
+        execSync('git init -q', { cwd: dir })
+        execSync('git config user.name test', { cwd: dir })
+        execSync('git config user.email test@test', { cwd: dir })
+        writeFileSync(join(dir, 'src.ts'), 'v1\n', 'utf-8')
+        execSync('git add . && git commit -qm init', { cwd: dir })
+        // 未声明的源码改动：既不在白名单，也没有 fixer 声明
+        writeFileSync(join(dir, 'src.ts'), 'v2\n', 'utf-8')
+
+        const { ctx } = makeCommitCtx(dir, [deliverableAction()])
+
+        await expect(commitLocalChanges(ctx)).rejects.toThrowError(/undeclared tracked change/)
+        expect(execSync('git show HEAD:src.ts', { cwd: dir, encoding: 'utf-8' })).toBe('v1\n')
+    })
+
+    it('commits a declared source path even outside the whitelist', async () => {
+        execSync('git init -q', { cwd: dir })
+        execSync('git config user.name test', { cwd: dir })
+        execSync('git config user.email test@test', { cwd: dir })
+        writeFileSync(join(dir, 'src.ts'), 'v1\n', 'utf-8')
+        execSync('git add . && git commit -qm init', { cwd: dir })
+        writeFileSync(join(dir, 'src.ts'), 'v2\n', 'utf-8')
+
+        const action = deliverableAction()
+        action.changedPaths = ['src.ts']
+        const { ctx, logger } = makeCommitCtx(dir, [action])
+
+        await commitLocalChanges(ctx)
+
+        expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('Committed fix changes to current branch'))
+        expect(execSync('git show HEAD:src.ts', { cwd: dir, encoding: 'utf-8' })).toBe('v2\n')
+    })
+
+    it('skips zero-fix runs even when side-effect files changed the worktree', async () => {
+        execSync('git init -q', { cwd: dir })
+        execSync('git config user.name test', { cwd: dir })
+        execSync('git config user.email test@test', { cwd: dir })
+        writeFileSync(join(dir, 'tracked.txt'), 'v1\n', 'utf-8')
+        execSync('git add . && git commit -qm init', { cwd: dir })
+        // 模拟 ensureGitignore / allowBuilds 等 side-effect 改动：有 git diff 但零修复动作
+        writeFileSync(join(dir, 'tracked.txt'), 'v2\n', 'utf-8')
+
+        const { ctx, logger } = makeCommitCtx(dir)
+
+        await commitLocalChanges(ctx)
+
+        expect(logger.info).toHaveBeenCalledWith('No deliverable fixes produced — skipping local commit')
+        expect(execSync('git show HEAD:tracked.txt', { cwd: dir, encoding: 'utf-8' })).toBe('v1\n')
+    })
+
+    it('skips local commit when post-fix install verification is still pre-existing failing', async () => {
+        execSync('git init -q', { cwd: dir })
+        execSync('git config user.name test', { cwd: dir })
+        execSync('git config user.email test@test', { cwd: dir })
+        writeFileSync(join(dir, 'tracked.txt'), 'v1\n', 'utf-8')
+        execSync('git add . && git commit -qm init', { cwd: dir })
+        writeFileSync(join(dir, 'tracked.txt'), 'v2\n', 'utf-8')
+
+        const { ctx, logger } = makeCommitCtx(dir, [
+            deliverableAction(),
+            {
+                type: 'verification',
+                repository: 'foo/bar',
+                target: 'pnpm install --frozen-lockfile',
+                success: false,
+                preExisting: true,
+                durationMs: 1,
+            },
+        ])
+
+        await commitLocalChanges(ctx)
+
+        expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Install verification is still failing'))
+        expect(execSync('git show HEAD:tracked.txt', { cwd: dir, encoding: 'utf-8' })).toBe('v1\n')
     })
 })

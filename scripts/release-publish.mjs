@@ -12,8 +12,12 @@
  * - npm 查询失败（离线/限流）→ 保守跳过（宁可漏发也不误判）
  *
  * 用法：
- *   pnpm release:publish            # 发布所有未发布版本并按序打 tag
- *   pnpm release:publish --dry-run  # 仅预览将发布的包与将创建的 tag，不实际执行
+ *   pnpm release:publish                 # 发布所有未发布版本并按序打 tag
+ *   pnpm release:publish --dry-run       # 仅预览将发布的包与将创建的 tag，不实际执行
+ *   pnpm release:publish --otp 123456    # 本地 2FA 发布：OTP 透传给每包的 pnpm publish
+ *
+ * 发布 registry 固定为官方 `https://registry.npmjs.org/`（可用 `--registry` 覆盖），
+ * 不继承用户级 pnpm / npm registry 配置——避免被镜像站（只读）配置带到错误的发布端点。
  *
  * 认证：
  * - CI（GitHub Actions）：OIDC trusted publishing（id-token: write），无需 token
@@ -22,7 +26,7 @@
  * 行为一致：脚本自行管理 tag 与流程，不依赖 pnpm 的 gitChecks 前置校验）。
  * pnpm publish 会自动将 workspace:* 依赖替换为实际版本号。
  */
-import { execSync } from 'node:child_process'
+import { execFileSync, execSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -32,6 +36,9 @@ import { hasLocalTag, isPublishedOnRegistry, readPackageVersion } from './tag-re
 const repoRoot = fileURLToPath(new URL('..', import.meta.url))
 /** 发布结果临时产物（release:github 消费；gitignore） */
 const RESULT_FILE = join(repoRoot, 'release-publish-result.json')
+/** 发布固定走官方 registry（本地镜像配置不得影响发布端点）。 */
+export const DEFAULT_PUBLISH_REGISTRY = 'https://registry.npmjs.org/'
+const OTP_PATTERN = /^\d{6,8}$/
 
 function git(args) {
     return execSync(`git ${args}`, { cwd: repoRoot, encoding: 'utf8' }).trim()
@@ -72,8 +79,81 @@ export function buildPublishPlan(packages, deps) {
     })
 }
 
+/** 校验发布 registry：必须是 https、无空白 / 内嵌凭据；返回规范化前的原值。 */
+export function validateRegistry(value) {
+    if (typeof value !== 'string' || value.trim() === '') {
+        throw new Error('--registry 缺少取值')
+    }
+    if (/\s/.test(value)) {
+        throw new Error('--registry 不得包含空白字符')
+    }
+    let url
+    try {
+        url = new URL(value)
+    } catch {
+        throw new Error('--registry 必须是合法 https URL')
+    }
+    if (url.protocol !== 'https:') {
+        throw new Error('--registry 必须是 https URL')
+    }
+    if (url.username || url.password) {
+        throw new Error('--registry 不得包含内嵌凭据')
+    }
+    return value
+}
+
+/** 解析发布参数：`--dry-run` / `--otp <code>` / `--registry <url>`（等号或空格形式）。未知参数 fail-closed。 */
+export function parsePublishArgs(argv = process.argv.slice(2)) {
+    const options = { dryRun: false, otp: null, registry: DEFAULT_PUBLISH_REGISTRY }
+    for (let index = 0; index < argv.length; index += 1) {
+        const arg = argv[index]
+        const [key, inlineValue] = arg.includes('=') ? arg.split(/[=](.*)/s, 2) : [arg, undefined]
+        if (key === '--dry-run') {
+            options.dryRun = true
+            continue
+        }
+        if (key === '--otp' || key === '--registry') {
+            const value = inlineValue ?? argv[index + 1]
+            if (inlineValue === undefined) {
+                index += 1
+            }
+            if (!value || value.startsWith('--')) {
+                throw new Error(`${key} 缺少取值`)
+            }
+            if (key === '--otp') {
+                if (!OTP_PATTERN.test(value)) {
+                    throw new Error('--otp 必须为 6-8 位数字')
+                }
+                options.otp = value
+            } else {
+                options.registry = validateRegistry(value)
+            }
+            continue
+        }
+        throw new Error(`未知参数：${arg}`)
+    }
+    return options
+}
+
+/** 构造发布参数数组（execFileSync 直传，不经 shell；pkg 来自 packages.config.mjs）。 */
+export function buildPublishArgs(pkg, { otp = null, registry = DEFAULT_PUBLISH_REGISTRY } = {}) {
+    if (otp !== null && !OTP_PATTERN.test(otp)) {
+        throw new Error('OTP 必须为 6-8 位数字')
+    }
+    const parts = ['--filter', pkg, 'publish', '--no-git-checks', '--registry', validateRegistry(registry)]
+    if (otp) {
+        parts.push('--otp', otp)
+    }
+    return parts
+}
+
+/** 人类可读的发布命令（仅日志 / 文档用；实际执行走 buildPublishArgs + execFileSync）。 */
+export function buildPublishCommand(pkg, options = {}) {
+    return ['pnpm', ...buildPublishArgs(pkg, options)].join(' ')
+}
+
 /** 执行发布 + 打 tag（副作用；失败时 execSync 抛错 → 进程非零退出） */
-export function publishOne(planItem) {
+export function publishOne(planItem, publishOptions = {}) {
     // 锚点防御：tag 必须指向"同时 touch 该包路径"的提交（changelog 分段锚点约束，
     // 经验归档 §二十五/§二十六）。正常流程 HEAD = release:version + changelog 提交，
     // 天然满足；若在非发布提交上误执行，禁止打错 tag 污染推导基线。
@@ -82,11 +162,11 @@ export function publishOne(planItem) {
             `HEAD 不是 touch ${planItem.path} 的提交（${headHash()}），请确认已执行 release:version 并提交发布变更（package.json 版本 + CHANGELOG）后再发布`,
         )
     }
-    console.log(`publishing ${planItem.pkg}@${planItem.version}`)
-    execSync(`pnpm --filter ${planItem.pkg} publish --no-git-checks`, {
+    console.log(`publishing ${planItem.pkg}@${planItem.version} → ${publishOptions.registry ?? DEFAULT_PUBLISH_REGISTRY}`)
+    // execFileSync 数组参数：不经 shell，registry / OTP 不会被解释为命令
+    execFileSync('pnpm', buildPublishArgs(planItem.pkg, publishOptions), {
         cwd: repoRoot,
         stdio: 'inherit',
-        encoding: 'utf8',
     })
     git(`tag -a "${planItem.tagName}" -m "release ${planItem.tagName}"`)
     console.log(`published ${planItem.pkg}@${planItem.version}，tag ${planItem.tagName} 已创建`)
@@ -207,7 +287,7 @@ function finalizeRelease(tagged) {
 }
 
 export async function main() {
-    const dryRun = process.argv.includes('--dry-run')
+    const { dryRun, otp, registry } = parsePublishArgs()
     // registry 查询并行化（每包一次 fetch，isPublishedOnRegistry 为异步实现）
     const publishedByPkg = new Map()
     await Promise.all(
@@ -235,7 +315,7 @@ export async function main() {
                 if (dryRun) {
                     console.log(`[dry-run] would publish ${p.pkg}@${p.version} + tag ${p.tagName}`)
                 } else {
-                    publishOne(p)
+                    publishOne(p, { otp, registry })
                     tagged.push(p)
                 }
                 break

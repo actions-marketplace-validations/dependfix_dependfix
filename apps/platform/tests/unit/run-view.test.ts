@@ -1,12 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import {
     alertsFound,
+    buildExportScopeItems,
+    EXPORT_RUNS_LIMIT,
+    failureKindLabel,
+    failureStageLabel,
     formatRunDuration,
+    RUN_FAILURE_KIND_OPTIONS,
+    RUN_FAILURE_STAGE_OPTIONS,
     runExecutorLabel,
     runModeLabel,
-    runThresholdLabel,
     shortRunId,
 } from '../../app/utils/run-view'
+import { RUN_FAILURE_KINDS, RUN_FAILURE_STAGES } from '#server/services/run-failure-classify'
 
 const t = (key: string, params?: Record<string, string | number>) => {
     if (!params) {
@@ -68,13 +74,43 @@ describe('utils/run-view', () => {
         })
     })
 
-    describe('runThresholdLabel', () => {
-        it('all 走 common.severity.all', () => {
-            expect(runThresholdLabel('all', t)).toBe('common.severity.all')
+    describe('failureStageLabel / failureKindLabel', () => {
+        it('阶段选项与服务端分类枚举同序（筛选控件取值来源）', () => {
+            expect(RUN_FAILURE_STAGE_OPTIONS).toEqual([
+                'source', 'clone', 'install', 'fix', 'verify', 'deliver', 'runtime', 'cleanup', 'unknown',
+            ])
+            expect(RUN_FAILURE_KIND_OPTIONS).toEqual(['transient', 'deterministic', 'unknown'])
         })
 
-        it('其他原样返回', () => {
-            expect(runThresholdLabel('high', t)).toBe('high')
+        it('前端枚举与服务端单一事实源严格一致（防双份枚举静默漂移）', () => {
+            expect(RUN_FAILURE_STAGE_OPTIONS).toEqual(RUN_FAILURE_STAGES)
+            expect(RUN_FAILURE_KIND_OPTIONS).toEqual(RUN_FAILURE_KINDS)
+        })
+
+        it('已知阶段 / 建议返回 i18n key', () => {
+            expect(failureStageLabel('verify', t)).toBe('runs.failureStage.verify')
+            expect(failureKindLabel('transient', t)).toBe('runs.failureKind.transient')
+        })
+
+        it('每个阶段 / 建议选项都有对应 i18n key（避免下拉出现裸枚举值）', () => {
+            for (const stage of RUN_FAILURE_STAGE_OPTIONS) {
+                expect(failureStageLabel(stage, t)).toBe(`runs.failureStage.${stage}`)
+            }
+            for (const kind of RUN_FAILURE_KIND_OPTIONS) {
+                expect(failureKindLabel(kind, t)).toBe(`runs.failureKind.${kind}`)
+            }
+        })
+
+        it('null / undefined / 空串返回 null', () => {
+            expect(failureStageLabel(null, t)).toBeNull()
+            expect(failureStageLabel(undefined, t)).toBeNull()
+            expect(failureStageLabel('', t)).toBeNull()
+            expect(failureKindLabel(null, t)).toBeNull()
+        })
+
+        it('未知值原样返回（兜底不隐藏原始信息）', () => {
+            expect(failureStageLabel('future-stage', t)).toBe('future-stage')
+            expect(failureKindLabel('future-kind', t)).toBe('future-kind')
         })
     })
 
@@ -99,6 +135,29 @@ describe('utils/run-view', () => {
                 t,
             )
             expect(result).toContain('alerts.runDurationSeconds(seconds:')
+        })
+    })
+
+    describe('buildExportScopeItems', () => {
+        it('未超上限：可点且文案带命中数', () => {
+            expect(buildExportScopeItems(12, t)).toEqual([
+                { label: 'scans.runList.exportAllLogs(total:12)', disabled: false },
+            ])
+        })
+
+        it('恰好等于上限：仍可点（边界不含超限）', () => {
+            expect(buildExportScopeItems(EXPORT_RUNS_LIMIT, t)).toEqual([
+                { label: `scans.runList.exportAllLogs(total:${EXPORT_RUNS_LIMIT})`, disabled: false },
+            ])
+        })
+
+        it('超上限：禁用并标注上限原因', () => {
+            expect(buildExportScopeItems(EXPORT_RUNS_LIMIT + 1, t)).toEqual([
+                {
+                    label: `scans.runList.exportAllLogsOverLimit(total:${EXPORT_RUNS_LIMIT + 1},limit:${EXPORT_RUNS_LIMIT})`,
+                    disabled: true,
+                },
+            ])
         })
     })
 })

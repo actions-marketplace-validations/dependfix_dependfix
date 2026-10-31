@@ -4,6 +4,7 @@ import { PRCheck, PR_CHECK_CONCLUSIONS } from '#server/entities/pr-check'
 import { ensureDatabaseInitialized } from '#server/database'
 import { requireAuth } from '#server/utils/guard'
 import { parseOptional } from '#server/utils/zod-helpers'
+import { toPRCheckView } from '#server/utils/pr-check-view'
 
 /**
  * GET /api/pr-checks：依赖更新 PR check 状态监测列表（详见 docs/plan/todo.md §M24.1）。
@@ -27,24 +28,6 @@ import { parseOptional } from '#server/utils/zod-helpers'
 const conclusionSchema = z.enum(PR_CHECK_CONCLUSIONS as unknown as [string, ...string[]]).optional()
 const alertFiringSchema = z.enum(['true', 'false']).optional()
 
-/** PRCheck 视图（API 序列化层；与 entities/pr-check 字段一一对应） */
-const toView = (row: PRCheck) => ({
-    id: row.id,
-    repositoryId: row.repositoryId,
-    prNumber: row.prNumber,
-    headSha: row.headSha,
-    authorLogin: row.authorLogin,
-    conclusion: row.conclusion,
-    checkRunId: row.checkRunId,
-    detailsUrl: row.detailsUrl,
-    errorMessage: row.errorMessage,
-    alertFiring: row.alertFiring,
-    acknowledgedAt: row.acknowledgedAt?.toISOString() ?? null,
-    acknowledgedByUserId: row.acknowledgedByUserId,
-    lastPolledAt: row.lastPolledAt.toISOString(),
-    createdAt: row.createdAt.toISOString(),
-    updatedAt: row.updatedAt.toISOString(),
-})
 
 const listHandler = async (event: H3Event) => {
     await requireAuth(event)
@@ -65,7 +48,10 @@ const listHandler = async (event: H3Event) => {
         : undefined
 
     const ds = await ensureDatabaseInitialized()
+    // leftJoinAndSelect：查询内解析 repository 关系，供 toView 输出 `owner/name` 标签
+    // （ManyToOne 不产生行倍增，与 take(500) 上限语义兼容）
     const qb = ds.getRepository(PRCheck).createQueryBuilder('prCheck')
+        .leftJoinAndSelect('prCheck.repository', 'repository')
         .orderBy('prCheck.createdAt', 'DESC')
         .take(500)
 
@@ -80,7 +66,7 @@ const listHandler = async (event: H3Event) => {
     }
 
     const rows = await qb.getMany()
-    return rows.map(toView)
+    return rows.map(toPRCheckView)
 }
 
 export default defineEventHandler(listHandler)

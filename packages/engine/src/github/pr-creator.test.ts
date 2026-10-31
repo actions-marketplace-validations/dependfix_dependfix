@@ -1,11 +1,11 @@
-/* eslint-disable max-lines -- M18.4（todo.md §M18.4 范围）测试层补强 stageAndCommit author 路径回归 + 既有 955 行；按职责不拆分 */
-import { execSync } from 'node:child_process'
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+/* eslint-disable max-lines -- 测试层补强 stageAndCommit author / 签名 / hooks 隔离路径回归 + 既有 955 行；按职责不拆分（范围见 docs/plan/archive/todo-archive-phases-m18.md §M18.4） */
+import { execFileSync, execSync } from 'node:child_process'
+import { chmodSync, existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Octokit } from '@octokit/rest'
-import { createEmptyRunSummary, type FixAction, type NormalizedSecurityAlert, type RunResult } from '@dependfix/core'
+import { createEmptyRunSummary, type CiAlignmentRecord, type FixAction, type NormalizedSecurityAlert, type RunResult } from '@dependfix/core'
 import {
     computeFixFingerprint,
     extractFingerprintFromBranch,
@@ -21,8 +21,10 @@ import {
     deleteRemoteBranch,
     isConfirmAnswer,
     stageAndCommit,
+    createPullRequest,
     type DependfixOpenPR,
 } from './pr-creator'
+import { CommitScopeError } from './commit-scope'
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -348,7 +350,7 @@ describe('closePullRequest', () => {
 })
 
 // ---------------------------------------------------------------------------
-// commentOnPullRequest / addLabelToPullRequest（todo.md §M19.3 重复 PR 评论 + label）
+// commentOnPullRequest / addLabelToPullRequest（docs/plan/archive/todo-archive-phases-m19-m21.md §M19.3 重复 PR 评论 + label）
 // ---------------------------------------------------------------------------
 
 describe('commentOnPullRequest', () => {
@@ -419,7 +421,7 @@ describe('addLabelToPullRequest', () => {
  * - PAT 路径（author 不传）→ 使用 `PAT_DEFAULT_COMMIT_AUTHOR`（保持 PAT 路径行为零变化）
  * - GitHub App 路径（author 传入 `{app_id}+{bot_login}[bot]`）→ 使用传入 author
  *
- * 关键回归约束（与 todo.md §M18.0 决策 2 PAT 用户行为零变化一致）：
+ * 关键回归约束（与 docs/plan/archive/todo-archive-phases-m18.md §M18.0 决策 2 PAT 用户行为零变化一致）：
  * - 已有 `user.name` / `user.email` 时**不**覆盖（用户/CI 上游可能预设 git config）
  *
  * **测试隔离**：本测试通过 `GIT_CONFIG_GLOBAL=/dev/null` + `GIT_CONFIG_NOSYSTEM=1` 隔离
@@ -427,9 +429,9 @@ describe('addLabelToPullRequest', () => {
  * `git config user.name` 误判"已配置"而不设 local）。所有 execSync 都通过 `git` helper 走隔离 env。
  *
  * @see [C22 PAT 无感升级评估 §5.1 兼容性](../../../../docs/design/governance/c22-pat-backward-compat.md)
- * @see [todo.md §M18.4（测试层）](../../../../docs/plan/todo.md)
+ * @see [docs/plan/archive/todo-archive-phases-m18.md §M18.4（测试层）](../../../../docs/plan/archive/todo-archive-phases-m18.md)
  */
-describe('stageAndCommit (author 路径回归)', () => {
+describe('stageAndCommit 回归（author / 签名 / hooks 隔离）', () => {
     const tempDirs: string[] = []
 
     /** execSync helper for git command in test tempDir（不屏蔽 host global，避免 `git init` 抛 `bad config line 1 in file /dev/null`） */
@@ -456,8 +458,11 @@ describe('stageAndCommit (author 路径回归)', () => {
         git('init -b main', dir)
         // 第一次 init commit：注入临时 user.name/email（不会写入 repo config）
         writeFileSync(join(dir, 'README.md'), '# test\n')
+        writeFileSync(join(dir, 'package.json'), '{ "name": "fixture" }\n')
         git('add .', dir)
-        git('-c user.name=test -c user.email=test@example.com commit -m init', dir)
+        // 显式关签名：本仓库下有用例把 host 全局 `commit.gpgsign=true` + 不可用 gpg.program 注入，
+        // 夹具的初始提交不能被它带崩（否则工作区停在「已暂存未提交」，后续判定口径失真）
+        git('-c user.name=test -c user.email=test@example.com -c commit.gpgsign=false commit -m init', dir)
         return dir
     }
 
@@ -471,6 +476,7 @@ describe('stageAndCommit (author 路径回归)', () => {
         git('config user.email test@example.com', dir)
         git('config user.name test', dir)
         writeFileSync(join(dir, 'README.md'), '# test\n')
+        writeFileSync(join(dir, 'package.json'), '{ "name": "fixture" }\n')
         git('add .', dir)
         git('commit -m init', dir)
         return dir
@@ -484,9 +490,9 @@ describe('stageAndCommit (author 路径回归)', () => {
     }
 
     beforeEach(() => {
-        // 注：原 M18.4 测试曾用 ISOLATED_GIT_ENV (GIT_CONFIG_GLOBAL=/dev/null) 屏蔽 host 全局，
+        // 注：早期测试曾用 ISOLATED_GIT_ENV (GIT_CONFIG_GLOBAL=/dev/null) 屏蔽 host 全局，
         // 但 `/dev/null` 不是合法 git config 文件 → `git init` 抛 `bad config line 1 in file /dev/null`。
-        // W3 修复改用 stageAndCommit 内部 `-c user.name=X -c user.email=Y` 显式传，
+        // 后改用 stageAndCommit 内部 `-c user.name=X -c user.email=Y` 显式传，
         // 强制 commit author 用传入值（lookup order 中最高优先），无需屏蔽 host 全局。
     })
 
@@ -500,11 +506,11 @@ describe('stageAndCommit (author 路径回归)', () => {
         }
     })
 
-    it('PAT 路径（author 不传）+ repo 无 config → local git config 设置成 PAT_DEFAULT_COMMIT_AUTHOR', () => {
+    it('PAT 路径（author 不传）+ repo 无 config → local git config 设置成 PAT_DEFAULT_COMMIT_AUTHOR', async () => {
         const dir = createGitRepoWithoutGitConfig()
-        writeFileSync(join(dir, 'change.txt'), 'fixed\n')
+        writeFileSync(join(dir, 'package.json'), '{ "name": "fixed" }\n')
 
-        stageAndCommit('fix: dependabot', dir) // PAT 路径
+        await stageAndCommit('fix: dependabot', dir) // PAT 路径
 
         // 用 --local 验证 ensureGitConfig 设置的是 local 级别（不被 host 全局 config 干扰）
         const userName = git('config --local --get user.name', dir)
@@ -513,12 +519,12 @@ describe('stageAndCommit (author 路径回归)', () => {
         expect(userEmail).toBe('dependfix[bot]@users.noreply.github.com')
     }, 15_000)
 
-    it('App 路径（author 传入）+ repo 无 config → local git config 设置成传入 author', () => {
+    it('App 路径（author 传入）+ repo 无 config → local git config 设置成传入 author', async () => {
         const dir = createGitRepoWithoutGitConfig()
-        writeFileSync(join(dir, 'change.txt'), 'fixed\n')
+        writeFileSync(join(dir, 'package.json'), '{ "name": "fixed" }\n')
 
-        // 模拟 todo.md §M18.2（集成层）调用：传入 AppAuthProvider.getCommitAuthor() 动态生成的 author
-        stageAndCommit('fix: dependabot', dir, {
+        // 模拟 docs/plan/archive/todo-archive-phases-m18.md §M18.2（集成层）调用：传入 AppAuthProvider.getCommitAuthor() 动态生成的 author
+        await stageAndCommit('fix: dependabot', dir, {
             name: '123456[bot]',
             email: '123456+dependfix-bot[bot]@users.noreply.github.com',
         })
@@ -529,12 +535,12 @@ describe('stageAndCommit (author 路径回归)', () => {
         expect(userEmail).toBe('123456+dependfix-bot[bot]@users.noreply.github.com')
     }, 15_000)
 
-    it('已有 user.name / user.email + 传入 author → 不覆盖（关键回归：传入 author 不破坏既有 config）', () => {
+    it('已有 user.name / user.email + 传入 author → 不覆盖（关键回归：传入 author 不破坏既有 config）', async () => {
         const dir = createGitRepoWithGitConfig()
-        writeFileSync(join(dir, 'change.txt'), 'fixed\n')
+        writeFileSync(join(dir, 'package.json'), '{ "name": "fixed" }\n')
 
         // 即使传入 App author，已有 git config 不被覆盖
-        stageAndCommit('fix: dependabot', dir, {
+        await stageAndCommit('fix: dependabot', dir, {
             name: '123456[bot]',
             email: '123456+dependfix-bot[bot]@users.noreply.github.com',
         })
@@ -545,11 +551,11 @@ describe('stageAndCommit (author 路径回归)', () => {
         expect(userEmail).toBe('test@example.com')
     }, 15_000)
 
-    it('完整 stageAndCommit 端到端：App author 实际生效（git log -1 看到正确 author）', () => {
+    it('完整 stageAndCommit 端到端：App author 实际生效（git log -1 看到正确 author）', async () => {
         const dir = createGitRepoWithoutGitConfig()
-        writeFileSync(join(dir, 'change.txt'), 'fixed\n')
+        writeFileSync(join(dir, 'package.json'), '{ "name": "fixed" }\n')
 
-        stageAndCommit('fix: dependabot', dir, {
+        await stageAndCommit('fix: dependabot', dir, {
             name: '123456[bot]',
             email: '123456+dependfix-bot[bot]@users.noreply.github.com',
         })
@@ -560,11 +566,11 @@ describe('stageAndCommit (author 路径回归)', () => {
         expect(author.email).toBe('123456+dependfix-bot[bot]@users.noreply.github.com')
     }, 15_000)
 
-    it('完整 stageAndCommit 端到端：PAT 默认 author 实际生效（git log -1 看到 dependfix[bot]）', () => {
+    it('完整 stageAndCommit 端到端：PAT 默认 author 实际生效（git log -1 看到 dependfix[bot]）', async () => {
         const dir = createGitRepoWithoutGitConfig()
-        writeFileSync(join(dir, 'change.txt'), 'fixed\n')
+        writeFileSync(join(dir, 'package.json'), '{ "name": "fixed" }\n')
 
-        stageAndCommit('fix: dependabot', dir) // PAT 路径
+        await stageAndCommit('fix: dependabot', dir) // PAT 路径
 
         const author = readCommitAuthor(dir)
         expect(author.name).toBe('dependfix[bot]')
@@ -572,7 +578,7 @@ describe('stageAndCommit (author 路径回归)', () => {
     }, 15_000)
 
     /**
-     * W3 回归：stageAndCommit 显式传 `-c user.name=X -c user.email=Y` 保证 commit author
+     * 回归：stageAndCommit 显式传 `-c user.name=X -c user.email=Y` 保证 commit author
      * 用传入值，不受 host 全局 user.name 污染。
      *
      * 修复前：`git config user.name` 查询会查到 host 全局 `CaoMeiYouRen`，
@@ -584,15 +590,15 @@ describe('stageAndCommit (author 路径回归)', () => {
      * order（env → `-c` config → local → global → system）中最高优先，**强制** commit author
      * 用传入值，与 host 全局 config 无关。
      */
-    it('W3 回归：stageAndCommit 显式 -c user.name -c user.email 覆盖 host 全局 user.name', () => {
+    it('stageAndCommit 显式 -c user.name -c user.email 覆盖 host 全局 user.name', async () => {
         // 场景：worker 创建 tempDir + git init，host 全局有 user.name=CaoMeiYouRen（不屏蔽）
         const dir = createGitRepoWithoutGitConfig()
         // 模拟 host 全局有 user.name（在 local 写入等效——git commit lookup order：local 优先）
         git('config user.name host-global-user', dir)
         git('config user.email host-global@example.com', dir)
-        writeFileSync(join(dir, 'change.txt'), 'fixed\n')
+        writeFileSync(join(dir, 'package.json'), '{ "name": "fixed" }\n')
 
-        stageAndCommit('fix: dependabot', dir, {
+        await stageAndCommit('fix: dependabot', dir, {
             name: '123456[bot]',
             email: '123456+dependfix-bot[bot]@users.noreply.github.com',
         })
@@ -603,9 +609,9 @@ describe('stageAndCommit (author 路径回归)', () => {
         expect(author.email).toBe('123456+dependfix-bot[bot]@users.noreply.github.com')
     }, 15_000)
 
-    // W1 回归：host 全局 git config 含 user.name 但 repo 无 local config → ensureGitConfig
+    // host 全局 git config 含 user.name 但 repo 无 local config → ensureGitConfig
     // 写入 local config（不被 host 全局污染）—— 验证 gitConfigExists 用 --local flag 路径
-    it('W1 回归：host 全局 git config 存在 user.name 但 repo 无 local config → ensureGitConfig 写入 local config（不被 host 污染）', () => {
+    it('host 全局 git config 存在 user.name 但 repo 无 local config → ensureGitConfig 写入 local config（不被 host 污染）', async () => {
         // 模拟开发者机器的 host 全局 git config（不应被 dependfix 错误读取）
         const globalDir = mkdtempSync(join(tmpdir(), 'dependfix-global-'))
         const globalConfig = join(globalDir, 'gitconfig')
@@ -615,7 +621,7 @@ describe('stageAndCommit (author 路径回归)', () => {
 
         try {
             const dir = createGitRepoWithoutGitConfig()
-            writeFileSync(join(dir, 'change.txt'), 'fixed\n')
+            writeFileSync(join(dir, 'package.json'), '{ "name": "fixed" }\n')
 
             // 验证前置状态：local config 无 user.name / user.email（用 --local 查询应返回空）
             // 关键：如果 gitConfigExists 不带 --local flag，会错误读到 host global 的 GlobalHost，
@@ -623,7 +629,7 @@ describe('stageAndCommit (author 路径回归)', () => {
             expect(git('config --local --get user.name', dir)).toBe('')
             expect(git('config --local --get user.email', dir)).toBe('')
 
-            stageAndCommit('fix: dependabot', dir) // PAT 路径
+            await stageAndCommit('fix: dependabot', dir) // PAT 路径
 
             // 验证：local config 是 PAT author（不是 host global 的 GlobalHost）
             const userName = git('config --local --get user.name', dir)
@@ -638,6 +644,264 @@ describe('stageAndCommit (author 路径回归)', () => {
                 /* ignore */
             }
         }
+    }, 15_000)
+
+    /**
+     * 回归：stageAndCommit 显式传 `-c commit.gpgsign=false`，隔离 host `commit.gpgsign=true`。
+     *
+     * 根因：dependfix 宿主进程直接继承宿主 git 配置（平台 `container-executor` 名为 container、
+     * 实为宿主进程内运行），故 host 开启签名时有两种破坏：
+     * ① host 有可用签名 key → commit 带上宿主个人 GPG 签名（签名身份与被修复仓库的 commit
+     *   author 不一致）；
+     * ② host 无可用 key / `gpg.program` 不可用（CI、纯 Linux 容器）→
+     *   `gpg failed to sign the data` → `failed to write commit object`，交付直接失败。
+     *
+     * 修复后 `-c commit.gpgsign=false` 在 lookup order（env → `-c` → local → global → system）
+     * 中最高优先，签名不再被触发，commit 恒成功且 `%G?` = `N`（无签名）。
+     *
+     * 本用例把 `gpg.program` 指向不存在的程序：若签名未被关闭，commit 必然失败——
+     * 断言与环境无关（无论本机是否安装 gpg）。
+     */
+    it('host commit.gpgsign=true + gpg.program 不可用 → commit 仍成功且无签名', async () => {
+        const globalDir = mkdtempSync(join(tmpdir(), 'dependfix-gpgsign-'))
+        const globalConfig = join(globalDir, 'gitconfig')
+        writeFileSync(
+            globalConfig,
+            '[commit]\n\tgpgsign = true\n[gpg]\n\tprogram = /nonexistent/dependfix-no-such-gpg\n',
+        )
+        vi.stubEnv('GIT_CONFIG_GLOBAL', globalConfig)
+        vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1')
+
+        try {
+            const dir = createGitRepoWithoutGitConfig()
+            writeFileSync(join(dir, 'package.json'), '{ "name": "fixed" }\n')
+
+            // 修复前：此处抛 `fatal: failed to write commit object`
+            await stageAndCommit('fix: dependabot', dir)
+
+            const author = readCommitAuthor(dir)
+            expect(author.name).toBe('dependfix[bot]')
+            // %G? = N 表示 commit 无 GPG 签名
+            expect(git('log -1 --format=%G?', dir)).toBe('N')
+        } finally {
+            vi.unstubAllEnvs()
+            try {
+                rmSync(globalDir, { recursive: true, force: true })
+            } catch {
+                /* ignore */
+            }
+        }
+    }, 15_000)
+
+    /**
+     * 回归（覆盖根因分支 ①）：host `commit.gpgsign=true` 且 gpg 按 host 默认配置可用时，
+     * commit 仍不得带签名。
+     *
+     * 与上一用例的差异：**不**把 `gpg.program` 指向不可用程序。若 host 配了可用签名 key，
+     * 修复前 commit 会带宿主个人签名（`%G?` = `G`/`U`）；若 host 无可用 key，修复前 commit
+     * 直接失败。两种情形在修复后均应为「成功 + `%G?` = `N`」，故本断言同样与环境无关。
+     */
+    it('host commit.gpgsign=true + gpg 可用 → commit 仍成功且无签名', async () => {
+        const globalDir = mkdtempSync(join(tmpdir(), 'dependfix-gpgsign-'))
+        const globalConfig = join(globalDir, 'gitconfig')
+        writeFileSync(globalConfig, '[commit]\n\tgpgsign = true\n')
+        vi.stubEnv('GIT_CONFIG_GLOBAL', globalConfig)
+        vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1')
+
+        try {
+            const dir = createGitRepoWithoutGitConfig()
+            writeFileSync(join(dir, 'package.json'), '{ "name": "fixed" }\n')
+
+            await stageAndCommit('fix: dependabot', dir)
+
+            const author = readCommitAuthor(dir)
+            expect(author.name).toBe('dependfix[bot]')
+            expect(git('log -1 --format=%G?', dir)).toBe('N')
+        } finally {
+            vi.unstubAllEnvs()
+            try {
+                rmSync(globalDir, { recursive: true, force: true })
+            } catch {
+                /* ignore */
+            }
+        }
+    }, 15_000)
+
+    /**
+     * 回归：repo **local** `commit.gpgsign=true`（非 host global）同样被 `-c` 覆盖。
+     * 与 host 级用例互补——验证显式 `-c` 在 lookup order 中同时优于 repo local 配置。
+     */
+    it('repo local commit.gpgsign=true → commit 仍成功且无签名', async () => {
+        const dir = createGitRepoWithoutGitConfig()
+        // 写入 repo local config（非 host global）：签名开关 + 不可用的 gpg 程序
+        git('config commit.gpgsign true', dir)
+        git('config gpg.program /nonexistent/dependfix-no-such-gpg', dir)
+        writeFileSync(join(dir, 'package.json'), '{ "name": "fixed" }\n')
+
+        // 修复前：local `commit.gpgsign=true` 会触发签名 → gpg 不可用 → failed to write commit object
+        await stageAndCommit('fix: dependabot', dir)
+
+        expect(git('log -1 --format=%G?', dir)).toBe('N')
+    }, 15_000)
+
+    it('commit.gpgsign=false 仅作用于本次调用，不写入 repo local config', async () => {
+        const dir = createGitRepoWithoutGitConfig()
+        writeFileSync(join(dir, 'package.json'), '{ "name": "fixed" }\n')
+
+        await stageAndCommit('fix: dependabot', dir)
+
+        // `-c` 是单次调用级配置，不得落盘到用户仓库的 local config（不改变被修复仓库状态）。
+        // 用 `--list`（成功路径）而非 `--get`：local 未设该键时 `--get` exit 1 会被 git() helper
+        // 吞成空串，使 `toBe('')` 恒真而失去断言力。
+        const localConfig = git('config --local --list', dir)
+        expect(localConfig).not.toContain('commit.gpgsign')
+        // 前置校验：local config 确有内容（ensureGitConfig 写入的 user.*），证明 --list 走的是成功路径
+        expect(localConfig).toContain('user.name=')
+    }, 15_000)
+
+    /**
+     * 回归：stageAndCommit 显式传 `--no-verify`，隔离被修复仓库的 git hooks。
+     *
+     * 根因：目标仓库常安装 husky / lint-staged（`.husky/pre-commit` → `npx lint-staged`），dependfix 的
+     * 自动 commit 会触发它；隔离执行环境无 `npx`、目标仓库 `node_modules` 也未必完整 →
+     * hook 非 0 退出（生产实证 `npx: not found` exit 127）→ `COMMIT_FAILED` → 修复回滚。
+     *
+     * 本用例植入「写标记文件 + exit 1」的 husky 风格 pre-commit：
+     * - 反例：同环境裸 commit 必被拦截（证明 hook 真实生效，避免正例退化为恒真）
+     * - 正例：stageAndCommit 成功，且标记文件不存在（证明 hook 未执行）
+     */
+    it('目标仓库 pre-commit hook 非 0 退出 → stageAndCommit 仍成功且 hook 未执行', async () => {
+        const hooksGlobalDir = mkdtempSync(join(tmpdir(), 'dependfix-hooks-global-'))
+        const hooksGlobalConfig = join(hooksGlobalDir, 'gitconfig')
+        writeFileSync(hooksGlobalConfig, '')
+        // 隔离 host 全局配置（避免 host `core.hooksPath` 等干扰本用例的 hook 安装点）
+        vi.stubEnv('GIT_CONFIG_GLOBAL', hooksGlobalConfig)
+        vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1')
+
+        try {
+            const dir = createGitRepoWithoutGitConfig()
+            const hookPath = join(dir, '.git', 'hooks', 'pre-commit')
+            writeFileSync(hookPath, '#!/bin/sh\ntouch .hook-ran\nexit 1\n')
+            chmodSync(hookPath, 0o755)
+            writeFileSync(join(dir, 'package.json'), '{ "name": "fixed" }\n')
+
+            // 反例对照：同环境裸 commit 被 hook 拦截（exit 非 0 → execSync 抛错）
+            git('add .', dir)
+            expect(() => execSync('git -c user.name=x -c user.email=x@example.com commit -m bare', {
+                cwd: dir,
+                stdio: 'pipe',
+            })).toThrow()
+            expect(existsSync(join(dir, '.hook-ran'))).toBe(true)
+
+            // 清理反例副作用（标记文件），再制造新变更供正例提交
+            rmSync(join(dir, '.hook-ran'), { force: true })
+            writeFileSync(join(dir, 'package.json'), '{ "name": "fixed-2" }\n')
+
+            // 被测实现：`--no-verify` 隔离后 commit 成功且 hook 未执行
+            await stageAndCommit('fix: dependabot', dir)
+
+            expect(existsSync(join(dir, '.hook-ran'))).toBe(false)
+            expect(git('log -1 --format=%s', dir)).toBe('fix: dependabot')
+        } finally {
+            vi.unstubAllEnvs()
+            try {
+                rmSync(hooksGlobalDir, { recursive: true, force: true })
+            } catch {
+                /* ignore */
+            }
+        }
+    }, 15_000)
+})
+
+// ---------------------------------------------------------------------------
+// stageAndCommit 提交面白名单
+// ---------------------------------------------------------------------------
+
+describe('stageAndCommit 提交面白名单', () => {
+    const tempDirs: string[] = []
+
+    function git(args: string[], cwd: string): string {
+        try {
+            return execFileSync('git', args, { cwd, stdio: 'pipe', encoding: 'utf-8' }).trim()
+        } catch {
+            return ''
+        }
+    }
+
+    /** 仓库含 README.md + package.json（均已在初始提交内） */
+    function createRepo(): string {
+        const dir = mkdtempSync(join(tmpdir(), 'dependfix-test-scope-'))
+        tempDirs.push(dir)
+        execSync('git init -q -b main', { cwd: dir, stdio: 'pipe' })
+        execSync('git config user.email test@example.com', { cwd: dir, stdio: 'pipe' })
+        execSync('git config user.name test', { cwd: dir, stdio: 'pipe' })
+        writeFileSync(join(dir, 'README.md'), '# test\n')
+        writeFileSync(join(dir, 'src.ts'), 'v1\n')
+        writeFileSync(join(dir, 'package.json'), '{ "name": "fixture" }\n')
+        execSync('git add . && git -c commit.gpgsign=false commit -q -m init', { cwd: dir, stdio: 'pipe' })
+        return dir
+    }
+
+    afterEach(() => {
+        for (const dir of tempDirs.splice(0)) {
+            try {
+                rmSync(dir, { recursive: true, force: true })
+            } catch {
+                /* ignore */
+            }
+        }
+    })
+
+    it('只提交白名单与声明路径：生成物 / 未跟踪文件不进入 commit', async () => {
+        const dir = createRepo()
+        writeFileSync(join(dir, 'package.json'), '{ "name": "fixed" }\n')
+        writeFileSync(join(dir, 'src.ts'), 'v2\n')
+        writeFileSync(join(dir, '.nuxtrc'), 'compatibilityVersion=4\n')
+        writeFileSync(join(dir, 'auto-imports.d.ts'), '// generated\n')
+        writeFileSync(join(dir, 'notes.txt'), 'scratch\n')
+
+        const scope = await stageAndCommit('fix: dependabot', dir, undefined, { declaredPaths: ['src.ts'] })
+
+        expect(scope.staged).toEqual(['package.json', 'src.ts'])
+        expect(scope.ignored.sort()).toEqual(['.nuxtrc', 'auto-imports.d.ts', 'notes.txt'])
+        expect(git(['show', '--name-only', '--pretty=format:', 'HEAD'], dir).split('\n').filter(Boolean).sort())
+            .toEqual(['package.json', 'src.ts'])
+    }, 15_000)
+
+    it('未声明的已跟踪改动 → CommitScopeError(UNEXPECTED_CHANGES)，且不产生提交', async () => {
+        const dir = createRepo()
+        const headBefore = git(['rev-parse', 'HEAD'], dir)
+        writeFileSync(join(dir, 'README.md'), '# hacked\n')
+        writeFileSync(join(dir, 'package.json'), '{ "name": "fixed" }\n')
+
+        let thrown: unknown
+        try {
+            await stageAndCommit('fix: dependabot', dir)
+        } catch (error: unknown) {
+            thrown = error
+        }
+
+        expect(thrown).toBeInstanceOf(CommitScopeError)
+        expect((thrown as CommitScopeError).category).toBe('UNEXPECTED_CHANGES')
+        expect((thrown as CommitScopeError).message).toContain('README.md')
+        expect(git(['rev-parse', 'HEAD'], dir)).toBe(headBefore)
+    }, 15_000)
+
+    it('只有生成物 / 未跟踪文件 → CommitScopeError(NO_CHANGES)，不产生空提交', async () => {
+        const dir = createRepo()
+        const headBefore = git(['rev-parse', 'HEAD'], dir)
+        writeFileSync(join(dir, '.nuxtrc'), 'compatibilityVersion=4\n')
+        writeFileSync(join(dir, 'notes.txt'), 'scratch\n')
+
+        let thrown: unknown
+        try {
+            await stageAndCommit('fix: dependabot', dir)
+        } catch (error: unknown) {
+            thrown = error
+        }
+
+        expect((thrown as CommitScopeError).category).toBe('NO_CHANGES')
+        expect(git(['rev-parse', 'HEAD'], dir)).toBe(headBefore)
     }, 15_000)
 })
 
@@ -670,19 +934,19 @@ describe('createFixBranch', () => {
     })
 
     // Windows 并发全量跑时 git init/commit 系列命令可能超过默认 5s 超时（基线 flaky）
-    it('creates a new branch with the given name', () => {
+    it('creates a new branch with the given name', async () => {
         const dir = createGitRepo()
-        const result = createFixBranch('dependfix/auto-fix-abc12345', dir)
+        const result = await createFixBranch('dependfix/auto-fix-abc12345', dir)
 
         expect(result).toEqual({ branchName: 'dependfix/auto-fix-abc12345', created: true })
         const current = execSync('git branch --show-current', { cwd: dir, encoding: 'utf-8' }).trim()
         expect(current).toBe('dependfix/auto-fix-abc12345')
     }, 15_000)
 
-    it('switches to an existing branch instead of creating a duplicate', () => {
+    it('switches to an existing branch instead of creating a duplicate', async () => {
         const dir = createGitRepo()
-        createFixBranch('dependfix/auto-fix-abc12345', dir)
-        const second = createFixBranch('dependfix/auto-fix-abc12345', dir)
+        await createFixBranch('dependfix/auto-fix-abc12345', dir)
+        const second = await createFixBranch('dependfix/auto-fix-abc12345', dir)
 
         expect(second.created).toBe(false)
         expect(second.branchName).toBe('dependfix/auto-fix-abc12345')
@@ -848,6 +1112,49 @@ describe('generatePRBody', () => {
     it('omits Supersedes when no superseded numbers are given', () => {
         const body = generatePRBody(buildRunResult())
         expect(body).not.toContain('Supersedes')
+    })
+
+    it('无尝试标记时不写入 dependfix:attempt 注释', () => {
+        expect(generatePRBody(buildRunResult())).not.toContain('dependfix:attempt')
+        expect(generatePRBody(buildRunResult(), [], [])).not.toContain('dependfix:attempt')
+    })
+
+    it('尝试标记置于正文头部（尾部截断不会丢标记）', () => {
+        const markers = [
+            { key: 'aaaaaaaaaaaaaaaa', n: 2 },
+            { key: 'bbbbbbbbbbbbbbbb', n: 1, failureSignature: 'deadbeef', failed: 1 as const },
+        ]
+        const body = generatePRBody(buildRunResult(), undefined, markers)
+
+        expect(body.startsWith('<!-- dependfix:attempt key=aaaaaaaaaaaaaaaa n=2 failed=? -->')).toBe(true)
+        expect(body).toContain('<!-- dependfix:attempt key=bbbbbbbbbbbbbbbb n=1 fp=deadbeef failed=1 -->')
+        // 标记位于标题之前；正文内容完整保留
+        expect(body.indexOf('dependfix:attempt')).toBeLessThan(body.indexOf('## 🔒 Dependfix Auto Fix'))
+    })
+
+    it('renders skipped/truncated breakdown and unfixed count', () => {
+        const result = buildRunResult()
+        result.summary = {
+            ...result.summary,
+            alertsFound: 20,
+            alertsFixed: 0,
+            alertsUnfixed: 20,
+            alertsConverged: 0,
+            alertsSkipped: 4,
+            alertsSkippedByReason: { 'cross-major': 4 },
+            alertsTruncated: 6,
+            alertsTruncatedBySeverity: { critical: 2, high: 4 },
+        }
+
+        const body = generatePRBody(result)
+
+        expect(body).toContain('| Unfixed alerts | 20 |')
+        expect(body).toContain('### ⏭️ Not Fixed / Skipped')
+        expect(body).toContain('**20 / 20** evaluated alerts remain unfixed; **6** truncated before analysis (not evaluated).')
+        expect(body).toContain('| Truncated: Critical | 2 |')
+        expect(body).toContain('| Truncated: High | 4 |')
+        expect(body).toContain('| Skipped: Cross-major / manual review | 4 |')
+        expect(body).toContain('| Failed / other not fixed | 16 |')
     })
 
     it('truncates body from the tail when exceeding GitHub 64KB limit', () => {
@@ -1255,5 +1562,233 @@ describe('generatePRBody supply chain warnings', () => {
         const body = generatePRBody(buildRunResult())
 
         expect(body).not.toContain('Supply Chain Warnings')
+    })
+})
+
+// ---------------------------------------------------------------------------
+// generatePRBody CI 口径（验证链 vs 目标仓库 CI）
+// ---------------------------------------------------------------------------
+
+function makeCiAlignment(overrides: Partial<CiAlignmentRecord> = {}): CiAlignmentRecord {
+    return {
+        repository: 'owner/repo',
+        commands: ['pnpm install --frozen-lockfile', 'pnpm lint', 'pnpm build', 'pnpm typecheck', 'pnpm test'],
+        status: 'aligned',
+        ciCategories: ['lint', 'build', 'test'],
+        extraInExecution: ['typecheck'],
+        missingInExecution: [],
+        workflows: [{ path: '.github/workflows/ci.yml', categories: ['lint', 'build', 'test'], unrecognized: [] }],
+        ...overrides,
+    }
+}
+
+function ciBulletLines(body: string): string[] {
+    const section = body.split('### 🔎 CI 口径')[1]?.split('\n\n')[0] ?? ''
+    return section.split('\n').map((line) => line.trim()).filter((line) => line.startsWith('- '))
+}
+
+describe('generatePRBody CI 口径', () => {
+    it('aligned 时披露一致与「CI 未跑 typecheck，本次已验证」', () => {
+        const result = { ...buildRunResult(), ciAlignment: [makeCiAlignment()] }
+
+        const body = generatePRBody(result)
+
+        expect(body).toContain('### 🔎 CI 口径')
+        expect(body).toContain('CI 口径：一致')
+        expect(body).toContain('本仓库 CI 未跑 typecheck，本次已验证')
+        expect(body).toContain('本次验证链：')
+    })
+
+    it('区块固定 ≤ 5 行', () => {
+        const result = {
+            ...buildRunResult(),
+            ciAlignment: [makeCiAlignment({
+                workflows: [{
+                    path: '.github/workflows/ci.yml',
+                    categories: ['lint', 'build', 'test'],
+                    unrecognized: ['pnpm test:e2e', 'pnpm format', 'pnpm release'],
+                }],
+                defaultBranchHealth: [{ path: '.github/workflows/ci.yml', conclusion: 'failure' }],
+            })],
+        }
+
+        expect(ciBulletLines(generatePRBody(result)).length).toBeLessThanOrEqual(5)
+    })
+
+    it('differs 时列出 CI 运行而本次未执行的类别', () => {
+        const result = {
+            ...buildRunResult(),
+            ciAlignment: [makeCiAlignment({
+                status: 'differs',
+                extraInExecution: [],
+                missingInExecution: ['test'],
+            })],
+        }
+
+        const body = generatePRBody(result)
+
+        expect(body).toContain('CI 口径：不一致（CI 运行、本次未执行：test）')
+    })
+
+    it('unreadable 时标注未能读取 CI 配置（不阻断正文生成）', () => {
+        const result = {
+            ...buildRunResult(),
+            ciAlignment: [makeCiAlignment({
+                status: 'unreadable',
+                workflows: [],
+                ciCategories: [],
+                extraInExecution: [],
+                unreadableReason: '未找到 .github/workflows',
+            })],
+        }
+
+        const body = generatePRBody(result)
+
+        expect(body).toContain('CI 口径：未能读取 CI 配置（未找到 .github/workflows）')
+    })
+
+    it('默认分支同 workflow 最近一次失败 → 标注「非本 PR 引入」', () => {
+        const result = {
+            ...buildRunResult(),
+            ciAlignment: [makeCiAlignment({
+                defaultBranchHealth: [{ path: '.github/workflows/ci.yml', conclusion: 'failure' }],
+            })],
+        }
+
+        expect(generatePRBody(result)).toContain('默认分支同 workflow 最近一次失败（非本 PR 引入）')
+    })
+
+    it('健康预检未获取（API 失败 / 限流 / 超时）不标注失败结论', () => {
+        const result = {
+            ...buildRunResult(),
+            ciAlignment: [makeCiAlignment({
+                healthUnavailableReason: 'API rate limit exceeded',
+            })],
+        }
+
+        const body = generatePRBody(result)
+
+        expect(body).not.toContain('最近一次失败')
+        expect(body).not.toContain('rate limit')
+    })
+
+    it('无口径记录时不渲染区块（旧结果 / 未执行验证链）', () => {
+        expect(generatePRBody(buildRunResult())).not.toContain('CI 口径')
+    })
+})
+
+describe('generatePRBody family lockstep', () => {
+    it('adds a Family column and lists members / skipped members', () => {
+        const result = buildRunResult()
+        result.actions = [
+            makeBodyAction({
+                target: 'vitest',
+                fromVersion: '^3.2.4',
+                toVersion: '^4.0.1',
+                isMajor: true,
+                strategy: 'family-lockstep',
+                family: {
+                    id: 'vitest',
+                    members: ['vitest', '@vitest/coverage-v8'],
+                    skipped: ['@vitest/ui'],
+                },
+            }),
+        ]
+
+        const body = generatePRBody(result)
+
+        expect(body).toContain('| Package | From | To | Strategy | Major | Family |')
+        expect(body).toContain('| `vitest` | ^3.2.4 | ^4.0.1 | family lockstep | ⚠️ Yes | `vitest` |')
+        expect(body).toContain('### 🧩 Family Lockstep')
+        expect(body).toContain('| `vitest` | `vitest`, `@vitest/coverage-v8` | `@vitest/ui` |')
+    })
+
+    it('renders an em dash for non-family rows when the Family column is present', () => {
+        const result = buildRunResult()
+        result.actions = [
+            makeBodyAction({
+                target: 'vitest',
+                family: { id: 'vitest', members: ['vitest', '@vitest/coverage-v8'], skipped: [] },
+            }),
+            makeBodyAction({ target: 'lodash', fromVersion: '4.17.20', toVersion: '4.17.21' }),
+        ]
+
+        const body = generatePRBody(result)
+
+        expect(body).toContain('| Package | From | To | Strategy | Major | Family |')
+        expect(body).toContain('| `lodash` | 4.17.20 | 4.17.21 | direct | No | — |')
+    })
+
+    it('renders the repository column and multi-repository family table', () => {
+        const result = buildRunResult()
+        result.actions = [
+            makeBodyAction({
+                target: 'vitest',
+                family: { id: 'vitest', members: ['vitest'], skipped: [] },
+            }),
+            makeBodyAction({
+                repository: 'owner/other',
+                target: 'jest',
+                family: { id: 'jest', members: ['jest', '@types/jest'], skipped: [] },
+            }),
+        ]
+
+        const body = generatePRBody(result)
+
+        expect(body).toContain('| Repository | Package | From | To | Strategy | Major | Family |')
+        expect(body).toContain('| Repository | Family | Members | Skipped |')
+        expect(body).toContain('| owner/other | `jest` | `jest`, `@types/jest` | — |')
+    })
+
+    it('keeps the table shape unchanged without family information', () => {
+        const result = buildRunResult()
+        result.actions = [makeBodyAction({ target: 'vite', fromVersion: '5.4.20', toVersion: '6.4.3' })]
+
+        const body = generatePRBody(result)
+
+        expect(body).toContain('| `vite` | 5.4.20 | 6.4.3 | direct | No |')
+        expect(body).not.toContain('Family Lockstep')
+    })
+})
+
+// ---------------------------------------------------------------------------
+// createPullRequest（draft 档）
+// ---------------------------------------------------------------------------
+
+describe('createPullRequest', () => {
+    const makeClient = () => {
+        const create = vi.fn().mockResolvedValue({
+            data: { number: 5, html_url: 'https://github.com/o/r/pull/5', head: { sha: 'abc' } },
+        })
+        return { octokit: { rest: { pulls: { create } } } as unknown as Octokit, create }
+    }
+
+    const params = {
+        owner: 'o',
+        repo: 'r',
+        headBranch: 'dependfix/auto-fix-deadbeef',
+        baseBranch: 'main',
+        title: 'title',
+        body: 'body',
+    }
+
+    it('默认请求体不带 draft（既有行为逐字不变）', async () => {
+        const { octokit, create } = makeClient()
+        const result = await createPullRequest({ octokit, ...params })
+        expect(create.mock.calls[0]![0]).toEqual({
+            owner: 'o',
+            repo: 'r',
+            title: 'title',
+            body: 'body',
+            head: params.headBranch,
+            base: 'main',
+        })
+        expect(result).toEqual({ number: 5, htmlUrl: 'https://github.com/o/r/pull/5', headSha: 'abc' })
+    })
+
+    it('draft 档显式置 true（基线红的草稿交付）', async () => {
+        const { octokit, create } = makeClient()
+        await createPullRequest({ octokit, ...params, draft: true })
+        expect(create.mock.calls[0]![0]).toMatchObject({ draft: true })
     })
 })

@@ -1,12 +1,25 @@
-import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import type { Octokit } from '@octokit/rest'
 import {
     type FixAction,
     type RunResult,
     collectCodeScanningSuggestions,
+    collectFamilySummaries,
+    countUnfixedAlerts,
+    formatSeverity,
+    formatSkipReason,
     isAlertFixedByActions,
+    skippedBreakdown,
+    truncatedBreakdown,
+    formatCiAlignmentSection,
 } from '@dependfix/core'
+import { GIT_PUSH_HOOKS_ISOLATION_ARGS, GIT_PUSH_SIGNING_ISOLATION_ARGS } from './git-signing'
+import { commitStaged, stageScopedChanges, type StageAndCommitOptions, type StageAndCommitResult } from './commit-scope'
+import { buildDraftDeliveryNotice } from './delivery-issue'
+import { formatAttemptMarker, type AttemptMarker } from './fix-fingerprint'
+import { branchExists, ensureGitConfig, PAT_DEFAULT_COMMIT_AUTHOR } from './git-config'
+import { runGitOrThrow } from './git-run'
+import { escapeTableCell } from './markdown-table'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -27,6 +40,13 @@ export interface CreatePullRequestParams {
     title: string
     /** PR 内容（Markdown） */
     body: string
+    /**
+     * 创建为草稿 PR（基线红的交付降级 `draft` 档使用）。
+     *
+     * 草稿态让目标仓库 CI 仍会按既有失败为红，但不会触发人工 review 队列；
+     * 缺省 / `false` 时请求体不带 `draft`，与既有行为逐字一致。
+     */
+    draft?: boolean
 }
 
 export interface PullRequestResult {
@@ -34,6 +54,8 @@ export interface PullRequestResult {
     number: number
     /** PR HTML URL */
     htmlUrl: string
+    /** PR head 提交 SHA（check 回环用它精确查询；响应缺省时 undefined） */
+    headSha?: string
 }
 
 export interface FixBranchResult {
@@ -57,22 +79,8 @@ export interface DependfixOpenPR {
 // Constants
 // ---------------------------------------------------------------------------
 
-/**
- * PAT 路径默认 commit author（保持现有 PAT 路径用户行为零变化）。
- *
- * 注：此常量仅作为 PAT 路径的默认值；GitHub App 路径（M18.2 之后接入）走动态 commit author。
- * 现有 PAT 路径仍硬编码 `dependfix[bot]@users.noreply.github.com`，虽非真实 bot 身份（字符串约定），
- * 但保持行为不变以确保 PAT 用户无感升级。已知缺陷由 C22 范围之外的后续阶段修复。
- *
- * @see [C22 PAT 无感升级评估 §5.1 兼容性](../../../../docs/design/governance/c22-pat-backward-compat.md)
- */
-const PAT_DEFAULT_COMMIT_AUTHOR = {
-    name: 'dependfix[bot]',
-    email: 'dependfix[bot]@users.noreply.github.com',
-} as const
-
 /** 自动修复分支统一前缀（分支名 = 前缀 + 内容指纹 8 位） */
-const BRANCH_PREFIX = 'dependfix/auto-fix-'
+export const DEPENDFIX_BRANCH_PREFIX = 'dependfix/auto-fix-'
 
 // ---------------------------------------------------------------------------
 // Fingerprint
@@ -132,10 +140,10 @@ export function computeFixFingerprint(actions: FixAction[]): string {
  * （如旧版 runId 分支，会被 supersede）。
  */
 export function extractFingerprintFromBranch(branchName: string): string | null {
-    if (!branchName.startsWith(BRANCH_PREFIX)) {
+    if (!branchName.startsWith(DEPENDFIX_BRANCH_PREFIX)) {
         return null
     }
-    const fingerprint = branchName.slice(BRANCH_PREFIX.length)
+    const fingerprint = branchName.slice(DEPENDFIX_BRANCH_PREFIX.length)
     return /^[0-9a-f]{8}$/.test(fingerprint) ? fingerprint : null
 }
 
@@ -182,45 +190,58 @@ export function computeFixAndPrPlan(existingPRs: DependfixOpenPR[], fingerprint:
  *
  * @returns 分支名和是否为新创建
  */
-export function createFixBranch(branchName: string, workDir: string): FixBranchResult {
-    const exists = branchExists(branchName, workDir)
+export async function createFixBranch(branchName: string, workDir: string): Promise<FixBranchResult> {
+    const exists = await branchExists(branchName, workDir)
     if (exists) {
-        execFileSync('git', ['checkout', branchName], { cwd: workDir, stdio: 'pipe' })
+        await runGitOrThrow(['checkout', branchName], { cwd: workDir, what: `checkout fix branch ${branchName}` })
         return { branchName, created: false }
     }
 
-    execFileSync('git', ['checkout', '-b', branchName], { cwd: workDir, stdio: 'pipe' })
+    await runGitOrThrow(['checkout', '-b', branchName], { cwd: workDir, what: `create fix branch ${branchName}` })
     return { branchName, created: true }
 }
 
 /**
- * 暂存所有变更并提交。
- * 自动设置 git user.name / user.email（如未设置）。
- * 使用 `execFileSync` 参数数组形式（不经 shell），保证多行 commit message
- * 与 UTF-8 字符（如 →）在 Windows/Linux 双平台传递一致。
+ * 暂存修复相关文件并提交。
  *
- * W3 修复（M18.4 audit round 2）：显式传 `-c user.name=X -c user.email=Y` 强制 commit author
- * 使用传入值，不受 host 全局 `user.name`（如 CaoMeiYouRen）污染——`git commit` 走 lookup order
- * (env → `-c` config → local → global → system)，显式 `-c` 在 lookup order 中最高优先。
+ * 提交集合由 [stageScopedChanges] 判定（固定白名单 ∪ fixer 声明路径，生成物剔除）：
+ * 未声明的已跟踪改动抛 `UNEXPECTED_CHANGES`，空集合抛 `NO_CHANGES`——不再通配暂存，
+ * 避免把目标仓库的生成物与用户未提交改动带进 PR。author / 签名 / hooks 三条隔离见
+ * [commitStaged] 与 ./git-signing.ts。
  *
- * @param author - 可选 commit author 信息；不传时使用 PAT 默认值（保持现有 PAT 路径行为零变化）。
- *   M18.2 之后 GitHub App 路径会传入动态生成的 `{app_id}+{bot_login}[bot]` author。
- *
- * @see [C22 PAT 无感升级评估 §5.1 兼容性](../../../../docs/design/governance/c22-pat-backward-compat.md)
+ * @param author - 可选 commit author；不传时使用 PAT 默认值（GitHub App 路径传动态 author）
+ * @throws {CommitScopeError} 提交集合含未声明改动 / 非法声明路径 / 为空
+ * @see [M48.4 提交面白名单 §7](../../../../docs/design/governance/pr-delivery-closure.md#7-m484-提交面白名单与-yaml-定点编辑)
  */
-export function stageAndCommit(message: string, workDir: string, author?: { name: string, email: string }): void {
-    ensureGitConfig(workDir, author)
-    const effectiveAuthor = author ?? PAT_DEFAULT_COMMIT_AUTHOR
-    execFileSync('git', ['add', '.'], { cwd: workDir, stdio: 'pipe' })
-    execFileSync('git', [
-        '-c', `user.name=${effectiveAuthor.name}`,
-        '-c', `user.email=${effectiveAuthor.email}`,
-        'commit',
-        '-m', message,
-    ], { cwd: workDir, stdio: 'pipe' })
+export async function stageAndCommit(
+    message: string,
+    workDir: string,
+    author?: { name: string, email: string },
+    options: StageAndCommitOptions = {},
+): Promise<StageAndCommitResult> {
+    await ensureGitConfig(workDir, author)
+    const staging = await stageScopedChanges(workDir, options.declaredPaths ?? [])
+    await commitStaged(message, workDir, author ?? PAT_DEFAULT_COMMIT_AUTHOR)
+    return staging
 }
-export function pushBranch(branchName: string, workDir: string): void {
-    execFileSync('git', ['push', 'origin', branchName], { cwd: workDir, stdio: 'pipe' })
+
+/**
+ * 推送分支到 origin。
+ *
+ * 隔离（单一事实源见 ./git-signing.ts）：
+ * - **签名**：显式传 `-c push.gpgSign=false`，避免宿主 `push.gpgSign=true` 让 push 带上
+ *   `--signed`（服务端不支持时直接 `the receiving end does not support --signed push` 失败）
+ * - **hooks**：`push --no-verify` 跳过被修复仓库的 `pre-push`（隔离环境无 `npx` / 目标仓库
+ *   `node_modules` 不完整时该 hook 会以非 0 退出，把交付链打断为 `push_failed`）
+ */
+export async function pushBranch(branchName: string, workDir: string): Promise<void> {
+    await runGitOrThrow([
+        ...GIT_PUSH_SIGNING_ISOLATION_ARGS,
+        'push',
+        ...GIT_PUSH_HOOKS_ISOLATION_ARGS,
+        'origin',
+        branchName,
+    ], { cwd: workDir, what: `push branch ${branchName}` })
 }
 
 // ---------------------------------------------------------------------------
@@ -247,7 +268,7 @@ export async function findDependfixOpenPR(
     })
 
     return data
-        .filter((pr) => pr.head.ref.startsWith(BRANCH_PREFIX))
+        .filter((pr) => pr.head.ref.startsWith(DEPENDFIX_BRANCH_PREFIX))
         .map((pr) => ({
             number: pr.number,
             htmlUrl: pr.html_url,
@@ -319,10 +340,10 @@ export async function addLabelToPullRequest(
 }
 
 /**
- * 通过 GitHub API 创建 Pull Request。
+ * 通过 GitHub API 创建 Pull Request（`draft: true` 创建草稿 PR：基线红的交付降级档）。
  */
 export async function createPullRequest(params: CreatePullRequestParams): Promise<PullRequestResult> {
-    const { octokit, owner, repo, headBranch, baseBranch, title, body } = params
+    const { octokit, owner, repo, headBranch, baseBranch, title, body, draft } = params
 
     const { data } = await octokit.rest.pulls.create({
         owner,
@@ -331,11 +352,14 @@ export async function createPullRequest(params: CreatePullRequestParams): Promis
         body,
         head: headBranch,
         base: baseBranch,
+        // 缺省不带该字段（既有请求体逐字不变）；`draft` 档显式置 true
+        ...(draft ? { draft: true } : {}),
     })
 
     return {
         number: data.number,
         htmlUrl: data.html_url,
+        headSha: data.head?.sha ?? undefined,
     }
 }
 
@@ -443,11 +467,6 @@ function isPackageUpgradeAction(action: FixAction): boolean {
         && !action.noOp
 }
 
-/** 转义 Markdown 表格单元格：`\` 先转义再转义 `|`（避免已有转义双重处理），换行折叠为空格（错误消息常含多行） */
-function escapeTableCell(value: string): string {
-    return value.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ')
-}
-
 /**
  * 依赖升级 action 的聚合键（仓库 + 包名 + 目标 manifest；跨仓库同包不合并；
  * 同包根升级与成员升级各自成行，避免成员 filePath 丢失）。
@@ -467,6 +486,8 @@ interface AggregatedUpgrade {
     error?: string
     /** 成员级升级目标 manifest（相对路径，如 `packages/web/package.json`）；根升级缺省 */
     filePath?: string
+    /** 家族标识（仅按家族规则写盘的动作携带；成员 / 跳过成员由 Family Lockstep 段统一展示） */
+    familyId?: string
 }
 
 function aggregateUpgradeActions(
@@ -491,6 +512,7 @@ function aggregateUpgradeActions(
                 strategy: action.strategy,
                 error: action.error,
                 filePath: action.filePath,
+                ...(action.family ? { familyId: action.family.id } : {}),
             })
             continue
         }
@@ -501,6 +523,9 @@ function aggregateUpgradeActions(
         current.strategy = action.strategy === 'override' ? action.strategy : current.strategy
         if (action.error) {
             current.error = action.error
+        }
+        if (action.family && !current.familyId) {
+            current.familyId = action.family.id
         }
     }
 
@@ -520,17 +545,36 @@ const MAX_PR_BODY_BYTES = 60 * 1024
  * 明细表在尾部被截断），并附加截断说明——避免大仓库 PR 创建 422。
  *
  * @param supersededNumbers 被本 PR 取代并已关闭的旧 PR 编号列表（用于 Supersedes 声明）
+ * @param attemptMarkers 同告警尝试标记（HTML 注释；必须置于正文头部——正文超 64KB 时从尾部截断，尾置标记会丢失）
  */
-export function generatePRBody(result: RunResult, supersededNumbers?: number[]): string {
+export function generatePRBody(
+    result: RunResult,
+    supersededNumbers?: number[],
+    attemptMarkers?: readonly AttemptMarker[],
+): string {
     const { summary, actions, errors } = result
+    const unfixed = countUnfixedAlerts(summary)
+    const skippedRows = skippedBreakdown(summary)
+    const truncatedRows = truncatedBreakdown(summary)
 
-    const lines: string[] = [
+    const lines: string[] = []
+    if (attemptMarkers && attemptMarkers.length > 0) {
+        lines.push(...attemptMarkers.map((marker) => formatAttemptMarker(marker)), '')
+    }
+
+    lines.push(
         '## 🔒 Dependfix Auto Fix',
         '',
         `**Run ID**: \`${result.runId}\``,
         `**Mode**: ${result.config.mode}`,
         `**Time**: ${result.startedAt}`,
         '',
+    )
+
+    // 基线红：草稿交付说明（放在最前，避免被读成「CI 会绿」；非草稿档返回空数组）
+    lines.push(...buildDraftDeliveryNotice(result))
+
+    lines.push(
         '### 📊 Summary',
         '',
         '| Metric | Value |',
@@ -540,12 +584,38 @@ export function generatePRBody(result: RunResult, supersededNumbers?: number[]):
         `| Alerts fixable | ${summary.alertsFixable} |`,
         `| Dependencies upgraded | ${summary.alertsFixed} |`,
         `| Upgrades failed | ${summary.alertsFailed} |`,
+        `| Skipped | ${summary.alertsSkipped} |`,
         `| Converged (already >= target) | ${summary.alertsConverged} |`,
+        `| Truncated (max alerts/repo) | ${summary.alertsTruncated} |`,
+        `| Unfixed alerts | ${unfixed} |`,
         `| Lockfile repairs | ${summary.lockfileRepairs} |`,
         `| Verifications passed | ${summary.verificationsPassed} |`,
         `| Verifications failed | ${summary.verificationsFailed} |`,
         '',
-    ]
+    )
+
+    // Not Fixed / Skipped（分组披露：避免「部分修复」被读成「全部修复」）
+    if (unfixed > 0 || skippedRows.length > 0 || truncatedRows.length > 0) {
+        const skippedTotal = skippedRows.reduce((sum, row) => sum + row.count, 0)
+        const failedResidual = Math.max(0, unfixed - skippedTotal)
+        lines.push('### ⏭️ Not Fixed / Skipped', '')
+        lines.push(
+            `> **${unfixed} / ${summary.alertsFound}** evaluated alerts remain unfixed; **${summary.alertsTruncated}** truncated before analysis (not evaluated).`,
+            '',
+            '| Category | Count |',
+            '|----------|-------|',
+        )
+        for (const row of truncatedRows) {
+            lines.push(`| Truncated: ${formatSeverity(row.key)} | ${row.count} |`)
+        }
+        for (const row of skippedRows) {
+            lines.push(`| Skipped: ${formatSkipReason(row.key)} | ${row.count} |`)
+        }
+        if (failedResidual > 0) {
+            lines.push(`| Failed / other not fixed | ${failedResidual} |`)
+        }
+        lines.push('')
+    }
 
     // Supply Chain Warnings（路径 A 投毒合入前人工确认依据：升级包带脚本且被批准）
     const supplyChainWarnings = result.supplyChainWarnings ?? []
@@ -566,12 +636,16 @@ export function generatePRBody(result: RunResult, supersededNumbers?: number[]):
 
     // Upgraded dependencies（按包聚合，每包一行）
     const upgrades = aggregateUpgradeActions(actions, (a) => a.success)
+    const hasFamilyColumn = upgrades.some((u) => u.familyId !== undefined)
     if (upgrades.length > 0) {
         const multiRepo = new Set(upgrades.map((u) => u.repository)).size > 1
         lines.push('### 📦 Upgraded Dependencies', '')
         const headers = multiRepo
             ? ['Repository', 'Package', 'From', 'To', 'Strategy', 'Major']
             : ['Package', 'From', 'To', 'Strategy', 'Major']
+        if (hasFamilyColumn) {
+            headers.push('Family')
+        }
         lines.push(`| ${headers.join(' | ')} |`)
         lines.push(`|${headers.map(() => '---').join('|')}|`)
         for (const u of upgrades) {
@@ -583,11 +657,40 @@ export function generatePRBody(result: RunResult, supersededNumbers?: number[]):
                 strategy = 'major-upgrade'
             } else if (u.strategy === 'member-upgrade') {
                 strategy = 'member upgrade'
+            } else if (u.strategy === 'family-lockstep') {
+                strategy = 'family lockstep'
             }
             const packageCell = u.filePath ? `\`${u.packageName}\` (${u.filePath})` : `\`${u.packageName}\``
             const cells = multiRepo
                 ? [u.repository, packageCell, u.fromVersion ?? '-', u.toVersion ?? '-', strategy, major]
                 : [packageCell, u.fromVersion ?? '-', u.toVersion ?? '-', strategy, major]
+            if (hasFamilyColumn) {
+                cells.push(u.familyId ? `\`${escapeTableCell(u.familyId)}\`` : '—')
+            }
+            lines.push(`| ${cells.join(' | ')} |`)
+        }
+        lines.push('')
+    }
+
+    // Family Lockstep（家族锁步：成员清单在改动摘要中显式列出，无隐藏标记）
+    const familySummaries = collectFamilySummaries(actions)
+    if (familySummaries.length > 0) {
+        const multiRepo = new Set(familySummaries.map((familySummary) => familySummary.repository)).size > 1
+        lines.push('### 🧩 Family Lockstep', '')
+        lines.push('> 同一次修复内同一生态成员保持同一条版本线；未写盘成员列在 Skipped 中。', '')
+        const headers = multiRepo
+            ? ['Repository', 'Family', 'Members', 'Skipped']
+            : ['Family', 'Members', 'Skipped']
+        lines.push(`| ${headers.join(' | ')} |`)
+        lines.push(`|${headers.map(() => '---').join('|')}|`)
+        for (const familySummary of familySummaries) {
+            const members = familySummary.members.map((member) => `\`${escapeTableCell(member)}\``).join(', ')
+            const skipped = familySummary.skipped.length > 0
+                ? familySummary.skipped.map((member) => `\`${escapeTableCell(member)}\``).join(', ')
+                : '—'
+            const cells = multiRepo
+                ? [escapeTableCell(familySummary.repository), `\`${escapeTableCell(familySummary.family)}\``, members, skipped]
+                : [`\`${escapeTableCell(familySummary.family)}\``, members, skipped]
             lines.push(`| ${cells.join(' | ')} |`)
         }
         lines.push('')
@@ -651,6 +754,15 @@ export function generatePRBody(result: RunResult, supersededNumbers?: number[]):
         lines.push('')
     }
 
+    // CI 口径（验证链 vs 目标仓库 CI 的可识别命令类别；固定 ≤5 行，只披露口径不承诺结果）
+    const ciAlignment = result.ciAlignment ?? []
+    if (ciAlignment.length > 0) {
+        const ciLines = formatCiAlignmentSection(ciAlignment, 5)
+        if (ciLines.length > 0) {
+            lines.push('### 🔎 CI 口径', '', ...ciLines, '')
+        }
+    }
+
     // Code Scanning 建议（无法自动修复的问题不静默丢失）
     const suggestions = collectCodeScanningSuggestions(result, result.config.mode)
     if (suggestions.length > 0) {
@@ -706,46 +818,4 @@ function truncatePRBody(lines: string[]): string {
         bytes += lineBytes
     }
     return `${kept.join('\n')}${truncationNote}`
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function branchExists(branchName: string, workDir: string): boolean {
-    try {
-        execFileSync('git', ['rev-parse', '--verify', branchName], {
-            cwd: workDir,
-            stdio: 'pipe',
-        })
-        return true
-    } catch {
-        return false
-    }
-}
-
-function ensureGitConfig(workDir: string, author?: { name: string, email: string }): void {
-    const effectiveAuthor = author ?? PAT_DEFAULT_COMMIT_AUTHOR
-    const hasName = gitConfigExists('user.name', workDir)
-    const hasEmail = gitConfigExists('user.email', workDir)
-
-    if (!hasName) {
-        execFileSync('git', ['config', 'user.name', effectiveAuthor.name], { cwd: workDir, stdio: 'pipe' })
-    }
-    if (!hasEmail) {
-        execFileSync('git', ['config', 'user.email', effectiveAuthor.email], { cwd: workDir, stdio: 'pipe' })
-    }
-}
-
-function gitConfigExists(key: string, workDir: string): boolean {
-    // 必须用 `--local` 限定 local config 查询——否则 `git config user.name`（无 flag）
-    // 走 lookup order (local → global → system)，会返回 host 全局 user.name（如
-    // CaoMeiYouRen）误判"已配置"，让 ensureGitConfig 跳过 set local config。
-    // W3 修复（M18.4 audit round 2）：见 stageAndCommit 内 `-c user.name=X` 注释。
-    try {
-        execFileSync('git', ['config', '--local', '--get', key], { cwd: workDir, stdio: 'pipe' })
-        return true
-    } catch {
-        return false
-    }
 }

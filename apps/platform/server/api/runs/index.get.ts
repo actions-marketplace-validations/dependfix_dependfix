@@ -1,32 +1,28 @@
 import { z } from 'zod'
-import { In, type FindOptionsWhere } from 'typeorm'
+import { In } from 'typeorm'
 import { ScanRun } from '#server/entities/scan-run'
 import { ensureDatabaseInitialized } from '#server/database'
 import { requireAuth } from '#server/utils/guard'
 import { createLocalizedError } from '#server/utils/localized-error'
 import { resolveOrganizationId } from '#server/utils/organization'
-
-const PAGE_SIZE_DEFAULT = 100
-const PAGE_SIZE_MAX = 200
+import { buildRunsWhere, runsFilterSchema, runsPaginationShape } from '#server/utils/runs-query'
+import { parseRunResource } from '#server/utils/run-resource'
 
 /**
  * 查询参数 schema（todo.md §M14.2 UX-R1 + §M16.1）：
- * - repositoryId：可选，按仓库过滤（既有，`repo-history-dialog.vue` 主调用方）
+ * - repositoryId / status / failureStage / failureKind：共用筛选（`runsFilterSchema`，列表与日志导出同口径）
  * - ids：可选，逗号分隔 run id 列表（alerts.vue §openRunSidebar 复用，todo.md §T1306）
  *   —— 修复 silent bug：原 server 不识别 `ids`，alerts sidebar 实际拿到全量 run 而非该告警 affected runs
- * - page：默认 1，最小 1
- * - pageSize：默认 100，上限 200（超出自动钳制，不抛错；防止单次拉取过大影响性能）
+ * - page / pageSize：共用分页片段（`runsPaginationShape`，默认 1 / 100，`pageSize` 超上限静默钳制；
+ *   与日志导出的窗口取数同源——两侧各改一份会让「导出当前页」与屏幕所见错位）
  *
  * organizationId 不暴露为 query 参数：服务端隐式从默认组织注入（单组织模型），
  * 与 batch-runs/schedules/repos 列表 handler 风格一致（todo.md §M16.1 组织隔离）。
  */
-const querySchema = z.object({
-    repositoryId: z.string().min(1).optional(),
+const querySchema = runsFilterSchema.extend({
     ids: z.string().optional()
         .transform((v) => (v && v.length > 0 ? v : undefined)),
-    page: z.coerce.number().int().min(1).default(1),
-    pageSize: z.coerce.number().int().min(1).default(PAGE_SIZE_DEFAULT)
-        .transform((v) => Math.min(v, PAGE_SIZE_MAX)),
+    ...runsPaginationShape,
 })
 
 const toView = (r: ScanRun) => ({
@@ -42,7 +38,21 @@ const toView = (r: ScanRun) => ({
     finishedAt: r.finishedAt,
     runUrl: r.runUrl,
     summary: r.summaryJson ? JSON.parse(r.summaryJson) as Record<string, unknown> : null,
+    // 运行结果可信度：exitCode 为进程级事实；环境性失败计数与 summary 同源落库。
+    // 旧数据 exitCode 为 null；B 模式执行器不传递 exitCode（触发受理哨兵），但环境性失败计数仍可落库。
+    // 消费方须按 null 降级，不得把 null 推断为 0 成功。
+    exitCode: r.exitCode,
+    environmentalFailureCount: r.environmentalFailureCount,
+    // 资源 / OOM 归因：列与 resourceJson 同源；null = 不可采集（原因在 resource.degradedReason）
+    memoryMaxBytes: r.memoryMaxBytes,
+    peakRssBytes: r.peakRssBytes,
+    oomKilled: r.oomKilled,
+    resource: parseRunResource(r.resourceJson),
     error: r.errorJson ? JSON.parse(r.errorJson) as { code: string, message: string } | null : null,
+    // 失败分类（非失败终态为 null；落库口径见 run-failure-classify.ts）
+    failureCode: r.failureCode,
+    failureStage: r.failureStage,
+    failureKind: r.failureKind,
 })
 
 /**
@@ -63,16 +73,13 @@ export default defineEventHandler(async (event) => {
             data: { issues: parsed.error.issues },
         })
     }
-    const { repositoryId, ids, page, pageSize } = parsed.data
+    const { repositoryId, ids, status, failureStage, failureKind, page, pageSize } = parsed.data
 
     const ds = await ensureDatabaseInitialized()
     const organizationId = await resolveOrganizationId(ds)
     const runRepo = ds.getRepository(ScanRun)
 
-    const where: FindOptionsWhere<ScanRun> = { repository: { organizationId } }
-    if (repositoryId) {
-        where.repositoryId = repositoryId
-    }
+    const where = buildRunsWhere({ repositoryId, status, failureStage, failureKind }, organizationId)
     if (ids) {
         const idList = ids.split(',').map((s) => s.trim()).filter(Boolean)
         if (idList.length > 0) {

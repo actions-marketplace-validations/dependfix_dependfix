@@ -4,6 +4,7 @@ import { ensureDatabaseInitialized } from '#server/database'
 import { requireAuth } from '#server/utils/guard'
 import { createLocalizedError } from '#server/utils/localized-error'
 import { parseLogEntries, formatLogEntries } from '#server/utils/memory-logger'
+import { parseRunResource } from '#server/utils/run-resource'
 
 /** GET /api/runs/[id]：扫描详情（含结果明细 + 执行日志） */
 export default defineEventHandler(async (event) => {
@@ -48,7 +49,23 @@ export default defineEventHandler(async (event) => {
         finishedAt: run.finishedAt,
         runUrl: run.runUrl,
         summary: run.summaryJson ? JSON.parse(run.summaryJson) as Record<string, unknown> : null,
+        // 运行结果可信度：与列表同一口径；旧数据 exitCode 为 null，B 模式不传递 exitCode
+        exitCode: run.exitCode,
+        environmentalFailureCount: run.environmentalFailureCount,
+        // 构建版本回执：本次 run 由哪个部署产物执行（未注入为 unknown，存量行为 null）
+        buildVersion: run.buildVersion ?? null,
+        buildCommit: run.buildCommit ?? null,
+        memoryMaxBytes: run.memoryMaxBytes,
+        peakRssBytes: run.peakRssBytes,
+        oomKilled: run.oomKilled,
+        resource: parseRunResource(run.resourceJson),
         error: run.errorJson ? JSON.parse(run.errorJson) as { code: string, message: string } : null,
+        // 失败分类三列 + 重试来源：详情视图据此展示失败归因与「重试入口 / 来源链」
+        // （口径见 docs/design/governance/run-failure-taxonomy.md §5.5）
+        failureCode: run.failureCode,
+        failureStage: run.failureStage,
+        failureKind: run.failureKind,
+        retriedFromRunId: run.retriedFromRunId ?? null,
         results: results.map((r) => ({
             id: r.id,
             source: r.source,

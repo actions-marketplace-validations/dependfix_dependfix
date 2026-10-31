@@ -1,9 +1,10 @@
 /**
  * 批量运行聚合统计纯函数。
  * 输入：下属 ScanRun 列表（+ 可选 ScanResult 明细）→ 输出 BatchRun 的终态判定与跨仓库统计。
- * 聚合更新策略（设计 §5.2 方案 A 轮询更新）：GET /api/batch-runs/[id] 时实时计算并写回，
- * 不引入 Worker 回调机制（降低耦合）。
+ * 聚合更新策略（设计 §5.2 双通道）：详情接口 GET /api/batch-runs/[id] 实时计算写回（用户查看时收敛）
+ * + 周期兜底对账 batch-reconciler.ts（收敛未被查看的批次），不引入 Worker 回调机制（降低耦合）。
  */
+import { TERMINAL_SCAN_RUN_STATUSES } from '../scan-run-status'
 import type { BatchRunStatus } from '#server/entities/batch-run'
 import type { ScanResult } from '#server/entities/scan-result'
 import type { ScanRun } from '#server/entities/scan-run'
@@ -30,9 +31,10 @@ export interface BatchAggregation {
 }
 
 /** 终态状态集合（聚合计数口径：completed + failed + dispatched + degraded 均计终态）。
- * degraded 是 sandbox 启动时降级的终态——业务结果完整（与 completed 等价口径计入 alertsTotal/fixedCount），
- * 但因路径偏离不计入 completedCount；详见 executor-sandbox.md §7.8.4 */
-const TERMINAL_STATUSES = new Set(['completed', 'failed', 'dispatched', 'degraded'])
+ * degraded 是 sandbox 入口关闭 / 启动时降级的终态——业务结果完整（与 completed 等价口径计入 alertsTotal/fixedCount），
+ * 但因路径偏离不计入 completedCount；详见 executor-sandbox-implementation.md §7.8.4。
+ * 集合本体统一由 `scan-run-status.ts` 提供，避免多处副本漂移。 */
+const TERMINAL_STATUSES = new Set<string>(TERMINAL_SCAN_RUN_STATUSES)
 
 /** 解析 ScanRun.summaryJson（core RunSummary 形状），非法/缺失返回零值（防御：落库路径已控制） */
 const parseRunSummary = (raw: string | null | undefined): { alertsFound: number, alertsFixed: number } => {
@@ -52,6 +54,23 @@ const parseRunSummary = (raw: string | null | undefined): { alertsFound: number,
 
 /** 空批次聚合恒等值（无下属 run；供 executeBatchRun 空批次终态兜底复用） */
 export const EMPTY_BATCH_SUMMARY: BatchSummary = { alertsTotal: 0, severityCounts: {}, fixedCount: 0 }
+
+/**
+ * 批量完成的真实时间：取下属 ScanRun 中最晚的 finishedAt，而非「聚合发生的时刻」。
+ * 批次到达终态是由周期对账 / 详情查看触发，若用触发时刻会导致 finishedAt 被记为
+ * 首次查看时间（生产事故：4 条早批次 finishedAt 均为同一查看时刻）。
+ * 无任何带 finishedAt 的子项时回退 fallback（默认当前时刻）——零子项批次无真实完成时间。
+ */
+export const resolveBatchFinishedAt = (runs: ScanRun[], fallback: Date = new Date()): Date => {
+    let latest = 0
+    for (const run of runs) {
+        const time = run.finishedAt ? run.finishedAt.getTime() : 0
+        if (time > latest) {
+            latest = time
+        }
+    }
+    return latest > 0 ? new Date(latest) : fallback
+}
 
 /**
  * 聚合纯函数：多 ScanRun → 终态判定 + 跨仓库统计。
@@ -122,3 +141,12 @@ export const aggregateScanRuns = (runs: ScanRun[], results: ScanResult[] = []): 
  */
 export const shouldWriteBackStatus = (storedStatus: string, aggregationStatus: string): boolean =>
     storedStatus === 'running' && aggregationStatus !== storedStatus
+
+/**
+ * 「零子项 + running」= 终态未定：既可能是 async 正在逐个建子项的窗口，也可能是孤儿
+ * （触发进程异常 / 子仓库级联删除）。两种通道都不得按 completed 收敛：
+ * - 详情接口：不得把孤儿永久固化为 completed（否则周期对账只扫 running，永远纠正不回来）
+ * - 周期对账：未超阈值保持不动，超阈值按孤儿 failed 处理
+ */
+export const isUndecidedZeroChildRunning = (storedStatus: string, runCount: number): boolean =>
+    storedStatus === 'running' && runCount === 0

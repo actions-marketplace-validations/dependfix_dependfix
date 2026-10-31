@@ -17,7 +17,7 @@
 
 import { sendMail, MailerError } from '../mailer'
 import { renderEnvAlertTemplate } from './templates'
-import { NotificationError, parseSupportedLocale, type NotificationChannel, type NotificationEvent, type NotificationResult } from './channel'
+import { NotificationError, parseSupportedLocale, type NotificationChannel, type NotificationEvent, type NotificationResult, type RenderedNotification } from './channel'
 
 export class EmailNotificationChannel implements NotificationChannel {
     readonly name = 'email'
@@ -49,15 +49,20 @@ export class EmailNotificationChannel implements NotificationChannel {
             message: event.message,
             createdAt: event.createdAt.toISOString(),
         }, event.locale ?? parseSupportedLocale(process.env.DEPENDFIX_LOCALE))
-        // fan-out：每个收件人单独 sendMail（保留 per-recipient 投递状态 + 错误隔离）
-        // 简化：先尝试第一个收件人，失败则整体失败（避免一封失败影响其他）
-        // 进阶优化可后续加并行 sendMail + 部分失败聚合
+        return this.sendMessage(rendered, recipients)
+    }
+
+    /** 发送已渲染消息（业务通知复用同一 SMTP / fail-closed 路径）。 */
+    async sendMessage(message: RenderedNotification, recipients: string[]): Promise<NotificationResult> {
+        if (recipients.length === 0 || !this.isAvailable()) {
+            return { delivered: false, channel: this.name }
+        }
         try {
             const result = await sendMail({
                 to: recipients.join(', '),
-                subject: rendered.subject,
-                html: rendered.html,
-                text: rendered.text,
+                subject: message.subject,
+                html: message.html,
+                text: message.text,
             })
             return {
                 delivered: result.delivered,

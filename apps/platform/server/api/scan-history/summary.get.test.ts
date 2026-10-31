@@ -3,7 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import type { DataSource } from 'typeorm'
 import { makeEvent, setupMemoryDatabase, teardownMemoryDatabase } from '../../../tests/api-helper'
 import reposIndexHandler from '../repos/index'
-import summaryHandler from './summary.get'
+import summaryHandler, { aggregateByRepository } from './summary.get'
 import { Organization } from '#server/entities/organization'
 import { Repository } from '#server/entities/repository'
 import { ScanResult } from '#server/entities/scan-result'
@@ -20,6 +20,7 @@ const call = (method: string, url: string) => summaryHandler(makeEvent(method, u
 
 interface SummaryResponse {
     byStatus: Record<string, number>
+    byFailureStage: Record<string, number>
     totals: { runs: number, totalAlerts: number, totalFixed: number }
     repositories: {
         repositoryId: string
@@ -30,9 +31,10 @@ interface SummaryResponse {
         fixedCount: number
         lastRunAt: string | null
         lastStatus: string | null
+        lastFailureStage: string | null
     }[]
     window: { start: string | null, end: string | null, included: number, limit: number }
-    filtered: { repositoryId: string | null }
+    filtered: { repositoryId: string | null, lastStatus: string | null }
 }
 
 const createRepo = async (overrides: { owner?: string, name?: string } = {}) => {
@@ -53,6 +55,9 @@ const seedRun = async (repositoryId: string, overrides: {
     status?: 'pending' | 'running' | 'completed' | 'failed' | 'dispatched' | 'degraded'
     summaryJson?: string | null
     createdAt?: Date
+    failureCode?: string | null
+    failureStage?: 'source' | 'clone' | 'install' | 'fix' | 'verify' | 'deliver' | 'runtime' | 'cleanup' | 'unknown' | null
+    failureKind?: 'transient' | 'deterministic' | 'unknown' | null
 } = {}) => {
     const ds = await ensureDatabaseInitialized()
     const entity = ds.getRepository(ScanRun).create({
@@ -62,6 +67,9 @@ const seedRun = async (repositoryId: string, overrides: {
         executorKind: 'container',
         status: overrides.status ?? 'completed',
         summaryJson: overrides.summaryJson ?? JSON.stringify({ alertsFound: 2, alertsFixed: 1 }),
+        failureCode: overrides.failureCode ?? null,
+        failureStage: overrides.failureStage ?? null,
+        failureKind: overrides.failureKind ?? null,
     })
     if (overrides.createdAt) {
         entity.createdAt = overrides.createdAt
@@ -81,7 +89,7 @@ const seedResults = async (runId: string, count: number, fixable: boolean) => {
     const items = Array.from({ length: count }, (_, i) => repo.create({
         scanRunId: runId,
         repositoryId: run.repositoryId,
-        // M20.3 unique index (repositoryId, upstreamId) 强制不同 upstreamId：
+        // unique index (repositoryId, upstreamId) 强制不同 upstreamId：
         // 用 pkg-${i} + runId 后缀保证唯一（同 run 下不同 upstreamId）
         upstreamId: `dependabot:${runId.slice(-4)}-${i}`,
         source: 'dependabot',
@@ -134,11 +142,161 @@ describe('GET /api/scan-history/summary', () => {
             dispatched: 0,
             degraded: 0,
         })
+        expect(res.byFailureStage).toEqual({
+            source: 0,
+            clone: 0,
+            install: 0,
+            fix: 0,
+            verify: 0,
+            deliver: 0,
+            runtime: 0,
+            cleanup: 0,
+            unknown: 0,
+        })
         expect(res.totals).toEqual({ runs: 0, totalAlerts: 0, totalFixed: 0 })
         expect(res.repositories).toEqual([])
-        expect(res.filtered).toEqual({ repositoryId: null })
+        expect(res.filtered).toEqual({ repositoryId: null, lastStatus: null })
         expect(res.window.limit).toBe(500)
         expect(res.window.included).toBe(0)
+    })
+
+    it('rejects invalid lastStatus with 400 (不静默丢弃非法值)', async () => {
+        // 锁定公开错误码契约（data.code）与状态码
+        await expect(call('GET', '/api/scan-history/summary?lastStatus=not-a-status'))
+            .rejects.toMatchObject({ statusCode: 400, data: { code: 'SCAN_HISTORY_VALIDATION_FAILED' } })
+        await expect(call('GET', '/api/scan-history/summary?lastStatus=COMPLETED'))
+            .rejects.toMatchObject({ statusCode: 400 })
+        // 超长值（> max(64)）同样 400（防御异常输入）
+        await expect(call('GET', `/api/scan-history/summary?lastStatus=${'x'.repeat(80)}`))
+            .rejects.toMatchObject({ statusCode: 400 })
+    })
+
+    it('filters repositories by lastStatus (集合与「最近状态」一致，totals / window 不受影响)', async () => {
+        // 专用仓库（显式 createdAt 保证 lastStatus 确定）：
+        // - filter-failed：较新 run = failed → lastStatus = failed
+        // - filter-ok：单条 completed → lastStatus = completed
+        const repoFailed = await createRepo({ owner: 'demo', name: 'filter-failed' })
+        await seedRun(repoFailed, { status: 'completed', createdAt: new Date('2026-01-01T00:00:00Z') })
+        await seedRun(repoFailed, { status: 'failed', createdAt: new Date('2026-02-01T00:00:00Z') })
+        const repoOk = await createRepo({ owner: 'demo', name: 'filter-ok' })
+        await seedRun(repoOk, { status: 'completed', createdAt: new Date('2026-01-15T00:00:00Z') })
+
+        const all = await call('GET', '/api/scan-history/summary') as SummaryResponse
+        const expected = all.repositories
+            .filter((repo) => repo.lastStatus === 'failed')
+            .map((repo) => repo.repositoryId)
+            .sort()
+        // 前置：至少命中专用仓库，避免空集假绿
+        expect(expected).toContain(repoFailed)
+
+        const filtered = await call('GET', '/api/scan-history/summary?lastStatus=failed') as SummaryResponse
+        // 集合一致性：过滤后的 repositories === 全量中 lastStatus=failed 的集合（精确相等）
+        expect(filtered.repositories.map((repo) => repo.repositoryId).sort()).toEqual(expected)
+        expect(filtered.repositories.every((repo) => repo.lastStatus === 'failed')).toBe(true)
+        expect(filtered.repositories.map((repo) => repo.repositoryId)).not.toContain(repoOk)
+        // 回显过滤条件
+        expect(filtered.filtered.lastStatus).toBe('failed')
+        // 窗口口径不变（lastStatus 只过滤聚合结果，不改 DB 层取数）
+        expect(filtered.totals).toEqual(all.totals)
+        expect(filtered.window).toEqual(all.window)
+    })
+
+    it('lastStatus 与 repositoryId 组合过滤（AND 语义）', async () => {
+        const repoBoth = await createRepo({ owner: 'demo', name: 'filter-both' })
+        await seedRun(repoBoth, { status: 'degraded', createdAt: new Date('2026-03-01T00:00:00Z') })
+
+        const res = await call('GET', `/api/scan-history/summary?repositoryId=${repoBoth}&lastStatus=degraded`) as SummaryResponse
+        expect(res.repositories.map((repo) => repo.repositoryId)).toEqual([repoBoth])
+        expect(res.filtered).toEqual({ repositoryId: repoBoth, lastStatus: 'degraded' })
+
+        // 组合不命中：仓库存在但最近状态不是该值 → 空列表（不报错）
+        const miss = await call('GET', `/api/scan-history/summary?repositoryId=${repoBoth}&lastStatus=completed`) as SummaryResponse
+        expect(miss.repositories).toEqual([])
+    })
+
+    it('aggregates byFailureStage across classified ScanRuns', async () => {
+        const repoStage = await createRepo({ owner: 'demo', name: 'fail-stage' })
+        await seedRun(repoStage, {
+            status: 'failed',
+            failureStage: 'verify',
+            failureKind: 'deterministic',
+            failureCode: 'VERIFICATION_FAILED',
+        })
+        await seedRun(repoStage, { status: 'failed', failureStage: 'clone', failureKind: 'transient', failureCode: 'clone_timeout' })
+        await seedRun(repoStage, { status: 'failed', failureStage: 'clone', failureKind: 'transient', failureCode: 'clone_timeout' })
+        // 未分类 failed 行（历史缺 errorJson）不计入任何阶段
+        await seedRun(repoStage, { status: 'failed' })
+
+        const res = await call('GET', `/api/scan-history/summary?repositoryId=${repoStage}`) as SummaryResponse
+        expect(res.byFailureStage.verify).toBe(1)
+        expect(res.byFailureStage.clone).toBe(2)
+        expect(res.byFailureStage.deliver).toBe(0)
+        // 非失败终态的 run 不计入阶段分布
+        expect(res.byFailureStage.unknown).toBe(0)
+    })
+
+    it('repositories 携带 lastFailureStage（与 lastStatus 同源）', async () => {
+        const repoFailLatest = await createRepo({ owner: 'demo', name: 'last-fail' })
+        // 较旧 completed → 较新 failed(deliver)：最近状态应带上失败阶段
+        await seedRun(repoFailLatest, { status: 'completed', createdAt: new Date('2026-06-01T00:00:00Z') })
+        await seedRun(repoFailLatest, {
+            status: 'failed',
+            failureStage: 'deliver',
+            failureKind: 'deterministic',
+            createdAt: new Date('2026-06-15T00:00:00Z'),
+        })
+
+        const repoOkLatest = await createRepo({ owner: 'demo', name: 'last-ok' })
+        // 较旧 failed(verify) → 较新 completed：不应残留失败阶段
+        await seedRun(repoOkLatest, {
+            status: 'failed',
+            failureStage: 'verify',
+            failureKind: 'deterministic',
+            createdAt: new Date('2026-06-01T00:00:00Z'),
+        })
+        await seedRun(repoOkLatest, { status: 'completed', createdAt: new Date('2026-06-15T00:00:00Z') })
+
+        const res = await call('GET', '/api/scan-history/summary') as SummaryResponse
+        const failLatest = res.repositories.find((r) => r.repositoryId === repoFailLatest)
+        expect(failLatest?.lastStatus).toBe('failed')
+        expect(failLatest?.lastFailureStage).toBe('deliver')
+        const okLatest = res.repositories.find((r) => r.repositoryId === repoOkLatest)
+        expect(okLatest?.lastStatus).toBe('completed')
+        expect(okLatest?.lastFailureStage).toBeNull()
+    })
+
+    /**
+     * `aggregateByRepository` 的 lastRunAt / lastFailureStage **替换分支**在 handler 集成路径
+     * 不可达（`createdAt DESC` 取数时首个即最新 → 只走初始分支）。以乱序输入直测两分支。
+     */
+    it('aggregateByRepository: 乱序输入时替换分支同步 lastStatus / lastFailureStage（直测防御路径）', () => {
+        const repo = { id: 'agg-repo', owner: 'demo', name: 'agg' } as Repository
+        const older = {
+            id: 'run-old',
+            repositoryId: 'agg-repo',
+            status: 'completed',
+            failureStage: null,
+            createdAt: new Date('2026-06-01T00:00:00Z'),
+            repository: repo,
+        } as unknown as ScanRun & { repository?: Repository | null }
+        const newer = {
+            id: 'run-new',
+            repositoryId: 'agg-repo',
+            status: 'failed',
+            failureStage: 'deliver',
+            createdAt: new Date('2026-06-15T00:00:00Z'),
+            repository: repo,
+        } as unknown as ScanRun & { repository?: Repository | null }
+
+        // 升序输入（旧 → 新）：走替换分支，lastStatus / lastFailureStage 被较新 run 覆盖
+        const replaced = aggregateByRepository([older, newer], new Map())[0]!
+        expect(replaced.lastStatus).toBe('failed')
+        expect(replaced.lastFailureStage).toBe('deliver')
+
+        // 降序输入（新 → 旧）：older 不覆盖（替换分支 false），保留较新 run 的状态
+        const kept = aggregateByRepository([newer, older], new Map())[0]!
+        expect(kept.lastStatus).toBe('failed')
+        expect(kept.lastFailureStage).toBe('deliver')
     })
 
     it('aggregates byStatus across seeded ScanRuns', async () => {

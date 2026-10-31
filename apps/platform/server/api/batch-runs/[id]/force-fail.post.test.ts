@@ -14,6 +14,9 @@ vi.mock('#server/utils/guard', () => ({
     requireOrgResource: vi.fn(async () => undefined),
 }))
 
+const { getQueueServiceMock } = vi.hoisted(() => ({ getQueueServiceMock: vi.fn() }))
+vi.mock('#server/services/queue/queue.service', () => ({ getQueueService: getQueueServiceMock }))
+
 const call = (id: string) => forceFailHandler(makeEvent('POST', `/api/batch-runs/${id}/force-fail`, undefined, {}, { id }))
 
 const clearAllTables = async (): Promise<void> => {
@@ -48,6 +51,7 @@ describe('POST /api/batch-runs/[id]/force-fail', () => {
 
     beforeEach(async () => {
         vi.clearAllMocks()
+        getQueueServiceMock.mockResolvedValue({ mode: 'sync', queue: null, close: vi.fn() })
         await clearAllTables()
     })
 
@@ -117,6 +121,8 @@ describe('POST /api/batch-runs/[id]/force-fail', () => {
         const r1 = await scanRepo.findOne({ where: { id: runningRun.id } })
         expect(r1?.status).toBe('failed')
         expect(JSON.parse(r1?.errorJson ?? '{}')).toMatchObject({ code: 'force_failed' })
+        expect(r1?.failureStage).toBe('runtime')
+        expect(r1?.failureKind).toBe('deterministic')
 
         const r2 = await scanRepo.findOne({ where: { id: pendingRun.id } })
         expect(r2?.status).toBe('failed')
@@ -169,5 +175,45 @@ describe('POST /api/batch-runs/[id]/force-fail', () => {
             alreadyTerminated: true,
             status: 'failed',
         })
+    })
+
+    it('async 模式：同步释放被强制结束子 run 的队列 job（否则重新触发仍被合并）', async () => {
+        const ds = await ensureDatabaseInitialized()
+        const organizationId = await resolveOrganizationId(ds)
+        const batchRepo = ds.getRepository(BatchRun)
+        const scanRepo = ds.getRepository(ScanRun)
+        await createRepo('repo-force-release')
+        const batch = await batchRepo.save(batchRepo.create({
+            organizationId, source: 'manual', mode: 'report-only',
+            severityThreshold: 'high', repositoryCount: 1, status: 'running',
+        }))
+        const run = await scanRepo.save(scanRepo.create({
+            repositoryId: 'repo-force-release',
+            mode: 'report-only',
+            severityThreshold: 'high',
+            executorKind: 'container',
+            batchRunId: batch.id,
+            status: 'running',
+            startedAt: new Date(),
+        }))
+        const inspect = vi.fn().mockResolvedValue({
+            jobId: `scan-${run.repositoryId}`,
+            state: 'waiting',
+            runId: run.id,
+            ageMs: 60_000,
+        })
+        const remove = vi.fn().mockResolvedValue({ removed: true })
+        getQueueServiceMock.mockResolvedValue({
+            mode: 'async',
+            queue: { inspect, remove },
+            close: vi.fn(),
+        })
+
+        const result = await call(batch.id) as Record<string, unknown>
+        expect(result.scanRunsFailed).toBe(1)
+        expect(result.queueReleased).toEqual({ removed: 1, skipped: 0 })
+
+        expect(inspect).toHaveBeenCalledWith(run.repositoryId)
+        expect(remove).toHaveBeenCalledWith(run.repositoryId, run.id)
     })
 })

@@ -14,6 +14,10 @@
  *   或蒸馏后压缩行 `[YYYY-MM-DD] [type] 摘要 → 详见 docs/...`（仍属活跃，只是摘要化）
  * - `## 已蒸馏条目 (Historical)`：`[YYYY-MM-DD] [type] 摘要 → 已迁移至 docs/...`
  *
+ * 日期+类型形态另支持 `### [YYYY-MM-DD] [type] 标题`（+ `- ` 正文行）与
+ * `- **[YYYY-MM-DD] [type] 标题**：正文`；完整可接受形态表与 stdout / 退出码契约见
+ * [docs/design/governance/session-wisdom-distillation.md §6](../docs/design/governance/session-wisdom-distillation.md)。
+ *
  * 活跃/已蒸馏按**小节标题**区分，不按行格式（蒸馏后无日期标题也不会死锁）。
  *
  * 用法:
@@ -30,11 +34,31 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PROJECT_ROOT = path.resolve(__dirname, '..')
 const WISDOM_PATH = path.join(PROJECT_ROOT, '.session', 'wisdom.md')
 
+// ---------------------------------------------------------------------------
+// 条目行形态（单一事实源：解析与「疑似条目」探测共用，避免两处漂移）
+// 可接受形态见 [docs/design/governance/session-wisdom-distillation.md §6 格式约定]
+// ---------------------------------------------------------------------------
+
+/** 蒸馏摘要行：`[YYYY-MM-DD] [type] 摘要 [→ [详见/已迁移至] target]`（可带 `- ` 前缀）。 */
+const DISTILLED_LINE_RE = /^[-*]?\s*\[(\d{4}-\d{2}-\d{2})\]\s*\[(\w+)\]\s*(.+?)\s*(?:→\s*(?:(?:详见|已迁移至)\s*)?(.+?))?\s*$/u
+
+/** 活跃条目标题：`### [YYYY-MM-DD] [type] 标题`（本仓 wisdom.md 实际写法）。 */
+const HEADING_ENTRY_RE = /^###\s+\[(\d{4}-\d{2}-\d{2})\]\s*\[([\w-]+)\]\s*(.+?)\s*$/u
+
+/** 列表形态活跃条目：`- **[YYYY-MM-DD] [type] 标题**：正文` 或 `...** → [详见/已迁移至] target`。 */
+const LIST_DATE_TYPE_RE = /^[-*]\s+\*\*\[(\d{4}-\d{2}-\d{2})\]\s*\[([\w-]+)\]\s*(.+?)\*\*(?:\s*[：:]\s*(.*)|\s*→\s*(?:(?:详见|已迁移至)\s*)?(.+))?$/u
+
+/** 摘要行（新格式）：`- **[type-id]** 标题 [→ 详见/已迁移至 target]`。 */
+const TYPE_ID_SUMMARY_RE = /^[-*]\s+\*\*\[([^\]]+)\]\*\*\s+(.+?)\s*(?:→\s*(?:详见|已迁移至)\s*(.+?))?\s*$/u
+
+/** 疑似条目探测（宽口径）：行内含 `[YYYY-MM-DD]` 日期 token。 */
+const SUSPECT_LINE_RE = /\[\d{4}-\d{2}-\d{2}\]/u
+
 // 类型 → 推荐迁移目标（dependfix docs 目录结构，见 session-wisdom-distillation.md §3.1）
 const TYPE_MIGRATION_TARGETS = {
     bug: '`docs/design/governance/` 对应治理文档',
     pattern: '`docs/standards/` 对应规范文档',
-    decision: '`docs/design/packages/` 或 `docs/design/governance/`',
+    decision: '`docs/design/modules/` 或 `docs/design/governance/`',
     env: '`docs/guide/tech-stack.md` 或 `docs/guide/ai-development.md`',
     test: '`docs/standards/testing.md`',
     baseline: '`docs/research/`',
@@ -116,14 +140,15 @@ export function parseWisdom(content) {
             currentSection = 'active'
         }
 
-        // Active 小节中 keep 条目（`### N.` 行）与摘要行（`- [date]` 列表前缀 / `- **[type-N]**` 新格式）需可达
-        if (currentDate === null && !trimmed.startsWith('### ') && !/^[-*]?\s*\[/u.test(trimmed) && !/^[-*]\s+\*\*\[/u.test(trimmed)) {
+        // Active 小节中 keep 条目（`### N.` 行）与摘要行（`- [date]` 列表前缀 / `- **[type-N]**` 新格式）需可达；
+        // 已进入某个条目（`currentEntry` 非空）时不再过滤——`- ` 行是其正文（见末段收集分支）
+        if (!currentEntry && currentDate === null && !trimmed.startsWith('### ') && !/^[-*]?\s*\[/u.test(trimmed) && !/^[-*]\s+\*\*\[/u.test(trimmed)) {
             continue
         }
 
         // 蒸馏摘要行：[YYYY-MM-DD] [type] 摘要 → 详见/已迁移至 ...
         // 允许可选的 `- ` 列表前缀（markdown 常见写法）
-        const distilledMatch = trimmed.match(/^[-*]?\s*\[(\d{4}-\d{2}-\d{2})\]\s*\[(\w+)\]\s*(.+?)(?:→\s*(?:详见|已迁移至)\s*(.+))?$/u)
+        const distilledMatch = trimmed.match(DISTILLED_LINE_RE)
         if (distilledMatch) {
             flushEntry()
             entries.push({
@@ -138,11 +163,44 @@ export function parseWisdom(content) {
             continue
         }
 
+        // 活跃条目标题形态（本仓 wisdom.md 实际写法）：`### [YYYY-MM-DD] [type] 标题`
+        // —— 其后的 `- ` 正文行由下方「条目内容行」分支收进 lines
+        const headingEntryMatch = trimmed.match(HEADING_ENTRY_RE)
+        if (headingEntryMatch) {
+            flushEntry()
+            currentEntry = {
+                date: headingEntryMatch[1],
+                type: headingEntryMatch[2].split(/[-\s]/)[0],
+                title: headingEntryMatch[3],
+                target: null,
+                isDistilled: currentSection === 'historical',
+                lines: [],
+                source: headingEntryMatch[2],
+            }
+            continue
+        }
+
+        // 列表形态：`- **[YYYY-MM-DD] [type] 标题**：正文`（可选 `→ 详见/已迁移至 <target>`）
+        const listDateTypeMatch = trimmed.match(LIST_DATE_TYPE_RE)
+        if (listDateTypeMatch) {
+            flushEntry()
+            entries.push({
+                date: listDateTypeMatch[1],
+                type: listDateTypeMatch[2].split(/[-\s]/)[0],
+                title: listDateTypeMatch[3],
+                target: listDateTypeMatch[5] ?? null,
+                isDistilled: currentSection === 'historical',
+                lines: listDateTypeMatch[4] ? [`- ${listDateTypeMatch[4]}`] : [],
+                source: listDateTypeMatch[2],
+            })
+            continue
+        }
+
         // 当前条目摘要行（新格式）：- **[type-id]** 标题 → 详见/已迁移至 docs/...
         // 例：- **[pattern-W6]** `JSON.parse(x) as RunResult` 不做运行时校验 → 详见 [docs/standards/testing.md §2](../docs/standards/testing.md#2-测试设计原则)
         // type-id 允许含 `/`（如 `practice-B1 实战`/`pattern-FsAdapter mock`/`flow-audit 阈值`/`pattern-文档事实校验` 等）
         // type 部分（取首段 - 之前）作为分类键
-        const newFormatMatch = trimmed.match(/^[-*]\s+\*\*\[([^\]]+)\]\*\*\s+(.+?)(?:→\s*(?:详见|已迁移至)\s*(.+?))?$/u)
+        const newFormatMatch = trimmed.match(TYPE_ID_SUMMARY_RE)
         if (newFormatMatch) {
             flushEntry()
             const typePart = newFormatMatch[1].split(/[-\s]/)[0]
@@ -193,6 +251,55 @@ export function parseWisdom(content) {
     return entries
 }
 
+/**
+ * 探测**活跃区**的「疑似条目」行（宽口径，仅用于假阴性告警，不改变解析结果）。
+ *
+ * 判定：活跃区中行内含 `[YYYY-MM-DD]` 日期 token（不额外要求类型括号），**且不被任一可接受
+ * 形态的条目正则命中**。目的是让「格式漂移 → `--check` 静默输出 0 条」无法通过
+ * （2026-10-13 实测：wisdom.md 用 `### [日期] [类型] 标题` 写法而解析器只认摘要行形态
+ * → `0 active entries`）。历史区（`## 已蒸馏条目`）的条目形态不在「活跃计数」告警面内，故不计入。
+ */
+export function findSuspectedEntries(content) {
+    const suspects = []
+    let section = null
+    for (const [index, raw] of content.split(/\r?\n/u).entries()) {
+        const line = raw.trim()
+        const sectionMatch = line.match(/^##\s+(.+)$/u)
+        if (sectionMatch) {
+            const detected = classifySection(sectionMatch[1])
+            if (detected) {
+                section = detected
+                continue
+            }
+        }
+        if ((section ?? 'active') !== 'active') {
+            continue
+        }
+        if (!SUSPECT_LINE_RE.test(line)) {
+            continue
+        }
+        if (DISTILLED_LINE_RE.test(line) || HEADING_ENTRY_RE.test(line) || LIST_DATE_TYPE_RE.test(line)) {
+            continue
+        }
+        suspects.push({ line: index + 1, text: line })
+    }
+    return suspects
+}
+
+/** 输出「疑似条目」告警（stderr；stdout 契约保持可被 hook 无脑解析）。 */
+export function warnSuspectedEntries(suspects) {
+    if (suspects.length === 0) {
+        return
+    }
+    console.error(
+        `[distill-wisdom] 警告：解析到 0 条活跃条目，但文件中存在 ${suspects.length} 处疑似条目行`
+        + `（格式未被识别，计数可能失真）——请核对 .session/wisdom.md 与蒸馏机制文档 §6 的格式约定：`,
+    )
+    for (const suspect of suspects.slice(0, 10)) {
+        console.error(`  - L${suspect.line}: ${suspect.text}`)
+    }
+}
+
 export async function main() {
     const args = process.argv.slice(2)
     const flags = {
@@ -221,13 +328,21 @@ export async function main() {
     const parsed = parseWisdom(wisdomContent)
     const activeEntries = parsed.filter((e) => !e.isDistilled)
     const distilledEntries = parsed.filter((e) => e.isDistilled)
+    // 假阴性防护：解析到 0 条但文件明显含条目行 → 显式告警（不改退出码契约，见蒸馏机制文档 §6）
+    const suspectedEntries = activeEntries.length === 0 ? findSuspectedEntries(wisdomContent) : []
 
     // --check 模式：仅检查活跃条目数
     if (flags.check) {
         const count = activeEntries.length
         const status = count >= flags.threshold ? 'WISDOM_NEEDS_DISTILL' : 'WISDOM_OK'
         console.log(`${status}: ${count} active entries (threshold=${flags.threshold})`)
+        if (suspectedEntries.length > 0) {
+            // 走 stderr：stdout 契约（WISDOM_OK / WISDOM_NEEDS_DISTILL）保持可被 hook 无脑解析
+            warnSuspectedEntries(suspectedEntries)
+        }
         process.exit(0)
+        // 测试环境 process.exit 被 mock 时不会真的终止；用 return 避免 fall-through 到报告路径
+        return
     }
 
     // 构造报告
@@ -310,6 +425,7 @@ export async function main() {
 
     const report = reportParts.join('\n')
     console.log(report)
+    warnSuspectedEntries(suspectedEntries)
 }
 
 if (process.argv[1] && !process.env.VITEST && import.meta.url === pathToFileURL(process.argv[1]).href) {

@@ -1,26 +1,5 @@
-import Aura from '@primeuix/themes/aura'
-import { definePreset } from '@primeuix/themes'
 import { parseDomainList } from './server/utils/email-domain'
 import { localeDetectorFile, nuxtI18n } from './i18n/nuxt-i18n-config'
-
-// 自定义 PrimeVue 主题预设：语义主色（青灰）跟随明暗模式
-const DependfixPreset = definePreset(Aura, {
-    semantic: {
-        primary: {
-            '50': '#f0fdfa',
-            '100': '#ccfbf1',
-            '200': '#99f6e4',
-            '300': '#5eead4',
-            '400': '#2dd4bf',
-            '500': '#14b8a6',
-            '600': '#0d9488',
-            '700': '#0f766e',
-            '800': '#115e59',
-            '900': '#134e4a',
-            '950': '#042f2e',
-        },
-    },
-})
 
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
@@ -51,9 +30,32 @@ export default defineNuxtConfig({
         },
     },
     modules: [
-        '@primevue/nuxt-module',
+        'caomei-ui/nuxt',
         '@nuxtjs/i18n',
     ],
+    // caomei-ui 主题接线：模块的 `theme` 只生成一条跨明暗的 `:root` 声明，
+    // 因此这里只声明跨主题稳定的 token（实底色 / 亮色档）；
+    // 随明暗自适应的 token（primary / bg / text / border）暗色档见 app/assets/styles/_caomei-tokens.scss。
+    caomeiUI: {
+        prefix: 'Caomei',
+        darkMode: 'class',
+        theme: {
+            // teal-600：soft 底 / 文字 / 边框强调（与 `_variables.scss` 的 `$color-primary-dark` 对齐）
+            primary: '#0d9488',
+            // teal-700：实底背景色，配 `--caomei-color-on-solid`（白）达 AA 4.5:1；
+            // 该 token 跨明暗稳定，不随暗色档变化
+            'primary-solid': '#0f766e',
+            // 自适应主色作底时的前景色：库默认亮色档为白（配 #0d9488 仅 3.74:1 < AA），
+            // 改深色前景后亮色档 5.25:1 达标；暗色档主色为 #5eead4（亮青），库默认前景本就是
+            // #0b0b0d，故该跨明暗单值不会造成暗色回归
+            'primary-foreground': '#0b0b0d',
+            bg: '#fff',
+            'bg-elevated': '#f8fafc',
+            text: '#334155',
+            'text-muted': '#94a3b8',
+            border: '#e2e8f0',
+        },
+    },
     // 国际化：单点声明见 i18n/i18n.config.ts（locales / strategy / detectBrowserLanguage / detector 路径）
     i18n: {
         ...nuxtI18n,
@@ -61,25 +63,15 @@ export default defineNuxtConfig({
         experimental: { localeDetector: localeDetectorFile },
     },
     css: [
-        'primeicons/primeicons.css',
         '@/assets/styles/main.scss',
     ],
-    primevue: {
-        options: {
-            theme: {
-                preset: DependfixPreset,
-                options: {
-                    darkModeSelector: '.dark',
-                    cssLayer: {
-                        name: 'primevue',
-                        order: 'theme, base, primevue',
-                    },
-                },
-            },
-        },
-    },
     runtimeConfig: {
         // 服务端私有配置（NUXT_ 前缀环境变量可覆盖）
+        // 部署产物版本戳（构建期 Docker ARG → 运行时 NUXT_BUILD_VERSION/NUXT_BUILD_COMMIT 覆盖）：
+        // 构建期未注入时缺省 unknown（不阻断启动）；供 GET /api/health 与启动日志核对运行态产物。
+        // 口径见 docs/standards/platform.md §10.7。
+        buildVersion: process.env.NUXT_BUILD_VERSION || 'unknown',
+        buildCommit: process.env.NUXT_BUILD_COMMIT || 'unknown',
         // 构建期默认值仅用于开发；生产必须通过 NUXT_AUTH_SECRET 注入（getAuth 启动校验强制）
         authSecret: process.env.AUTH_SECRET || 'dev-secret-change-me',
         encryptionKey: process.env.NUXT_ENCRYPTION_KEY || '',
@@ -116,14 +108,15 @@ export default defineNuxtConfig({
         oidcTokenUrl: process.env.OIDC_TOKEN_URL || '',
         oidcUserInfoUrl: process.env.OIDC_USERINFO_URL || '',
         oidcScopes: process.env.OIDC_SCOPES || '',
-        // 扫描任务队列（渐进式降级）：REDIS_URL 可用时异步队列；不可用自动降级同步
+        // 扫描任务队列（渐进式降级，含消费者维度）：Redis 可用且存在消费者时才异步；否则自动降级同步
         redisUrl: process.env.REDIS_URL || 'redis://127.0.0.1:6379',
-        // auto（默认）：Redis 探测决定 async/sync；true：强制队列（不可用降级同步 warn）；false：强制同步
+        // auto（默认）：Redis 可用且本进程消费队列（inProcessWorker）才 async，否则 sync；
+        // true：强制异步（Redis 不可用降级同步 + warn）；false：强制同步
         queueEnabled: process.env.QUEUE_ENABLED || 'auto',
         // 失败重试：次数 + 指数退避起点 ms（BullMQ backoff）
         queueJobRetries: process.env.QUEUE_JOB_RETRIES || '',
         queueBackoffMs: process.env.QUEUE_BACKOFF_MS || '',
-        // 单容器部署：Nuxt 进程内消费队列（无需独立 worker 进程）
+        // 单容器部署：Nuxt 进程内消费队列（当前阶段唯一消费者；auto 模式下 false 会降级同步）
         inProcessWorker: process.env.IN_PROCESS_WORKER === 'true',
         // e2e/fixtures 端点放行开关（hard requirement：platform.md §3.6 + security.md §2.1.4）：
         // 生产构建默认 false（NUXT_E2E_FIXTURES_ALLOWED 未设）；仅 e2e webServer 启动时显式开启。
@@ -160,15 +153,6 @@ export default defineNuxtConfig({
         },
     },
     vite: {
-        resolve: {
-            dedupe: [
-                'primevue',
-                '@primevue/core',
-                '@primeuix/styled',
-                '@primeuix/styles',
-                '@primeuix/themes',
-            ],
-        },
         css: {
             preprocessorOptions: {
                 scss: {

@@ -30,6 +30,29 @@ describe('parseCliArgs', () => {
         ).toThrowError(/Invalid --upgrade-groups entry/)
     })
 
+    it('parses overrideProtect from cli --override-protect', () => {
+        const invocation = parseCliArgs([
+            'fix',
+            '--repo', 'owner/repo-a',
+            '--override-protect', 'owner/*:decode-uri-component;owner/repo-b:left-pad,pkg-a',
+        ])
+
+        expect(invocation.configOverrides.overrideProtect).toEqual({
+            'owner/*': ['decode-uri-component'],
+            'owner/repo-b': ['left-pad', 'pkg-a'],
+        })
+    })
+
+    it('rejects malformed --override-protect entries', () => {
+        expect(() =>
+            parseCliArgs([
+                'fix',
+                '--repo', 'owner/repo-a',
+                '--override-protect', 'missing-colon-here',
+            ]),
+        ).toThrowError(/Invalid --override-protect entry/)
+    })
+
     it('lets cli overrides take precedence over env', () => {
         const invocation = parseCliArgs([
             'fix',
@@ -66,6 +89,14 @@ describe('parseCliArgs', () => {
             codeScanningEnabled: false,
             codeQualityEnabled: false,
             allowMajorUpgrade: false,
+            rollbackGranularity: 'unit',
+            mirrorCiScripts: false,
+            retryFailed: false,
+            onBaselineRed: 'skip',
+            waitPrChecks: false,
+            closeFailedPr: false,
+            prCheckTimeoutMs: 900000,
+            prCheckRunBudgetMs: 1200000,
             maxAlertsPerRepository: 3,
             maxConcurrency: 1,
             maxRetries: 3,
@@ -192,6 +223,13 @@ describe('parseCliArgs', () => {
             .configOverrides.allowMajorUpgrade).toBe(true)
         expect(parseCliArgs(['report-only', '--repo', 'foo/bar', '--no-allow-major-upgrade'])
             .configOverrides.allowMajorUpgrade).toBe(false)
+    })
+
+    it('parses rollback granularity and rejects invalid values', () => {
+        expect(parseCliArgs(['report-only', '--repo', 'foo/bar', '--rollback-granularity', 'REPO'])
+            .configOverrides.rollbackGranularity).toBe('repo')
+        expect(() => parseCliArgs(['report-only', '--repo', 'foo/bar', '--rollback-granularity', 'batch']))
+            .toThrow('--rollback-granularity must be one of: unit, repo')
     })
 
     it('reads toolchainPnpmVersion from env and CLI', () => {

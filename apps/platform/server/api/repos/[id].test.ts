@@ -3,6 +3,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { expectError, makeEvent, setupMemoryDatabase, teardownMemoryDatabase } from '../../../tests/api-helper'
 import reposIdHandler from './[id]'
 import reposIndexHandler from './index'
+import { ensureDatabaseInitialized } from '#server/database'
+import { AuditEvent } from '#server/entities/audit-event'
 
 // todo.md §M16.5 三角色鉴权：mock 改为可重写（默认 admin），三角色相关 case 用 mockRequireRole.mockImplementationOnce 切换
 const { mockRequireAuth, mockRequireRole, mockRequireOrgResource } = vi.hoisted(() => ({
@@ -77,8 +79,12 @@ describe('GET /api/repos/[id]', () => {
         await expectError(callId('PUT', `/api/repos/${id}`, { executorKind: 'nope' }, { id }), 400)
     })
 
-    it('persists sandboxLimits JSON via PUT (M11 T1005-B)', async () => {
-        // M11 T1005-B：仓库级 sandboxLimits 序列化 + 更新语义（undefined=不修改 / null 或 object=更新）
+    it('rejects sandbox executor (entry temporarily disabled)', async () => {
+        await expectError(callId('PUT', `/api/repos/${id}`, { executorKind: 'sandbox' }, { id }), 400)
+    })
+
+    it('persists sandboxLimits JSON via PUT', async () => {
+        // 仓库级 sandboxLimits 序列化 + 更新语义（undefined=不修改 / null 或 object=更新）
         const result = await callId('PUT', `/api/repos/${id}`, { sandboxLimits: { memoryMb: 4096, cpu: 2.0 } }, { id }) as { updated: boolean }
         expect(result).toEqual({ id, updated: true })
 
@@ -101,6 +107,118 @@ describe('GET /api/repos/[id]', () => {
             callId('PUT', `/api/repos/${id}`, { sandboxLimits: { memoryMb: 100000 } }, { id }),
             400,
         )
+    })
+
+    it('rejects PUT with unknown sandboxLimits key (如 gpu) → 400（strict，不静默剥离）', async () => {
+        await expectError(
+            callId('PUT', `/api/repos/${id}`, { sandboxLimits: { memoryMb: 2048, gpu: 1 } }, { id }),
+            400,
+        )
+    })
+
+    it('tags 缺省 = 不修改（其它字段更新不清空既有标签）', async () => {
+        await callId('PUT', `/api/repos/${id}`, { tags: ['prod'] }, { id })
+        await callId('PUT', `/api/repos/${id}`, { note: '仅改备注' }, { id })
+
+        const detail = await callId('GET', `/api/repos/${id}`, undefined, { id }) as { tags: string[] }
+        expect(detail.tags).toEqual(['prod'])
+    })
+
+    it('tags 写入即归一（trim + 去重），读回与写入一致', async () => {
+        const result = await callId('PUT', `/api/repos/${id}`, {
+            tags: [' prod ', 'prod', 'core'],
+        }, { id }) as { updated: boolean }
+        expect(result).toEqual({ id, updated: true })
+
+        const detail = await callId('GET', `/api/repos/${id}`, undefined, { id }) as { tags: string[] }
+        expect(detail.tags).toEqual(['prod', 'core'])
+    })
+
+    it('persists verifyCommands JSON via PUT', async () => {
+        // 仓库级自定义验证命令序列化 + 读取（数组 → JSON 列 → 数组）
+        const result = await callId('PUT', `/api/repos/${id}`, {
+            verifyCommands: ['pnpm install --frozen-lockfile', 'pnpm test'],
+        }, { id }) as { updated: boolean }
+        expect(result).toEqual({ id, updated: true })
+
+        const detail = await callId('GET', `/api/repos/${id}`, undefined, { id }) as Record<string, unknown>
+        expect(detail.verifyCommands).toEqual(['pnpm install --frozen-lockfile', 'pnpm test'])
+    })
+
+    it('clears verifyCommands via PUT (null) → 走引擎默认验证链', async () => {
+        await callId('PUT', `/api/repos/${id}`, { verifyCommands: ['pnpm test'] }, { id })
+        const cleared = await callId('PUT', `/api/repos/${id}`, { verifyCommands: null }, { id }) as { updated: boolean }
+        expect(cleared).toEqual({ id, updated: true })
+
+        const detail = await callId('GET', `/api/repos/${id}`, undefined, { id }) as Record<string, unknown>
+        expect(detail.verifyCommands).toEqual([])
+    })
+
+    it('persists prCheckFocus via PUT（规范化 + 重复保存幂等 + undefined 不修改 + null 清空）', async () => {
+        const focus = {
+            providers: [' Vercel ', 'vercel'],
+            names: [' Test '],
+            kinds: ['check', 'deployment'],
+        }
+        await callId('PUT', `/api/repos/${id}`, { prCheckFocus: focus }, { id })
+
+        const expected = { providers: ['vercel'], names: ['Test'], kinds: ['check', 'deployment'] }
+        const readFocus = async () => {
+            const detail = await callId('GET', `/api/repos/${id}`, undefined, { id }) as Record<string, unknown>
+            return detail.prCheckFocus
+        }
+        expect(await readFocus()).toEqual(expected)
+
+        // 重复保存同一配置 → 结果不变（幂等）
+        await callId('PUT', `/api/repos/${id}`, { prCheckFocus: focus }, { id })
+        expect(await readFocus()).toEqual(expected)
+
+        // 未传该字段 → 不修改
+        await callId('PUT', `/api/repos/${id}`, { note: 'unrelated update' }, { id })
+        expect(await readFocus()).toEqual(expected)
+
+        // null / 三维全空 → 清空（回到未配置）
+        await callId('PUT', `/api/repos/${id}`, { prCheckFocus: { providers: [], names: [], kinds: [] } }, { id })
+        expect(await readFocus()).toBeNull()
+        await callId('PUT', `/api/repos/${id}`, { prCheckFocus: focus }, { id })
+        await callId('PUT', `/api/repos/${id}`, { prCheckFocus: null }, { id })
+        expect(await readFocus()).toBeNull()
+    })
+
+    it('records verify_commands_update audit only when commands actually change', async () => {
+        const ds = await ensureDatabaseInitialized()
+        const auditRepo = ds.getRepository(AuditEvent)
+        const before = await auditRepo.find({ where: { repositoryId: id } })
+
+        // 1) 设置命令 → 记 1 条审计（previous=[] / next=设置值）
+        await callId('PUT', `/api/repos/${id}`, { verifyCommands: ['pnpm test'] }, { id })
+        const afterSet = await auditRepo.find({ where: { repositoryId: id } })
+        expect(afterSet.length).toBe(before.length + 1)
+        const setEvent = afterSet[afterSet.length - 1]!
+        expect(setEvent.type).toBe('verify_commands_update')
+        expect(setEvent.severity).toBe('info')
+        expect(JSON.parse(setEvent.payloadJson!)).toEqual({
+            repository: 'demo/app',
+            previous: [],
+            next: ['pnpm test'],
+        })
+
+        // 2) 同一命令重复提交 → 无实际变化 → 不新增审计
+        await callId('PUT', `/api/repos/${id}`, { verifyCommands: ['pnpm test'] }, { id })
+        // 3) 仅更新其它字段（未触碰 verifyCommands）→ 同样不新增审计
+        await callId('PUT', `/api/repos/${id}`, { note: 'no-op change' }, { id })
+        const afterNoop = await auditRepo.find({ where: { repositoryId: id } })
+        expect(afterNoop.length).toBe(afterSet.length)
+
+        // 4) 改为其他命令 → 再记 1 条（previous / next 为变更前后值）
+        await callId('PUT', `/api/repos/${id}`, { verifyCommands: ['pnpm lint', 'pnpm test'] }, { id })
+        const afterChange = await auditRepo.find({ where: { repositoryId: id } })
+        expect(afterChange.length).toBe(afterNoop.length + 1)
+        expect(JSON.parse(afterChange[afterChange.length - 1]!.payloadJson!)).toEqual({
+            repository: 'demo/app',
+            previous: ['pnpm test'],
+            next: ['pnpm lint', 'pnpm test'],
+        })
     })
 
     it('deletes repository via DELETE', async () => {

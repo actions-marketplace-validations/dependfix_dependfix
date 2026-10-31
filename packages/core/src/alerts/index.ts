@@ -1,6 +1,8 @@
 export type AlertSource = 'dependabot' | 'code-scanning' | 'code-quality' | 'pnpm-audit'
 
-export type AlertSeverity = 'critical' | 'high' | 'medium' | 'low' | 'unknown'
+export const ALERT_SEVERITIES = ['critical', 'high', 'medium', 'low', 'unknown'] as const
+
+export type AlertSeverity = (typeof ALERT_SEVERITIES)[number]
 
 export type FixStrategy = 'upgrade' | 'lock' | 'wait-upstream' | 'manual' | 'override'
 
@@ -45,7 +47,7 @@ export interface NormalizedSecurityAlert {
      */
     suggestion?: string
     /**
-     * 上游告警唯一 ID（M20 新增）。
+     * 上游告警唯一 ID。
      * 平台 ScanResult 用此作为去重键（unique index `(repositoryId, upstreamId)`）。
      * 格式：`${source}:${identifier}`，详见 [`./upstream-id.ts`](./upstream-id.ts)。
      * - dependabot / code-scanning / code-quality：`${source}:${alertNumber|findingNumber}`
@@ -53,23 +55,35 @@ export interface NormalizedSecurityAlert {
      */
     upstreamId: string
     /**
-     * GitHub Security Advisory ID（M23.3 C66-A2 新增）。
+     * GitHub Security Advisory ID。
      * - dependabot：`security_advisory.ghsa_id`
      * - pnpm-audit：`advisory.github_advisory_id`（GitHub Advisory Database 收录时）
      * - code-scanning / code-quality：无此概念（缺省 undefined）
      */
     ghsaId?: string
     /**
-     * CVE ID 列表（M23.3 C66-A2 新增）。
+     * CVE ID 列表。
      * - dependabot：从 `security_advisory.identifiers[]` 提取 type === 'CVE' 列表
      * - pnpm-audit：从 `advisory.cves[]` 字符串数组
      * - code-scanning / code-quality：无此概念（缺省空数组）
      */
     cveIds?: string[]
+    /**
+     * 依赖链路径列表（pnpm-audit `advisories[].findings[].paths[]` 解析）。
+     *
+     * 每项为一条完整依赖链（`>` 分隔，从 workspace root 到 vulnerable package），
+     * 如 `docs>vitepress>@vitejs/plugin-vue>vite`。扁平数组，多 finding 多 path
+     * 统一展开去重。
+     * - pnpm-audit：`findings[].paths[]` 合并去重
+     * - dependabot / code-scanning / code-quality：无此概念（缺省 undefined）
+     *
+     * 用途：路径级 pnpm overrides（`parent>child`）写入依据 + 报告依赖链展示。
+     */
+    dependencyPath?: string[]
 }
 
 /**
- * M20 新增：上游告警 ID 规范化。
+ * 上游告警 ID 规范化。
  * 见 [./upstream-id.ts](./upstream-id.ts)。
  */
 export { normalizeUpstreamId } from './upstream-id'

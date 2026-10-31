@@ -9,6 +9,8 @@
 
 ## All configuration items
 
+> **Scope**: this section covers the **CLI** (`dependfix` command / GitHub Action). The **platform** (`apps/platform`) environment variables (database / auth / queue / executor sandbox / backup / notification, etc.) are listed in the [Platform configuration](#platform-configuration-appsplatform) section at the end.
+
 | Option | Environment variable | Type | Default | Description |
 |:-------|:---------------------|:-----|:--------|:------------|
 | `mode` | `DEPENDFIX_MODE` | `string` | `report-only` | Run mode: `report-only` / `fix` / `fix-and-pr` |
@@ -29,13 +31,15 @@
 | `alertsToken` | `DEPENDFIX_ALERTS_TOKEN` | `string` | — | Dependabot alerts-specific token (optional, minimum-permission fine-grained PAT, only `Dependabot alerts: read`; falls back to `githubToken` if not set. `GITHUB_TOKEN` cannot read Dependabot alerts) |
 | `alertSource` | `DEPENDFIX_ALERTS_SOURCE` | `string` | `github-dependabot` | Alert data source: `github-dependabot` (GitHub Dependabot alerts API) / `pnpm-audit` (local no-token fallback, scans current workspace lockfile; repo resolution priority: explicit `--repo` → git remote → `local` fallback). `pnpm-audit` does not require token, does not support `fix-and-pr` mode or multiple `--repo`. See [pnpm audit fallback design](https://github.com/dependfix/dependfix/blob/master/docs/design/governance/architecture) |
 | `codeScanningEnabled` | `DEPENDFIX_CODE_SCANNING` | `boolean` | `false` | Also fetch Code Scanning alerts (**parallel to** Dependabot, not a fallback; default off, behavior matches M2). When enabled, Dependabot + Code Scanning are fetched in parallel without overwriting; Code Scanning alerts are not auto-fixable by default (A/B/C rule tier per rule). Requires token `security-events: read` (GITHUB_TOKEN default); not available with `pnpm-audit`. See [Code Scanning design](https://github.com/dependfix/dependfix/blob/master/docs/design/governance/architecture) |
-| `allowMajorUpgrade` | **No env channel** (CLI `--allow-major-upgrade` only) | `boolean` | `false` | Explicitly authorize auto-upgrade for cross-line alerts (recommended version crosses major boundary, current line has no fix). Only direct dependencies in root package.json (workspace members keep manual) with single-version lockfile alerts are auto-upgraded across lines; post-upgrade re-verification eliminates brittle instances and forces full verification (install+lint+build) with auto-rollback on failure. Indirect / multi-version alerts stay manual. **Deliberately not exposing `DEPENDFIX_ALLOW_MAJOR_UPGRADE` env** (combined with action.yml not exposing input → GitHub Action structural disable, prevents CI auto-cross-line surprise). See [Quick Start cross-major-upgrade section](../guide/quick-start.md) |
+| `overrideProtect` | `DEPENDFIX_OVERRIDE_PROTECT` | `string` | — | Overrides protection list (**per-repository granularity**): `repo-glob:pkg1,pkg2;repo-glob2:pkg3`. On a hit, dependfix **does not write** the override for that package and records an `OVERRIDE_PROTECTED` audit entry (prevents recurrence of destructive overrides previously removed by hand; evidence: PR #1095). Repository glob semantics match `repo-include/exclude` (a single star does not cross the slash; use a two-segment wildcard for a global fallback). See [override-protect design](https://github.com/dependfix/dependfix/blob/master/docs/design/governance/override-protect-policy.md); the list may also be declared by the target repository in `.github/dependfix.yml` (**central config wins**: once set centrally, the repo declaration is ignored entirely to prevent bypass; see [fixer design §12.7](https://github.com/dependfix/dependfix/blob/master/docs/design/modules/dependency-fixer-records.md)) |
+| `allowMajorUpgrade` | **No env channel** (CLI `--allow-major-upgrade` only) | `boolean` | `false` | Explicitly authorize auto-upgrade for cross-line alerts (recommended version crosses major boundary, current line has no fix). Only direct dependencies in root package.json (workspace members keep manual) with single-version lockfile alerts are auto-upgraded across lines; post-upgrade re-verification eliminates brittle instances and forces full verification (install+lint+build+typecheck+test) with auto-rollback on failure. Indirect / multi-version alerts stay manual. **Deliberately not exposing `DEPENDFIX_ALLOW_MAJOR_UPGRADE` env** (combined with action.yml not exposing input → GitHub Action structural disable, prevents CI auto-cross-line surprise). See [Quick Start cross-major-upgrade section](../guide/quick-start.md) |
 | `maxAlertsPerRepository` | `DEPENDFIX_MAX_ALERTS_PER_REPOSITORY` | `number` | `20` | Max alerts processed per repo |
 | `maxConcurrency` | `DEPENDFIX_MAX_CONCURRENCY` | `number` | `1` | Multi-repo concurrency window (1-16, default 1 conservative sequential). `>1` emits warning (may hit GitHub rate limit); **only `report-only` mode allows concurrency** — `fix` / `fix-and-pr` share single workDir, concurrent writes cause overwrite / rollback race / install contention, config check fail-fast rejects |
 | `maxRetries` | `DEPENDFIX_MAX_RETRIES` | `number` | `3` | GitHub API rate-limit retries (0-10; 0=off). For 429 / primary rate limit (403 + remaining=0) / secondary rate limit (403/429 signatures), exponential backoff (reset header priority, max 30s); permission 403 does not retry |
 | `upgradeGroups` | `DEPENDFIX_UPGRADE_GROUPS` | `Record<string, string[]>` | — | User-explicit dependency groups (overrides auto-grouping), format `name1:pkg1,pkg2;name2:pkg3` (semicolon between groups, colon between group name and packages, comma between packages). Default: auto-grouping — `dependabot.yml groups` → `@types` merge → scope/prefix heuristic → single-package. See [dependency grouping design](https://github.com/dependfix/dependfix/blob/master/docs/design/governance/architecture) |
 | `verbose` | — | `boolean` | `false` | Verbose logging (CLI `--verbose` only) |
-| `commands` | — | `string[]` | — | Custom verification commands (CLI `--commands` only) |
+| `commands` | — | `string[]` | — | Custom verification commands (CLI `--commands` only); **replaces the whole default chain** (no merging) |
+| `rollbackGranularity` | `DEPENDFIX_ROLLBACK_GRANULARITY` | `unit` / `repo` | `unit` | Verification failure rollback granularity: `unit` reverts the latest probe-verified change unit and re-verifies once (preserving earlier units); `repo` keeps repository-level `git reset --hard` as the escape hatch. CLI: `--rollback-granularity` |
 | `history` | — (CLI `--history` only) | `string` | — | Query repo history run summary (read `dependfix-reports/index.json`, reverse chronological, repo-level count), **does not run scan**, no token/repo required; with run flags history takes precedence, others ignored |
 
 ## GitHub auth token permission mapping
@@ -112,3 +116,131 @@
 3. Use a script wrapper that injects env vars
 
 After M4 lands, you can use a JSON / YAML config file (merging order: defaults → file → env vars → CLI flags, with later sources overriding earlier).
+## Platform configuration (apps/platform)
+
+The management platform (`apps/platform`) is configured via env vars injected by compose from `apps/platform/.env`.
+
+- **Quick start (minimal)**: `cp apps/platform/.env.example .env` → set at least `AUTH_SECRET` (+ `NUXT_ENCRYPTION_KEY` when using the credentials feature).
+- **Full variables**: `apps/platform/.env.full.example` (all variables + defaults + sections).
+- **Full deployment steps**: see [Docker deployment](./deployment.md).
+
+> ⚠️ **Injection model (important)**: the default `docker-compose.yml` has **no `env_file`** — it forwards only a whitelist of variables via `${...}` interpolation into the container (**compose name → container name**):
+> `PORT` · `PUID`/`PGID` · `AUTH_SECRET`→`NUXT_AUTH_SECRET` · `DATABASE_PATH` · `DATABASE_MIGRATIONS_RUN` · `NUXT_ENCRYPTION_KEY` · `REGISTRATION_DISABLED`→`NUXT_REGISTRATION_DISABLED` · `NUXT_PUBLIC_BETTER_AUTH_URL` · `NUXT_REDIS_URL` (hard-coded) · `QUEUE_ENABLED`/`QUEUE_JOB_RETRIES`/`QUEUE_BACKOFF_MS`→`NUXT_*` · `QUEUE_WORKER`→`DEPENDFIX_QUEUE_WORKER` · `IN_PROCESS_WORKER`→`NUXT_IN_PROCESS_WORKER` · `PNPM_CONFIG_STORE_DIR` · `LOG_DIR`/`LOG_LEVEL`/`LOGFILES` · `DEPENDFIX_IMAGE`/`DEPENDFIX_BUILD_IMAGE`.
+> Variables **outside** the whitelist below (email / OAuth / OIDC / `AUTH_MODE` / `DATABASE_TYPE|URL|SSL|SYNCHRONIZE` / `BACKUP_*` / `RUN_WORK_ROOT` / `SANDBOX_*` / `DEPENDFIX_AI_*` / `ACTION_STATUS_MONITOR_ENABLED` / notification, etc.) are **not injected by default** — add them to the compose `environment:` (Nuxt runtimeConfig vars need the `NUXT_` prefix) or via `docker run -e`.
+>
+> ⚠️ **Nuxt runtime override prefix**: the platform is a Nuxt app; `runtimeConfig` runtime overrides **only honor the `NUXT_` prefix** — compose var `AUTH_SECRET` → container `NUXT_AUTH_SECRET`; `REGISTRATION_DISABLED` → `NUXT_REGISTRATION_DISABLED`. Build-time-baked env (e.g. `AUTH_MODE`) needs the `NUXT_` prefix at runtime, otherwise it silently falls back to the default. Server vars read directly via `process.env` (`DATABASE_*` / `CLONE_*` / `DEPENDFIX_*`, etc.) are injected under their original names.
+
+### Essential
+
+| Variable (compose / container name) | Required | Default | Description |
+|:---|:---:|:---|:---|
+| `AUTH_SECRET` → `NUXT_AUTH_SECRET` | ✅ prod | `change-me-to-a-random-secret` | better-auth session signing key; set a strong random value in production (`openssl rand -hex 32`) |
+| `NUXT_ENCRYPTION_KEY` | ✅ when using credentials | empty | Credentials AES-256-GCM key (32 random bytes); empty disables the credentials feature |
+| `PORT` | — | `3000` | Platform listen port |
+| `NUXT_PUBLIC_BETTER_AUTH_URL` | recommended (required for reverse proxy / HTTPS) | `http://localhost:3000` | Public URL; OAuth callbacks and better-auth `trustedOrigins` tightening depend on it (falls back to wildcard if unset) |
+| `NUXT_PUBLIC_BASE_URL` | — | empty | Legacy alias (read as a `trustedOrigins` fallback); use `NUXT_PUBLIC_BETTER_AUTH_URL` for new deployments |
+| `NUXT_PUBLIC_DEFAULT_BRANCH` / `DEFAULT_BRANCH` | — | `main` | Default branch for new repos (build-time injected) |
+| `MACHINE_ID` | — | PID % 1024 | Snowflake machine ID (0-1023); set explicitly for multi-instance |
+
+### Database & backup
+
+| Variable | Required | Default | Description |
+|:---|:---:|:---|:---|
+| `DATABASE_PATH` | — | `data/dependfix.sqlite` | SQLite file path (compose injects `/app/data/dependfix.sqlite`) |
+| `DATABASE_TYPE` / `DATABASE_URL` | — | inferred | Non-SQLite backend (PostgreSQL, etc.) |
+| `DATABASE_SSL` / `DATABASE_CHARSET` / `DATABASE_TIMEZONE` / `DATABASE_ENTITY_PREFIX` | — | empty | Connection tuning |
+| `DATABASE_SYNCHRONIZE` | — | `false` | TypeORM auto-sync; ⚠️ forbidden in production ([engineering practice note EP-17](https://github.com/dependfix/dependfix/blob/master/docs/design/governance/engineering-practice-notes.md)) |
+| `DATABASE_MIGRATIONS_RUN` | — | `true` in image | Run pending migrations on startup (fresh DB auto-creates tables) |
+| `DEPENDFIX_MIGRATIONS_ONLY` | — | `false` | Internal: migration-only mode (used by `docker/init-db.sh`) |
+| `BACKUP_SKIP` | — | `false` | Skip startup backup (e2e only) |
+| `BACKUP_RETENTION_COUNT` | — | `5` | Startup backup retention count |
+
+### Authentication & social login
+
+| Variable | Required | Default | Description |
+|:---|:---:|:---|:---|
+| `AUTH_MODE` | — | `public` | Auth mode: `enterprise` (OIDC SSO + email domain allowlist) / `public` (GitHub/Google OAuth + email domain blocklist) |
+| `REGISTRATION_DISABLED` | — | `false` | Disable registration (keep login); set `true` after the first admin registers |
+| `ALLOWED_EMAIL_DOMAINS` | — | empty | Enterprise allowlist (comma-separated); empty disables auto-provisioning |
+| `BLOCKED_EMAIL_DOMAINS` | — | empty | Public blocklist (comma-separated) |
+| `NUXT_PUBLIC_ALLOWED_EMAIL_DOMAINS` | — | empty | Frontend allowlist hint (blocklist not exposed) |
+| `BETTER_AUTH_TRUSTED_ORIGINS` | — | empty | Explicit trustedOrigins list (comma-separated, reverse proxy / multi-domain) |
+| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | — | empty | GitHub OAuth (public mode; enabled only when both are set) |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | — | empty | Google OAuth (public mode; enabled only when both are set) |
+| `OIDC_DISCOVERY_URL` / `OIDC_ISSUER` | — | empty | OIDC SSO (enterprise; enabled when discovery/issuer + clientId + clientSecret are set) |
+| `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | — | empty | OIDC client credentials |
+| `OIDC_AUTHORIZATION_URL` / `OIDC_TOKEN_URL` / `OIDC_USERINFO_URL` / `OIDC_SCOPES` | — | empty / `openid,profile,email` | Manual endpoint overrides for IdPs without discovery |
+
+### Email (SMTP)
+
+| Variable | Required | Default | Description |
+|:---|:---:|:---|:---|
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` | — | empty / `587` | Configuring it enables email verification and password reset; otherwise skipped |
+
+### Scan queue & Redis
+
+| Variable | Required | Default | Description |
+|:---|:---:|:---|:---|
+| `REDIS_URL` | — | `redis://127.0.0.1:6379` | BullMQ queue; async when Redis reachable + version ≥ 5.0 + a consumer exists, otherwise sync. The default compose hard-codes the container's `NUXT_REDIS_URL` to `redis://redis:6379` (built-in redis); this var applies only to custom orchestration / direct process |
+| `QUEUE_ENABLED` | — | `auto` | `auto` / `true` (force async) / `false` (force sync). In the compose whitelist (→ `NUXT_QUEUE_ENABLED`) |
+| `QUEUE_JOB_RETRIES` / `QUEUE_BACKOFF_MS` | — | empty | Job retries / backoff (ms); in the compose whitelist (→ `NUXT_*`) |
+| `QUEUE_WORKER` → `DEPENDFIX_QUEUE_WORKER` | — | compose `1` / entrypoint `0` | Independent worker process consuming the queue (removes BullMQ lock-renewal failures); `0` reverts to single-process. ⚠️ **compose-side name is `QUEUE_WORKER`** |
+| `DEPENDFIX_QUEUE_WORKER_SOCKET` | — | `/tmp/dependfix-queue-worker.sock` | Worker internal socket path (outside the whitelist; container name) |
+| `DEPENDFIX_QUEUE_WORKER_SLOW_RETRY_SECONDS` | — | `300` | Slow-retry interval (seconds, 1-3600; invalid / 0 falls back to 300) after the worker exceeds the consecutive fast-failure limit; restarts are never permanently abandoned. Forwarded by compose |
+| `DEPENDFIX_ROLE` | — | injected per process by the entrypoint (`worker` / `server`) | Process role: `worker` skips HTTP-only plugins (periodic cleanup / build stamp), avoiding duplicated DB queries and log noise; the entrypoint normalizes it to `server` in the single-process form (equivalent to unset: nothing is skipped); unset for direct processes. Outside the whitelist (container-internal); contract: [platform.md §10.6](../../../standards/platform.md#106-队列执行进程隔离独立-worker-进程) |
+| `IN_PROCESS_WORKER` → `NUXT_IN_PROCESS_WORKER` | — | `true` (compose) / `false` (direct process) | In-process worker (sole consumer in single-process deployments); the effective default follows compose forwarding |
+| `STALE_CLEANUP_INTERVAL_MS` | — | `300000` | Orphan task cleanup cadence (ms) |
+| `STALE_CLEANUP_RUNNING_GRACE_MS` | — | `300000` | Grace period (ms, > 0; invalid / 0 falls back to default) after a running run exceeds the execution timeout before it is marked `orphan_run`. Forwarded by compose |
+| `STALE_CLEANUP_PENDING_GRACE_MS` | — | `300000` | Minimum wait (ms, > 0; invalid / 0 falls back to default) before a pending run is considered orphaned when no consumer exists / the job belongs to a terminal run; the no-consumer branch additionally requires a job age ≥ 2× this value. Forwarded by compose |
+
+### Executor / sandbox / scan
+
+| Variable | Required | Default | Description |
+|:---|:---:|:---|:---|
+| `RUN_WORK_ROOT` | — | `data/runs` | Run working root (clone / execution artifacts) |
+| `EXECUTION_TIMEOUT_MS` | — | `1800000` (30 min) | Single-repo execution timeout; the container executor and queue Worker lock duration share one resolver (`resolveExecutionTimeoutMs()`). Out-of-range (< 1 min / > 24 h) or invalid falls back to default |
+| `DEPENDFIX_INSTALL_TIMEOUT_MS` | — | `300000` (5 min) | Install-class command timeout (dependency install and lockfile repair chain share one resolver); out-of-range (< 10 s / > 30 min) or invalid falls back to default. On timeout the engine cancels the run and terminates the child process tree |
+| `CLONE_TIMEOUT_MS` | — | `300000` | git clone timeout (ms) |
+| `CLONE_MAX_RETRIES` | — | `3` | Max clone retries |
+| `PNPM_CONFIG_STORE_DIR` | — | `/app/data/pnpm-store` (derived by the entrypoint) | pnpm store shared by target-repository installs: inside the data volume by default, reused across runs / container recreations. The entrypoint probes writability **as the run identity** (covering read-only mounts); when unusable (read-only / insufficient permissions / not absolute) it warns and falls back to pnpm's default location under `$HOME` (cold install every run; never blocks). A custom path's parent must be traversable by `PUID`/`PGID`, and the store must sit on the same filesystem as `RUN_WORK_ROOT` for hard links. Clean up with `pnpm store prune` (see [pnpm store and dependency cache](./deployment.md#pnpm-store-and-dependency-cache)) |
+| `SANDBOX_RUNTIME` | — | `runc` | Sandbox OCI runtime |
+| `SANDBOX_IMAGE` | — | `dependfix-platform:latest` | Sandbox image |
+| `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` | — | empty | Egress proxy (engine verification phase) |
+| `DEPENDFIX_SUPPRESS_LOCAL_EXECUTION_WARNING` | — | `false` | Suppress the "local non-container execution" security warning (local debugging only) |
+| `ACTION_STATUS_MONITOR_ENABLED` | — | `false` | Dependabot PR-check status monitor master switch; requires a PAT credential and PR activity |
+| `DEPENDFIX_AI_PROVIDER` / `_MODEL` / `_BASE_URL` / `_API_URL` / `_API_KEY` / `_TRIGGER` | — | empty | AI triage config for the engine inside platform scans (injected from org-level AI config) |
+
+> **Resource sizing**: the control plane (UI / API only) needs at least 1 CPU / 1 GB; the default single container / worker that runs installs and verification should have ≥ 2 CPU / 8 GB (4 GB has been verified to OOM). The `[resource]` startup log prints the cgroup / host memory limit and concurrency; below the recommendation it only warns and does not block startup. Run records expose `scan_run.memory_max_bytes` / `peak_rss_bytes` / `oom_killed`; when unavailable they are `NULL` with the reason in `resource_json.degradedReason`. When Redis is unavailable / enqueue fails, the HTTP process degrades to synchronous execution and must also be sized as an execution plane (8 GB). See [Docker deployment → Resource sizing](./deployment.md#resource-sizing).
+
+### Notification
+
+| Variable | Required | Default | Description |
+|:---|:---:|:---|:---|
+| `DEPENDFIX_NOTIFICATION_ENABLED` | — | `true` | Notification master switch; `false` disables all email (including platform incidents) |
+| `DEPENDFIX_NOTIFICATION_RECIPIENT_CAP` | — | `50` | Recipient cap per email |
+| `DEPENDFIX_ENV_ALERT_RECIPIENTS` | — | org admin/org_admin emails | Environment alert email recipients (comma-separated, overrides default) |
+| `DEPENDFIX_WEEKLY_DIGEST_HOUR` | — | `9` | Weekly digest trigger hour (0-23, server timezone; invalid values fall back to 9); requires both organization and personal switches on |
+| `DEPENDFIX_LOCALE` | — | `zh-CN` | Notification email language (`zh-CN` / `en-US`) |
+
+### Logging
+
+| Variable | Required | Default | Description |
+|:---|:---:|:---|:---|
+| `LOG_DIR` | — | `/app/data/logs` (entrypoint derives `$DATA_DIR/logs`) | Process-level log directory (daily rotation, 31-day retention; errors go to `YYYY-MM-DD.errors.log`). Follows the data volume when `DATA_DIR` is customized; use an absolute path for custom values |
+| `LOG_LEVEL` | — | `info` | Log level: `error` / `warn` / `info` / `http` / `verbose` / `debug` / `silly`; filters console and files alike; invalid values fall back to `info` with a warning |
+| `LOGFILES` | — | `true` | Whether to write files (`true/false` · `1/0` · `yes/no` · `on/off`); `false` keeps stdout / stderr only (`docker logs` still works), invalid values fall back to the default with a warning. An unwritable directory falls back to console with a warning |
+
+> Channel split: process-level logs (startup / queue / executor / notification) go through the unified logger into files; per-run engine output stays in `ScanRun.logsJson` via `MemoryLogger` (visible on the console, never duplicated into the log files). Troubleshooting commands and retention are in [Docker deployment → Log files](./deployment.md#log-files).
+
+### Docker / deployment
+
+| Variable | Required | Default | Description |
+|:---|:---:|:---|:---|
+| `PUID` / `PGID` | — | `100` / `101` | Run identity (data volume and `$HOME` ownership); `0` makes the entrypoint fail-closed |
+| `RUN_USER` | — | `dependfix` | Run user name |
+| `DEPENDFIX_ALLOW_ANY_DIR` | — | `0` | Allow chown scope outside `/app` and `/home` (advanced) |
+| `DEPENDFIX_IMAGE` / `DEPENDFIX_BUILD_IMAGE` | — | `caomeiyouren/dependfix:latest` / `:local` | Image selection / local build image name |
+| `DEPENDFIX_USE_LOCAL_BUILD` | — | `0` | Deployment script uses the locally built image |
+| `NUXT_BUILD_VERSION` / `NUXT_BUILD_COMMIT` | — | `unknown` | Deployment artifact version stamp (injected via `--build-arg` at build time, read-only at runtime, verified through `GET /api/health` and the startup log; the same value is recorded as each run's build receipt and shown in run details; usually no need to set on the deploy side) |
+
+> **Internal / test variables** (do not set in production): `NODE_ENV` / `E2E_TEST` / `NUXT_E2E_FIXTURES_ALLOWED` / `AUTH_TRACE` / `CI` — see `apps/platform/.env.full.example` §10. CLI and MCP variables (`DEPENDFIX_GITHUB_TOKEN` / `DEPENDFIX_MCP_REPORT_DIR` / `PNPM_VERSION`, etc.) are covered earlier in this document and in the respective package READMEs.

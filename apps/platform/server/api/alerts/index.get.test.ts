@@ -92,9 +92,9 @@ describe('GET /api/alerts', () => {
     it('returns all alerts with repository context', async () => {
         const list = await call('/api/alerts') as Record<string, unknown>[]
         expect(list).toHaveLength(2)
-        // 不依赖 list[0] 顺序：handler 不传 groupBy 时按 createdAt DESC（后插入排前），
-        // 但 SQLite rowid 排序在 createdAt 同毫秒时不稳定（CI 与本机表现不一致），
-        // 改用 toContainEqual 做集合包含断言（与同 describe 下其他非顺序断言风格一致）
+        // 本用例只验证集合包含（不验证行序）：handler 不传 groupBy 时按 createdAt DESC，
+        // 同毫秒并列现由 result.id DESC 兜底（见文件末「并列排序兜底」describe），
+        // 但集合断言与排序策略解耦，排序口径演进时无需改写本用例
         expect(list).toContainEqual(expect.objectContaining({ repository: 'demo/app', severity: 'high', packageName: 'lodash' }))
         expect(list).toContainEqual(expect.objectContaining({ repository: 'demo/app', severity: 'low', packageName: '' }))
     })
@@ -366,7 +366,7 @@ describe('GET /api/alerts', () => {
             expect(superseded).toBeUndefined()
         })
 
-        it('默认响应包含 M20.3 新增字段（upstreamId / occurrenceCount / firstSeenAt / lastSeenAt / supersededAt）', async () => {
+        it('默认响应包含新增字段（upstreamId / occurrenceCount / firstSeenAt / lastSeenAt / supersededAt）', async () => {
             const list = await call('/api/alerts') as Record<string, unknown>[]
             expect(list.length).toBeGreaterThan(0)
             for (const row of list) {
@@ -380,15 +380,15 @@ describe('GET /api/alerts', () => {
         })
     })
 
-    describe('M20.5 dedupe 参数移除（向后兼容：dedupe=true 静默忽略）', () => {
-        // M20.5 移除 dedupe 参数的处理：
-        // - 后端不再处理 dedupe query（应用层指纹聚合已无意义——M20.3 per-alert 模型）
+    describe('dedupe 参数移除（向后兼容：dedupe=true 静默忽略）', () => {
+        // dedupe 参数移除的处理：
+        // - 后端不再处理 dedupe query（应用层指纹聚合已无意义——per-alert 模型）
         // - dedupe=true 静默忽略（旧前端的兼容请求，不会 400）
         // - 返回全量活跃告警（不再按 fingerprint 聚合）
 
         beforeAll(async () => {
             // 在已有的 lodash (dependabot:1) 基础上追加 lodash 第二次插入
-            // （M20.3 unique index 强制不同 upstreamId；模拟同 packageName 跨次扫描的"实际业务"）
+            // （unique index 强制不同 upstreamId；模拟同 packageName 跨次扫描的"实际业务"）
             const ds = await ensureDatabaseInitialized()
             const run = await ds.getRepository(ScanRun).findOne({ where: { repositoryId } })
             if (!run) {
@@ -417,7 +417,7 @@ describe('GET /api/alerts', () => {
 
         it('dedupe=true 静默忽略，返回全量活跃告警（含重复 lodash）', async () => {
             const list = await call('/api/alerts?dedupe=true') as Record<string, unknown>[]
-            // M20.3 后每行独立告警：活跃告警中含 lodash 两次（demo/app run 下的不同 upstreamId）
+            // per-alert 模型下每行独立告警：活跃告警中含 lodash 两次（demo/app run 下的不同 upstreamId）
             expect(list.length).toBeGreaterThanOrEqual(5)
             // 验证 lodash 出现 2 次（不同 upstreamId，依赖 occurrenceCount 区分）
             const lodashRows = list.filter((a) => a.packageName === 'lodash')
@@ -443,10 +443,11 @@ describe('GET /api/alerts', () => {
 
         it('dependabot 告警：ghsaId 非 null + cveIds 反序列化为数组', async () => {
             // 锁定 fixture 中预置 GHSA 的那条 lodash 行（upstreamId='dependabot:1'）：
-            // 同 describe 下 M20.5 dedupe beforeAll 另插一条 lodash（无 ghsaId），
+            // 同 describe 下 dedupe beforeAll 另插一条 lodash（无 ghsaId），
             // 跨 worker 还可能被其他测试文件（如 stats.get / runs/[id].get / scan-orchestrator）通过
             // globalThis singleton DataSource 注入更多 lodash；按 upstreamId 精确匹配避免依赖
-            // 列表顺序（createdAt DESC 在 SQLite rowid 同毫秒下不稳定，且会被后插入的无 ghsaId 行污染）。
+            // 列表顺序（同毫秒并列现由 result.id DESC 兜底，但会被其它用例后插入的无 ghsaId 行干扰，
+            // 顺序仍不是本用例要锁定的口径）。
             const list = await call('/api/alerts?source=dependabot') as { packageName: string, upstreamId: string, ghsaId: string | null, cveIds: string[] }[]
             const lodashRow = list.find((a) => a.packageName === 'lodash' && a.upstreamId === 'dependabot:1')
             expect(lodashRow).toBeDefined()
@@ -475,6 +476,77 @@ describe('GET /api/alerts', () => {
             const axiosRow = list.find((a) => a.packageName === 'axios')
             expect(axiosRow).toBeDefined()
             expect(axiosRow?.cveIds).toEqual(['CVE-2023-45857', 'CVE-2024-39338'])
+        })
+    })
+
+    describe('并列排序兜底（同 createdAt 行序确定）', () => {
+        // 独立仓库 + 独立 run：不改变其他 describe 的计数断言（如 groupBy=repository 的 3 条）
+        let tieRepositoryId: string
+        const tieIds: string[] = []
+
+        beforeAll(async () => {
+            const ds = await ensureDatabaseInitialized()
+            const created = await reposIndexHandler(makeEvent('POST', '/api/repos', {
+                owner: 'tie',
+                name: 'order',
+                platform: 'github',
+                packageManager: 'pnpm',
+                defaultBranch: 'main',
+                executorKind: 'container',
+            })) as { id: string }
+            tieRepositoryId = created.id
+            const run = await ds.getRepository(ScanRun).save(ds.getRepository(ScanRun).create({
+                repositoryId: tieRepositoryId,
+                mode: 'fix',
+                severityThreshold: 'high',
+                executorKind: 'container',
+                status: 'completed',
+            }))
+            // 三行同毫秒 createdAt + 同 packageName：主排序键全并列，只有主键次键能定序
+            const shared = new Date('2026-07-01T00:00:00.000Z')
+            for (const upstreamId of ['tie:first', 'tie:second', 'tie:third']) {
+                const saved = await ds.getRepository(ScanResult).save(ds.getRepository(ScanResult).create({
+                    scanRunId: run.id,
+                    repositoryId: run.repositoryId,
+                    upstreamId,
+                    source: 'dependabot',
+                    severity: 'high',
+                    packageName: 'pinned-same-package',
+                    manifestPath: 'package.json',
+                    ruleId: null,
+                    summary: '并列排序用例',
+                    fixable: true,
+                    fixStrategy: 'upgrade',
+                    fixStatus: 'pending',
+                    firstSeenAt: shared,
+                    lastSeenAt: shared,
+                    occurrenceCount: 1,
+                    createdAt: shared,
+                    supersededAt: null,
+                    ghsaId: null,
+                    cveIds: null,
+                }))
+                tieIds.push(saved.id)
+            }
+        })
+
+        it('同一 createdAt 的多行：两次查询行序一致，且按主键 DESC', async () => {
+            const first = await call(`/api/alerts?repositoryId=${tieRepositoryId}`) as { id: string }[]
+            const second = await call(`/api/alerts?repositoryId=${tieRepositoryId}`) as { id: string }[]
+
+            expect(first).toHaveLength(3)
+            expect(first.map((row) => row.id)).toEqual(second.map((row) => row.id))
+            expect(first.map((row) => row.id)).toEqual([...tieIds].sort().reverse())
+        })
+
+        it('groupBy=package 同包并列同样确定（packageName ASC + 主键 DESC）', async () => {
+            const list = await call(`/api/alerts?groupBy=package&repositoryId=${tieRepositoryId}`) as { id: string }[]
+            expect(list.map((row) => row.id)).toEqual([...tieIds].sort().reverse())
+        })
+
+        it('groupBy=repository 同 repo 同包并列同样确定（owner/name/package 后补主键 DESC）', async () => {
+            const list = await call(`/api/alerts?groupBy=repository&repositoryId=${tieRepositoryId}`) as { id: string }[]
+            expect(list.map((row) => row.id)).toEqual([...tieIds].sort().reverse())
         })
     })
 })

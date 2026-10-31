@@ -5,14 +5,21 @@
  *
  * 终态兜底（本服务内收敛）：
  * - 空批次（无目标仓库）：立即 completed + 零值 summary，避免永久 running
- * - async 全部入队失败：直接 failed（轮询聚合只产出 completed，需在此兜底 failed）
- * - 单仓库入队失败：跳过继续（不中断批次），终态由轮询聚合收敛
- * - 其余终态：由轮询聚合（GET /api/batch-runs/[id] 实时聚合写回）收敛
+ * - async 全部入队失败：直接 failed（聚合只产出 completed，需在此兜底 failed）
+ * - 单仓库入队失败：跳过继续（不中断批次），终态由聚合收敛
+ * - sync 模式串行结束：立即聚合终态化（本文件内）
+ * - async 其余终态：由周期兜底对账（batch-reconciler.ts）+ 详情实时聚合收敛
  */
+import { In } from 'typeorm'
 import { getQueueService } from '../queue/queue.service'
 import { SCAN_JOB_PRIORITY } from '../queue/queue-mode'
+import { enqueueScanJob } from '../scan-trigger.service'
 import { createPendingScanRun, runScanForRepository, type ScanRequest } from '../scan-orchestrator.service'
-import { EMPTY_BATCH_SUMMARY } from './batch-aggregate'
+import { applyFailureClassification } from '../run-failure-classify'
+import { notifyBatchTerminal } from '../notification/batch-notification.service'
+import { aggregateScanRuns, EMPTY_BATCH_SUMMARY } from './batch-aggregate'
+import { persistBatchAggregation, persistBatchFailedIfRunning } from './batch-writeback'
+import { ScanResult } from '#server/entities/scan-result'
 import { ScanRun } from '#server/entities/scan-run'
 import { BatchRun, type BatchRunSource } from '#server/entities/batch-run'
 import { ensureDatabaseInitialized } from '#server/database'
@@ -28,6 +35,8 @@ export interface ExecuteBatchInput {
     request: ScanRequest
     /** 当前组织 id（BatchRun 归属；权限隔离由调用方守卫） */
     organizationId: string
+    /** 手动批量触发者；定时 / 系统触发为 undefined */
+    triggeredByUserId?: string
 }
 
 export interface ExecuteBatchResult {
@@ -47,6 +56,7 @@ export const executeBatchRun = async (input: ExecuteBatchInput): Promise<Execute
         repositoryCount: input.repositoryIds.length,
         status: 'running',
         organizationId: input.organizationId,
+        triggeredByUserId: input.triggeredByUserId ?? null,
     }))
 
     // 空批次终态兜底：无目标仓库（如 tag 策略无匹配仓库）→ 立即 completed，避免永久 running
@@ -55,6 +65,9 @@ export const executeBatchRun = async (input: ExecuteBatchInput): Promise<Execute
         batchRun.finishedAt = new Date()
         batchRun.summaryJson = JSON.stringify(EMPTY_BATCH_SUMMARY)
         await batchRepo.save(batchRun)
+        void notifyBatchTerminal(batchRun).catch((notifyError) => {
+            console.error('[notification] batch terminal notify failed:', notifyError)
+        })
         return { batchRunId: batchRun.id, repositoryCount: 0 }
     }
 
@@ -67,17 +80,19 @@ export const executeBatchRun = async (input: ExecuteBatchInput): Promise<Execute
         for (const repositoryId of input.repositoryIds) {
             let run: ScanRun | null = null
             try {
-                run = await createPendingScanRun(repositoryId, input.request, { batchRunId: batchRun.id })
-                const { reused } = await queueService.queue.add(repositoryId, input.request, { priority, runId: run.id })
+                run = await createPendingScanRun(repositoryId, input.request, { batchRunId: batchRun.id, triggeredByUserId: input.triggeredByUserId })
+                const { reused } = await enqueueScanJob(queueService.queue, repositoryId, input.request, run, { priority })
                 if (reused) {
                     // 同仓库已有进行中任务（jobId 去重合并）：本次预创建的 pending run 不会被 worker 消费，
                     // 置 failed + duplicate 标记，保证聚合终态收敛（与单仓库 scan.post.ts 语义一致）
                     run.status = 'failed'
                     run.finishedAt = new Date()
-                    run.errorJson = JSON.stringify({
-                        code: 'SCAN_PENDING_MERGED', // M18.x 治理批次 S1：与 ServerErrorCode 联合类型对齐
+                    const mergedFailure = {
+                        code: 'SCAN_PENDING_MERGED', // 与 ServerErrorCode 联合类型对齐
                         message: '该仓库已有进行中的扫描任务，本次触发已合并',
-                    })
+                    }
+                    run.errorJson = JSON.stringify(mergedFailure)
+                    applyFailureClassification(run, { status: 'failed', error: mergedFailure })
                     await ds.getRepository(ScanRun).save(run)
                 } else {
                     enqueued++
@@ -89,7 +104,9 @@ export const executeBatchRun = async (input: ExecuteBatchInput): Promise<Execute
                     // 避免孤儿 pending run 无法被 worker 消费 → 聚合永远 pending → 批次永久 running
                     run.status = 'failed'
                     run.finishedAt = new Date()
-                    run.errorJson = JSON.stringify({ code: 'enqueue_failed', message })
+                    const enqueueFailure = { code: 'enqueue_failed', message }
+                    run.errorJson = JSON.stringify(enqueueFailure)
+                    applyFailureClassification(run, { status: 'failed', error: enqueueFailure })
                     await ds.getRepository(ScanRun).save(run)
                 } else {
                     // pending run 创建失败（如仓库并发删除）：无残留，跳过继续（不中断批次）
@@ -97,16 +114,34 @@ export const executeBatchRun = async (input: ExecuteBatchInput): Promise<Execute
                 }
             }
         }
-        // 全部入队失败 → 批次直接 failed 终态（避免永久 running）
-        if (enqueued === 0) {
-            batchRun.status = 'failed'
-            batchRun.finishedAt = new Date()
-            await batchRepo.save(batchRun)
+        // 全部入队失败 → 批次直接 failed 终态（避免永久 running）；条件写回（乐观锁 = 读取时 running），
+        // 不整行 save，避免把并发详情 GET 已聚合的计数 / summary 覆盖回创建期初值
+        if (enqueued === 0 && await persistBatchFailedIfRunning(batchRepo, batchRun, { finishedAt: new Date() })) {
+            void notifyBatchTerminal(batchRun).catch((notifyError) => {
+                console.error('[notification] batch terminal notify failed:', notifyError)
+            })
         }
     } else {
-        // sync 降级：逐仓库同步串行（runScanForRepository 内部兜底失败为 failed run，不抛错中断批次）
+        // sync 降级：逐仓库同步串行。runScanForRepository 内部把「执行失败」兜底为 failed run；
+        // 但预执行错误（如仓库锁 / 凭据缺失）仍会冒泡中断本循环——批次保持 running，交由周期对账收敛
+        // （零子项 → 孤儿 failed；已建出部分子项 → 按已建子项聚合）。不在此静默吞错，避免掩盖未执行仓库
         for (const repositoryId of input.repositoryIds) {
-            await runScanForRepository(repositoryId, input.request, { batchRunId: batchRun.id })
+            await runScanForRepository(repositoryId, input.request, { batchRunId: batchRun.id, triggeredByUserId: input.triggeredByUserId })
+        }
+        // 串行结束即所有子 run 达终态：立即聚合终态化（不依赖用户查看 / 周期对账）
+        const runs = await ds.getRepository(ScanRun).find({ where: { batchRunId: batchRun.id } })
+        const results = runs.length > 0
+            ? await ds.getRepository(ScanResult).find({ where: { scanRunId: In(runs.map((run) => run.id)) } })
+            : []
+        // 零子项时不在此终结（异常场景交由周期对账按孤儿处理，避免误标 completed）；
+        // 条件写回：并发 admin force-fail 抢先时跳过，不把 failed 覆盖回 completed
+        if (runs.length > 0) {
+            const { persisted } = await persistBatchAggregation(batchRepo, batchRun, aggregateScanRuns(runs, results), runs)
+            if (persisted && batchRun.status !== 'running') {
+                void notifyBatchTerminal(batchRun).catch((notifyError) => {
+                    console.error('[notification] batch terminal notify failed:', notifyError)
+                })
+            }
         }
     }
 

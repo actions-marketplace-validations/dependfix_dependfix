@@ -4,6 +4,16 @@ import {
     type PRCheckSnapshot,
     type PRCheckSyncSource,
 } from './types'
+import {
+    aggregateOverallStatus,
+    dedupeSignalsByLatestRound,
+    deriveWorstConclusion,
+    pickCheckRunId,
+    pickErrorSummary,
+    shouldSkipTerminalPr,
+    summarizeFailureSources,
+} from './build-signals'
+import { filterSignalsByFocus, parsePRCheckFocus, type PRCheckFocus } from '#server/utils/pr-check-focus'
 import { Repository as RepositoryEntity } from '#server/entities/repository'
 import { PRCheck, type PRCheckConclusion } from '#server/entities/pr-check'
 
@@ -17,11 +27,14 @@ import { PRCheck, type PRCheckConclusion } from '#server/entities/pr-check'
  * 核心方法 `pollOnce` 数据流：
  * 1. 拉取目标仓库列表（schedule.selectorKind 解析；MVP 阶段 per-org scope，D6）
  * 2. 对每个仓库：syncSource.fetchSnapshots → 快照数组（PR + check run）
+ * 2b. 按仓库级关注集（`Repository.prCheckFocus`）过滤信号：未配置 = 全量，配置 = 只保留命中项
+ *    （全量信号仍落库；关注面只影响聚合与告警判定）
  * 3. 对每个快照：INSERT/UPDATE PRCheck 表（按 `(repositoryId, prNumber, headSha)` 复合唯一索引幂等）
- * 4. 状态机推断（关键决策 D3）：
- *    - 快照失败（failure / timed_out / action_required）→ alertFiring=true
- *    - 快照成功（success）→ alertFiring=false（自动 ack；acknowledgedAt 留原值）
- *    - 其他（pending / skipped / cancelled 等）→ alertFiring=false
+ * 4. 状态机推断（关键决策 D3 + M43.2b 承接）：
+ *    - 关注面快照失败（conclusion ∈ failure / timed_out / action_required）→ alertFiring=true
+ *    - 关注面聚合成功（`overallStatus === 'success'`）→ alertFiring=false 且**清空** acknowledgedAt /
+ *      acknowledgedByUserId（自动 ack；判定按聚合状态，含 neutral 信号的 PR 亦能清零）
+ *    - 其他（pending / skipped / cancelled 等）→ alertFiring=false（保留既有 ack 记录）
  * 5. lastPolledAt = observedAt
  *
  * 用户 ack 操作（PATCH /api/pr-checks/[id] { alertFiring: false }）由 Phase 3 API 层实现，
@@ -47,7 +60,7 @@ export class ActionStatusMonitor {
     /**
      * 单轮 polling：拉取 target 仓库的所有目标 PR check 状态 → 落库。
      *
-     * @param options.organizationId 组织 id（per-org scope，关键决策 D6）
+     * @param options.organizationId 组织 id（per-org scope）
      * @param options.repositoryIds 限定仓库 id 列表（undefined = 当前组织全部仓库；Phase 2 scheduler 触发时会传入 schedule 解析后的 id 列表）
      * @returns 处理汇总（processed = 落库快照数；errors = 失败快照数）
      */
@@ -62,14 +75,21 @@ export class ActionStatusMonitor {
 
         for (const repo of repos) {
             try {
+                // 终态节流：读取既有行，构造「终态 + HEAD 未变 + 静默窗口内」的跳过集（省三源 API）
+                const knownTerminalHeads = await this.loadTerminalHeadMap(repo.id)
+                // 关注集按仓库解析：null = 未配置（全量告警）；配置变更仅在下一轮 polling 生效
+                const focus = parsePRCheckFocus(repo.prCheckFocus)
                 const snapshots = await this.source.fetchSnapshots({
                     owner: repo.owner,
                     repo: repo.name,
                     repositoryId: repo.id,
+                    knownTerminalHeads,
                 })
                 for (const snapshot of snapshots) {
-                    await this.applyOne(snapshot)
-                    processed += 1
+                    const applied = await this.applyOne(snapshot, focus)
+                    if (applied) {
+                        processed += 1
+                    }
                 }
             } catch (error) {
                 // 单仓失败不影响其他仓库继续 polling（错误隔离 + fail-open）
@@ -85,7 +105,7 @@ export class ActionStatusMonitor {
     }
 
     /**
-     * 加载目标仓库列表（关键决策 D6 per-org scope）：
+     * 加载目标仓库列表（per-org scope）：
      * - 显式传 repositoryIds 时 → 仅监测该列表（schedule explicit 策略解析结果）
      * - 未传时 → 加载当前组织全部仓库（schedule all / organization 策略解析结果）
      */
@@ -104,21 +124,75 @@ export class ActionStatusMonitor {
     }
 
     /**
+     * 构造「终态 + 静默窗口内」跳过集（`prNumber → headSha`）。
+     *
+     * 静默窗口外的终态行**不跳过**——同一 SHA 上可能发生 workflow 重跑 / 迟到写入的部署状态，
+     * 永久跳过会漏掉本特性要捕获的失败场景（口径见 `build-signals.ts` 的 `TERMINAL_REPOLL_QUIET_MS`）。
+     */
+    private async loadTerminalHeadMap(repositoryId: string): Promise<Map<number, string>> {
+        // 同一 PR 可能有多行（不同 HEAD）：按 lastPolledAt 降序取「最新行」作为跳过判定依据，
+        // 避免 find 无 ORDER BY 时的 last-write-wins 不确定（最坏只是漏节流，此处求稳定）
+        const rows = await this.ds.getRepository(PRCheck).find({
+            where: { repositoryId },
+            order: { lastPolledAt: 'DESC' },
+        })
+        const now = new Date()
+        const map = new Map<number, string>()
+        for (const row of rows) {
+            if (map.has(row.prNumber)) {
+                continue
+            }
+            if (shouldSkipTerminalPr(row, now)) {
+                map.set(row.prNumber, row.headSha)
+            }
+        }
+        return map
+    }
+
+    /**
      * 应用单个快照：按 (repositoryId, prNumber, headSha) 复合唯一索引幂等 INSERT/UPDATE。
      *
-     * 状态机推断（关键决策 D3）：
-     * - INSERT 路径：alertFiring = isFailureConclusion(snapshot.conclusion)（失败即 firing）
-     * - UPDATE 路径：alertFiring 严格基于 snapshot.conclusion：
-     *   - 失败 → firing=true（覆盖原值，包括之前用户 ack 的状态）
-     *   - success → firing=false（自动 ack；acknowledgedAt 留原值）
-     *   - 其他 → firing=false
+     * **关注集**：`focus` 非空时，只有命中关注集的信号参与聚合与告警判定
+     * （`overallStatus` / `conclusion` / `failureSources` / `checkRunId` / `errorMessage` / `alertFiring`）；
+     * 未命中信号仍**全量**写入 `signalsJson`（同名收敛已在采集层完成，此处不再折叠）；
+     * `signalsJson` 仍写入**全量信号**（审计面，未命中的信号不丢弃）。命中集合为空时按空集聚合口径
+     * 视为 `success`（关注面没有任何需要告警的信号），但整行照常落库。
+     *
+     * 状态机推断（关键决策与后续承接）：
+     * - INSERT / UPDATE 路径：alertFiring = isFailureConclusion(关注面 conclusion)
+     * - **自动 ack 清空判定按 `overallStatus === 'success'`**（后续承接项）：聚合成功（含
+     *   `neutral` / `skipped` 信号但无失败 / 无 pending）即视为回归成功并清 ack；
+     *   若沿用 `conclusion === 'success'`，含 `neutral` 信号的 PR 将永不清 ack。
      *
      * 注意：用户 ack 操作（alertFiring=false + acknowledgedAt=NOW）**不修改** conclusion；
      * 状态机严格基于 polling 结果，下轮 polling 失败时 alertFiring 会被覆盖回 true。
+     *
+     * @param focus 仓库级关注集（`null` = 未配置 = 现状：全量信号参与判定）
+     * @returns 是否实际落库（`false` = 空信号被守卫跳过，不计入 `processed`）
      */
-    private async applyOne(snapshot: PRCheckSnapshot): Promise<void> {
+    private async applyOne(snapshot: PRCheckSnapshot, focus: PRCheckFocus | null): Promise<boolean> {
+        // 空信号守卫：无信号不落库（`aggregateOverallStatus([])` 为真空真，直接消费会把「无信号」
+        // 误写为聚合 success；见设计稿 §3.7「空集真空真」）。采集层已过滤，此处为接口级防御。
+        // 注意：关注集过滤发生在守卫之后——「有信号但全部未命中」属于关注面空集，应落库并视为 success。
+        if (snapshot.signals.length === 0) {
+            return false
+        }
+
         const repo = this.ds.getRepository(PRCheck)
-        const inferredAlertFiring = isFailureConclusion(snapshot.conclusion)
+        // 关注面信号：未配置（null）时沿用快照原值（与改动前逐字节一致）；已配置时只保留命中项并重新派生。
+        // 无论哪条路径，`signalsJson` 都写入**全量信号**（审计面，未命中的信号不丢弃）。
+        // 关注面内同名多轮收敛：只保留最新一轮（与采集层 `PollingSource` 同口径，见设计稿 §3.10）
+        const focusedSignals = focus ? dedupeSignalsByLatestRound(filterSignalsByFocus(snapshot.signals, focus)) : null
+        const overallStatus = focusedSignals ? aggregateOverallStatus(focusedSignals) : snapshot.overallStatus
+        const conclusion = focusedSignals ? deriveWorstConclusion(focusedSignals) : snapshot.conclusion
+        const inferredAlertFiring = isFailureConclusion(conclusion)
+        const signalsJson = JSON.stringify(snapshot.signals)
+        const failureSourcesJson = JSON.stringify(
+            summarizeFailureSources(focusedSignals ?? snapshot.signals),
+        )
+        // 代表字段（checkRunId / errorMessage）与告警同源：已配置时取关注面，未配置时沿用快照派生值
+        const checkRunId = focusedSignals ? pickCheckRunId(focusedSignals) : snapshot.checkRunId
+        const errorMessage = focusedSignals ? pickErrorSummary(focusedSignals) : snapshot.errorMessage
 
         const existing = await repo.findOne({
             where: {
@@ -129,16 +203,17 @@ export class ActionStatusMonitor {
         })
 
         if (existing) {
-            existing.conclusion = snapshot.conclusion
-            existing.checkRunId = snapshot.checkRunId
+            existing.conclusion = conclusion
+            existing.signalsJson = signalsJson
+            existing.overallStatus = overallStatus
+            existing.failureSourcesJson = failureSourcesJson
+            existing.checkRunId = checkRunId
             existing.detailsUrl = snapshot.detailsUrl
-            existing.errorMessage = snapshot.errorMessage
+            existing.errorMessage = errorMessage
             existing.authorLogin = snapshot.authorLogin
             existing.alertFiring = inferredAlertFiring
-            // 回归 success → 自动 ack（清空 acknowledgedAt / acknowledgedByUserId；
-            // 即使本轮 polling 前 alertFiring=true，回归 success 后 alertFiring 已被设为 false，
-            // 状态机语义「用户 ack 时间随回归 success 自动清零」成立）
-            if (snapshot.conclusion === 'success') {
+            // 聚合回归成功 → 自动 ack（清空 acknowledgedAt / acknowledgedByUserId）
+            if (overallStatus === 'success') {
                 existing.acknowledgedAt = null
                 existing.acknowledgedByUserId = null
             }
@@ -150,16 +225,20 @@ export class ActionStatusMonitor {
             row.prNumber = snapshot.prNumber
             row.headSha = snapshot.headSha
             row.authorLogin = snapshot.authorLogin
-            row.conclusion = snapshot.conclusion
-            row.checkRunId = snapshot.checkRunId
+            row.conclusion = conclusion
+            row.signalsJson = signalsJson
+            row.overallStatus = overallStatus
+            row.failureSourcesJson = failureSourcesJson
+            row.checkRunId = checkRunId
             row.detailsUrl = snapshot.detailsUrl
-            row.errorMessage = snapshot.errorMessage
+            row.errorMessage = errorMessage
             row.alertFiring = inferredAlertFiring
             row.acknowledgedAt = null
             row.acknowledgedByUserId = null
             row.lastPolledAt = snapshot.observedAt
             await repo.save(row)
         }
+        return true
     }
 }
 

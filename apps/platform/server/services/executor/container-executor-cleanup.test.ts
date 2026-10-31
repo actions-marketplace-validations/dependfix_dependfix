@@ -127,8 +127,11 @@ describe('cleanupRemoteBranch', () => {
         expect(bin).toBe('git')
         expect(args).toEqual([
             '-c',
+            'push.gpgSign=false',
+            '-c',
             expect.stringContaining('http.extraheader=Authorization: basic '),
             'push',
+            '--no-verify',
             'origin',
             '--delete',
             'dependfix/auto-fix-abc12345',
@@ -152,6 +155,7 @@ describe('cleanupRemoteBranch', () => {
 
         const callArgs = childProcessMock.execFile.mock.calls[0] as unknown as [string, string[]]
         const [, args] = callArgs
-        expect(args).toEqual(['push', 'origin', '--delete', 'dependfix/auto-fix-abc12345'])
+        // hooks 隔离：`push --no-verify` 跳过被修复仓库 pre-push（与 commit 侧同一事实源）
+        expect(args).toEqual(['-c', 'push.gpgSign=false', 'push', '--no-verify', 'origin', '--delete', 'dependfix/auto-fix-abc12345'])
     })
 })

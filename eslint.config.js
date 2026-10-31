@@ -98,9 +98,11 @@ const strictRules = {
     '@typescript-eslint/no-unnecessary-type-conversion': [1],
 }
 
-// Nuxt 平台（apps/platform）：使用平台自己的 tsconfig.json（extends .nuxt/tsconfig.json 并显式 include server/**/*）。
-// 不能直接用 .nuxt/tsconfig.json：其 include 只有 `../server` + `../server/*`（不递归），
-// 深层目录（如 server/services/executor/）不在项目中会触发 "file was not found in any project"。
+// Nuxt 平台（apps/platform）：使用平台自己的 tsconfig.json（extends .nuxt/tsconfig.json，
+// 显式 include 各目录并覆盖 exclude）。
+// 不能直接用 .nuxt/tsconfig.json：Nuxt 4.6 起该文件拆分为 app / server / shared / node 多份配置，
+// exclude 含 `../server/**/*`；平台 tsconfig 需覆盖 exclude 才能把 server 深层目录纳入 type-checked lint
+// （否则报 "file was not found in any project"）。
 const nuxtTsconfig = './apps/platform/tsconfig.json'
 
 export default defineConfig([
@@ -118,6 +120,11 @@ export default defineConfig([
             'apps/platform/playwright-report/**',
             'apps/platform/test-results/**',
             'apps/platform/blob-report/**',
+            // VitePress 生成物（同样因 flat config 不读 .gitignore 需显式排除）：
+            // - `cache/**`：`vitepress dev` 产出的 Vite 依赖预构建缓存（本次复现来源）
+            // - `.temp/**`：`vitepress build` 的 SSR 中间产物目录（正常结束会被 rimraf，DEBUG 模式保留）
+            'docs/.vitepress/cache/**',
+            'docs/.vitepress/.temp/**',
         ],
     },
     {
@@ -165,7 +172,9 @@ export default defineConfig([
         // Nuxt 平台（apps/platform）：TS 使用平台 tsconfig（extends .nuxt/tsconfig.json 并 include server/**/*）
         // 规则采用 momei 的 Nuxt 策略：no-unsafe-* 系列关闭（Nuxt/TypeORM/better-auth 生态类型复杂，
         // 且 workspace 包未构建（无 dist）时类型解析失败会触发 unsafe 警告爆炸，渐进收紧）。
-        // 与 apps/platform/eslint.config.js（eslint-config-cmyr/nuxt 为基础）保持同一语义。
+        // 与 apps/platform/eslint.config.js 并非同一规则集：后者额外启用 strictTypeChecked / stylistic
+        // （array-type、consistent-type-definitions、vue/object-curly-spacing 等），且两套配置各自可执行。
+        // CI 门禁（pnpm run lint:check）会依次跑根配置与平台配置，改动平台文件须同时满足两者。
         files: ['apps/platform/**/*.{ts,tsx,mts,cts}'],
         // nuxt.config.ts 使用 Nuxt auto-import（defineNuxtConfig），须用 .nuxt/tsconfig.json 单独校验；
         // i18n/localeDetector.ts 被 @nuxtjs/i18n 排除出平台 tsconfig（nitro tsconfig 兜底类型检查），

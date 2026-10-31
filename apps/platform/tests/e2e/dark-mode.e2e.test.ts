@@ -5,7 +5,7 @@ import { waitForHydration } from './helpers/hydration.helper'
  * 暗色模式回归测试（C59 修复防护，见 docs/plan/backlog.md §C59）。
  *
  * 背景：自定义 SCSS 容器（header / body / auth）切到 dark mode 后保持浅色，
- * 与 PrimeVue 组件（DataTable / Dialog / Tag）"半亮半暗"。根因：`_mixins.scss` 的
+ * 与组件库主题（DataTable / Dialog / Tag）"半亮半暗"。根因：`_mixins.scss` 的
  * `@mixin dark-mode` 用 `:global(.dark) &`，这是 CSS Modules 语法，仅在 `<style scoped>`
  * 块内有效；`main.scss` 通过 `nuxt.config.ts:60` 的 `css: [...]` 作为全局 CSS 加载，
  * 没有 scope，编译产物 `:global(.dark) .parent-class` 里的 `:global(.dark)` 不是
@@ -21,7 +21,7 @@ import { waitForHydration } from './helpers/hydration.helper'
  */
 test.use({ storageState: 'tests/e2e/.auth/admin.json' })
 
-test.describe('暗色模式（C59 修复防护）', () => {
+test.describe('暗色模式（修复防护）', () => {
     test('切换 dark mode 后，自定义 SCSS 容器（html / body / header）跟随 .dark 切换', async ({ page, context }) => {
         page.on('console', (msg) => {
             if (msg.type() === 'error') {
@@ -38,7 +38,7 @@ test.describe('暗色模式（C59 修复防护）', () => {
         // 2) 进入 /repos，等待 hydration + DataTable 渲染
         await page.goto('/repos')
         await waitForHydration(page)
-        await expect(page.locator('.p-datatable')).toBeVisible({ timeout: 15000 })
+        await expect(page.locator('.caomei-data-table')).toBeVisible({ timeout: 15000 })
 
         // 3) 等待 initColorMode 把 .dark 挂到 <html>（同步事件，但需 Vue mount 触发）
         await expect(page.locator('html')).toHaveClass(/dark/, { timeout: 5000 })
@@ -46,7 +46,7 @@ test.describe('暗色模式（C59 修复防护）', () => {
         // 4) 跳过 0.2s 颜色过渡等待（避免 transition 中间态 getComputedStyle 报旧色）
         await page.waitForTimeout(300)
 
-        // 5) 实测自定义 SCSS 容器 computed style（C59 修复前 header/body 是浅色，修复后是深色）
+        // 5) 实测自定义 SCSS 容器 computed style（修复前 header/body 是浅色，修复后是深色）
         const computedBackgrounds = await page.evaluate(() => {
             const html = document.documentElement
             const body = document.body
@@ -61,7 +61,7 @@ test.describe('暗色模式（C59 修复防护）', () => {
             }
         })
 
-        // 关键断言（C59 修复前：html.hasDark=true 但 bodyBackground=rgb(255,255,255)；
+        // 关键断言（修复前：html.hasDark=true 但 bodyBackground=rgb(255,255,255)；
         // 修复后：bodyBackground 必须是深色 #0f172a = rgb(15, 23, 42)）
         expect(computedBackgrounds.htmlHasDark).toBe(true)
         expect(computedBackgrounds.htmlColorScheme).toBe('dark')
@@ -97,5 +97,46 @@ test.describe('暗色模式（C59 修复防护）', () => {
         expect(lightBackgrounds.bodyBackground).toBe('rgb(255, 255, 255)')
         // light mode: header 背景 = #f8fafc
         expect(lightBackgrounds.headerBackground).toBe('rgb(248, 250, 252)')
+    })
+
+    test('暗色模式下仓库表单弹窗（含自定义验证命令输入）随 .dark 切换（docs/standards/platform.md §3.8）', async ({ page, context }) => {
+        await context.addInitScript(() => {
+            localStorage.setItem('dependfix-color-mode', 'dark')
+        })
+
+        await page.goto('/repos')
+        await waitForHydration(page)
+        await expect(page.locator('html')).toHaveClass(/dark/, { timeout: 5000 })
+
+        await page.locator('button:has-text("添加仓库")').click()
+        await expect(page.locator('.caomei-dialog__header')).toContainText('添加仓库', { timeout: 15000 })
+        await expect(page.locator('textarea#verifyCommands')).toBeVisible()
+
+        // 跳过 0.2s 颜色过渡等待（避免 transition 中间态 getComputedStyle 报旧色）
+        await page.waitForTimeout(300)
+
+        const dialogStyles = await page.evaluate(() => {
+            const textarea = document.querySelector('textarea#verifyCommands')
+            const content = document.querySelector('.caomei-dialog__content')
+            return {
+                colorScheme: getComputedStyle(document.documentElement).colorScheme,
+                textareaColor: textarea ? getComputedStyle(textarea).color : null,
+                contentBackground: content ? getComputedStyle(content).backgroundColor : null,
+            }
+        })
+
+        // 断言区分度（mutation 实测：切 light 后三项分别为 light / rgb(248,250,252) / rgb(51,65,85)；背景取自
+        // caomeiUI theme 的 `bg-elevated` = #f8fafc，0.6.0 起弹窗内容容器改用该 token）
+        expect(dialogStyles.colorScheme).toBe('dark')
+        // 弹窗内容容器背景 = 暗色 elevated surface token（caomei-ui 0.6.0 起 dialog content 由 `bg` 改 `bg-elevated`
+        // → #1e293b = rgb(30, 41, 59)），仍显著区别于 light 的近白底（#f8fafc）
+        expect(dialogStyles.contentBackground).toBe('rgb(30, 41, 59)')
+        // 新增的「自定义验证命令」输入文本色跟随暗色 token rgb(241, 245, 249)（非 light 的 rgb(51, 65, 85)）
+        expect(dialogStyles.textareaColor).toBe('rgb(241, 245, 249)')
+
+        await page.screenshot({
+            path: 'test-results/m32-1-repo-form-dark.png',
+            fullPage: false,
+        })
     })
 })

@@ -33,22 +33,42 @@ dependfix is built on the Node.js runtime + TypeScript stack, with the following
 
 | Layer | Language | Runtime | Build tool |
 |:------|:---------|:--------|:-----------|
-| `packages/core` | TypeScript (strict) | Node.js >= 20 (LTS) | tsdown |
-| `packages/engine` | TypeScript (strict) | Node.js >= 20 (LTS) | tsdown |
-| `packages/cli` | TypeScript (strict) | Node.js >= 20 (LTS) | tsdown (ESM only since 0.2.0) |
-| `packages/mcp` | TypeScript (strict) | Node.js >= 20 (LTS) | tsdown |
+| `packages/core` | TypeScript (strict) | Node.js ^22.23.4 \|\| ^24.22.1 | tsdown |
+| `packages/engine` | TypeScript (strict) | Node.js ^22.23.4 \|\| ^24.22.1 | tsdown |
+| `packages/cli` | TypeScript (strict) | Node.js ^22.23.4 \|\| ^24.22.1 | tsdown (ESM only since 0.2.0) |
+| `packages/mcp` | TypeScript (strict) | Node.js ^22.23.4 \|\| ^24.22.1 | tsdown |
 | `packages/skills` | Markdown + YAML frontmatter | N/A (Claude / Copilot / Cursor consumption) | N/A |
-| `apps/platform` | Vue 3 + TypeScript | Node.js >= 20 (LTS) | Nuxt 4 + Vite |
-| `apps/action` | TypeScript | Node.js 20 (GitHub Actions runner) | tsdown |
+| `apps/platform` | Vue 3 + TypeScript | Node.js ^22.23.4 \|\| ^24.22.1 | Nuxt 4 + Vite |
+| `action.yml` (composite, not a package) | YAML | per consumer `actions/setup-node` | N/A |
 
 > **Breaking change (since 0.2.0)**: `dependfix` / `@dependfix/core` are now **pure ESM** (CJS dual-format outputs removed). CLI commands and GitHub Action consumption are unaffected; programmatic consumers should use `import`; `require()` needs Node 22.12+ (native `require(ESM)`). Node 20.x CJS programmatic consumers need dynamic `import()`.
+
+## Platform dependencies (`apps/platform`)
+
+Versions are **not** duplicated here — [`apps/platform/package.json`](../../../../apps/platform/package.json) is the single source of truth; module-type dependencies are wired in `apps/platform/nuxt.config.ts` (`modules`).
+
+| Dependency | Purpose |
+|:-----------|:--------|
+| nuxt | Full-stack framework |
+| vue | UI framework |
+| vue-router | Routing |
+| caomei-ui | In-house UI component library (version pinned exactly; PrimeVue 4 migration completed in M31, upgraded to 0.5.0 in M34.2, to 0.6.0 on 2026-10-11 (0.6.0 upgrade regression completed on 2026-10-12) and to 0.7.0 on 2026-10-25; upgraded to 1.0.0-rc.1 from the `next` channel on 2026-10-31) |
+| @lucide/vue | Icon components (passed through `CaomeiIcon`) |
+| @nuxtjs/i18n | Internationalization |
+| better-auth | Authentication core (SSO / third-party login via `better-auth/plugins` → `genericOAuth`) |
+| typeorm / reflect-metadata | ORM framework + decorator runtime |
+| better-sqlite3 / pg / mysql2 | SQLite (dev/test) / PostgreSQL (production) / MySQL (alternative) |
+| bullmq / ioredis | Task queue + Redis client |
+| zod / lodash-es / winston / winston-daily-rotate-file / nodemailer | Validation / utilities / process-level structured logging (console + daily-rotated local files) / email |
+
+> Only dependencies traceable to `package.json`, `nuxt.config.ts` or source imports are listed; entries without any reference have been removed (Sentry monitoring has been split out of the deferred T705 item into a standalone observability candidate (official SaaS, scheduled after 1.0) and is not adopted yet; the `winston` row is now wired up as the platform process-level log channel (see the [Chinese platform logging design](../../../design/governance/platform-logging.md)); Axiom remote aggregation remains a post-1.0 candidate — see the Chinese third-party observability evaluation; PWA / VueUse / dayjs / class-validator / dompurify are not used).
 
 ## Build & release
 
 dependfix uses **tsdown** (built on Rolldown) as the build tool:
 
 - **Library packages** (`packages/core` / `packages/engine` / `packages/cli` / `packages/mcp`): tsdown builds dual ESM + CJS output (ESM only since 0.2.0) and `.d.ts` type declarations
-- **App packages** (`apps/platform` / `apps/action`): tsdown bundles entry points (single ESM output, no `.d.ts`)
+- **App package** (`apps/platform`): tsdown bundles entry points (single ESM output, no `.d.ts`); the GitHub Action is a root `action.yml` composite, not a package
 - **Smoke test**: after `tsdown` build completes, run `node dist/index.js --help` to verify runtime entry is callable
 
 Release process: see [Release Guide](https://github.com/dependfix/dependfix/blob/master/docs/guide/release.md).
@@ -61,7 +81,7 @@ Release process: see [Release Guide](https://github.com/dependfix/dependfix/blob
 | `apps/platform` server | Vitest + Better-SQLite in-memory | Same as above |
 | `apps/platform` web | Vitest + Vue Test Utils | Same as above |
 | `apps/platform` e2e | Playwright | Critical user flows (5 critical baseline) |
-| `apps/action` smoke | tsx entry + mock outputs | N/A |
+| root `action.yml` (composite) | dogfooded via `uses: ./` in `.github/workflows/security-auto-fix.yml` | N/A |
 
 Coverage report command:
 
@@ -77,13 +97,13 @@ Coverage reports are output to `coverage/` (lcov + html + json formats), uploade
 - **commitlint**: Conventional Commits enforcement, run by husky `commit-msg` hook. Commit format: `<type>(<scope>): <subject>`
 - **lint-staged**: auto-fix staged files (ESLint `--fix` + `lint-md`) before commit
 - **markdownlint**: `lint-md` for `.md` files (project consistency)
-- **check:docs**: `scripts/check-docs.mjs` validates links + VitePress anchors, runs in CI
+- **check:docs**: `scripts/check-docs.mjs` validates local links, link-text section numbers, malformed links, emphasis pairing, site absolute links and archive anchors, runs in CI
 - **i18n:audit**: scripts/i18n/audit-locale-keys.mjs validates zh-CN / en-US key set parity, runs in CI
 - **distill:wisdom**: scripts/distill-wisdom.mjs validates wisdom active entry count <= threshold, runs before session end
 
 ## Dependency management
 
-- **Package manager**: pnpm >= 9 (monorepo workspace)
+- **Package manager**: pnpm (monorepo workspace; version pinned in `package.json` → `packageManager`)
 - **Lockfile**: `pnpm-lock.yaml` committed; CI uses `pnpm install --frozen-lockfile`
 - **Dependency updates**: dependabot auto-creates PRs; dependfix itself is used as the fix tool (self-referential loop with careful audit)
 - **Frozen lockfile handling**: see [Quick Start cross-major-upgrade](../guide/quick-start.md) and `pnpm i --frozen-lockfile` auto-fix design

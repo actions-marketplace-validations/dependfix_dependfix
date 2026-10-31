@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test'
 import { waitForHydration } from './helpers/hydration.helper'
 
 /**
- * env-events 视图冒烟测试（docs/plan/todo.md §C-ENV-CHANGE-ALERT）。
+ * env-events 视图冒烟测试。
  *
  * 覆盖：
  * - viewer 角色访问 /env-events 跳转（导航隐藏但 URL 直访必须 403 重定向）
@@ -29,6 +29,26 @@ test.describe('C-ENV env-events UI', () => {
         await expect(filters).toHaveCount(5)
     })
 
+    test('类型下拉与 audit_event 全量 8 类口径一致（含 container_unavailable / 配置留痕类 / PR 回环类，不含已移除的 docker_daemon_down）', async ({ page }) => {
+        // 必须在 goto 前注册：env-events.vue 在 onMounted 立即调用 fetchEvents()
+        await page.route('**/api/audit-events*', (route) => route.fulfill({
+            status: 200, contentType: 'application/json', body: JSON.stringify([]),
+        }))
+        await page.goto('/env-events')
+        await waitForHydration(page)
+        await page.locator('#type').click()
+        const items = page.locator('.caomei-select__item')
+        await expect(items).toHaveCount(9) // 全部类型 + 8 类
+        const optionsText = (await items.allInnerTexts()).join('\n')
+        expect(optionsText).toContain('容器执行器不可用')
+        expect(optionsText).toContain('AI 配置更新')
+        expect(optionsText).toContain('验证命令更新')
+        expect(optionsText).toContain('通知设置更新')
+        expect(optionsText).toContain('PR 回环评论')
+        expect(optionsText).toContain('PR 回环自动关闭')
+        expect(optionsText).not.toContain('Docker 守护进程停止')
+    })
+
     test('导航菜单对 admin 可见 env-events 链接', async ({ page }) => {
         await page.goto('/dashboard')
         await waitForHydration(page)
@@ -51,13 +71,29 @@ test.describe('C-ENV env-events UI', () => {
         await waitForHydration(page)
         // 选择 type
         await page.locator('#type').click()
-        await page.locator('li:has-text("沙箱降级")').click()
+        await page.locator('.caomei-select__item:has-text("沙箱降级")').click()
         // 点筛选
         await page.locator('button:has-text("筛选")').click()
         // 等待 table 行出现
         await page.waitForSelector('.env-events__table tbody tr', { timeout: 10000 })
         const rows = page.locator('.env-events__table tbody tr')
         await expect(rows.first()).toContainText('沙箱降级')
+    })
+
+    test('类型标签渲染：container_unavailable 显示中文文案', async ({ page }) => {
+        await page.route('**/api/audit-events*', (route) => route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify([
+                { id: 'evt-c1', type: 'container_unavailable', severity: 'error', repository: 'demo/app', scanRunId: null, payloadJson: JSON.stringify({ code: 'container_unavailable', executor: 'container', message: '工作根目录不可写' }), notified: false, notifiedVia: null, createdAt: new Date().toISOString() },
+            ]),
+        }))
+        await page.goto('/env-events')
+        await waitForHydration(page)
+        await page.waitForSelector('.env-events__table tbody tr', { timeout: 10000 })
+        const firstRow = page.locator('.env-events__table tbody tr').first()
+        await expect(firstRow).toContainText('容器执行器不可用')
+        await expect(firstRow).toContainText('工作根目录不可写')
     })
 
     test('详情展开：点击展开按钮显示完整 payloadJson', async ({ page }) => {
@@ -93,9 +129,9 @@ test.describe('C-ENV env-events UI', () => {
         expect(flexWrap).toBe('wrap')
     })
 
-    test('DataTable scrollable：60vh 滚动容器存在', async ({ page }) => {
-        // PrimeVue 4 DataTable scrollable 包裹层 class 名为 .p-datatable-table-container
-        // （PrimeVue 3 叫 .p-datatable-wrapper，4 已重命名）—— 返回 1 条最小数据确保包裹层出现
+    test('DataTable 滚动容器：60vh 滚动容器存在', async ({ page }) => {
+        // caomei DataTable 无 scrollable 能力，改用外层容器 + CSS 承接（见迁移评估 docs/design/governance/caomei-ui-migration.md §15.3/§15.10）：
+        // 容器为页面自定义类 `.env-events__table-scroll`（max-height: 60vh; overflow: auto）
         await page.route('**/api/audit-events*', (route) => route.fulfill({
             status: 200,
             contentType: 'application/json',
@@ -106,11 +142,23 @@ test.describe('C-ENV env-events UI', () => {
         await page.goto('/env-events')
         await waitForHydration(page)
         await page.waitForSelector('.env-events__table', { timeout: 10000 })
-        const scrollWrapper = page.locator('.env-events__table .p-datatable-table-container')
+        const scrollWrapper = page.locator('.env-events__table .env-events__table-scroll')
         await expect(scrollWrapper).toBeVisible()
+        // 断言滚动容器的核心 CSS（迁移前 `scrollable` + `scroll-height="60vh"` 的等价承接）
+        const scrollStyles = await scrollWrapper.evaluate((el) => {
+            const cs = window.getComputedStyle(el)
+            return {
+                overflowY: cs.overflowY,
+                maxHeightPx: Number.parseFloat(cs.maxHeight),
+                expectedPx: window.innerHeight * 0.6,
+            }
+        })
+        expect(scrollStyles.overflowY).toBe('auto')
+        expect(scrollStyles.maxHeightPx).toBeGreaterThan(0)
+        expect(Math.abs(scrollStyles.maxHeightPx - scrollStyles.expectedPx)).toBeLessThanOrEqual(2)
     })
 
-    test('severity 列 sortable 三态：点击切换 unsorted → asc → desc → unsorted（removable-sort）', async ({ page }) => {
+    test('severity 列 sortable 三态：点击切换 unsorted → asc → desc → unsorted', async ({ page }) => {
         await page.route('**/api/audit-events*', (route) => route.fulfill({
             status: 200,
             contentType: 'application/json',
@@ -122,19 +170,20 @@ test.describe('C-ENV env-events UI', () => {
         await page.goto('/env-events')
         await waitForHydration(page)
         await page.waitForSelector('.env-events__table tbody tr', { timeout: 10000 })
-        const severityHeader = page.locator('.env-events__table .p-datatable th:has-text("级别")')
-        // 列 header 含 sortable 标记（PrimeVue 4 data-p-sortable-column 属性）
-        await expect(severityHeader).toHaveAttribute('data-p-sortable-column', 'true')
+        const severityHeader = page.locator('.env-events__table .caomei-data-table th:has-text("级别")')
+        // 可排序列头渲染排序按钮（caomei 用 `.caomei-data-table__sort` + th[aria-sort]）
+        const severitySort = severityHeader.locator('.caomei-data-table__sort')
+        await expect(severitySort).toBeVisible()
         // 初始未排序：aria-sort="none"
         await expect(severityHeader).toHaveAttribute('aria-sort', 'none')
-        // 第一击：unsorted → asc（PrimeVue 4 默认 sort-order=1）
-        await severityHeader.click()
+        // 第一击：unsorted → asc
+        await severitySort.click()
         await expect(severityHeader).toHaveAttribute('aria-sort', 'ascending', { timeout: 5000 })
-        // 第二击：asc → desc 翻转（:default-sort-order=-1 决定再次点击进入 desc）
-        await severityHeader.click()
+        // 第二击：asc → desc
+        await severitySort.click()
         await expect(severityHeader).toHaveAttribute('aria-sort', 'descending', { timeout: 5000 })
-        // 第三击：desc → unsorted（removable-sort 三态）
-        await severityHeader.click()
+        // 第三击：desc → unsorted（三态含移除）
+        await severitySort.click()
         await expect(severityHeader).toHaveAttribute('aria-sort', 'none', { timeout: 5000 })
     })
 })

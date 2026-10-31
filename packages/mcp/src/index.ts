@@ -11,7 +11,7 @@ import { getHistory } from './tools/history'
 import { pnpmAudit } from './tools/pnpm-audit.tool'
 
 /**
- * dependfix MCP Server：向 AI 助手暴露 7 个 tool。
+ * dependfix MCP Server：向 AI 助手暴露 8 个 tool。
  * - fetch_alerts（只读）：拉取 Dependabot / Code Scanning 告警
  * - get_last_report（只读）：读取最近 JSON 报告
  * - run_scan（写入）：执行扫描/修复（默认 report-only；支持 AI 研判透传）
@@ -19,6 +19,7 @@ import { pnpmAudit } from './tools/pnpm-audit.tool'
  * - discover_repos（只读）：按 owner / org 自动发现仓库
  * - cleanup_branches（写入）：清理已合并/已关闭的 dependfix 分支（非交互）
  * - history（只读）：查询仓库历史运行摘要
+ * - pnpm_audit（只读）：本地 pnpm audit 回退数据源
  * 凭据从 GITHUB_TOKEN 环境变量读取（mcp-server.md §4.3）。
  */
 export const createMcpServer = (): McpServer => {
@@ -128,7 +129,7 @@ export const createMcpServer = (): McpServer => {
     server.registerTool(
         'pnpm_audit',
         {
-            description: '本地 pnpm audit 回退数据源（无需 GitHub token；audit 失败硬返回错误）',
+            description: '本地 pnpm audit 回退数据源（复用 GITHUB_TOKEN 检查；audit 失败硬返回错误）',
             inputSchema: pnpmAuditSchema,
         },
         async (input) => {

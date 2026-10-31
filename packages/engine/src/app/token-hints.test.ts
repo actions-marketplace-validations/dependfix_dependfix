@@ -3,11 +3,15 @@
 import { describe, expect, it } from 'vitest'
 import { AppError } from '@dependfix/core'
 import {
+    alertSourceLabel,
+    alertsDisabledHint,
+    alertsFetchTokenHint,
     codeQualityAlertsTokenHint,
     codeScanningAlertsTokenHint,
     dependabotAlertsTokenHint,
+    isAlertsDisabledError,
     pullRequestCreationHint,
-} from './helpers'
+} from './token-hints'
 
 describe('pullRequestCreationHint', () => {
     it('returns guidance for GITHUB_TOKEN PR creation 403', () => {
@@ -147,5 +151,97 @@ describe('codeQualityAlertsTokenHint', () => {
     it('returns null for non-AppError values', () => {
         expect(codeQualityAlertsTokenHint(new Error('boom'))).toBeNull()
         expect(codeQualityAlertsTokenHint('string error')).toBeNull()
+    })
+})
+
+describe('alertsFetchTokenHint（三源合一）', () => {
+    it('Dependabot 失败命中 Dependabot 指引', () => {
+        const hint = alertsFetchTokenHint(new AppError(
+            'PERMISSION_DENIED',
+            'fetch dependabot alerts for foo/bar: Resource not accessible by integration',
+        ))
+        expect(hint).toContain('Dependabot alerts 读取权限')
+    })
+
+    it('Code Scanning 失败命中 Code Scanning 指引', () => {
+        const hint = alertsFetchTokenHint(new AppError(
+            'PERMISSION_DENIED',
+            'fetch code scanning alerts for foo/bar: Resource not accessible by integration',
+        ))
+        expect(hint).toContain('security-events')
+    })
+
+    it('Code Quality 失败命中 Code Quality 指引（修复路径此前缺失该源）', () => {
+        const hint = alertsFetchTokenHint(new AppError(
+            'PERMISSION_DENIED',
+            'fetch code quality findings for foo/bar: Resource not accessible by integration',
+        ))
+        expect(hint).toContain('Code quality')
+    })
+
+    it('非拉取上下文 / 非 AppError → null', () => {
+        expect(alertsFetchTokenHint(new AppError('PERMISSION_DENIED', 'some other failure for foo/bar'))).toBeNull()
+        expect(alertsFetchTokenHint(new Error('boom'))).toBeNull()
+        expect(alertsFetchTokenHint('string error')).toBeNull()
+    })
+})
+
+describe('isAlertsDisabledError', () => {
+    it('returns true for AppError with ALERTS_DISABLED code', () => {
+        expect(isAlertsDisabledError(new AppError('ALERTS_DISABLED', 'Dependabot alerts are disabled for this repository.'))).toBe(true)
+    })
+
+    it('returns false for AppError with PERMISSION_DENIED code', () => {
+        expect(isAlertsDisabledError(new AppError('PERMISSION_DENIED', 'Resource not accessible'))).toBe(false)
+    })
+
+    it('returns false for non-AppError values', () => {
+        expect(isAlertsDisabledError(new Error('ALERTS_DISABLED'))).toBe(false)
+        expect(isAlertsDisabledError(null)).toBe(false)
+    })
+})
+
+describe('alertsDisabledHint（按告警源给出开启路径）', () => {
+    it('dependabot → Dependabot alerts 开启路径 + pnpm-audit 本地回退', () => {
+        const hint = alertsDisabledHint('dependabot')
+        expect(hint).toContain('未启用')
+        expect(hint).toContain('非 token 权限问题')
+        expect(hint).toContain('Code security')
+        expect(hint).toContain('Dependabot alerts')
+        expect(hint).toContain('--alerts-source pnpm-audit')
+    })
+
+    it('code-scanning → GitHub Advanced Security / Code Scanning 开启路径', () => {
+        const hint = alertsDisabledHint('code-scanning')
+        expect(hint).toContain('Advanced Security')
+        expect(hint).toContain('Code Scanning')
+        expect(hint).toContain('非 token 权限问题')
+        expect(hint).not.toContain('--alerts-source pnpm-audit')
+    })
+
+    it('code-quality → GitHub Advanced Security / Code Quality 开启路径', () => {
+        const hint = alertsDisabledHint('code-quality')
+        expect(hint).toContain('Advanced Security')
+        expect(hint).toContain('Code Quality')
+        expect(hint).not.toContain('Dependabot alerts')
+    })
+
+    it('未知源 → 通用文案（不误指具体功能）', () => {
+        const hint = alertsDisabledHint('snyk')
+        expect(hint).toContain('Code security')
+        expect(hint).not.toContain('Dependabot')
+        expect(hint).not.toContain('Advanced Security')
+    })
+})
+
+describe('alertSourceLabel', () => {
+    it('给出三个内置告警源的可读标签', () => {
+        expect(alertSourceLabel('dependabot')).toBe('Dependabot alerts')
+        expect(alertSourceLabel('code-scanning')).toBe('Code Scanning alerts')
+        expect(alertSourceLabel('code-quality')).toBe('Code Quality findings')
+    })
+
+    it('未知源回退为 `<source> alerts`', () => {
+        expect(alertSourceLabel('snyk')).toBe('snyk alerts')
     })
 })

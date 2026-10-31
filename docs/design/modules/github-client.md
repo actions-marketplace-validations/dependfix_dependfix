@@ -112,6 +112,7 @@ const alerts = await octokit.paginate(octokit.rest.dependabot.listAlertsForRepo,
 export const GITHUB_ERROR_CODES = [
     'AUTHENTICATION_FAILED',
     'PERMISSION_DENIED',
+    'ALERTS_DISABLED',
     'RATE_LIMITED',
     'REPO_NOT_FOUND',
     'GITHUB_API_ERROR',
@@ -167,11 +168,21 @@ export function mapGitHubError(error: unknown, context: string): AppError {
 | HTTP 状态码 | 条件 | `AppError.code` |
 |:---:|------|------|
 | 401 | — | `AUTHENTICATION_FAILED` |
+| 403 | message 命中「功能未启用」判定（见下方匹配口径） | `ALERTS_DISABLED` |
 | 403 | `X-RateLimit-Remaining: 0` | `RATE_LIMITED` |
 | 403 | 其他 | `PERMISSION_DENIED` |
 | 404 | — | `REPO_NOT_FOUND` |
 | 4xx/5xx | — | `GITHUB_API_ERROR` |
 | 网络异常 | — | `NETWORK_ERROR` |
+
+**403「功能未启用」匹配口径（单点声明）**：
+
+1. **Dependabot alerts**：精确文案 `Dependabot alerts are disabled for this repository`（实测；非文档化行为）。
+2. **GitHub Advanced Security / Code Security（Code Scanning、Code Quality）**：官方文档**只描述 403 语义**（"Response if GitHub Advanced Security is not enabled for this repository"）**未给响应文案**，故采用「两个片段同时命中」的容忍匹配——产品名片段（`advanced security` 或新称 `code security`）+ 启用状态否定词（`must be enabled` / `not enabled` / `is disabled`，大小写不敏感）。
+
+两类均**匹配失败即退回 `PERMISSION_DENIED`**（不把未知 403 误判为「未启用」）；判定按 message 而非调用来源，故 Code Quality 若返回同一文案同样归为「未启用」。判定顺序：未启用 → 限流（`X-RateLimit-Remaining: 0`）→ 权限不足。
+
+> 未启用 ≠ 获取失败：`fetchRepoAlerts` 将其记入 `RunResult.alertsDisabled`（含 `source`）单列计数，不计入 `allErrors`、不影响 exitCode；提示文案由 `alertsDisabledHint(source)` 按源给出（见 [platform.md §6.1](../../standards/platform.md#61-错误码与告警状态口径平台展示消费-engine-错误码)）。
 
 ---
 
@@ -216,91 +227,8 @@ const allAlerts = await octokit.paginate(
 
 ---
 
-## 8. Mock 与测试策略
+## 分片索引（迁出章节）
 
-### 8.1 方案：`nock` 拦截 HTTP
-
-```typescript
-// packages/cli/src/github/client.test.ts
-
-import nock from 'nock'
-import { createGitHubClient } from './client'
-
-const API_BASE = 'https://api.github.com'
-
-describe('createGitHubClient', () => {
-    afterEach(() => nock.cleanAll())
-
-    it('returns repo info on success', async () => {
-        nock(API_BASE)
-            .get('/repos/foo/bar')
-            .reply(200, { id: 1, full_name: 'foo/bar' })
-
-        const octokit = createGitHubClient({ token: 'test-token' })
-        const { data } = await octokit.rest.repos.get({ owner: 'foo', repo: 'bar' })
-        expect(data.full_name).toBe('foo/bar')
-    })
-
-    it('throws AUTHENTICATION_FAILED on 401', async () => {
-        nock(API_BASE)
-            .get('/repos/foo/bar')
-            .reply(401, { message: 'Bad credentials' })
-
-        // ...
-    })
-})
-```
-
-### 8.2 测试场景
-
-| 场景 | nock 配置 | 验证 |
-|------|----------|------|
-| 正常响应 | `.reply(200, fixture)` | 数据完整性 |
-| 认证失败 | `.reply(401)` | 抛 `AUTHENTICATION_FAILED` |
-| 限流 | `.reply(403, {}, { 'x-ratelimit-remaining': '0' })` | 抛 `RATE_LIMITED` |
-| 权限不足 | `.reply(403)` | 抛 `PERMISSION_DENIED` |
-| 仓库不存在 | `.reply(404)` | 抛 `REPO_NOT_FOUND` |
-| 网络错误 | `nock.disableNetConnect()` + 断网 | 抛 `NETWORK_ERROR` |
-
-### 8.3 依赖
-
-```json
-{
-    "devDependencies": {
-        "nock": "^14.0.0"
-    }
-}
-```
-
-### 8.4 静态 Fixture（保留用于 T103 集成测试）
-
-```
-packages/cli/src/github/__fixtures__/
-├── dependabot-alerts.json    # 5 条样例（覆盖 critical/high/medium、fixable/non-fixable）
-├── repo-info.json            # 单仓库基本信息
-└── empty-alerts.json         # 无告警
-```
-
-Fixture 给 T103 `dependabot-fetcher.test.ts` 使用，验证 Dependabot 原始类型 → `NormalizedSecurityAlert` 映射。
-
----
-
-## 9. 实现文件清单
-
-| 文件 | 说明 |
-|------|------|
-| `packages/cli/src/github/client.ts` | `createGitHubClient()` 工厂函数 |
-| `packages/cli/src/github/errors.ts` | `mapGitHubError()` 错误映射 |
-| `packages/cli/src/github/client.test.ts` | 6 场景单元测试（nock 拦截） |
-| `packages/core/src/errors/error-codes.ts` | `GITHUB_ERROR_CODES` 枚举 |
-| `packages/cli/package.json` | 新增 `@octokit/rest`（dep）+ `nock`（devDep） |
-
----
-
-## 10. 非目标（M1 不做）
-
-- 不实现 GitHub App / Installation Token 认证
-- 不实现 `@octokit/plugin-throttling`（M2 引入）
-- 不调用 Code Scanning 端点 —— 已由 `code-scanning-fetcher.ts`（M3 T301）承接，见 [code-scanning-fetcher](../../../packages/engine/src/github/code-scanning-fetcher.ts)
-- 不实现 `octokit.rest.repos.listForOrg()` 自动发现（M4）
-- 不封装自定义类，直接暴露 `Octokit` 实例
+| 分片 | 章节范围 | 主题 |
+|:--|:--|:--|
+| [github-client-testing.md](./github-client-testing.md) | §8 - §10 | Mock 与测试策略 / 实现文件清单 / 非目标 |

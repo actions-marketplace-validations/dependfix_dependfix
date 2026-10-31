@@ -1,7 +1,9 @@
 import 'reflect-metadata'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { makeEvent, setupMemoryDatabase, teardownMemoryDatabase } from '../../../tests/api-helper'
+import { expectError, makeEvent, setupMemoryDatabase, teardownMemoryDatabase } from '../../../tests/api-helper'
 import reposHandler from './index'
+import { ensureDatabaseInitialized } from '#server/database'
+import { AuditEvent } from '#server/entities/audit-event'
 
 // 鉴权由 guard.test.ts 单独覆盖：API handler 测试 mock guard 层，聚焦业务逻辑；
 // 但 todo.md §M16.5 T701-e2e 补强要求 API handler 测试也覆盖三角色鉴权——
@@ -103,20 +105,32 @@ describe('GET /api/repos', () => {
         expect(item?.tags).toEqual(['prod', 'core'])
     })
 
-    it('persists sandboxLimits object as JSON column and reads back (M11 T1005-B)', async () => {
-        // M11 T1005-B：POST 路径序列化 sandboxLimits → toView 反序列化读取
+    it('persists sandboxLimits object as JSON column and reads back', async () => {
+        // POST 路径序列化 sandboxLimits → toView 反序列化读取
+        // （sandbox 执行入口已临时关闭；字段本身仍保留，存量数据可读）
         await call('POST', '/api/repos', {
             owner: 'sb-limits',
             name: 'repo',
             platform: 'github',
             packageManager: 'pnpm',
             defaultBranch: 'main',
-            executorKind: 'sandbox',
+            executorKind: 'container',
             sandboxLimits: { memoryMb: 8192, cpu: 1.5 },
         })
         const list = await call('GET', '/api/repos') as Record<string, unknown>[]
         const item = list.find((r) => r.owner === 'sb-limits')
         expect(item?.sandboxLimits).toEqual({ memoryMb: 8192, cpu: 1.5 })
+    })
+
+    it('rejects sandbox executor (entry temporarily disabled)', async () => {
+        await expectError(call('POST', '/api/repos', {
+            owner: 'sb-disabled',
+            name: 'repo',
+            platform: 'github',
+            packageManager: 'pnpm',
+            defaultBranch: 'main',
+            executorKind: 'sandbox',
+        }), 400)
     })
 
     it('omits sandboxLimits when not provided (走平台 SANDBOX_DEFAULTS)', async () => {
@@ -135,6 +149,140 @@ describe('GET /api/repos', () => {
 
     it('rejects unsupported method with 405', async () => {
         await expect(call('PUT', '/api/repos')).rejects.toMatchObject({ statusCode: 405 })
+    })
+
+    describe('verifyCommands（平台侧自定义验证命令）', () => {
+        it('persists verifyCommands array as JSON column and reads back', async () => {
+            await call('POST', '/api/repos', {
+                owner: 'vc-list',
+                name: 'repo',
+                platform: 'github',
+                packageManager: 'pnpm',
+                defaultBranch: 'main',
+                executorKind: 'container',
+                verifyCommands: ['pnpm install --frozen-lockfile', 'pnpm test'],
+            })
+            const list = await call('GET', '/api/repos') as Record<string, unknown>[]
+            const item = list.find((r) => r.owner === 'vc-list')
+            expect(item?.verifyCommands).toEqual(['pnpm install --frozen-lockfile', 'pnpm test'])
+        })
+
+        it('returns empty verifyCommands when not provided (走引擎默认验证链)', async () => {
+            await call('POST', '/api/repos', {
+                owner: 'vc-empty',
+                name: 'repo',
+                platform: 'github',
+                packageManager: 'pnpm',
+                defaultBranch: 'main',
+                executorKind: 'container',
+            })
+            const list = await call('GET', '/api/repos') as Record<string, unknown>[]
+            expect(list.find((r) => r.owner === 'vc-empty')?.verifyCommands).toEqual([])
+        })
+
+        it('rejects verifyCommands with control characters (400, 保持「一项 = 一条命令行」)', async () => {
+            await expect(call('POST', '/api/repos', {
+                owner: 'vc-invalid',
+                name: 'repo',
+                platform: 'github',
+                packageManager: 'pnpm',
+                defaultBranch: 'main',
+                executorKind: 'container',
+                verifyCommands: ['pnpm lint\nrm -rf /'],
+            })).rejects.toMatchObject({
+                statusCode: 400,
+                data: { code: 'REPO_VALIDATION_FAILED' },
+            })
+        })
+
+        it('records verify_commands_update audit event on create', async () => {
+            const created = await call('POST', '/api/repos', {
+                owner: 'vc-audit',
+                name: 'repo',
+                platform: 'github',
+                packageManager: 'pnpm',
+                defaultBranch: 'main',
+                executorKind: 'container',
+                verifyCommands: ['pnpm test'],
+            }) as { id: string }
+
+            const ds = await ensureDatabaseInitialized()
+            const events = await ds.getRepository(AuditEvent).find({ where: { repositoryId: created.id } })
+            expect(events).toHaveLength(1)
+            expect(events[0]!.type).toBe('verify_commands_update')
+            expect(JSON.parse(events[0]!.payloadJson!)).toEqual({
+                repository: 'vc-audit/repo',
+                previous: [],
+                next: ['pnpm test'],
+            })
+        })
+
+        it('does not record audit event on create without commands', async () => {
+            const created = await call('POST', '/api/repos', {
+                owner: 'vc-no-audit',
+                name: 'repo',
+                platform: 'github',
+                packageManager: 'pnpm',
+                defaultBranch: 'main',
+                executorKind: 'container',
+            }) as { id: string }
+
+            const ds = await ensureDatabaseInitialized()
+            const events = await ds.getRepository(AuditEvent).find({ where: { repositoryId: created.id } })
+            expect(events).toHaveLength(0)
+        })
+    })
+
+    describe('prCheckFocus（PR Check 告警关注集）', () => {
+        it('persists prCheckFocus on create and returns the normalized view', async () => {
+            await call('POST', '/api/repos', {
+                owner: 'focus-create',
+                name: 'repo',
+                platform: 'github',
+                packageManager: 'pnpm',
+                defaultBranch: 'main',
+                executorKind: 'container',
+                prCheckFocus: {
+                    providers: [' Vercel ', 'vercel'],
+                    names: [' Test '],
+                    kinds: ['check'],
+                },
+            })
+            const list = await call('GET', '/api/repos') as Record<string, unknown>[]
+            expect(list.find((r) => r.owner === 'focus-create')?.prCheckFocus).toEqual({
+                providers: ['vercel'],
+                names: ['Test'],
+                kinds: ['check'],
+            })
+        })
+
+        it('returns null prCheckFocus when not configured（未配置 = 全量告警）', async () => {
+            await call('POST', '/api/repos', {
+                owner: 'focus-empty',
+                name: 'repo',
+                platform: 'github',
+                packageManager: 'pnpm',
+                defaultBranch: 'main',
+                executorKind: 'container',
+            })
+            const list = await call('GET', '/api/repos') as Record<string, unknown>[]
+            expect(list.find((r) => r.owner === 'focus-empty')?.prCheckFocus).toBeNull()
+        })
+
+        it('rejects prCheckFocus with invalid kind (400)', async () => {
+            await expect(call('POST', '/api/repos', {
+                owner: 'focus-invalid',
+                name: 'repo',
+                platform: 'github',
+                packageManager: 'pnpm',
+                defaultBranch: 'main',
+                executorKind: 'container',
+                prCheckFocus: { kinds: ['bogus'] },
+            })).rejects.toMatchObject({
+                statusCode: 400,
+                data: { code: 'REPO_VALIDATION_FAILED' },
+            })
+        })
     })
 })
 

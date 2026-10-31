@@ -18,13 +18,13 @@ permissions:
 #
 #  与 test.yml 的定位区别：
 #    - test.yml: 每次 push/PR，快速反馈（~15-30min），阻断合并
-#    - 本工作流: 每周定时，深度检查（~60-90min），不阻断合并，监测趋势
+#    - 本工作流: 每周定时，深度检查（基线约 5-8min），不阻断合并，监测趋势
 #
-#  超时配置说明：
-#    regression:weekly 各 step timeoutBudget 累加约 80min（test:coverage 30m
-#    + security:audit-deps 10m + docs 检查 30m + i18n 审计 10m + governance 审计 20m），
-#    补充检查（typecheck + build + lint:md）约 15min，
-#    整体设为 120min 弹性余量。
+#  超时与步骤说明：
+#    weekly profile = test:coverage + security:audit-deps + DOC_GATES（16 项，单点声明见
+#    scripts/run-doc-gates.mjs，与 test.yml / release.yml 同集合）+ lint / typecheck / build，共 21 步。
+#    各 step 的 timeoutBudget（每步 10m，覆盖 / 审计 30m / 10m）是**展示元数据**（runner 不据此中断），
+#    实际基线约 5-8min；job 上限 120min 保留弹性，不以 step 预算累加作为余量依据。
 
 jobs:
   # ═════════════════════════════════════════════════════════════════════════════
@@ -99,15 +99,17 @@ jobs:
         run: pnpm --filter @dependfix/platform exec nuxt prepare
 
       # ── Phase 1: 核心回归（regression:weekly profile） ─────────────────
-      #  包含：test:coverage + security:audit-deps + docs:check:*
-      #  + i18n:audit:missing + lint + typecheck + build
+      #  包含：test:coverage + security:audit-deps + DOC_GATES（16 项文档/治理门禁）
+      #  + lint + typecheck + build（共 21 步，组成以 profile 为准）
       - name: Run weekly regression gate
         run: pnpm run regression:weekly
         env:
           # security:audit-deps 和 governance 脚本可能需要 GitHub API
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # ── Phase 2: 补充检查（regression:weekly profile 未覆盖的维度） ───
+      # ── Phase 2: 补充检查（`if: always()`：即使 gate 提前失败也留诊断证据） ───
+      #  其中 lint:md / check:docs 已包含在 gate 的 DOC_GATES 内：重复一次为秒级开销，
+      #  只在 gate 失败时才有额外价值（失败后仍能独立确认文档面），保留。
       - name: Nuxt typecheck
         if: always()
         run: pnpm run typecheck

@@ -48,6 +48,16 @@ describe('runCli', () => {
     })
 })
 
+// 发布产物布局（`../package.json`）由 backlog「0.6.0 发布物 --version」在 0.6.1 发布后实测承接。
+describe('dependfixCommand 版本', () => {
+    it('版本取自 package.json（发布后 --version 与 npm 版本一致）', async () => {
+        const { readFileSync } = await import('node:fs')
+        const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as { version: string }
+        expect(cmd.meta.version).toBe(pkg.version)
+        expect(cmd.meta.version).not.toBe('0.1.0')
+    })
+})
+
 describe('dependfixCommand', () => {
     beforeEach(() => {
         vi.clearAllMocks()
@@ -84,7 +94,7 @@ describe('dependfixCommand', () => {
             run: mockRun,
         } as any)
 
-        const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+        const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
 
         await cmd.run({ rawArgs: ['fix'] })
 

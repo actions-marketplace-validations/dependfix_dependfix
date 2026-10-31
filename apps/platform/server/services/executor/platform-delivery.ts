@@ -11,6 +11,8 @@ import {
     fetchDefaultBranch,
     findDependfixOpenPR,
     generatePRBody,
+    GIT_PUSH_HOOKS_ISOLATION_ARGS,
+    GIT_PUSH_SIGNING_ISOLATION_ARGS,
     type DependfixOpenPR,
 } from '@dependfix/engine'
 import { fromPat } from '@dependfix/engine/auth'
@@ -32,7 +34,7 @@ const execFileAsync = promisify(execFile)
  * - action='skip'：平台不动作；runUrl 指向同指纹已存在的 PR；status 走 `completed`（幂等交付）
  * - action='create'：平台按 plan.branchName / plan.supersedePRs 推进 push + create + close
  *
- * 错误码语义（与 C53 状态机契约对齐）：
+ * 错误码语义（与状态机契约对齐）：
  * - 推 push 前查询 open PR 失败（GitHub API 4xx/5xx/网络）→ 降级为「假设无 open PR」，继续 create 路径
  *   （GitHub createPullRequest 在 head 已存在 open PR 时会返回 422，兜底归为 pr_creation_failed 状态）
  * - 失败回退：仅记录 warn，不阻断——避免单次 API 调用失败阻塞整个交付
@@ -115,6 +117,10 @@ export class PlatformDeliveryError extends Error {
  * 形成自包含的交付单元（不依赖 container-executor 的私有函数），单测可直接 import。
  *
  * 凭据走 `http.extraheader`（base64 basic auth），不进 argv/URL（防 execFile 错误回显泄露 token）。
+ * 签名隔离：同 push 侧策略（`GIT_PUSH_SIGNING_ISOLATION_ARGS`，见 engine 的 git-signing.ts）——
+ * 避免宿主 `push.gpgSign=true` 让 push 带 `--signed` 而在服务端不支持时失败。
+ * hooks 隔离：同 push 侧策略（`GIT_PUSH_HOOKS_ISOLATION_ARGS`）——`push --no-verify` 跳过被修复
+ * 仓库的 `pre-push`（口径见 docs/standards/git.md §3.8）。
  * 失败原样抛 PlatformDeliveryError(code='push_failed')。
  */
 export async function pushFixBranchWithCredential(
@@ -123,7 +129,13 @@ export async function pushFixBranchWithCredential(
     token: string,
 ): Promise<void> {
     const basic = Buffer.from(`x-access-token:${token}`).toString('base64')
-    const args = ['-c', `http.extraheader=Authorization: basic ${basic}`, 'push', 'origin', branchName]
+    const args = [
+        ...GIT_PUSH_SIGNING_ISOLATION_ARGS,
+        '-c', `http.extraheader=Authorization: basic ${basic}`,
+        'push',
+        ...GIT_PUSH_HOOKS_ISOLATION_ARGS,
+        'origin', branchName,
+    ]
     try {
         const { stderr } = await execFileAsync('git', args, { cwd: workDir, timeout: 60_000 })
         if (stderr && !/^To /m.test(stderr)) {

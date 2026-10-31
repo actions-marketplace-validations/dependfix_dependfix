@@ -1,6 +1,10 @@
 <script setup lang="ts">
 // 仓库管理：列表 + 添加/编辑/删除
+import { Check, List, Pencil, Play, Plus, RotateCcwClock, Trash, Upload } from '@lucide/vue'
+import type { DataTableColumn } from 'caomei-ui'
 import type { RepoView } from '~/types/platform'
+import { DEFAULT_SCAN_MODE, DEFAULT_SCAN_SEVERITY } from '~/composables/use-scan-preferences'
+import { scanModeOptions, scanSeverityOptions } from '~/utils/scan-options'
 
 definePageMeta({
     middleware: 'auth',
@@ -8,24 +12,12 @@ definePageMeta({
 
 const { t, d } = useI18n()
 
-interface RepoForm {
-    owner: string
-    name: string
-    defaultBranch: string
-    packageManager: 'pnpm' | 'npm' | 'yarn'
-    credentialId: string | null
-    actionWorkflowFile: string
-    executorKind: 'container' | 'github-action' | 'sandbox'
-    note: string
-    tags: string[]
-}
-
 const loading = ref(true)
-const saving = ref(false)
 const repos = ref<RepoView[]>([])
 const credentials = ref<{ id: string, name: string, type: string }[]>([])
-const dialogVisible = ref(false)
-const editingId = ref<string | null>(null)
+/** 仓库表单弹窗可见性 + 编辑对象（null = 新增；字段状态与提交逻辑内聚在 repo-form-dialog 子组件） */
+const repoDialogVisible = ref(false)
+const editingRepo = ref<RepoView | null>(null)
 const error = ref('')
 const success = ref('')
 
@@ -33,19 +25,8 @@ const success = ref('')
 const config = useRuntimeConfig()
 const defaultBranch = (config.public.defaultBranch as string) || 'main'
 
-const emptyForm = (): RepoForm => ({
-    owner: '',
-    name: '',
-    defaultBranch,
-    packageManager: 'pnpm',
-    credentialId: null,
-    actionWorkflowFile: '',
-    executorKind: 'container',
-    note: '',
-    tags: [],
-})
-
-const form = ref<RepoForm>(emptyForm())
+// 批量扫描 / 行选择：`selectedRows` 是独立集合，刷新后按 id 重映射（见 use-repo-selection）
+const selectedRows = ref<RepoView[]>([])
 
 const fetchData = async () => {
     loading.value = true
@@ -56,6 +37,8 @@ const fetchData = async () => {
             $fetch('/api/credentials'),
         ])
         repos.value = repoRes as RepoView[]
+        // 刷新生成新对象：按 id 把已选集合映射过去，避免「计数仍在、勾选态消失」
+        selectedRows.value = remapSelectionById(selectedRows.value, repos.value)
         credentials.value = credRes as { id: string, name: string, type: string }[]
     } catch (e: any) {
         error.value = t('repos.errors.loadFailed', { message: e?.data?.message ?? e?.message ?? t('common.errors.unknown') })
@@ -67,62 +50,24 @@ const fetchData = async () => {
 onMounted(fetchData)
 
 const openCreate = () => {
-    editingId.value = null
-    form.value = emptyForm()
-    dialogVisible.value = true
+    editingRepo.value = null
+    repoDialogVisible.value = true
 }
 
 const openEdit = (repo: RepoView) => {
-    editingId.value = repo.id
-    form.value = {
-        owner: repo.owner,
-        name: repo.name,
-        defaultBranch: repo.defaultBranch,
-        packageManager: repo.packageManager as RepoForm['packageManager'],
-        credentialId: repo.credentialId,
-        actionWorkflowFile: repo.actionWorkflowFile ?? '',
-        executorKind: repo.executorKind as RepoForm['executorKind'],
-        note: repo.note ?? '',
-        tags: [...(repo.tags ?? [])],
-    }
-    dialogVisible.value = true
+    editingRepo.value = repo
+    repoDialogVisible.value = true
 }
 
-const closeDialog = () => {
-    dialogVisible.value = false
-    editingId.value = null
+/** 表单保存成功：刷新列表 + 按新增/编辑展示成功提示（表单状态由子组件负责重置） */
+const onRepoFormSaved = async () => {
+    success.value = editingRepo.value ? t('repos.success.updated') : t('repos.success.added')
+    await fetchData()
 }
 
-const submit = async () => {
-    saving.value = true
-    error.value = ''
-    try {
-        const payload = {
-            ...form.value,
-            actionWorkflowFile: form.value.actionWorkflowFile.trim() || null,
-            note: form.value.note.trim() || null,
-            tags: form.value.tags.length > 0 ? form.value.tags : null,
-        }
-        if (editingId.value) {
-            await $fetch(`/api/repos/${editingId.value}`, {
-                method: 'PUT',
-                body: payload,
-            })
-            success.value = t('repos.success.updated')
-        } else {
-            await $fetch('/api/repos', {
-                method: 'POST',
-                body: payload,
-            })
-            success.value = t('repos.success.added')
-        }
-        dialogVisible.value = false
-        await fetchData()
-    } catch (e: any) {
-        error.value = t('repos.errors.saveFailed', { message: e?.data?.message ?? e?.message ?? t('common.errors.unknown') })
-    } finally {
-        saving.value = false
-    }
+/** 表单保存失败：按页面既有错误展示口径包装（与 loadFailed / deleteFailed 同模式） */
+const onRepoFormFailed = (message: string) => {
+    error.value = t('repos.errors.saveFailed', { message })
 }
 
 const remove = async (repo: RepoView) => {
@@ -141,6 +86,7 @@ const repoDisplay = (repo: RepoView) => `${repo.owner}/${repo.name}`
 // 扫描触发（异步队列：入队立即返回 + 轮询状态；同步降级：请求内完成）
 const scanningId = ref<string | null>(null)
 const scanError = ref('')
+const scanMerged = ref('')
 const scanSuccess = ref('')
 const lastRunUrl = ref<string | null>(null)
 
@@ -168,10 +114,16 @@ const pollRun = async (runId: string, executorKind: string) => {
             return
         }
         if (run.status === 'failed') {
-            // SCAN_PENDING_MERGED（去重合并，M18.x 治理批次 S1 与 ServerErrorCode 对齐）：非执行失败，提示合并语义而非"扫描失败"
-            scanError.value = run.error?.code === 'SCAN_PENDING_MERGED'
-                ? (run.error.message ?? t('repos.scanDuplicate'))
-                : t('repos.scanFailed', { message: run.error?.message ?? t('common.errors.unknown') })
+            // SCAN_PENDING_MERGED（去重合并，与 ServerErrorCode 口径对齐）：非执行失败，走 warning 提示合并语义。
+            // 防御分支（按测试规范 §6.5 登记）：异步合并已在**立即响应**阶段（triggerScan 的 `runData.merged`）
+            // 短路，本分支在生产不可达；同步路径不产出 merged。保留以防后续轮询观测到被合并 run 的终态。
+            // 文案用共享 i18n 键（与 alerts「立即修复此仓库」入口口径一致；服务端 message 不参与渲染以保证双语文案）
+            if (run.error?.code === 'SCAN_PENDING_MERGED') {
+                scanSuccess.value = ''
+                scanMerged.value = t('common.scanTriggerMerged')
+            } else {
+                scanError.value = t('repos.scanFailed', { message: run.error?.message ?? t('common.errors.unknown') })
+            }
             return
         }
         if (run.status === 'dispatched') {
@@ -199,6 +151,7 @@ const triggerScan = async (
 ) => {
     pollCancelled = false
     scanError.value = ''
+    scanMerged.value = ''
     scanSuccess.value = ''
     lastRunUrl.value = null
     scanningId.value = repo.id
@@ -217,8 +170,14 @@ const triggerScan = async (
                 aiTrigger,
             },
         })
-        const runData = run as unknown as { id: string, status: string, runUrl: string | null }
-        if (runData.status === 'pending') {
+        const runData = run as unknown as { id: string, status: string, runUrl: string | null, merged?: { code: string, message: string } }
+        if (runData.merged) {
+            // 去重合并：本次触发未真正执行（新建路径的 pending run 已被置 failed + SCAN_PENDING_MERGED）
+            // → 只提示合并语义，不轮询、不按失败呈现（与 alerts 入口口径一致）；
+            // 清掉异步预置的「正在触发…」success，避免同屏 warning + success 语义冲突
+            scanSuccess.value = ''
+            scanMerged.value = t('common.scanTriggerMerged')
+        } else if (runData.status === 'pending') {
             // 队列模式：已入队，轮询状态
             scanSuccess.value = t('repos.scanQueued')
             await pollRun(runData.id, repo.executorKind ?? 'container')
@@ -247,26 +206,20 @@ watch(toastMessage, (v) => {
     }
 })
 
-// 扫描模式/严重级别选项（批量 + 单仓库 Dialog 共享，见 docs/plan/todo.md §PR2 C52）
-const modeOptions = computed(() => [
-    { label: t('common.scanMode.reportOnly'), value: 'report-only' },
-    { label: t('common.scanMode.fix'), value: 'fix' },
-    { label: t('common.scanMode.fixAndPr'), value: 'fix-and-pr' },
-])
+// 扫描模式/严重级别选项（批量 + 单仓库 Dialog + 设置页共享；标签口径单一事实源见 utils/scan-options.ts）
+const modeOptions = computed(() => scanModeOptions(t))
 
-const severityOptions = computed(() => [
-    { label: 'Critical', value: 'critical' },
-    { label: 'High', value: 'high' },
-    { label: 'Medium', value: 'medium' },
-    { label: t('common.severity.all'), value: 'all' },
-])
+const severityOptions = computed(() => scanSeverityOptions(t))
 
-// 单仓库扫描配置 Dialog state（见 docs/plan/todo.md §PR2 C52）
+// 单仓库扫描配置 Dialog state
 const scanConfigDialogVisible = ref(false)
 const scanConfigRepo = ref<RepoView | null>(null)
-const scanConfigMode = ref('report-only')
-const scanConfigSeverity = ref('high')
-// AI 研判 override state（todo.md §M26.1 + [platform-ai-integration.md §7.3](../design/governance/platform-ai-integration.md)）：
+// 扫描偏好（设备级：显式默认 > 上次选择 > 硬编码兜底；见 use-scan-preferences.ts）
+// 打开弹窗时解析当前生效默认；提交时记录「上次选择」
+const scanPreferences = useScanPreferences()
+const scanConfigMode = ref<string>(DEFAULT_SCAN_MODE)
+const scanConfigSeverity = ref<string>(DEFAULT_SCAN_SEVERITY)
+// AI 研判 override state（AI 集成设计见 ../design/governance/platform-ai-integration.md）：
 // 默认从仓库级 aiEnabled / aiTrigger 继承；用户可在 Dialog 中临时 override（不写回 repo）
 const scanConfigAiEnabled = ref(false)
 const scanConfigAiTrigger = ref<'failure' | 'major' | 'both'>('both')
@@ -274,8 +227,10 @@ const scanConfigHasOrgAiKey = ref(false)
 
 const openScanConfig = (repo: RepoView) => {
     scanConfigRepo.value = repo
-    scanConfigMode.value = 'report-only'
-    scanConfigSeverity.value = 'high'
+    // 默认值：设备级偏好（显式默认 > 上次选择 > report-only / high 兜底）
+    const defaults = scanPreferences.resolveDefaults()
+    scanConfigMode.value = defaults.mode
+    scanConfigSeverity.value = defaults.severity
     // 默认值：继承仓库级 aiEnabled / aiTrigger；Organization Key 状态由 fetchData 期间缓存的 hasOrgAiKey 提供
     scanConfigAiEnabled.value = repo.aiEnabled
     scanConfigAiTrigger.value = repo.aiTrigger
@@ -298,6 +253,8 @@ const submitScanConfig = () => {
     const repo = scanConfigRepo.value
     if (!repo) return
     scanConfigDialogVisible.value = false
+    // 记录「上次选择」（设备级偏好；下次打开弹窗作为默认值来源之一）
+    scanPreferences.rememberChoice(scanConfigMode.value, scanConfigSeverity.value)
     void triggerScan(
         repo,
         scanConfigMode.value,
@@ -307,52 +264,147 @@ const submitScanConfig = () => {
     )
 }
 
-// 批量扫描（勾选多仓库 → 跳转批量运行页）
-const selectedRows = ref<RepoView[]>([])
-const batchDialogVisible = ref(false)
-const batchSubmitting = ref(false)
-const batchError = ref('')
-const batchMode = ref('report-only')
-const batchSeverityThreshold = ref('high')
+// 批量扫描（勾选多仓库 → 跳转批量运行页）；状态与提交逻辑见 use-repo-batch-scan.ts
 
-const openBatchScan = () => {
-    if (!selectedRows.value.length) return
-    batchError.value = ''
-    batchMode.value = 'report-only'
-    batchSeverityThreshold.value = 'high'
-    batchDialogVisible.value = true
+/**
+ * 行选择受控回写：提供 `selection` 时 caomei 进入受控模式，不回写则勾选无效
+ * （等价迁移前的 `v-model:selection`）。
+ * emit 载荷类型为 `T | T[] | null`（multiple 模式运行时恒为数组），此处做最小窄化，
+ * 不改动 `selectedRows` 的下游语义（批量扫描按钮启用条件 / 批量操作请求体）。
+ */
+const onSelectionChange = (rows: RepoView | RepoView[] | null) => {
+    selectedRows.value = Array.isArray(rows) ? rows : rows ? [rows] : []
 }
-
-/** 批量触发：POST /api/repos/batch-scan → 跳转批量运行页查看进度与聚合结果
- * 乐观关闭：提交前立即关闭 dialog，避免用户感知"点了不关"——同步模式下几百毫秒用户不易察觉，
- * 异步模式下 /api/repos/batch-scan 返回前用户看到的是 dialog 持续 spinning + 滞留期间；
- * 失败时回滚 dialog + 显示错误 */
-const submitBatchScan = async () => {
-    batchSubmitting.value = true
-    batchError.value = ''
-    batchDialogVisible.value = false
-    try {
-        const result = await $fetch<{ batchRunId: string, repositoryCount: number }>('/api/repos/batch-scan', {
-            method: 'POST',
-            body: {
-                repositoryIds: selectedRows.value.map((r) => r.id),
-                mode: batchMode.value,
-                severityThreshold: batchSeverityThreshold.value,
-            },
-        })
-        success.value = t('repos.success.batchTriggered', { count: result.repositoryCount })
-        await navigateTo('/batch-runs')
-    } catch (e: any) {
-        // 失败时回滚 dialog + 显示错误（用户可重试或修改后再次提交）
-        batchDialogVisible.value = true
-        batchError.value = t('repos.errors.batchFailed', { message: e?.data?.message ?? e?.message ?? t('common.errors.unknown') })
-    } finally {
-        batchSubmitting.value = false
-    }
-}
+const {
+    batchDialogVisible,
+    batchSubmitting,
+    batchError,
+    batchMode,
+    batchSeverityThreshold,
+    openBatchScan,
+    submitBatchScan,
+} = useRepoBatchScan(selectedRows, (message) => {
+    success.value = message
+})
 
 // ===== 批量导入（子组件 `import-repos-dialog` 承载；visible 由本页控制）=====
 const importDialogVisible = ref(false)
+
+// ===== 列表筛选 / 搜索 / 分页（客户端实现；服务端 `/api/repos` 契约不变）=====
+// 评估结论（用户 2026-10-10）：客户端筛选 + 客户端分页——`/api/repos` 返回全量，无需后端分页参数。
+const searchQuery = ref('')
+
+/** 筛选态（`'all'` = 不筛选；凭据列 `'none'` = 仅未关联） */
+const repoFilters = reactive({
+    executorKind: 'all',
+    packageManager: 'all',
+    credentialId: 'all',
+})
+
+/** 每页条数（caomei DataTable 内建分页，`rows` 为初值）与候选 */
+const ROWS_PER_PAGE = 10
+const ROWS_PER_PAGE_OPTIONS = [10, 25, 50]
+
+const executorFilterOptions = computed(() => [
+    { label: t('repos.filterAll'), value: 'all' },
+    { label: t('repos.platformContainer'), value: 'container' },
+    { label: t('repos.githubAction'), value: 'github-action' },
+    { label: t('repos.sandboxContainerUnavailable'), value: 'sandbox' },
+])
+
+const packageManagerFilterOptions = computed(() => [
+    { label: t('repos.filterAll'), value: 'all' },
+    { label: 'pnpm', value: 'pnpm' },
+    { label: 'npm', value: 'npm' },
+    { label: 'yarn', value: 'yarn' },
+])
+
+const credentialFilterOptions = computed(() => [
+    { label: t('repos.filterAll'), value: 'all' },
+    { label: t('repos.filterNotLinked'), value: 'none' },
+    ...credentials.value.map((credential) => ({ label: credential.name, value: credential.id })),
+])
+
+/** 是否存在生效中的搜索 / 筛选（用于空态文案与「重置」按钮可用性） */
+const hasActiveRepoFilter = computed(() => Boolean(
+    searchQuery.value.trim()
+    || repoFilters.executorKind !== 'all'
+    || repoFilters.packageManager !== 'all'
+    || repoFilters.credentialId !== 'all',
+))
+
+const resetRepoFilters = () => {
+    searchQuery.value = ''
+    repoFilters.executorKind = 'all'
+    repoFilters.packageManager = 'all'
+    repoFilters.credentialId = 'all'
+}
+
+/**
+ * 客户端「搜索（owner / 仓库名 / 标签 / 凭据名）+ 筛选（执行方式 / 包管理器 / 凭据）」叠加结果。
+ *
+ * 与行选择的交互：`selectedRows` 是独立持有的已选集合，筛选变化本身不清空它；
+ * 列表刷新（保存 / 删除 / 重新拉取）后按 id 重映射到新对象（库内受控选择按对象引用解析）；
+ * 但**任意一次勾选 / 取消勾选都会以当前过滤后的集合回写选择**（caomei DataTable 行为），
+ * 因此被筛选隐藏的已选行会在下一次勾选时被静默移出（跨页选择不受影响）。
+ * 「批量扫描」计数可能大于当前可见行数——筛选是视图态，不改变集合本身。
+ *
+ * 页码：`:data` 变化（搜索 / 筛选）时由 DataTable 内部（`@tanstack` autoResetPageIndex）回到第 1 页。
+ *
+ * 跨页全选：表头全选用上游 1.0.0 语义（当前页）；「全选全部筛选结果」由表格上方的选择栏承载，
+ * 单次点击覆盖所有筛选结果（含跨页），并显示「已选 / 筛选总数」。
+ */
+const filteredRepos = computed(() => {
+    const keyword = searchQuery.value.trim().toLowerCase()
+    return repos.value.filter((repo) => {
+        if (repoFilters.executorKind !== 'all' && repo.executorKind !== repoFilters.executorKind) {
+            return false
+        }
+        if (repoFilters.packageManager !== 'all' && repo.packageManager !== repoFilters.packageManager) {
+            return false
+        }
+        if (repoFilters.credentialId === 'none') {
+            if (repo.credentialId) {
+                return false
+            }
+        } else if (repoFilters.credentialId !== 'all' && repo.credentialId !== repoFilters.credentialId) {
+            return false
+        }
+        if (!keyword) {
+            return true
+        }
+        return [
+            repo.owner,
+            repo.name,
+            (repo.tags ?? []).join(' '),
+            repo.credentialName ?? '',
+        ].some((field) => field.toLowerCase().includes(keyword))
+    })
+})
+
+const reposEmptyText = computed(() => (
+    hasActiveRepoFilter.value ? t('repos.emptyFiltered') : t('repos.empty')
+))
+
+// 跨页全选：表头保持上游「当前页」语义，「全部筛选结果」由选择栏承载（状态与动作见组合式）
+const { allFilteredSelected, selectAllFiltered, clearSelection } = useRepoSelection(selectedRows, () => filteredRepos.value)
+
+/**
+ * 列定义（caomei DataTable 用 `columns` 数组 + `#cell-{key}` 插槽替代迁移前的 `<Column>`）。
+ * - `key` 即排序字段（`field` 语义并入 `key`）；`actions` 等非排序列用语义名保证唯一 key
+ * - 行选择列由 `selection-mode="multiple"` 内建渲染，不再需要迁移前的 `<Column selection-mode>`
+ */
+const columns = computed<DataTableColumn<RepoView>[]>(() => [
+    { key: 'owner', header: t('repos.colOwner'), sortable: true },
+    { key: 'name', header: t('repos.colRepo'), sortable: true },
+    { key: 'tags', header: t('repos.colTags') },
+    { key: 'defaultBranch', header: t('repos.colDefaultBranch') },
+    { key: 'packageManager', header: t('repos.colPackageManager'), sortable: true },
+    // 凭据列：宽度约束 + 不折行（「未关联」等短值在窄列下曾折行；长凭据名保持单行、由自适应布局撑开列）
+    { key: 'credentialName', header: t('repos.colCredential'), width: '104px', bodyClass: 'repos__col-credential' },
+    { key: 'executorKind', header: t('repos.colExecutor'), sortable: true },
+    { key: 'actions', header: t('repos.colActions'), width: '230px' },
+])
 
 </script>
 
@@ -366,54 +418,119 @@ const importDialogVisible = ref(false)
                 </p>
             </div>
             <div class="repos__header-actions">
-                <Button
-                    icon="pi pi-upload"
-                    :label="t('repos.import')"
-                    severity="secondary"
+                <CaomeiButton
+                    tone="neutral"
                     @click="importDialogVisible = true"
-                />
-                <Button
-                    icon="pi pi-list"
-                    :label="t('repos.batchScan')"
-                    severity="secondary"
+                >
+                    <template #icon>
+                        <CaomeiIcon :icon="Upload" />
+                    </template>
+                    {{ t('repos.import') }}
+                </CaomeiButton>
+                <CaomeiButton
+                    tone="neutral"
                     :disabled="!selectedRows.length"
                     :badge="selectedRows.length ? String(selectedRows.length) : undefined"
-                    badge-class="p-badge-danger"
+                    badge-tone="danger"
                     :title="t('repos.batchScanTitle')"
                     @click="openBatchScan"
-                />
-                <Button
-                    icon="pi pi-plus"
-                    :label="t('repos.addRepo')"
-                    @click="openCreate"
-                />
+                >
+                    <template #icon>
+                        <CaomeiIcon :icon="List" />
+                    </template>
+                    {{ t('repos.batchScan') }}
+                </CaomeiButton>
+                <CaomeiButton @click="openCreate">
+                    <template #icon>
+                        <CaomeiIcon :icon="Plus" />
+                    </template>
+                    {{ t('repos.addRepo') }}
+                </CaomeiButton>
             </div>
         </div>
 
-        <Message
+        <!-- 列表筛选 / 搜索（客户端；服务端 `/api/repos` 契约不变） -->
+        <section class="repos__filters">
+            <div class="repos__filter-field repos__filter-field--search">
+                <label for="repos-filter-search">{{ t('repos.filterSearch') }}</label>
+                <CaomeiInput
+                    id="repos-filter-search"
+                    v-model="searchQuery"
+                    :placeholder="t('repos.filterSearchPlaceholder')"
+                />
+            </div>
+            <div class="repos__filter-field">
+                <label for="repos-filter-executor">{{ t('repos.colExecutor') }}</label>
+                <CaomeiSelect
+                    id="repos-filter-executor"
+                    v-model="repoFilters.executorKind"
+                    :options="executorFilterOptions"
+                    option-label="label"
+                    option-value="value"
+                />
+            </div>
+            <div class="repos__filter-field">
+                <label for="repos-filter-package-manager">{{ t('repos.colPackageManager') }}</label>
+                <CaomeiSelect
+                    id="repos-filter-package-manager"
+                    v-model="repoFilters.packageManager"
+                    :options="packageManagerFilterOptions"
+                    option-label="label"
+                    option-value="value"
+                />
+            </div>
+            <div class="repos__filter-field">
+                <label for="repos-filter-credential">{{ t('repos.colCredential') }}</label>
+                <CaomeiSelect
+                    id="repos-filter-credential"
+                    v-model="repoFilters.credentialId"
+                    :options="credentialFilterOptions"
+                    option-label="label"
+                    option-value="value"
+                />
+            </div>
+            <CaomeiButton
+                v-if="hasActiveRepoFilter"
+                tone="neutral"
+                size="sm"
+                class="repos__filter-reset"
+                @click="resetRepoFilters"
+            >
+                {{ t('repos.filterReset') }}
+            </CaomeiButton>
+        </section>
+
+        <CaomeiMessage
             v-if="error"
-            severity="error"
+            tone="danger"
             :closable="false"
         >
             {{ error }}
-        </Message>
-        <Message
+        </CaomeiMessage>
+        <CaomeiMessage
             v-if="success"
-            severity="success"
+            tone="success"
             :closable="false"
         >
             {{ success }}
-        </Message>
-        <Message
+        </CaomeiMessage>
+        <CaomeiMessage
             v-if="scanError"
-            severity="error"
+            tone="danger"
             :closable="false"
         >
             {{ scanError }}
-        </Message>
-        <Message
+        </CaomeiMessage>
+        <CaomeiMessage
+            v-if="scanMerged"
+            tone="warning"
+            :closable="false"
+        >
+            {{ scanMerged }}
+        </CaomeiMessage>
+        <CaomeiMessage
             v-if="scanSuccess"
-            severity="success"
+            tone="success"
             :closable="false"
         >
             {{ scanSuccess }}
@@ -425,248 +542,122 @@ const importDialogVisible = ref(false)
             >
                 {{ t('repos.openRunPage') }}
             </a>
-        </Message>
+        </CaomeiMessage>
 
-        <Card v-if="!loading">
-            <template #content>
-                <DataTable
-                    v-model:selection="selectedRows"
-                    :value="repos"
-                    data-key="id"
-                    striped-rows
-                    size="small"
-                    removable-sort
-                    :empty-message="t('repos.empty')"
-                >
-                    <Column selection-mode="multiple" header-style="{width: '3rem'}" />
-                    <Column
-                        field="owner"
-                        :header="t('repos.colOwner')"
-                        sortable
-                    />
-                    <Column
-                        field="name"
-                        :header="t('repos.colRepo')"
-                        sortable
-                    />
-                    <Column :header="t('repos.colTags')">
-                        <template #body="{data}">
-                            <div v-if="data.tags?.length" class="repos__tags">
-                                <Tag
-                                    v-for="tag in data.tags"
-                                    :key="tag"
-                                    :value="tag"
-                                    severity="info"
-                                    rounded
-                                />
-                            </div>
-                            <span v-else class="text-muted">—</span>
-                        </template>
-                    </Column>
-                    <Column :header="t('repos.colDefaultBranch')">
-                        <template #body="{data}">
-                            {{ data.defaultBranch }}
-                        </template>
-                    </Column>
-                    <Column
-                        field="packageManager"
-                        :header="t('repos.colPackageManager')"
-                        sortable
+        <CaomeiCard v-if="!loading">
+            <repo-selection-bar
+                v-if="filteredRepos.length || selectedRows.length"
+                :selected="selectedRows.length"
+                :total="filteredRepos.length"
+                :all-selected="allFilteredSelected"
+                @select-all="selectAllFiltered"
+                @clear="clearSelection"
+            />
+            <CaomeiDataTable
+                :data="filteredRepos"
+                :columns="columns"
+                row-key="id"
+                selection-mode="multiple"
+                :selection="selectedRows"
+                striped
+                :paginator="true"
+                :rows="ROWS_PER_PAGE"
+                :rows-per-page-options="ROWS_PER_PAGE_OPTIONS"
+                :empty-text="reposEmptyText"
+                @update:selection="onSelectionChange"
+            >
+                <template #cell-tags="{row}">
+                    <div v-if="row.tags?.length" class="repos__tags">
+                        <CaomeiTag
+                            v-for="tag in row.tags"
+                            :key="tag"
+                            tone="primary"
+                            rounded
+                        >
+                            {{ tag }}
+                        </CaomeiTag>
+                    </div>
+                    <span v-else class="text-muted">—</span>
+                </template>
+                <template #cell-defaultBranch="{row}">
+                    {{ row.defaultBranch }}
+                </template>
+                <template #cell-packageManager="{row}">
+                    <CaomeiTag tone="neutral">
+                        {{ row.packageManager }}
+                    </CaomeiTag>
+                </template>
+                <template #cell-credentialName="{row}">
+                    <span v-if="row.credentialName">{{ row.credentialName }}</span>
+                    <span v-else class="text-muted">{{ t('repos.notLinked') }}</span>
+                </template>
+                <template #cell-executorKind="{row}">
+                    <CaomeiTag>{{ row.executorKind === 'github-action' ? t('repos.githubAction') : row.executorKind === 'sandbox' ? t('repos.sandboxContainerUnavailable') : t('repos.platformContainer') }}</CaomeiTag>
+                </template>
+                <template #cell-actions="{row}">
+                    <CaomeiButton
+                        variant="ghost"
+                        rounded
+                        size="sm"
+                        :loading="scanningId === row.id"
+                        :label="t('repos.actionTriggerScan')"
+                        :title="t('repos.actionTriggerScan')"
+                        @click="openScanConfig(row)"
                     >
-                        <template #body="{data}">
-                            <Tag :value="data.packageManager" severity="secondary" />
+                        <template #icon>
+                            <CaomeiIcon :icon="Play" />
                         </template>
-                    </Column>
-                    <Column :header="t('repos.colCredential')">
-                        <template #body="{data}">
-                            <span v-if="data.credentialName">{{ data.credentialName }}</span>
-                            <span v-else class="text-muted">{{ t('repos.notLinked') }}</span>
-                        </template>
-                    </Column>
-                    <Column
-                        field="executorKind"
-                        :header="t('repos.colExecutor')"
-                        sortable
+                    </CaomeiButton>
+                    <CaomeiButton
+                        variant="ghost"
+                        rounded
+                        size="sm"
+                        :label="t('repos.actionScanHistory')"
+                        :title="t('repos.actionScanHistory')"
+                        @click="navigateTo(`/scans?repository=${row.id}`)"
                     >
-                        <template #body="{data}">
-                            <Tag :value="data.executorKind === 'github-action' ? t('repos.githubAction') : data.executorKind === 'sandbox' ? t('repos.sandboxContainer') : t('repos.platformContainer')" />
+                        <template #icon>
+                            <CaomeiIcon :icon="RotateCcwClock" />
                         </template>
-                    </Column>
-                    <Column :header="t('repos.colActions')" :style="{width: '230px'}">
-                        <template #body="{data}">
-                            <Button
-                                icon="pi pi-play"
-                                text
-                                rounded
-                                size="small"
-                                :loading="scanningId === data.id"
-                                :aria-label="t('repos.actionTriggerScan')"
-                                :title="t('repos.actionTriggerScan')"
-                                @click="openScanConfig(data)"
-                            />
-                            <Button
-                                icon="pi pi-history"
-                                text
-                                rounded
-                                size="small"
-                                :aria-label="t('repos.actionScanHistory')"
-                                :title="t('repos.actionScanHistory')"
-                                @click="navigateTo(`/scans?repository=${data.id}`)"
-                            />
-                            <Button
-                                icon="pi pi-pencil"
-                                text
-                                rounded
-                                size="small"
-                                :aria-label="t('repos.actionEdit')"
-                                @click="openEdit(data)"
-                            />
-                            <Button
-                                icon="pi pi-trash"
-                                text
-                                rounded
-                                size="small"
-                                severity="danger"
-                                :aria-label="t('repos.actionDelete')"
-                                @click="remove(data)"
-                            />
+                    </CaomeiButton>
+                    <CaomeiButton
+                        variant="ghost"
+                        rounded
+                        size="sm"
+                        :label="t('repos.actionEdit')"
+                        @click="openEdit(row)"
+                    >
+                        <template #icon>
+                            <CaomeiIcon :icon="Pencil" />
                         </template>
-                    </Column>
-                </DataTable>
-            </template>
-        </Card>
+                    </CaomeiButton>
+                    <CaomeiButton
+                        variant="ghost"
+                        rounded
+                        size="sm"
+                        tone="danger"
+                        :label="t('repos.actionDelete')"
+                        @click="remove(row)"
+                    >
+                        <template #icon>
+                            <CaomeiIcon :icon="Trash" />
+                        </template>
+                    </CaomeiButton>
+                </template>
+            </CaomeiDataTable>
+        </CaomeiCard>
         <p v-else class="text-muted">
             {{ t('common.empty.loading') }}
         </p>
 
-        <Dialog
-            v-model:visible="dialogVisible"
-            :header="editingId ? t('repos.dialogEditTitle') : t('repos.dialogAddTitle')"
-            modal
-            :draggable="false"
-            :style="{width: '520px'}"
-        >
-            <form class="repo-form" @submit.prevent="submit">
-                <div class="repo-form__row">
-                    <div class="repo-form__field">
-                        <label for="owner">{{ t('repos.fieldOwner') }}</label>
-                        <InputText
-                            id="owner"
-                            v-model="form.owner"
-                            placeholder="github-owner"
-                            fluid
-                            required
-                        />
-                    </div>
-                    <div class="repo-form__field">
-                        <label for="name">{{ t('repos.fieldName') }}</label>
-                        <InputText
-                            id="name"
-                            v-model="form.name"
-                            placeholder="repo-name"
-                            fluid
-                            required
-                        />
-                    </div>
-                </div>
-                <div class="repo-form__row">
-                    <div class="repo-form__field">
-                        <label for="defaultBranch">{{ t('repos.fieldDefaultBranch') }}</label>
-                        <InputText
-                            id="defaultBranch"
-                            v-model="form.defaultBranch"
-                            fluid
-                        />
-                    </div>
-                    <div class="repo-form__field">
-                        <label for="packageManager">{{ t('repos.fieldPackageManager') }}</label>
-                        <Select
-                            id="packageManager"
-                            v-model="form.packageManager"
-                            :options="['pnpm', 'npm', 'yarn']"
-                            fluid
-                        />
-                    </div>
-                </div>
-                <div class="repo-form__row">
-                    <div class="repo-form__field">
-                        <label for="credentialId">{{ t('repos.fieldCredential') }}</label>
-                        <Select
-                            id="credentialId"
-                            v-model="form.credentialId"
-                            :options="credentials"
-                            option-label="name"
-                            option-value="id"
-                            :show-clear="true"
-                            :placeholder="t('repos.notLinked')"
-                            fluid
-                        />
-                    </div>
-                    <div class="repo-form__field">
-                        <label for="executorKind">{{ t('repos.fieldExecutor') }}</label>
-                        <Select
-                            id="executorKind"
-                            v-model="form.executorKind"
-                            :options="[
-                                {label: t('repos.platformContainer'), value: 'container'},
-                                {label: t('repos.githubAction'), value: 'github-action'},
-                                {label: t('repos.sandboxContainer'), value: 'sandbox'}
-                            ]"
-                            option-label="label"
-                            option-value="value"
-                            fluid
-                        />
-                    </div>
-                </div>
-                <div
-                    v-if="form.executorKind === 'github-action'"
-                    class="repo-form__field"
-                >
-                    <label for="actionWorkflowFile">{{ t('repos.fieldWorkflowFile') }}</label>
-                    <InputText
-                        id="actionWorkflowFile"
-                        v-model="form.actionWorkflowFile"
-                        placeholder=".github/workflows/security-auto-fix.yml"
-                        fluid
-                    />
-                    <small class="text-muted">{{ t('repos.fieldWorkflowFileHint') }}</small>
-                </div>
-                <div class="repo-form__field">
-                    <label for="note">{{ t('repos.fieldNote') }}</label>
-                    <Textarea
-                        id="note"
-                        v-model="form.note"
-                        rows="2"
-                        fluid
-                    />
-                </div>
-                <div class="repo-form__field">
-                    <label for="tags">{{ t('repos.fieldTags') }}</label>
-                    <Chips
-                        id="tags"
-                        v-model="form.tags"
-                        :placeholder="t('repos.fieldTagsPlaceholder')"
-                        fluid
-                    />
-                    <small class="text-muted">{{ t('repos.fieldTagsHint') }}</small>
-                </div>
-
-                <div class="repo-form__actions">
-                    <Button
-                        :label="t('common.actions.cancel')"
-                        severity="secondary"
-                        text
-                        @click="closeDialog"
-                    />
-                    <Button
-                        type="submit"
-                        :label="t('common.actions.save')"
-                        icon="pi pi-check"
-                        :loading="saving"
-                    />
-                </div>
-            </form>
-        </Dialog>
+        <repo-form-dialog
+            v-model:visible="repoDialogVisible"
+            :repo="editingRepo"
+            :credentials="credentials"
+            :default-branch="defaultBranch"
+            @saved="onRepoFormSaved"
+            @failed="onRepoFormFailed"
+        />
 
         <import-repos-dialog
             v-model:visible="importDialogVisible"
@@ -674,21 +665,20 @@ const importDialogVisible = ref(false)
             @imported="fetchData"
         />
 
-        <Dialog
-            v-model:visible="batchDialogVisible"
-            :header="t('repos.batchHeader', {count: selectedRows.length})"
+        <CaomeiDialog
+            v-model:open="batchDialogVisible"
+            :title="t('repos.batchHeader', {count: selectedRows.length})"
             modal
-            :draggable="false"
             :style="{width: '480px'}"
         >
             <div class="batch-form">
-                <Message
+                <CaomeiMessage
                     v-if="batchError"
-                    severity="error"
+                    tone="danger"
                     :closable="false"
                 >
                     {{ batchError }}
-                </Message>
+                </CaomeiMessage>
                 <div class="batch-form__repos">
                     <span
                         v-for="repo in selectedRows"
@@ -701,43 +691,45 @@ const importDialogVisible = ref(false)
                 <div class="batch-form__row">
                     <div class="batch-form__field">
                         <label for="batchMode">{{ t('repos.batchMode') }}</label>
-                        <Select
+                        <CaomeiSelect
                             id="batchMode"
                             v-model="batchMode"
                             :options="modeOptions"
                             option-label="label"
                             option-value="value"
-                            fluid
                         />
                     </div>
                     <div class="batch-form__field">
                         <label for="batchSeverity">{{ t('repos.batchSeverity') }}</label>
-                        <Select
+                        <CaomeiSelect
                             id="batchSeverity"
                             v-model="batchSeverityThreshold"
                             :options="severityOptions"
                             option-label="label"
                             option-value="value"
-                            fluid
                         />
                     </div>
                 </div>
                 <div class="batch-form__actions">
-                    <Button
-                        :label="t('common.actions.cancel')"
-                        severity="secondary"
-                        text
+                    <CaomeiButton
+                        variant="ghost"
+                        tone="neutral"
                         @click="batchDialogVisible = false"
-                    />
-                    <Button
-                        :label="t('repos.batchStart')"
-                        icon="pi pi-play"
+                    >
+                        {{ t('common.actions.cancel') }}
+                    </CaomeiButton>
+                    <CaomeiButton
                         :loading="batchSubmitting"
                         @click="submitBatchScan"
-                    />
+                    >
+                        <template #icon>
+                            <CaomeiIcon :icon="Play" />
+                        </template>
+                        {{ t('repos.batchStart') }}
+                    </CaomeiButton>
                 </div>
             </div>
-        </Dialog>
+        </CaomeiDialog>
 
         <scan-config-dialog
             v-model:visible="scanConfigDialogVisible"
@@ -751,13 +743,18 @@ const importDialogVisible = ref(false)
             :has-org-ai-key="scanConfigHasOrgAiKey"
             @submit="submitScanConfig"
         />
-        <!-- `repo-history-dialog` 不再在此挂载：pi-history 跳转改到 /scans?repository=xxx（todo.md §M16.1），
+        <!-- `repo-history-dialog` 不再在此挂载：历史入口改为跳转 /scans?repository=xxx，
              详情 dialog 由 scans.vue 内 mount 的 `<repo-history-dialog query-key="run" />` 兜底 -->
     </div>
 </template>
 
 <style lang="scss" scoped>
 .repos {
+    // 凭据列单元格不折行（配合 columns 的 width 约束；长凭据名单行显示，列宽由自适应布局撑开）
+    :deep(.repos__col-credential) {
+        white-space: nowrap;
+    }
+
     &__header {
         display: flex;
         align-items: center;
@@ -774,40 +771,40 @@ const importDialogVisible = ref(false)
         }
     }
 
+    // 列表筛选 / 搜索工具栏（客户端筛选与分页，服务端契约不变）
+    &__filters {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-end;
+        gap: $space-3;
+        margin-bottom: $space-4;
+    }
+
+    &__filter-field {
+        display: flex;
+        flex-direction: column;
+        gap: $space-1;
+        min-width: 160px;
+
+        label {
+            font-size: $font-size-sm;
+            color: $color-text-muted;
+        }
+    }
+
+    &__filter-field--search {
+        flex: 1 1 220px;
+        max-width: 320px;
+    }
+
+    &__filter-reset {
+        margin-bottom: 1px;
+    }
+
     &__header-actions {
         display: flex;
         align-items: center;
         gap: $space-2;
-    }
-}
-
-.repo-form {
-    display: flex;
-    flex-direction: column;
-    gap: $space-4;
-
-    &__row {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: $space-3;
-    }
-
-    &__field {
-        display: flex;
-        flex-direction: column;
-        gap: $space-1;
-
-        label {
-            font-size: $font-size-sm;
-            font-weight: 500;
-        }
-    }
-
-    &__actions {
-        display: flex;
-        justify-content: flex-end;
-        gap: $space-2;
-        margin-top: $space-2;
     }
 }
 
@@ -844,9 +841,7 @@ const importDialogVisible = ref(false)
     }
 
     &__field {
-        display: flex;
-        flex-direction: column;
-        gap: $space-1;
+        @include field-stack;
 
         label {
             font-size: $font-size-sm;

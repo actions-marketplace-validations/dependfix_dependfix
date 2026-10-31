@@ -13,7 +13,7 @@ metadata:
 
 - [ ] Step 1: 确认是否允许提交 ⚠️ REQUIRED
     - [ ] 1.1 用户已明确要求提交。
-    - [ ] 1.2 A 阶段（`code-reviewer` 技能）已放行；`pnpm lint`、`pnpm typecheck` 与必要的定向测试均已通过。
+    - [ ] 1.2 A 阶段（`code-reviewer` 技能）已放行；`pnpm run lint:check`（无 `--fix`；涉样式时另跑 `pnpm run lint:css:check`）、`pnpm typecheck` 与必要的定向测试均已通过。
     - [ ] 1.3 质量门未通过时禁止提交；若强行提交，必须在交付前明确告知风险。
 - [ ] Step 2: 审视变更范围 ⚠️ REQUIRED
     - [ ] 2.1 `git status` + `git diff` 识别本次应入提交的文件。
@@ -105,7 +105,7 @@ scope 反映改动所在的目录或职责，必须英文、小写、kebab-case�
 ## 交付前检查
 
 - [ ] 用户已明确允许本次提交。
-- [ ] A 阶段（`code-reviewer`）已放行；`pnpm lint`、`pnpm typecheck`、必要的 `pnpm test` 均已通过。
+- [ ] A 阶段（`code-reviewer`）已放行；`pnpm run lint:check`（无 `--fix`；涉样式时另跑 `pnpm run lint:css:check`）、`pnpm typecheck`、必要的 `pnpm test` 均已通过。
 - [ ] 暂存范围只包含本次变更；`pnpm-lock.yaml` 随其所属批次一起提交。
 - [ ] 提交消息符合 Conventional Commits 语义且 type / scope 收敛合理。
 - [ ] type / scope 使用英文，主题与正文使用简体中文（或用户指定语言）。

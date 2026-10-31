@@ -2,22 +2,22 @@ import { test, expect, type Request } from '@playwright/test'
 import { waitForHydration } from './helpers/hydration.helper'
 
 /**
- * alerts 视图 rowGroup + 视图切换冒烟（docs/plan/todo.md §C58 + §C65-D2/D3/D4）。
+ * alerts 视图 rowGroup + 视图切换冒烟。
  *
  * 覆盖：
  * - 顶部图表去重（alerts 不再渲染 dashboard 同款图表，与 dashboard.vue 完全去重）
  * - DataTable rowGroup by packageName（subheader 显示包名 + 告警数）
- * - subheader 点击折叠/展开（PrimeVue 默认 rowToggleButton + 自定义 span 整体交互）
+ * - subheader 点击折叠/展开（caomei DataTable 内建行分组折叠按钮 + 自定义 span 整体交互）
  * - 视图切换：按包 / 按项目 / 原始列表三选一，groupBy 参数 + 动态 DataTable 属性
  *
- * 测试数据来源（todo.md §M16.5 E2E timeout 修复）：
+ * 测试数据来源：
  * - 依赖 global-setup 通过 POST /api/e2e/fixtures 注入的 server-side fixtures
  *   （apps/platform/tests/e2e/helpers/fixtures.helper.ts ALERTS_ROWGROUP_FIXTURES）
  * - **不能用 page.route mock /api/alerts + /api/repos**：alerts.vue 迁移 useAsyncData 后
  *   SSR 阶段在 server 进程内 fetch，page.route() 只能拦截浏览器请求，拦截不到 server
  *   进程内 fetch → SSR 阶段真实打 server → e2e 库空 → hydration 时 alerts.value=[] →
- *   PrimeVue rowGroup subheader 不渲染 → rowGroup 测试 timeout 重试 → E2E job
- *   累计 ≥ 20min → workflow timeout-minutes 取消（todo.md §M16.5 复盘）
+ *   caomei rowGroup subheader 不渲染 → rowGroup 测试 timeout 重试 → E2E job
+ *   累计超时 → workflow timeout-minutes 取消
  *
  * fixtures 内容（最小集）：
  * - repos: foo/bar + foo/baz（仓库 Select 选项）
@@ -29,16 +29,16 @@ test.use({ storageState: 'tests/e2e/.auth/admin.json' })
 
 test.describe('alerts rowGroup + 视图切换', () => {
     /**
-     * SSR 锁定测试（todo.md §M16.4 useAsyncData SSR-aware data fetching）
+     * SSR 锁定测试（useAsyncData SSR-aware data fetching）
      *
      * 验证迁移到 useAsyncData 后，alerts 数据走 Nuxt payload 通道：
      * - SSR 阶段 server 进程内 fetch /api/alerts（依赖 global-setup 注入的 fixtures 提供真实数据）
-     * - hydration 完成时 alerts.value 已有完整数据 → PrimeVue DataTable processedData
+     * - hydration 完成时 alerts.value 已有完整数据 → caomei DataTable processedData
      *   在 hydration 阶段就完整计算 → rowGroup subheader 立即可见
      *
      * 反向锁定（双保险）：
      * 1. UI 断言：hydration 后立即见 rowGroup subheader（onMounted 模式下 SSR alerts=[] →
-     *    PrimeVue 4 rowGroup known issue 不渲染 → waitForSelector timeout）
+     *    caomei rowGroup 在数据缺失时不渲染分组 → waitForSelector timeout）
      * 2. 网络断言：page.on('request') 跟踪浏览器侧 /api/alerts fetch 数 = 0
      *    （useAsyncData SSR-aware → SSR fetch + payload 复用 → 客户端 0 次额外 fetch；
      *    onMounted 模式下 hydration 后客户端必然触发 1 次 fetchAlerts → 断言失败反向锁定）
@@ -61,7 +61,7 @@ test.describe('alerts rowGroup + 视图切换', () => {
             // 反向锁定：useAsyncData SSR-aware → 0 次客户端 fetch（payload 复用）
             // 若回退到 onMounted 异步赋值模式，hydration 后客户端必然触发 1 次 /api/alerts
             expect(requests).toHaveLength(0)
-            // 反向锁定：UI 已渲染 rowGroup subheader（onMounted 模式下 PrimeVue hydration 后不渲染）
+            // 反向锁定：UI 已渲染 rowGroup subheader（onMounted 模式下分组 subheader 不渲染）
             await page.waitForSelector('.alerts__group-header', { timeout: 5000 })
             const groupHeaders = await page.locator('.alerts__group-header').count()
             expect(groupHeaders).toBeGreaterThan(0)
@@ -70,7 +70,7 @@ test.describe('alerts rowGroup + 视图切换', () => {
         }
     })
 
-    test('alerts 页面不包含 dashboard 同款图表（去重 todo.md §C65-D4）', async ({ page }) => {
+    test('alerts 页面不包含 dashboard 同款图表（去重）', async ({ page }) => {
         await page.goto('/alerts')
         await waitForHydration(page)
         // 断言：alerts 页面不存在 dashboard 图表 DOM
@@ -81,9 +81,9 @@ test.describe('alerts rowGroup + 视图切换', () => {
         await expect(chartsGrid).toHaveCount(0)
     })
 
-    // todo.md §M16.4 useAsyncData SSR-aware data fetching 修复后启用：
+    // useAsyncData SSR-aware data fetching 后启用：
     // 迁移到 useAsyncData 后，SSR 阶段 fetch 已经发生，hydration 时 alerts 数组已有数据，
-    // PrimeVue DataTable processedData 在 hydration 阶段就完整计算 → rowGroup subheader 渲染。
+    // caomei DataTable processedData 在 hydration 阶段就完整计算 → rowGroup subheader 渲染。
     test('DataTable rowGroup by packageName：subheader 显示包名 + 告警数', async ({ page }) => {
         await page.goto('/alerts')
         await waitForHydration(page)
@@ -102,36 +102,72 @@ test.describe('alerts rowGroup + 视图切换', () => {
         await waitForHydration(page)
         await page.waitForSelector('.alerts__group-header', { timeout: 15000 })
         const firstGroup = page.locator('.alerts__group-header').first()
-        // PrimeVue 4.5.5 rowToggleButton + chevron 图标：ChevronRight/Left 通过 SVG path 区分
-        // （不是 pi-chevron-* class 名 —— 旧版 PrimeVue 4 早期使用 font-awesome class，
-        // 4.5.5 改用 primeicons SVG），断言 SVG path 子串区分
-        // 折叠态 SVG path 起点 "M14"（ChevronRight）；展开态 "M5"（ChevronDown）；
-        // 用 rowToggleButton 的 transform 状态判断（PrimeVue 内部用旋转 + 路径切换实现）
-        const toggleButton = page.locator('.p-datatable-row-toggle-button').first()
-        // 点击前：折叠态（默认）
+        // caomei DataTable 内建分组折叠按钮：`.caomei-data-table__row-group-toggle`
+        // （含 aria-expanded 与 aria-label，图标为 ChevronRight/Down 切换）
+        const toggleButton = page.locator('.caomei-data-table__row-group-toggle').first()
         await expect(toggleButton).toBeVisible()
-        // 点击 groupheader 展开
+        await expect(toggleButton).toHaveAttribute('aria-expanded', 'false')
+        // 点击 groupheader 展开 → aria-expanded 翻转 + 该组数据行渲染
         await firstGroup.click()
-        // 等待动画后验证 toggleButton 内部 SVG path 已变（展开态）
-        await page.waitForTimeout(300)
-        const expandedPath = await page.locator('.p-datatable-row-toggle-button').first().locator('svg path').getAttribute('d')
-        // 折叠态 "M14 7.5L17.5 10.5L14 13.5"（ChevronRight） vs 展开态 "M5 7.5L8 10.5L5 13.5"（ChevronLeft 旋转）
-        // 简化断言：点击前后 path 不一致即可证明状态切换
+        await expect(toggleButton).toHaveAttribute('aria-expanded', 'true', { timeout: 5000 })
+        await expect(page.locator('.caomei-data-table__row').first()).toBeVisible({ timeout: 5000 })
+        // 再点一次折叠 → aria-expanded 回到 false 且数据行不再渲染
         await firstGroup.click()
-        await page.waitForTimeout(300)
-        const collapsedPath = await page.locator('.p-datatable-row-toggle-button').first().locator('svg path').getAttribute('d')
-        expect(expandedPath).not.toBe(collapsedPath)
+        await expect(toggleButton).toHaveAttribute('aria-expanded', 'false', { timeout: 5000 })
+        await expect(page.locator('.caomei-data-table__row')).toHaveCount(0)
     })
 
     test('#groupheader slot 内无自定义 chevron（双 chevron 视觉缺陷修复）', async ({ page }) => {
         await page.goto('/alerts')
         await waitForHydration(page)
-        // PrimeVue 4 expandable-row-groups + #groupheader slot 模式下，PrimeVue 默认渲染
-        // rowToggleButton（含 ChevronDownIcon/RightIcon），slot 内不应再叠加自定义 chevron
-        // （参见 node_modules/primevue/datatable/index.mjs:1776-1800）
+        // caomei DataTable expandable row groups + #groupheader slot 模式下，DataTable 默认渲染
+        // 行分组折叠按钮（含 chevron），slot 内不应再叠加自定义 chevron
         // 断言：DOM 中不存在 alerts__group-toggle 类名的 <i> 元素（修复前是 font-awesome pi-chevron-*）
         const customChevron = page.locator('i.alerts__group-toggle')
         await expect(customChevron).toHaveCount(0)
+    })
+
+    /**
+     * 跨 severity 契约：同一包跨多档 severity 只渲染一个分组头（「一个包一组」）。
+     *
+     * fixtures 中 lodash 同时含 high（dependabot ×2）与 medium（code-scanning ×1）——
+     * 修复前「按行 severity 降序」会把两档拆到不同 severity 区块，渲染出两个同名 lodash 分组头，
+     * 且二者共享同一计数（`groupCounts` 为全局 Map）。修复后「严重级别」列排序取值改为组排序键，
+     * 同包行相邻 → 只出现一个分组头，计数与展开状态自洽。
+     */
+    test('同一包跨 severity 只渲染一个分组头（一个包一组，计数自洽）', async ({ page }) => {
+        await page.goto('/alerts')
+        await waitForHydration(page)
+        await page.waitForSelector('.alerts__group-header', { timeout: 15000 })
+
+        const groupLabels = async () => (await page.locator('.alerts__group-header strong').allTextContents()).map((s) => s.trim())
+        const expectOneGroupPerPackage = async () => {
+            const labels = await groupLabels()
+            expect(labels.filter((label) => label === 'lodash')).toHaveLength(1)
+            expect(new Set(labels).size).toBe(labels.length)
+        }
+
+        // lodash 跨 high（2 行）+ medium（1 行）→ 修复前会渲染 2 个同名分组头
+        await expectOneGroupPerPackage()
+
+        // 计数自洽：lodash 组显示 3 条告警（active 集合；minimist 已 superseded 默认被过滤）
+        const lodashHeader = page.locator('.alerts__group-header').filter({ hasText: 'lodash' }).first()
+        await expect(lodashHeader.locator('strong')).toHaveText('lodash')
+        await expect(lodashHeader).toContainText('3 条告警')
+        // 组头严重级别 Tag = 组内最高级别（lodash = high）
+        await expect(lodashHeader.locator('.caomei-tag__content')).toHaveText('high')
+
+        // 分支①「无排序键」：点击严重级别列（初值 desc → 移除）→ 无排序键时仍按预排序基线保持一组一包
+        const severityHeader = page.locator('.caomei-data-table th:has-text("严重级别")').first()
+        await severityHeader.locator('.caomei-data-table__sort').click()
+        await expect(severityHeader).toHaveAttribute('aria-sort', 'none', { timeout: 5000 })
+        await expectOneGroupPerPackage()
+
+        // 分支②「其它列排序」：用户按出现次数排序后，严重级别（组排序键）仍被补回第一排序键 → 分组不被打散
+        const occHeader = page.locator('.caomei-data-table th:has-text("出现次数")').first()
+        await occHeader.locator('.caomei-data-table__sort').click()
+        await expect(occHeader).toHaveAttribute('aria-sort', 'ascending', { timeout: 5000 })
+        await expectOneGroupPerPackage()
     })
 
     test('视图切换：顶部 Select 三选一（按包 / 按项目 / 原始列表）', async ({ page }) => {
@@ -141,9 +177,9 @@ test.describe('alerts rowGroup + 视图切换', () => {
         const viewSelect = page.locator('#view-mode')
         await expect(viewSelect).toBeVisible()
         await viewSelect.click()
-        const overlay = page.locator('.p-select-overlay')
+        const overlay = page.locator('.caomei-select__content')
         await expect(overlay).toBeVisible({ timeout: 5000 })
-        const options = overlay.locator('li[role="option"]')
+        const options = overlay.locator('.caomei-select__item')
         await expect(options).toHaveCount(3, { timeout: 5000 })
         // 选项 label 文本（i18n 默认 zh-CN）
         await expect(options.nth(0)).toContainText('按包')
@@ -169,7 +205,7 @@ test.describe('alerts rowGroup + 视图切换', () => {
             (resp) => resp.url().includes('/api/alerts') && resp.url().includes('groupBy=repository'),
         )
         await page.locator('#view-mode').click()
-        await page.locator('.p-select-overlay li:has-text("按项目")').click()
+        await page.locator('.caomei-select__content .caomei-select__item:has-text("按项目")').click()
         await repoResponsePromise
         // 至少有一次 client 请求 groupBy=repository
         const repoReq = requests.find((u) => new URL(u).searchParams.get('groupBy') === 'repository')
@@ -193,7 +229,7 @@ test.describe('alerts rowGroup + 视图切换', () => {
             (resp) => resp.url().includes('/api/alerts') && !resp.url().includes('groupBy'),
         )
         await page.locator('#view-mode').click()
-        await page.locator('.p-select-overlay li:has-text("原始列表")').click()
+        await page.locator('.caomei-select__content .caomei-select__item:has-text("原始列表")').click()
         await noneResponsePromise
         // 至少有一次 client 请求不带 groupBy
         const noneReq = requests.find((u) => !new URL(u).searchParams.has('groupBy'))
@@ -201,11 +237,11 @@ test.describe('alerts rowGroup + 视图切换', () => {
         page.off('request', onRequest)
     })
 
-    // todo.md §M20.6：M20.3 per-alert 模型下 ScanResult 字段（occurrenceCount / firstSeenAt /
+    // per-alert 模型下 ScanResult 字段（occurrenceCount / firstSeenAt /
     // lastSeenAt）默认显示；includeSuperseded 开关控制"已关闭"告警显示。
     //
-    // 反向锁定（替代旧 todo.md §M14.3 §T1403 dedupe=across 锁定）：
-    // - 旧测试验证默认 dedupe=across → 聚合列展开；todo.md §M20.6 移除 dedupe UI 后改为验证
+    // 反向锁定（替代旧 dedupe=across 锁定）：
+    // - 移除 dedupe UI 后改为验证
     //   默认 includeSuperseded=false → 已关闭告警行不渲染（minimist 行不在首屏表格中）
     test('首屏默认 includeSuperseded=false → hydration 后已关闭告警行不渲染', async ({ page }) => {
         await page.goto('/alerts')
@@ -217,14 +253,14 @@ test.describe('alerts rowGroup + 视图切换', () => {
         await expect(page.locator('tbody tr:has-text("node-fetch")').first()).toBeVisible()
         // 断言已关闭告警不可见
         await expect(page.locator('tbody tr:has-text("minimist")')).toHaveCount(0)
-        // 出现次数 / 最近发现 / 首次发现 列默认显示（todo.md §M20.6 移除 v-if 控制）
+        // 出现次数 / 最近发现 / 首次发现 列默认显示（移除 v-if 控制）
         await expect(page.locator('th:has-text("出现次数")')).toBeVisible()
         await expect(page.locator('th:has-text("最近发现")')).toBeVisible()
         await expect(page.locator('th:has-text("首次发现")')).toBeVisible()
     })
 
-    // todo.md §M20.6：includeSuperseded 开关切换验证。
-    // PrimeVue 4 ToggleSwitch 是 checkbox 形式（无 overlay），点击切换布尔值。
+    // includeSuperseded 开关切换验证。
+    // include-superseded 开关为点击切换布尔值（无 overlay）。
     // 设计取舍：
     // - 默认 includeSuperseded=false → minimist 行不渲染（已关闭告警被过滤）
     // - 点击开关 → true → useAsyncData watch 触发 refetch → /api/alerts?includeSuperseded=true
@@ -261,7 +297,7 @@ test.describe('alerts rowGroup + 视图切换', () => {
      *
      * 断言契约（subheader 级别，而非数据行级别）：
      * - 用户可见的第一印象是「subheader 顺序」——每个 subheader 代表一个 package 的告警集合
-     * - PrimeVue 多键排序 stable sort 保留同 package 内原顺序（lodash 3 条 = high/medium/high，
+     * - DataTable 多键排序 stable sort 保留同 package 内原顺序（lodash 3 条 = high/medium/high，
      *   high × 2 + medium × 1 → stable sort 后仍是 high → medium → high），但**不同 package 之间**
      *   必须按 severity desc 排列
      * - 因此正确的断言不是「所有数据行 severity 单调不增」（会因稳定排序误判），
@@ -289,16 +325,16 @@ test.describe('alerts rowGroup + 视图切换', () => {
         await page.waitForTimeout(200)
 
         // 提取每个 subheader 对应的 package + 该 group 内告警的 severity 序列
-        // 关键 DOM 特征：
-        // - subheader 行：class 含 p-datatable-row-group-header，TD colspan=13，内嵌 .alerts__group-header
-        // - 数据行：class p-row-odd / p-row-even，紧随在某 subheader 行之后
+        // 关键 DOM 特征（caomei DataTable）：
+        // - subheader 行：class 含 caomei-data-table__row-group，TD colspan=14，内嵌 .alerts__group-header
+        // - 数据行：class 含 caomei-data-table__row，紧随在某 subheader 行之后
         const groupSeverities: { packageName: string, severities: string[] }[] = await page.evaluate(() => {
             const rows = Array.from(document.querySelectorAll('tbody tr'))
             const groups: { packageName: string, severities: string[] }[] = []
             let current: { packageName: string, severities: string[] } | null = null
             for (const tr of rows) {
                 const cls = tr.getAttribute('class') ?? ''
-                const isRowGroupHeader = cls.includes('p-datatable-row-group-header')
+                const isRowGroupHeader = cls.includes('caomei-data-table__row-group')
                 if (isRowGroupHeader) {
                     const strong = tr.querySelector('.alerts__group-header strong')
                     const packageName = strong?.textContent?.trim() ?? ''
@@ -306,11 +342,11 @@ test.describe('alerts rowGroup + 视图切换', () => {
                     groups.push(current)
                     continue
                 }
-                // 数据行：class p-row-odd 或 p-row-even；只取紧接 subheader 后面的
-                if (current && (cls.includes('p-row-odd') || cls.includes('p-row-even'))) {
+                // 数据行：只取紧接 subheader 后面的
+                if (current && cls.includes('caomei-data-table__row')) {
                     const cells = tr.querySelectorAll('td')
                     const severityCell = cells[1]
-                    const tag = severityCell?.querySelector('.p-tag-label')
+                    const tag = severityCell?.querySelector('.caomei-tag__content')
                     const tagText = tag?.textContent?.trim().toLowerCase() ?? ''
                     if (tagText) {
                         current.severities.push(tagText)

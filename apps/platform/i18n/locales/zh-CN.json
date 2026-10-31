@@ -9,6 +9,7 @@
             "envEvents": "环境事件",
             "prChecks": "PR Checks",
             "schedules": "定时计划",
+            "notifications": "通知",
             "batchRuns": "批量运行",
             "credentials": "凭据",
             "users": "用户",
@@ -45,6 +46,7 @@
         "errors": {
             "unknown": "未知错误"
         },
+        "scanTriggerMerged": "该仓库已有进行中的扫描任务，本次触发已合并（未执行）；可在扫描历史查看进度",
         "yes": "是",
         "no": "否",
         "fixStatus": {
@@ -92,9 +94,18 @@
         "title": "仓库管理",
         "subtitle": "管理扫描目标仓库与执行配置",
         "empty": "暂无仓库，点击右上角添加",
+        "emptyFiltered": "没有符合当前搜索 / 筛选条件的仓库",
+        "filterSearch": "搜索",
+        "filterSearchPlaceholder": "owner / 仓库名 / 标签 / 凭据",
+        "filterAll": "全部",
+        "filterNotLinked": "未关联",
+        "filterReset": "重置筛选",
         "import": "批量导入",
         "batchScan": "批量扫描",
         "batchScanTitle": "勾选多个仓库后批量触发扫描",
+        "selectionSummary": "已选 {selected} 条，当前筛选 {total} 条",
+        "selectAllFiltered": "全选全部（{count}）",
+        "clearSelection": "清空选择",
         "addRepo": "添加仓库",
         "openRunPage": "打开运行页",
         "colOwner": "Owner",
@@ -108,6 +119,8 @@
         "notLinked": "未关联",
         "platformContainer": "平台容器",
         "sandboxContainer": "独立沙箱容器",
+        "sandboxContainerUnavailable": "独立沙箱容器（暂不可用）",
+        "sandboxMigratedNotice": "该仓库原使用独立沙箱容器，当前暂不可用；保存后将改为平台容器。",
         "githubAction": "GitHub Action",
         "privateRepo": "私有",
         "publicRepo": "公开",
@@ -127,6 +140,22 @@
         "fieldExecutor": "执行方式",
         "fieldWorkflowFile": "Action workflow 文件",
         "fieldWorkflowFileHint": "目标仓库内 workflow 路径（GitHub Action 执行方式必填）",
+        "fieldVerifyCommands": "自定义验证命令",
+        "fieldVerifyCommandsPlaceholder": "一行一条，如：\npnpm install --frozen-lockfile\npnpm lint\npnpm test",
+        "fieldVerifyCommandsHint": "留空使用引擎默认验证链（install / lint / build / typecheck / test）；自定义命令会原样执行（不校验脚本是否存在），仅 admin / org_admin 可修改，变更会记录审计事件",
+        "fieldPrCheckFocus": "PR Check 关注集",
+        "fieldPrCheckFocusProviders": "关注 provider（逗号分隔）",
+        "fieldPrCheckFocusProvidersPlaceholder": "如 github-actions, vercel",
+        "fieldPrCheckFocusNames": "关注 check 名（逗号分隔）",
+        "fieldPrCheckFocusNamesPlaceholder": "如 Test, Preview",
+        "fieldPrCheckFocusKinds": "关注来源类型",
+        "fieldPrCheckFocusKindsPlaceholder": "留空 = 不限来源类型",
+        "fieldPrCheckFocusHint": "只有命中关注集的信号参与 PR Check 告警；未命中的信号仍会采集，并可在展开行查看。维度内为 OR、维度间为 AND，留空维度不限；三项全空 = 不启用（全量告警）。",
+        "focusKind": {
+            "check": "Check",
+            "status": "Status",
+            "deployment": "部署"
+        },
         "fieldNote": "备注",
         "fieldTags": "标签",
         "fieldTagsPlaceholder": "输入标签后回车（如 frontend / critical），用于定时计划按标签选择",
@@ -157,6 +186,9 @@
         "importFilterVisibilityAll": "全部可见性",
         "importFilterVisibilityPublic": "仅公开",
         "importFilterVisibilityPrivate": "仅私有",
+        "importFilterArchived": "归档/禁用",
+        "importFilterArchivedExclude": "排除",
+        "importFilterArchivedInclude": "含归档",
         "importFilterSearch": "搜索",
         "importFilterSearchPlaceholder": "搜索仓库名或描述",
         "importPaginationPageInfo": "第 {current} / {page} 页",
@@ -167,7 +199,6 @@
         "importFreshRefreshed": "已强制刷新",
         "scanStatusQueryFailed": "扫描状态查询失败，可在扫描历史中查看",
         "scanCompleted": "扫描完成，可在扫描历史中查看结果",
-        "scanDuplicate": "该仓库已有进行中的扫描任务",
         "scanFailed": "扫描失败：{message}",
         "scanDispatched": "已触发 GitHub Action 扫描（可在扫描历史中查看）",
         "scanDispatchedWithUrl": "已触发 GitHub Action 扫描，点击下方链接查看运行",
@@ -203,6 +234,7 @@
         "empty": "暂无定时计划，点击右上角新建",
         "newPlan": "新建计划",
         "colName": "名称",
+        "colKind": "类型",
         "colCron": "cron 表达式",
         "colStrategy": "仓库策略",
         "colMode": "模式",
@@ -221,6 +253,14 @@
         "dialogCreateTitle": "新建定时计划",
         "fieldName": "计划名称 *",
         "fieldNamePlaceholder": "如 每周一凌晨扫描",
+        "fieldKind": "计划类型",
+        "fieldKindHint": "定时批量扫描，或依赖更新 PR check 状态监测（后者需服务端启用 ACTION_STATUS_MONITOR_ENABLED）",
+        "kind": {
+            "scan": "定时批量扫描",
+            "prCheck": "PR Check 监测"
+        },
+        "prCheckHint": "PR Check 监测按 cron 轮询依赖更新 PR 的 check 状态并生成告警，不使用扫描模式 / 严重级别阈值。",
+        "monitorDisabledBanner": "存在 PR Check 类型的定时计划，但监测总开关未启用（ACTION_STATUS_MONITOR_ENABLED=false），触发将被跳过。请在服务端设置 ACTION_STATUS_MONITOR_ENABLED=true 并重启进程。",
         "fieldCron": "cron 表达式 *",
         "fieldCronHint": "5 段（分 时 日 月 周）或 6 段（含秒），如 0 2 * * 1 = 每周一 02:00；建议间隔不小于 1 小时",
         "cronPreviewTitle": "下次触发（按当前时区，next 3）",
@@ -254,6 +294,7 @@
             "created": "定时计划已创建",
             "deleted": "定时计划已删除",
             "triggered": "已触发批量扫描（{count} 个仓库），可在批量运行页查看进度",
+            "prCheckTriggered": "已触发 PR Check 监测（更新 {processed} 个，错误 {errors} 个）",
             "disabled": "定时计划已禁用",
             "enabled": "定时计划已启用"
         },
@@ -265,6 +306,10 @@
             "operationFailed": "操作失败：{message}",
             "tagRequired": "按标签策略需要填写标签",
             "reposRequired": "手动指定策略需要至少选择一个仓库"
+        },
+        "warnings": {
+            "prCheckSkipped": "PR Check 监测总开关未启用（ACTION_STATUS_MONITOR_ENABLED=false），本次触发已跳过。",
+            "unknownTriggerResult": "触发返回了未识别的结果类型，请刷新页面或联系管理员。"
         }
     },
     "index": {
@@ -363,6 +408,36 @@
         "languageCard": "语言偏好",
         "languageLabel": "界面语言",
         "languageHint": "多语言切换即写入偏好，刷新后保持",
+        "scanPreferencesCard": "扫描偏好",
+        "scanDefaultMode": "默认扫描模式",
+        "scanDefaultSeverity": "默认严重级别",
+        "scanDefaultAuto": "未设置（跟随上次选择）",
+        "scanPreferencesReset": "重置扫描偏好",
+        "scanPreferencesHint": "生效顺序：显式默认 > 上次选择 > 系统兜底（仅报告 / 高级）。偏好保存在本设备；重置后恢复系统兜底。",
+        "scanPreferencesEffective": "当前生效：{mode}（{modeSource}）· {severity}（{severitySource}）",
+        "scanPreferenceSourceDefault": "显式默认",
+        "scanPreferenceSourceLast": "上次选择",
+        "scanPreferenceSourceFallback": "系统兜底",
+        "notifications": {
+            "card": "通知偏好",
+            "hint": "邮件通知；平台自身问题与 Critical 告警始终发送，不可关闭。组织关闭的类别无法在个人开启。",
+            "platformIncident": "平台自身问题",
+            "platformIncidentHint": "执行器 / 环境异常始终发送给管理员，不可关闭。",
+            "securityCritical": "Critical 告警",
+            "mandatoryHint": "必选，不可关闭。",
+            "securityHigh": "High 告警",
+            "runFailure": "运行失败",
+            "runCompleted": "完成摘要",
+            "weeklyDigest": "每周汇总",
+            "viewer": "当前角色无接收权限",
+            "orgDisabled": "组织已关闭该类别",
+            "channelUnavailable": "SMTP 未配置，通知暂不会实际发送。",
+            "weeklyDigestHint": "需组织与个人同时开启；默认每周一 09:00（服务器时区，可由部署配置调整）发送一次活跃未修复告警汇总。",
+            "deploymentDisabled": "部署层已熔断通知（DEPENDFIX_NOTIFICATION_ENABLED=false）。",
+            "saved": "通知偏好已保存",
+            "loadFailed": "通知偏好加载失败：{message}",
+            "saveFailed": "通知偏好保存失败：{message}"
+        },
         "unlink": "解绑",
         "credentialProvider": "邮箱密码",
         "errors": {
@@ -377,11 +452,66 @@
             "profileUpdated": "个人资料已更新",
             "passwordChanged": "密码已修改，其他设备会话已失效",
             "emailChanged": "邮箱已修改",
-            "unlinked": "已解绑 {provider}"
+            "unlinked": "已解绑 {provider}",
+            "scanPreferencesReset": "已重置扫描偏好"
         },
         "confirm": {
             "unlinkAccount": "确认解绑 {provider} 账号？"
         }
+    },
+    "notifications": {
+        "title": "通知与邮件",
+        "subtitle": "配置组织级通知策略、收件人与投递记录。",
+        "test": "发送测试邮件",
+        "categoriesCard": "事件类别",
+        "deliveryCard": "投递策略",
+        "category": {
+            "platform_incident": "平台自身问题",
+            "security_critical": "Critical 告警",
+            "security_high": "High 告警",
+            "run_failure": "运行失败",
+            "run_completed": "完成摘要",
+            "weekly_digest": "每周汇总"
+        },
+        "platformIncidentNote": "平台自身问题为必选，始终发送给管理员，不可关闭。",
+        "criticalNote": "Critical 告警为必选类别，始终发送，不可关闭。",
+        "severity": "严重级别阈值",
+        "severityHigh": "{critical} + {high}",
+        "severityCritical": "仅 {critical}",
+        "cooldownHours": "冷却窗口（小时）",
+        "maxPerHour": "每小时上限",
+        "extraRecipients": "额外管理员收件人",
+        "extraRecipientsHint": "逗号或换行分隔，最多 20 个。",
+        "save": "保存设置",
+        "saved": "通知设置已保存",
+        "testDelivered": "测试邮件已投递",
+        "testNoop": "SMTP 未配置，测试邮件未实际发送",
+        "testFailed": "测试邮件失败：{message}",
+        "weeklyDigestHint": "默认每周一 09:00（服务器时区，可由部署配置调整）发送一次活跃未修复告警汇总；需组织与个人同时开启。",
+        "deploymentDisabled": "部署层已熔断通知（DEPENDFIX_NOTIFICATION_ENABLED=false）。",
+        "logsCard": "最近投递记录",
+        "logsHint": "最近 20 条；仅显示状态与收件人，不记录邮件正文。",
+        "refresh": "刷新",
+        "emptyLogs": "暂无投递记录",
+        "colTime": "时间",
+        "colCategory": "类别",
+        "colScope": "范围",
+        "colStatus": "状态",
+        "colRecipients": "收件人",
+        "colError": "错误",
+        "status": {
+            "sending": "发送中",
+            "sent": "已发送",
+            "noop": "未配置 / 跳过",
+            "failed": "失败",
+            "skipped_duplicate": "重复跳过",
+            "skipped_cooldown": "冷却跳过",
+            "skipped_throttled": "限流跳过",
+            "skipped_no_recipient": "无收件人"
+        },
+        "loadFailed": "通知设置加载失败：{message}",
+        "saveFailed": "通知设置保存失败：{message}",
+        "channelUnavailable": "SMTP 未配置，通知暂不会实际发送。"
     },
     "users": {
         "title": "用户管理",
@@ -488,11 +618,18 @@
         "colPrNumber": "PR",
         "colAuthor": "作者",
         "colConclusion": "结论",
-        "colLastPolledAt": "最近轮询",
+        "colLastPolledAt": "最近采集",
         "colStatus": "Alert",
         "colLink": "链接",
         "colActions": "操作",
         "repositoryUnknown": "未知仓库",
+        "poll": {
+            "action": "立即检查",
+            "success": "已更新 {processed} 个 PR 状态（错误 {errors} 个）",
+            "disabled": "PR Check 监测未启用（ACTION_STATUS_MONITOR_ENABLED=false），本次已跳过",
+            "truncated": "候选仓库数（{candidateCount}）超出单次检查上限，本次仅处理前若干仓库（其余仓库未检查）",
+            "failed": "立即检查失败：{message}"
+        },
         "ack": {
             "action": "Ack 关闭告警",
             "success": "已 ack PR #{prNumber}",
@@ -506,12 +643,42 @@
         },
         "errors": {
             "loadFailed": "加载失败：{message}"
+        },
+        "colLastPolledAtHint": "仅在该 PR 本轮实际采集并落库时更新；终态且 HEAD 未变的 PR 会在静默窗口内跳过采集——陈旧时间不等于轮询故障",
+        "signalsTitle": "构建 / 部署信号",
+        "signalsAggregate": "聚合状态",
+        "signalsFailureSources": "失败源",
+        "signalsNone": "无信号数据（本字段上线前采集的行）",
+        "signalsEmpty": "该 HEAD 暂无构建 / 部署信号",
+        "signalsDetailLink": "详情",
+        "signalsLogLink": "日志",
+        "signalsKind": {
+            "check": "Check",
+            "status": "Status",
+            "deployment": "部署"
+        },
+        "signalsState": {
+            "pending": "进行中",
+            "success": "成功",
+            "failure": "失败",
+            "error": "错误",
+            "neutral": "中性",
+            "skipped": "已跳过"
+        },
+        "focusConfigured": "关注集生效",
+        "signalIgnored": "未关注",
+        "signalAttribution": {
+            "selfCaused": "本次改动导致",
+            "preExisting": "既有失败",
+            "externalNoise": "外部噪音",
+            "cancelled": "已取消 / 跳过",
+            "unknown": "未判定"
         }
     },
     "envEvents": {
         "title": "环境事件",
-        "subtitle": "sandbox / docker / runtime 环境变化告警（含通知状态）",
-        "empty": "暂无环境事件（sandbox 启动降级或运行时失败时自动记录）",
+        "subtitle": "执行器 / 环境异常与配置留痕审计（含通知状态）",
+        "empty": "暂无环境事件（执行器异常、环境变化或配置变更时自动记录）",
         "filterType": "事件类型",
         "filterSeverity": "严重级别",
         "filterNotified": "通知状态",
@@ -535,7 +702,12 @@
         "severityCritical": "严重",
         "typeSandboxUnavailable": "沙箱不可用",
         "typeSandboxDegraded": "沙箱降级",
-        "typeDockerDaemonDown": "Docker 守护进程停止",
+        "typeContainerUnavailable": "容器执行器不可用",
+        "typeAiConfigUpdate": "AI 配置更新",
+        "typeVerifyCommandsUpdate": "验证命令更新",
+        "typeNotificationSettingsUpdate": "通知设置更新",
+        "typePrFeedbackCommented": "PR 回环评论",
+        "typePrFeedbackClosed": "PR 回环自动关闭",
         "expand": "展开",
         "collapse": "收起",
         "errors": {
@@ -600,6 +772,9 @@
         "subtitle": "定时计划 / 手动批量触发的跨仓库扫描汇总（展开查看聚合统计与各仓库结果）",
         "refresh": "刷新",
         "empty": "暂无批量运行记录，可在仓库页勾选批量扫描或配置定时计划触发",
+        "emptyFiltered": "没有符合当前筛选条件的批量运行记录",
+        "filterAll": "全部",
+        "filterReset": "重置筛选",
         "colSource": "触发来源",
         "colCreatedAt": "触发时间",
         "colParams": "参数",
@@ -655,6 +830,63 @@
         "statusDispatched": "已触发",
         "statusRunning": "执行中",
         "statusDegraded": "已降级",
+        "exitCode": "退出码",
+        "buildVersion": "构建版本",
+        "buildVersionHint": "受理本次运行的平台部署产物版本 / commit（镜像构建期注入）；容器 / 沙箱即实际执行者，GitHub Action 由目标仓库 runner 执行。「未知」表示未注入或存量运行未记录",
+        "buildUnknown": "未知",
+        "environmentalFailures": "环境性失败 {count}",
+        "environmentalFailuresLabel": "环境性失败",
+        "environmentalFailuresHint": "环境性失败（安装被信号杀死 / 超时 / 静默非零退出）不归因本次运行，仅在此提示可见",
+        "deliverySkipped": "交付跳过 {count} 个仓库",
+        "deliverySkippedLabel": "交付跳过",
+        "deliverySkippedHint": "修复后安装验证仍为既有失败（本次改动前即为红），本次修复未交付（改动已回滚）；载体（issue / 草稿 PR）仅在引擎 fix-and-pr 路径按 DEPENDFIX_ON_BASELINE_RED 创建。exit code 不受影响",
+        "deliverySkipIssues": "新建 issue {count}",
+        "deliverySkipDraftPrs": "草稿 PR {count}",
+        "memoryLimit": "内存上限",
+        "peakMemory": "峰值内存",
+        "resourceUnavailable": "不可采集",
+        "peakMemoryHint": "执行窗口内 cgroup memory.current 采样峰值（含页缓存）",
+        "oomKilled": "OOM 杀死",
+        "oomKilledHint": "执行前后 cgroup oom_kill 计数增加时为「是」；null 表示不可采集",
+        "unfixedAlerts": "未修复 {count}",
+        "unfixedAlertsLabel": "未修复告警",
+        "unfixedAlertsHint": "有告警本次未修复（含失败 / 跳过 / 不可自动修复）；不计入本次运行的代码回归归因",
+        "resultMissing": "结果缺失",
+        "resultMissingHint": "本次运行未产出结果（如执行超时）；不展示告警 0，避免被误读为「扫描无告警」",
+        "breakdown": {
+            "headline": "未修复 {unfixed} / {total}",
+            "headlineHint": "总数含截断；未修复不含截断；跳过告警包含在未修复内",
+            "listHint": "截断 / 跳过明细见运行详情",
+            "truncatedShort": "截断 {count}",
+            "truncatedNotEvaluated": "截断 {count}（未评估）",
+            "skippedShort": "跳过 {count}",
+            "truncatedBySeverity": "截断（按严重级别）",
+            "skippedByReason": "跳过（按原因）",
+            "other": "其他 / 未分类",
+            "reason": {
+                "subdirectoryManifest": "子目录 / 根直接清单",
+                "crossMajor": "跨大版本 / 人工复核",
+                "notFixable": "不可自动修复",
+                "overrideProtected": "保护名单",
+                "repeatedFailure": "同告警重复失败（尝试上限）"
+            }
+        },
+        "failureStage": {
+            "source": "告警获取",
+            "clone": "仓库克隆",
+            "install": "依赖安装",
+            "fix": "修复应用",
+            "verify": "验证门禁",
+            "deliver": "交付",
+            "runtime": "运行时",
+            "cleanup": "清理",
+            "unknown": "未知阶段"
+        },
+        "failureKind": {
+            "transient": "可重试",
+            "deterministic": "需研判",
+            "unknown": "待确认"
+        },
         "actionViewActionRun": "查看 Action 运行",
         "actionViewDetail": "查看详情",
         "backToList": "返回列表",
@@ -672,10 +904,23 @@
         "paginatorInfo": "第 {first} - {last} 条 / 共 {total} 条",
         "logsTitle": "执行日志",
         "logsCopy": "复制日志",
+        "logsDownload": "下载日志",
         "logsEmpty": "暂无执行日志",
+        "retry": {
+            "action": "重试",
+            "confirmTitle": "确认重试该运行？",
+            "confirmBody": "将按原参数（{mode} / {threshold}）重新入队扫描，占用扫描队列与容器资源；来源运行记录保持不变。",
+            "success": "已重新入队（运行 {runId}）",
+            "failed": "重试失败：{message}",
+            "source": "重试来源",
+            "hint": "该失败为「可重试」类（网络 / 超时等暂时性原因），可按原参数重跑",
+            "failureDetail": "失败归因",
+            "failureCodeLabel": "失败码"
+        },
         "errors": {
             "loadFailed": "加载失败：{message}",
-            "detailLoadFailed": "详情加载失败：{message}"
+            "detailLoadFailed": "详情加载失败：{message}",
+            "logsDownloadFailed": "日志下载失败：{message}"
         }
     },
     "scans": {
@@ -700,14 +945,27 @@
             "colLastRun": "最近运行",
             "colLastStatus": "最近状态",
             "colActions": "操作",
-            "actionFilterThis": "仅查看此仓库"
+            "actionFilterThis": "仅查看此仓库",
+            "filterStatus": "最近状态",
+            "windowHint": "统计窗口：最近 {included} 次运行（上限 {limit}）；更早的运行不计入"
         },
         "runList": {
             "title": "全部运行",
             "empty": "该范围内暂无扫描运行",
+            "filterStatus": "状态",
+            "filterFailureStage": "失败阶段",
+            "filterFailureKind": "处置建议",
+            "filterAll": "全部",
+            "clearFilters": "清除筛选",
+            "failureStageSummary": "失败阶段分布：",
+            "exportLogs": "导出当前页日志",
+            "exportMenuLabel": "导出范围",
+            "exportAllLogs": "导出全部筛选结果（共 {total} 条）",
+            "exportAllLogsOverLimit": "导出全部筛选结果（共 {total} 条，超出单次上限 {limit} 条）",
             "errors": {
                 "loadFailed": "加载失败：{message}",
-                "summaryFailed": "汇总加载失败：{message}"
+                "summaryFailed": "汇总加载失败：{message}",
+                "exportFailed": "日志导出失败：{message}"
             }
         },
         "errors": {
@@ -751,7 +1009,19 @@
             "zh-CN": "缺少运行 id",
             "en": "Run id is required"
         },
+        "RUN_LOGS_NOT_FOUND": {
+            "zh-CN": "没有可导出的执行日志",
+            "en": "No exportable execution logs"
+        },
+        "RUN_LOGS_EXPORT_TOO_LARGE": {
+            "zh-CN": "导出内容超出上限，请缩小筛选范围或减少单次导出的运行数",
+            "en": "Export exceeds the limit; narrow the filters or reduce the number of runs per export"
+        },
         "RUNS_VALIDATION_FAILED": {
+            "zh-CN": "查询参数校验失败",
+            "en": "Invalid query parameters"
+        },
+        "SCAN_HISTORY_VALIDATION_FAILED": {
             "zh-CN": "查询参数校验失败",
             "en": "Invalid query parameters"
         },
@@ -770,6 +1040,18 @@
         "SCAN_ALREADY_COMPLETED": {
             "zh-CN": "扫描已完成，请在扫描历史中查看",
             "en": "Scan already completed, please check scan history"
+        },
+        "RUN_RETRY_NOT_ALLOWED": {
+            "zh-CN": "该运行不属于可重试的暂时性失败（仅「可重试」类失败支持重试）",
+            "en": "This run is not a retryable transient failure (only transient failures can be retried)"
+        },
+        "RUN_RETRY_SOURCE_RUNNING": {
+            "zh-CN": "该运行尚未结束，无法作为重试来源",
+            "en": "This run has not finished yet and cannot be used as a retry source"
+        },
+        "RUN_RETRY_PARAMS_INVALID": {
+            "zh-CN": "该运行记录的参数无法用于重试（模式 / 阈值 / 执行器取值异常）",
+            "en": "The stored parameters of this run cannot be reused for a retry (invalid mode / threshold / executor)"
         },
         "CREDENTIAL_NOT_FOUND": {
             "zh-CN": "凭据不存在",
@@ -862,6 +1144,34 @@
         "AI_KEY_REQUIRED": {
             "zh-CN": "Organization 未配置 AI API Key，请先在设置中添加",
             "en": "Organization has no AI API Key configured. Please add one in settings"
+        },
+        "NOTIFICATION_VIEWER_FORBIDDEN": {
+            "zh-CN": "当前角色无接收业务通知的权限",
+            "en": "Your role cannot receive business notifications"
+        },
+        "NOTIFICATION_PREFERENCE_VALIDATION_FAILED": {
+            "zh-CN": "通知偏好参数无效",
+            "en": "Invalid notification preference payload"
+        },
+        "NOTIFICATION_PREFERENCE_EMPTY": {
+            "zh-CN": "至少需要修改一个通知偏好",
+            "en": "At least one notification preference is required"
+        },
+        "NOTIFICATION_CATEGORY_DISABLED": {
+            "zh-CN": "该通知类别已被组织关闭",
+            "en": "This notification category is disabled by the organization"
+        },
+        "NOTIFICATION_QUERY_INVALID": {
+            "zh-CN": "通知记录查询参数无效",
+            "en": "Invalid notification log query"
+        },
+        "NOTIFICATION_SETTINGS_VALIDATION_FAILED": {
+            "zh-CN": "通知设置参数无效",
+            "en": "Invalid notification settings"
+        },
+        "NOTIFICATION_TEST_FAILED": {
+            "zh-CN": "测试邮件发送失败",
+            "en": "Test email failed"
         },
         "UNKNOWN": {
             "zh-CN": "未知错误",

@@ -6,7 +6,7 @@
 
 | 组件 | 版本要求 | 说明 |
 |------|---------|------|
-| Node.js | >= 20 LTS | 运行环境 |
+| Node.js | ^22.23.4 \|\| ^24.22.1 | 运行环境（2026-10-21 [Node.js 安全公告](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases)基线；20.x 已 EOL，不再接收补丁） |
 | pnpm | 最新稳定版 | 包管理器 + workspace monorepo |
 
 ## Monorepo 结构
@@ -28,25 +28,24 @@
 
 ### 核心框架
 
-| 依赖 | 版本 | 用途 |
-|------|------|------|
-| nuxt | ^4.x | 全栈框架 |
-| vue | ^3.5 | UI 框架 |
-| vue-router | ^5.x | 路由 |
-| @primevue/core + primevue | ^4.x | UI 组件库 |
-| @primeuix/themes | ^2.x | 主题引擎 |
-| @nuxtjs/i18n | ^10.x | 国际化 |
-| @vueuse/core + @vueuse/nuxt | ^14.x | 组合式工具 |
-| @sentry/nuxt | ^10.x | 错误监控 |
-| @vite-pwa/nuxt | ^1.x | PWA 支持 |
+> 版本以 [`apps/platform/package.json`](../../apps/platform/package.json) 为准：本表只声明依赖与用途，不写具体版本号（避免依赖升级后与本表漂移）；模块类依赖的接线位置为 `apps/platform/nuxt.config.ts` 的 `modules`。
+
+| 依赖 | 用途 |
+|------|------|
+| nuxt | 全栈框架 |
+| vue | UI 框架 |
+| vue-router | 路由 |
+| caomei-ui | UI 组件库（自建；精确锁定版本，升级史：2026-09-29 M31 完成 PrimeVue 4 迁移，2026-10-01 M34.2 升级至 0.5.0，2026-10-11 升级至 0.6.0，2026-10-12 完成 0.6.0 升级回归，2026-10-25 升级至 0.7.0，2026-10-31 升级至 1.0.0-rc.1（`next` 通道，实证见 [迁移评估 §15.16](../design/governance/caomei-ui-migration.md#_15-16-caomei-ui-1-0-0-rc-1-升级实证-2026-10-31)）） |
+| @lucide/vue | 图标组件（经 `CaomeiIcon` 传入） |
+| @nuxtjs/i18n | 国际化 |
+
+> **Nuxt 4.6 起 tsconfig 拆分**：`.nuxt/tsconfig.json` 拆为 app / server / shared / node 多份，主文件 `exclude` 含 `../server/**/*`；手工 tsconfig 必须显式覆盖 `exclude`（保留 `node_modules` / `dist` / `.data` / `localeDetector`）并同步 eslint 注释，否则 server 深层文件退出 type-aware lint 而 `nuxt typecheck` 仍绿。验证跑 `pnpm run lint:check`。
 
 ### 认证
 
 | 依赖 | 用途 |
 |------|------|
-| better-auth | 认证核心 |
-| @better-auth/sso | SSO / 第三方登录 |
-| better-auth-localization | 认证 UI 多语言 |
+| better-auth | 认证核心（SSO / 第三方登录经 `better-auth/plugins` 的 `genericOAuth` 提供，见 `apps/platform/server/utils/auth.ts`） |
 
 #### better-auth × Nuxt 集成要点（T701/T707 实践沉淀）
 
@@ -61,7 +60,6 @@
 |------|------|
 | typeorm | ORM 框架 |
 | reflect-metadata | TypeORM 装饰器依赖 |
-| class-transformer + class-validator | 实体校验 |
 | better-sqlite3 | SQLite（开发/测试） |
 | pg | PostgreSQL（生产） |
 | mysql2 | MySQL（生产备选） |
@@ -78,11 +76,11 @@
 | 依赖 | 用途 |
 |------|------|
 | zod | 数据校验 |
-| dayjs | 日期处理 |
 | lodash-es | 工具函数 |
-| winston | 结构化日志 |
+| winston / winston-daily-rotate-file | 进程级结构化日志（控制台 + 本地文件按日轮转；见 [平台日志通道设计](../design/governance/platform-logging.md)） |
 | nodemailer | 邮件发送 |
-| dompurify + sanitize-html | XSS 防护 |
+
+> 本表只列当前实际使用（`apps/platform/package.json` / `nuxt.config.ts` / 源码 import 可追溯）的依赖；曾列入但在 `apps/platform`（`package.json` / `nuxt.config.ts` / 源码）无引用的条目已移除——Sentry 错误监控已从 T705 拆出为独立候选（官方 SaaS，1.0 后排期；见 [backlog](../plan/backlog.md) 与 [第三方可观测性评估](../research/2026-10-27-third-party-observability-evaluation.md)），当前仍未采用；表中 winston 行对应的平台 logger 已完成接线（进程级日志通道，见 [平台日志通道设计](../design/governance/platform-logging.md)）；Axiom 远程聚合仍为 1.0 后候选（同评估文档）。PWA / VueUse / dayjs / class-validator / dompurify 等未采用（页面渲染依赖 Vue 模板默认转义，无 `v-html` 使用面）。
 
 ## 库（packages/*）
 

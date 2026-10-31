@@ -1,7 +1,7 @@
 import { describe, expect, it, afterEach, vi } from 'vitest'
 import nock from 'nock'
 import { AppError } from '@dependfix/core'
-import { fetchRepoAlerts, type FetchAlertsDeps } from './repo-alerts'
+import { fetchRepoAlerts, hasSourceScopedFetchFailure, type FetchAlertsDeps } from './repo-alerts'
 
 const API_BASE = 'https://api.github.com'
 const REPO = 'foo/bar'
@@ -42,6 +42,7 @@ function makeDep(overrides: Partial<{
         workDir: '/tmp',
         logger: logger as never,
         allErrors: [],
+        alertsDisabled: [],
     }
 }
 
@@ -125,6 +126,9 @@ describe('fetchRepoAlerts (three-source parallel + per-source error isolation)',
         expect(deps.allErrors[0].repository).toBe(REPO)
         // 验证 source 字段（todo.md §M19.5 C8：用于 CLI 分组汇总）
         expect(deps.allErrors[0].source).toBe('code-quality')
+        // 调用点接线守护：per-source 错误消息必须带 Code Quality token 指引
+        // （三源合一 alertsFetchTokenHint 的 Code Quality 分支；旧两源链会丢失该指引）
+        expect(deps.allErrors[0].message).toContain('Code quality')
     })
 
     it('isolates code-scanning failure: dependabot still returned, error recorded', async () => {
@@ -180,5 +184,141 @@ describe('fetchRepoAlerts (three-source parallel + per-source error isolation)',
         const deps = makeDep({ codeScanningEnabled: true, codeQualityEnabled: true })
 
         await expect(fetchRepoAlerts(deps, REPO)).rejects.toBeInstanceOf(AppError)
+    })
+
+    it('records ALERTS_DISABLED as alertsDisabled (not allErrors), does not fail run', async () => {
+        nock(API_BASE)
+            .get('/repos/foo/bar/dependabot/alerts')
+            .query(true)
+            .reply(403, { message: 'Dependabot alerts are disabled for this repository.' })
+
+        const deps = makeDep()
+        const alerts = await fetchRepoAlerts(deps, REPO)
+
+        // 未启用 ≠ 失败：返回空数组，不抛错（方案 A）
+        expect(alerts).toHaveLength(0)
+        // 不计入 allErrors
+        expect(deps.allErrors).toHaveLength(0)
+        // 计入 alertsDisabled
+        expect(deps.alertsDisabled).toHaveLength(1)
+        expect(deps.alertsDisabled[0].repository).toBe(REPO)
+        expect(deps.alertsDisabled[0].source).toBe('dependabot')
+    })
+
+    it('throws when a disabled source coexists with failing sources (no successful source)', async () => {
+        nock(API_BASE)
+            .get('/repos/foo/bar/dependabot/alerts')
+            .query(true)
+            .reply(403, { message: 'Dependabot alerts are disabled for this repository.' })
+        nock(API_BASE)
+            .get('/repos/foo/bar/code-quality/findings')
+            .query(true)
+            .reply(403, { message: 'Resource not accessible by integration' })
+
+        const deps = makeDep({ codeQualityEnabled: true })
+
+        // 无任何成功源（dependabot 未启用 + code-quality 真实失败）→ 仓库失败（抛错）
+        await expect(fetchRepoAlerts(deps, REPO)).rejects.toBeInstanceOf(AppError)
+        // code-quality 真实失败计入 allErrors
+        expect(deps.allErrors).toHaveLength(1)
+        expect(deps.allErrors[0].source).toBe('code-quality')
+        // dependabot 未启用单独记录（抛错前已写入 deps，不因失败丢失）
+        expect(deps.alertsDisabled).toHaveLength(1)
+        expect(deps.alertsDisabled[0].source).toBe('dependabot')
+    })
+
+    it('throws when one source is disabled and the remaining enabled sources all fail (N=3)', async () => {
+        // 新语义：无任何成功源且存在失败源 → 仓库失败（不再以 0 告警冒充扫描成功，修复可审计性粒度退化）。
+        nock(API_BASE)
+            .get('/repos/foo/bar/dependabot/alerts')
+            .query(true)
+            .reply(403, { message: 'Dependabot alerts are disabled for this repository.' })
+        nock(API_BASE)
+            .get('/repos/foo/bar/code-scanning/alerts')
+            .query(true)
+            .reply(403, { message: 'Resource not accessible by integration' })
+        nock(API_BASE)
+            .get('/repos/foo/bar/code-quality/findings')
+            .query(true)
+            .reply(500, { message: 'Internal Server Error' })
+
+        const deps = makeDep({ codeScanningEnabled: true, codeQualityEnabled: true })
+
+        await expect(fetchRepoAlerts(deps, REPO)).rejects.toBeInstanceOf(AppError)
+        // 未启用源不计失败；其余两源各记一条真实失败（抛错前已写入 deps）
+        expect(deps.alertsDisabled).toHaveLength(1)
+        expect(deps.alertsDisabled[0].source).toBe('dependabot')
+        expect(deps.allErrors).toHaveLength(2)
+        expect(deps.allErrors.map((e) => e.source).sort()).toEqual(['code-quality', 'code-scanning'])
+    })
+
+    it('does not throw when every source is ALERTS_DISABLED (no success but no failure)', async () => {
+        nock(API_BASE)
+            .get('/repos/foo/bar/dependabot/alerts')
+            .query(true)
+            .reply(403, { message: 'Dependabot alerts are disabled for this repository.' })
+        nock(API_BASE)
+            .get('/repos/foo/bar/code-scanning/alerts')
+            .query(true)
+            .reply(403, { message: 'Advanced Security must be enabled for this repository to use code scanning.' })
+        nock(API_BASE)
+            .get('/repos/foo/bar/code-quality/findings')
+            .query(true)
+            .reply(403, { message: 'GitHub Advanced Security is not enabled for this repository.' })
+
+        const deps = makeDep({ codeScanningEnabled: true, codeQualityEnabled: true })
+        const alerts = await fetchRepoAlerts(deps, REPO)
+
+        // 三源全未启用：无成功源但也无失败源 → 不抛错、返回空（未启用是预期状态）
+        expect(alerts).toHaveLength(0)
+        expect(deps.allErrors).toHaveLength(0)
+        expect(deps.alertsDisabled).toHaveLength(3)
+        expect(deps.alertsDisabled.map((record) => record.source).sort()).toEqual(['code-quality', 'code-scanning', 'dependabot'])
+    })
+
+    it('records code-scanning ALERTS_DISABLED with source-specific hint（未启用 ≠ 失败）', async () => {
+        nock(API_BASE)
+            .get('/repos/foo/bar/dependabot/alerts')
+            .query(true)
+            .reply(200, [])
+        nock(API_BASE)
+            .get('/repos/foo/bar/code-scanning/alerts')
+            .query(true)
+            .reply(403, { message: 'Advanced Security must be enabled for this repository to use code scanning.' })
+
+        const deps = makeDep({ codeScanningEnabled: true })
+        const alerts = await fetchRepoAlerts(deps, REPO)
+
+        // 未启用不算失败源：不抛错、不入 allErrors，单独计入 alertsDisabled（按源单列）
+        expect(alerts).toHaveLength(0)
+        expect(deps.allErrors).toHaveLength(0)
+        expect(deps.alertsDisabled).toHaveLength(1)
+        expect(deps.alertsDisabled[0].source).toBe('code-scanning')
+
+        // 日志文案按告警源给出开启路径，不得误导为 Dependabot
+        const warnMessages = (deps.logger as unknown as { warn: ReturnType<typeof vi.fn> }).warn
+            .mock.calls.map((call) => String(call[0]))
+        expect(warnMessages.some((m) => m.includes('Code Scanning alerts disabled for foo/bar'))).toBe(true)
+        // 断言 hint 自身：子串取自按源开启路径文案（不会由 403 error message 命中）
+        expect(warnMessages.some((m) => m.includes('开启 GitHub Advanced Security 并配置 code scanning'))).toBe(true)
+        expect(warnMessages.some((m) => m.includes('Dependabot alerts disabled'))).toBe(false)
+    })
+})
+
+describe('hasSourceScopedFetchFailure（仓库级 catch 去重判据）', () => {
+    const base = { repository: REPO, stage: 'fetch' as const, category: 'FETCH_FAILED', message: 'boom' }
+
+    it('存在带 source 的 FETCH_FAILED → true', () => {
+        expect(hasSourceScopedFetchFailure([{ ...base, source: 'dependabot' }], REPO)).toBe(true)
+    })
+
+    it('无 source（仓库级信号）→ false', () => {
+        expect(hasSourceScopedFetchFailure([base], REPO)).toBe(false)
+    })
+
+    it('其他仓库 / 其他 category / 空列表 → false', () => {
+        expect(hasSourceScopedFetchFailure([{ ...base, source: 'dependabot' }], 'other/repo')).toBe(false)
+        expect(hasSourceScopedFetchFailure([{ ...base, source: 'dependabot', category: 'PROCESS_FAILED' }], REPO)).toBe(false)
+        expect(hasSourceScopedFetchFailure([], REPO)).toBe(false)
     })
 })

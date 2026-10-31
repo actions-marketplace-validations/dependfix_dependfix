@@ -1,4 +1,5 @@
 import type { APIRequestContext } from '@playwright/test'
+import type { RunFailureKind, RunFailureStage } from '#server/services/run-failure-classify'
 
 /**
  * e2e fixtures helper：通过 POST /api/e2e/fixtures 注入 server-side fixtures。
@@ -6,7 +7,7 @@ import type { APIRequestContext } from '@playwright/test'
  * 背景（todo.md §M16.5 E2E timeout 修复）：
  * - alerts.vue 迁移 useAsyncData 后 SSR 阶段在 server 进程内 fetch /api/alerts
  * - page.route() 拦截不到 server 内 fetch → SSR 阶段真实打 server → e2e 库空 → hydration
- *   alerts.value=[] → PrimeVue rowGroup 不渲染 → rowGroup 测试 timeout 重试 →
+ *   alerts.value=[] → 迁移前的 rowGroup 不渲染 → rowGroup 测试 timeout 重试 →
  *   E2E job 累计 ≥ 20min → workflow timeout-minutes 取消
  * - 修复路径：global-setup 通过 fixtures API 注入真实数据，alerts-rowgroup 去掉
  *   page.route mock alerts/repos，依赖 server 真实返回 fixtures 数据
@@ -23,11 +24,56 @@ import type { APIRequestContext } from '@playwright/test'
 export interface ScanRunFixture {
     repositoryOwner: string
     repositoryName: string
+    /**
+     * 主键覆盖（雪花 ID 十六进制串）。缺省由 `BaseEntity.setId` 生成；
+     * 视觉回归基线需要确定性的短 ID 文本（运行抽屉 / 运行详情弹窗会渲染它）。
+     */
+    id?: string
+    /**
+     * 时间戳覆盖。缺省由 fixtures 端点填注入时刻 `now()`：`createdAt` 参与运行列表排序与
+     * 「最近运行」统计，`startedAt` / `finishedAt` 渲染在运行列表 / 详情弹窗 / 运行抽屉上。
+     * `startedAt` / `finishedAt` 传 `null` 表示显式置空（与「不传走状态默认值」区分）。
+     */
+    createdAt?: string
+    startedAt?: string | null
+    finishedAt?: string | null
     mode?: 'report-only' | 'fix' | 'fix-and-pr'
     severityThreshold?: 'low' | 'medium' | 'high' | 'critical'
     executorKind?: 'container' | 'github-action' | 'sandbox'
     status?: 'pending' | 'running' | 'completed' | 'failed'
-    summary?: { alertsFound: number, alertsFixed: number }
+    summary?: {
+        alertsFound: number
+        alertsFixed: number
+        /** 告警级未修复数（旧数据可缺省，UI 回退近似公式） */
+        alertsUnfixed?: number
+        /** 已收敛（未修复口径排除项） */
+        alertsConverged?: number
+        /** 环境性失败事件数（UI 在列缺失时回退该值） */
+        environmentalFailures?: number
+        /** 交付跳过（基线红）：受影响仓库数 / 新建 issue 数 / 草稿 PR 数 */
+        deliverySkipped?: number
+        deliverySkipIssues?: number
+        deliverySkipDraftPrs?: number
+        /** 跳过总数与按原因分组（结果披露） */
+        alertsSkipped?: number
+        alertsSkippedByReason?: Partial<Record<
+            'subdirectory-manifest' | 'cross-major' | 'not-fixable' | 'override-protected' | 'repeated-failure',
+            number
+        >>
+        /** 截断总数与按严重级别分组（结果披露） */
+        alertsTruncated?: number
+        alertsTruncatedBySeverity?: Partial<Record<'critical' | 'high' | 'medium' | 'low' | 'unknown', number>>
+    }
+    /** 进程级退出码（缺省 null） */
+    exitCode?: number | null
+    /** 环境性失败计数列（缺省 null） */
+    environmentalFailureCount?: number | null
+    /** 执行级错误（写入 `errorJson`；详情弹窗失败横幅据此渲染，与 `failureCode` 同源） */
+    error?: { code: string, message: string }
+    /** 失败分类三列（复用服务端枚举，避免与端点校验的类型漂移） */
+    failureCode?: string
+    failureStage?: RunFailureStage
+    failureKind?: RunFailureKind
 }
 
 export interface ScanResultFixture {
@@ -69,12 +115,71 @@ export interface ScanResultFixture {
      * 跨次扫描累计出现次数（todo.md §M20.3）。默认 1。
      */
     occurrenceCount?: number
+    /**
+     * 创建时间。不提供时由实体默认值（插入时刻）填充。
+     * alerts 页「原始列表」视图按 `createdAt DESC` 排序——视觉基线需逐像素可复现时必须钉死，
+     * 否则同批次插入落在同一毫秒形成排序并列，行序随数据库返回顺序漂移。
+     */
+    createdAt?: string
 }
 
-export interface AlertsRowgroupFixtures {
-    repos: { owner: string, name: string }[]
+/** 归一化构建 / 部署信号（写入 `signals_json`；`observedAt` 由 fixtures 端点写入时刻填充） */
+export interface PRCheckSignalFixture {
+    kind: 'check' | 'status' | 'deployment'
+    provider: string
+    name: string
+    state: 'pending' | 'success' | 'failure' | 'error' | 'neutral' | 'skipped'
+    rawState?: string | null
+    sourceId?: string | null
+    targetUrl?: string | null
+    logUrl?: string | null
+    summary?: string | null
+}
+
+/** 失败源条目（写入 `failure_sources_json`；缺省时按 `signals` 派生） */
+export interface PRCheckFailureSourceFixture {
+    provider: string
+    name: string
+    kind: 'check' | 'status' | 'deployment'
+}
+
+export interface PRCheckFixture {
+    /** 引用 repos 中已存在的仓库 */
+    repositoryOwner: string
+    repositoryName: string
+    prNumber: number
+    headSha: string
+    authorLogin: string
+    conclusion?: 'success' | 'failure' | 'neutral' | 'cancelled' | 'timed_out' | 'action_required' | 'stale' | 'pending' | 'skipped'
+    checkRunId?: string | null
+    detailsUrl?: string | null
+    errorMessage?: string | null
+    alertFiring?: boolean
+    /** 用户 ack 时间（ISO 串）；设置后「Alert 状态」列渲染为已确认态 */
+    acknowledgedAt?: string | null
+    acknowledgedByUserId?: string | null
+    /** 最近采集时间（ISO 串，必填）：视觉基线依赖确定性取值（语义见「最近采集」列提示） */
+    lastPolledAt: string
+    /** 聚合构建 / 部署状态（缺省 null = 本列上线前的历史行） */
+    overallStatus?: 'pending' | 'success' | 'failure' | null
+    /** 归一化三源信号（缺省不写 `signals_json`） */
+    signals?: PRCheckSignalFixture[]
+    /** 失败源清单（缺省按 `signals` 派生） */
+    failureSources?: PRCheckFailureSourceFixture[]
+}
+
+/**
+ * fixtures 注入载荷（`POST /api/e2e/fixtures` 的 body 形状）。
+ *
+ * 名称沿革：原为 `AlertsRowgroupFixtures`（只有 alerts-rowgroup 数据集用到），
+ * 接入 `prChecks` 字段后成为通用载荷类型，故更名；数据集常量名保持不变。
+ */
+export interface FixturesPayload {
+    repos: { owner: string, name: string, tags?: string[] }[]
     scanRuns: ScanRunFixture[]
     scanResults: ScanResultFixture[]
+    /** PR Check 数据（视觉套件 pr-checks 页行级基线用；e2e 数据集可不提供） */
+    prChecks?: PRCheckFixture[]
 }
 
 /**
@@ -85,6 +190,8 @@ export interface AlertsRowgroupFixtures {
  * - scanResults: 6 个（todo.md §M20.6 增加 2 条用于验证"显示已解决"开关 + 状态列 superseded 显示）
  *   - lodash × 2 in foo/bar run 0（high dependabot + medium code-scanning）
  *   - lodash × 1 in foo/bar run 1（high dependabot，跨 run 用于 occurrenceCount 断言）
+ *     注：lodash 三条 occurrenceCount 取 2 / 1 / 3（跨档跨 run 各异）——既覆盖「跨次累计」语义，
+ *     也是「用户按其它列排序后分组仍连续」断言的区分度来源（全部相同则排序后无法暴露拆组回归）。
  *   - axios × 1 in foo/baz run 2（low pnpm-audit）
  *   - minimist × 1 in foo/bar run 1（high dependabot，supersededAt 非空 → 测试"显示已解决"开关）
  *   - node-fetch × 1 in foo/bar run 0（high dependabot，fixStatus=success → 测试"已修复"始终显示）
@@ -92,9 +199,13 @@ export interface AlertsRowgroupFixtures {
  * 覆盖 rowGroup by packageName（4 个 packageName） + repository（2 个 repo） +
  * 视图切换 + occurrenceCount + 展开/折叠 + includeSuperseded 开关 + 状态列 superseded 显示
  *
+ * **跨 severity 契约**：lodash 在同一仓库（foo/bar run 0）同时含 high（dependabot）与
+ * medium（code-scanning），是「一个包一组」的断言数据源——修复前按行 severity 降序会把两档拆到
+ * 不同区块、渲染重复分组头；`alerts-rowgroup` 的「同一包跨 severity 只渲染一个分组头」用例据此断言。
+ *
  * 不要扩展这个集合除非新测试需要；保持 minimum fixture 避免污染其他 e2e 文件
  */
-export const ALERTS_ROWGROUP_FIXTURES: AlertsRowgroupFixtures = {
+export const ALERTS_ROWGROUP_FIXTURES: FixturesPayload = {
     repos: [
         { owner: 'foo', name: 'bar' },
         { owner: 'foo', name: 'baz' },
@@ -144,6 +255,7 @@ export const ALERTS_ROWGROUP_FIXTURES: AlertsRowgroupFixtures = {
             recommendedVersion: '4.18.0',
             htmlUrl: null,
             fixStatus: 'pending',
+            occurrenceCount: 2,
         },
         {
             scanRunIndex: 0,
@@ -191,6 +303,7 @@ export const ALERTS_ROWGROUP_FIXTURES: AlertsRowgroupFixtures = {
             recommendedVersion: '4.18.0',
             htmlUrl: null,
             fixStatus: 'pending',
+            occurrenceCount: 3,
         },
         // minimist in foo/bar run 1（supersededAt 非空，验证"显示已解决"开关）
         {
@@ -254,7 +367,7 @@ export async function seedAlertsRowgroupFixtures(
  */
 export async function seedCustomFixtures(
     request: APIRequestContext,
-    fixtures: AlertsRowgroupFixtures,
+    fixtures: FixturesPayload,
 ): Promise<void> {
     const response = await request.post('/api/e2e/fixtures', {
         data: fixtures,

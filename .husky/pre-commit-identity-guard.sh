@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 # pre-commit identity guard：阻断 .git/config [user] 与 global 错位
 # 详见 docs/standards/development.md §5.1.23
-# 详见 docs/design/governance/experience-archive-§49-§57-recent-investigation.md §六十三
+# 详见 docs/design/governance/experience-archive-§49-§69-recent-investigation.md §六十三
 
 set -e
 

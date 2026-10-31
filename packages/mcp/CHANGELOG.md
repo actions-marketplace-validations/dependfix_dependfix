@@ -1,5 +1,17 @@
 # @dependfix/mcp
 
+# [0.3.0](https://github.com/dependfix/dependfix/compare/@dependfix/mcp@0.2.0...@dependfix/mcp@0.3.0) (2026-10-28)
+
+
+### 📦 代码重构
+
+* **engine:** 锁文件修复调用方适配异步签名 ([7a91501](https://github.com/dependfix/dependfix/commit/7a91501))
+
+
+### 💥 BREAKING CHANGES
+
+* **engine:** @dependfix/engine 的 tryLockfileRepair 由同步改为异步（返回 Promise）。
+
 # [0.2.0](https://github.com/dependfix/dependfix/compare/@dependfix/mcp@0.1.4...@dependfix/mcp@0.2.0) (2026-09-18)
 
 

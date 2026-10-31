@@ -1,76 +1,187 @@
 /**
- * 通知渠道注册表 + 便捷 API（apps/platform/server/services/notification/index.ts）。
+ * 通知渠道注册表 + 平台事件 fire-and-forget 入口。
  *
- * 设计要点：
- * - 单例注册表：notificationChannels 暴露所有已注册渠道
- * - fire-and-forget API（`notifyEnvEvent`）：异常仅日志，不阻塞调用方（scan-orchestrator）
- * - 收件人解析：resolveNotificationRecipients() 默认 org admin 全员 + env 覆盖
- * - 多渠道并发：当前仅 email 注册；后续 slack/webhook 接入时加 channel 名分发逻辑
- *
- * 失败语义：
- * - 任一 channel.send() 失败 → 记录日志 + 更新 audit_event.notified=false（不抛错）
- * - 后续审计事件列表可按 notified=false 过滤 + 重试（不在本批次范围）
+ * 业务通知统一入口见 `delivery.ts#dispatchNotification`；本文件保留 `notifyEnvEvent`
+ * 的平台事件语义（audit_event.notified + 渠道循环），并补投递记录 / 每小时上限。
  */
-
-import { EmailNotificationChannel } from './email-channel'
-import { SlackStubChannel, WebhookStubChannel } from './stub-channels'
-import { resolveNotificationRecipients } from './notification-recipients'
-import { NotificationError, type NotificationChannel, type NotificationEvent } from './channel'
-import { ensureDatabaseInitialized } from '#server/database'
+import { MoreThanOrEqual, Not } from 'typeorm'
+import { shouldNotifyEnvEvent } from './policy'
+import { NotificationError, type NotificationEvent } from './channel'
+import { listNotificationChannels, ensureNotificationChannelsRegistered } from './registry'
+import { buildPlatformDeliveryKey, isNotificationThrottled } from './dedupe'
+import { loadOrganizationNotificationSettings, reclaimStaleSendingLog, recordNotificationLog, updateNotificationLog } from './delivery'
+import { resolveNotificationRecipients } from './recipients'
+import { renderEnvAlertTemplate } from './templates'
+import { isDeploymentNotificationEnabled } from './preferences'
+import { NotificationLog } from '#server/entities/notification-log'
 import { AuditEvent } from '#server/entities/audit-event'
+import { ensureDatabaseInitialized } from '#server/database'
+import { logger } from '#server/utils/logger'
 
-const channels = new Map<string, NotificationChannel>()
+export { ensureNotificationChannelsRegistered, listNotificationChannels, registerNotificationChannel, unregisterNotificationChannel } from './registry'
 
-/** 注册渠道（重复注册抛错，避免覆盖） */
-export const registerNotificationChannel = (channel: NotificationChannel): void => {
-    if (channels.has(channel.name)) {
-        throw new Error(`Notification channel '${channel.name}' already registered`)
-    }
-    channels.set(channel.name, channel)
+const isUniqueViolation = (error: unknown): boolean => {
+    const code = (error as { code?: string })?.code ?? ''
+    const message = error instanceof Error ? error.message : String(error)
+    return code === 'SQLITE_CONSTRAINT_UNIQUE'
+        || code === '23505'
+        || code === 'ER_DUP_ENTRY'
+        || message.includes('UNIQUE constraint failed')
+        || message.includes('duplicate key value')
 }
-
-/** 注销渠道（测试用） */
-export const unregisterNotificationChannel = (name: string): void => {
-    channels.delete(name)
-}
-
-/** 列出所有已注册渠道 */
-export const listNotificationChannels = (): NotificationChannel[] => Array.from(channels.values())
 
 /**
- * fire-and-forget 通知入口：
- * 1. 解析收件人（admin 邮箱 / env 覆盖）
- * 2. 遍历已注册渠道：可用 → send；不可用 → skip
- * 3. 任一异常仅日志 + 更新 audit_event.notified=false，不抛错阻塞调用方
- *
- * 注意：本批次仅实现 EmailNotificationChannel，其他渠道（Slack/Webhook）留接口待后续接入。
+ * 平台事件通知（必选类别，仅受部署总开关约束）：
+ * - 策略白名单 → 收件人（env 覆盖 / 管理员）→ 每小时上限 → 渠道循环
+ * - 每条 AuditEvent 幂等键 `platform:<id>:<channel>`；渠道不可用记 noop
+ * - 异常仅日志 + audit_event.notified=false，不阻塞扫描
  */
 export const notifyEnvEvent = async (event: NotificationEvent): Promise<void> => {
-    const recipients = await resolveNotificationRecipients()
-    if (recipients.length === 0) {
-        console.warn(`[notification] no recipients configured for event ${event.id}; skip`)
+    if (!shouldNotifyEnvEvent(event.type)) {
+        logger.warn(`[notification] event type '${event.type}' is audit-only; skip notify for event ${event.id}`)
+        return
+    }
+
+    if (!isDeploymentNotificationEnabled()) {
+        await recordNotificationLog({
+            deliveryKey: null,
+            category: 'platform_incident',
+            scopeType: 'platform',
+            scopeId: event.id,
+            channel: 'email',
+            fingerprint: null,
+            recipients: [],
+            status: 'noop',
+        })
         await markNotified(event.id, false, null)
         return
     }
 
-    for (const channel of channels.values()) {
+    const { settings } = await loadOrganizationNotificationSettings()
+    const recipients = await resolveNotificationRecipients({
+        category: 'platform_incident',
+        settings,
+    })
+    if (recipients.length === 0) {
+        logger.warn(`[notification] no recipients configured for event ${event.id}; skip`)
+        await recordNotificationLog({
+            deliveryKey: null,
+            category: 'platform_incident',
+            scopeType: 'platform',
+            scopeId: event.id,
+            channel: 'email',
+            fingerprint: null,
+            recipients: [],
+            status: 'skipped_no_recipient',
+        })
+        await markNotified(event.id, false, null)
+        return
+    }
+
+    const ds = await ensureDatabaseInitialized()
+    const sentInLastHour = await ds.getRepository(NotificationLog).count({
+        where: {
+            status: 'sent',
+            // 周报逐封写入的 sent 行不占用平台事件的共享上限
+            category: Not('weekly_digest'),
+            createdAt: MoreThanOrEqual(new Date(Date.now() - 3_600_000)),
+        },
+    })
+    if (isNotificationThrottled(sentInLastHour, settings.maxPerHour)) {
+        await recordNotificationLog({
+            deliveryKey: null,
+            category: 'platform_incident',
+            scopeType: 'platform',
+            scopeId: event.id,
+            channel: 'email',
+            fingerprint: null,
+            recipients: recipients.map((recipient) => recipient.email),
+            status: 'skipped_throttled',
+        })
+        await markNotified(event.id, false, null)
+        return
+    }
+
+    const emails = recipients.map((recipient) => recipient.email)
+    const rendered = renderEnvAlertTemplate({
+        type: event.type,
+        severity: event.severity,
+        repository: event.repository,
+        scanRunId: event.scanRunId,
+        message: event.message,
+        createdAt: event.createdAt.toISOString(),
+    }, event.locale ?? 'zh-CN')
+
+    for (const channel of listNotificationChannels()) {
+        if (!channel.isAvailable()) {
+            await recordNotificationLog({
+                deliveryKey: null,
+                category: 'platform_incident',
+                scopeType: 'platform',
+                scopeId: event.id,
+                channel: channel.name,
+                fingerprint: null,
+                recipients: emails,
+                status: 'noop',
+            })
+            continue
+        }
+        let log: NotificationLog | null = null
         try {
-            if (!channel.isAvailable()) {
-                console.warn(`[notification] channel '${channel.name}' unavailable; skip event ${event.id}`)
+            const platformKey = channel.name === 'email'
+                ? buildPlatformDeliveryKey(event.id)
+                : `${buildPlatformDeliveryKey(event.id)}:${channel.name}`
+            await reclaimStaleSendingLog(platformKey)
+            log = await recordNotificationLog({
+                deliveryKey: platformKey,
+                category: 'platform_incident',
+                scopeType: 'platform',
+                scopeId: event.id,
+                channel: channel.name,
+                fingerprint: null,
+                recipients: emails,
+                status: 'sending',
+            })
+            if (!log) {
                 continue
             }
-            const result = await channel.send(event, recipients)
+            const result = channel.sendMessage
+                ? await channel.sendMessage(rendered, emails)
+                : await channel.send(event, emails)
+            if (result.delivered) {
+                await updateNotificationLog(log, { status: 'sent', sentAt: new Date() })
+            } else {
+                await updateNotificationLog(log, { status: 'noop', deliveryKey: null })
+            }
             await markNotified(event.id, result.delivered, channel.name)
         } catch (e) {
-            // fail-closed：异常仅日志，不阻塞扫描流程
             const code = e instanceof NotificationError ? e.code : 'NOTIFICATION_SEND_FAILED'
-            console.error(`[notification] channel '${channel.name}' send failed for event ${event.id} (${code}):`, e)
-            await markNotified(event.id, false, channel.name)
+            logger.error(`[notification] channel '${channel.name}' send failed for event ${event.id} (${code})`, { error: e })
+            if (isUniqueViolation(e)) {
+                await recordNotificationLog({
+                    deliveryKey: null,
+                    category: 'platform_incident',
+                    scopeType: 'platform',
+                    scopeId: event.id,
+                    channel: channel.name,
+                    fingerprint: null,
+                    recipients: emails,
+                    status: 'skipped_duplicate',
+                })
+                // 重复键说明其他进程已占位 / 已投递：不要降级 audit 的 notified 状态
+            } else {
+                await updateNotificationLog(log, {
+                    status: 'failed',
+                    deliveryKey: null,
+                    errorMessage: e instanceof Error ? e.message.slice(0, 500) : String(e).slice(0, 500),
+                })
+                await markNotified(event.id, false, channel.name)
+            }
         }
     }
 }
 
-/** 更新 AuditEvent 通知状态（best-effort，失败仅日志） */
+/** 更新 AuditEvent 通知状态（best-effort，失败仅日志）。 */
 async function markNotified(eventId: string, delivered: boolean, channelName: string | null): Promise<void> {
     try {
         const ds = await ensureDatabaseInitialized()
@@ -79,22 +190,8 @@ async function markNotified(eventId: string, delivered: boolean, channelName: st
             notifiedVia: channelName,
         })
     } catch (e) {
-        console.error(`[notification] failed to update audit_event ${eventId} notified status:`, e)
+        logger.error(`[notification] failed to update audit_event ${eventId} notified status`, { error: e })
     }
-}
-
-// 初始化默认渠道（模块加载时执行一次）
-let initialized = false
-export const ensureNotificationChannelsRegistered = (): void => {
-    if (initialized) {
-        return
-    }
-    initialized = true
-    registerNotificationChannel(new EmailNotificationChannel())
-    // 接口预留：Slack / Webhook 占位注册（isAvailable()=false，不实际发送）
-    // 后续接入时：替换为真实实现类 + 在 isAvailable() 中读取配置 + 实现 send()
-    registerNotificationChannel(new SlackStubChannel())
-    registerNotificationChannel(new WebhookStubChannel())
 }
 
 ensureNotificationChannelsRegistered()

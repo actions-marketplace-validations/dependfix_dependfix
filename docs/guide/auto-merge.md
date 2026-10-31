@@ -21,6 +21,7 @@ dependfix 扫描告警 → 创建修复分支 → push 提交 PR (author=dependf
 1. **目标仓库 admin 权限**（用于安装 mergify GitHub App）
 2. **CI Test job 可信**（自动合并前提是测试通过；如 CI 不可信，先加固 CI）
 3. **接受 rebase 合并模式**（避免引入 merge commit 噪音）
+4. **门禁覆盖全部 PR job**（`check-success` 按 job 名匹配，漏写一个 job 就等于该 job 失败也会合并）
 
 ## 启用步骤
 
@@ -38,9 +39,12 @@ pull_request_rules:
   - name: automatic merge for Dependabot pull requests
     conditions:
       # check-success 匹配的是「job 名」而非 workflow 名：workflow 中每个 job 都是独立
-      # check run，必须逐 job 各写一条。目标仓库若另有独立 job（如 Coverage / E2E），
-      # 需按实际 job 名补充，否则该 job 失败仍会触发自动合并。
+      # check run，必须逐 job 各写一条。本仓库 test.yml 的 PR job 为
+      # Test / Coverage / E2E / Visual Regression——四条都进门禁，漏一条即该 job 失败也会合并。
       - check-success=Test
+      - check-success=Coverage
+      - check-success=E2E
+      - check-success=Visual Regression
       - author~=^dependabot(|-preview)\[bot\]$
       - label=dependencies
     actions:
@@ -50,6 +54,9 @@ pull_request_rules:
   - name: automatic merge for dependfix bot pull requests
     conditions:
       - check-success=Test
+      - check-success=Coverage
+      - check-success=E2E
+      - check-success=Visual Regression
       - author~=^(.+?\+)?dependfix\[bot\]$
     actions:
       merge:
@@ -58,9 +65,16 @@ pull_request_rules:
 
 依赖 dependabot 的项目保留第一条规则；非依赖 dependabot 的项目可删除第一条。
 
-> `check-success` 只约束被列出的 job。dependfix 自身仓库的 Dependabot 规则同时要求
-> `check-success=Test` 与 `check-success=Coverage`（`test.yml` 的 Test 与 Coverage 是并列
-> 独立 job，只写 `Test` 会漏掉覆盖率门禁）。复制模板后请按目标仓库实际 job 名逐条对齐。
+> `check-success` 只约束被列出的 job，且 **`skipped` 不等于 `success`**：目标仓库若对某些 job 做路径过滤
+> （如纯文档改动跳过 E2E / 视觉回归），对应条件会永久不满足，需按实际触发面裁剪。
+>
+> 本仓库把「规则条件 = PR job 集合」做成机检门禁：`pnpm run check:mergify`
+> （CI Test job 阻断）。任一 workflow 新增 `pull_request` job 或 mergify 条件漂移（漏 job / 名字拼错）都会失败；
+> 复制模板到目标仓库后，请用同样的口径人工对齐 job 名。
+>
+> mergify 仍以 `check-success` 全绿作为**唯一**合并条件：dependfix 的 check 归因
+> （`self_caused` / `external_noise` / `pre_existing` ……）只用于解释失败来源与评论，
+> **不构成合并豁免**（见 [对外 PR 交付闭环设计 §9](../design/governance/pr-delivery-closure.md#9-m486-外部作业归因与自动合并门禁)）。
 
 ### 3. 验证
 
@@ -85,10 +99,15 @@ pull_request_rules:
 | dependfix 打 `duplicate` label | 重复 PR 场景（M19.3 闭环） | [packages/engine/src/github/pr-creator.ts](../../packages/engine/src/github/pr-creator.ts) `addLabelToPullRequest` |
 | CI Test job 通过 | GitHub Actions workflow | [`.github/workflows/test.yml`](../../.github/workflows/test.yml) |
 | mergify 自动合并 | bot author + check-success 命中 | 本文档 |
+| 合并门禁一致性机检 | `pnpm run check:mergify`（CI Test job 阻断） | [scripts/check-mergify-conditions.mjs](../../scripts/check-mergify-conditions.mjs) |
 
 ## 自定义（按需调整 conditions）
 
-如需更严格或更宽松的自动合并条件，可调整 `conditions`：
+如需更严格或更宽松的自动合并条件，可调整 `conditions`。
+
+> 以下示例为**放宽模板**：只保留 `check-success=Test`（以及可选的 author / label 条件）。
+> 套用到本仓库会被 `pnpm run check:mergify` 判红（缺 Coverage / E2E / Visual Regression）——
+> 本仓库必须保留四条同批 job；目标仓库按自身实际 PR job 对齐。
 
 ```yaml
 # 示例 1：仅 patch 升级自动合并（exclude major / minor）

@@ -1,10 +1,12 @@
 import type { H3Event } from 'h3'
-import { parseSandboxLimits, parseTags, Repository } from '#server/entities/repository'
+import { parseSandboxLimits, parseTags, parseVerifyCommands, Repository } from '#server/entities/repository'
 import { ensureDatabaseInitialized } from '#server/database'
 import { repositorySchema } from '#server/schemas/repository'
 import { requireAuth, requireRole } from '#server/utils/guard'
 import { createLocalizedError } from '#server/utils/localized-error'
 import { resolveOrganizationId } from '#server/utils/organization'
+import { normalizePRCheckFocus, parsePRCheckFocus } from '#server/utils/pr-check-focus'
+import { recordVerifyCommandsAudit } from '#server/services/repository-audit'
 
 const toView = (r: Repository) => ({
     id: r.id,
@@ -20,6 +22,8 @@ const toView = (r: Repository) => ({
     note: r.note,
     tags: parseTags(r.tags),
     sandboxLimits: parseSandboxLimits(r.sandboxLimits),
+    verifyCommands: parseVerifyCommands(r.verifyCommands),
+    prCheckFocus: parsePRCheckFocus(r.prCheckFocus),
     aiEnabled: r.aiEnabled,
     aiTrigger: r.aiTrigger,
     lastScanAt: r.lastScanAt,
@@ -27,7 +31,12 @@ const toView = (r: Repository) => ({
     updatedAt: r.updatedAt,
 })
 
-/** GET /api/repos：仓库列表（含关联凭据名称） */
+/**
+ * GET /api/repos：仓库列表（含关联凭据名称）。
+ *
+ * 注意：视觉回归的仓库集合门禁（`tests/visual/helpers/visual-db.ts`）依赖本端点返回**全量**仓库；
+ * 若未来引入分页 / 默认过滤，需同步调整门禁的集合真值来源（否则窗口外的多余仓库不可见、门禁假绿）。
+ */
 const listRepositories = async (event: H3Event) => {
     await requireAuth(event)
     const ds = await ensureDatabaseInitialized()
@@ -87,6 +96,14 @@ const createRepository = async (event: H3Event) => {
         ? JSON.stringify(parsed.data.sandboxLimits)
         : null
 
+    // verifyCommands 数组 → JSON 字符串列（与 tags 同模式；空数组存 null → 走引擎默认验证链）
+    const verifyCommandsValue: string | null = parsed.data.verifyCommands && parsed.data.verifyCommands.length > 0
+        ? JSON.stringify(parsed.data.verifyCommands)
+        : null
+
+    // prCheckFocus 对象 → JSON 字符串列（三维全空归一为 null = 未配置；规范化负责 trim / 去重 / 小写）
+    const prCheckFocusValue = normalizePRCheckFocus(parsed.data.prCheckFocus)
+
     const entity = repo.create({
         organizationId,
         owner: parsed.data.owner,
@@ -100,8 +117,22 @@ const createRepository = async (event: H3Event) => {
         note: parsed.data.note ?? null,
         tags,
         sandboxLimits,
+        verifyCommands: verifyCommandsValue,
+        prCheckFocus: prCheckFocusValue ? JSON.stringify(prCheckFocusValue) : null,
     })
     const saved = await repo.save(entity)
+
+    // 审计留痕（见 docs/standards/platform.md §3.8）：自定义验证命令等价于远程命令执行面，创建时若已配置则登记
+    if (verifyCommandsValue) {
+        await recordVerifyCommandsAudit(ds, {
+            repositoryId: saved.id,
+            owner: saved.owner,
+            name: saved.name,
+            previous: [],
+            next: parseVerifyCommands(verifyCommandsValue),
+        })
+    }
+
     // 保存后重查以加载 relations（创建响应与 GET 语义一致，credentialName 不恒为 null）
     const withRelation = await repo.findOne({
         where: { id: saved.id },

@@ -14,7 +14,7 @@
  */
 import { execFileSync } from 'node:child_process'
 import { readdirSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /**
@@ -26,9 +26,17 @@ import { fileURLToPath } from 'node:url'
  *   **当前豁免**（与原 check-links.mjs 行为一致）的原因：归档动作会让历史
  *   文档中的相对链接（如 [roadmap.md]）指向错误位置——这些是归档过程
  *   引入的预期行为，不应让链接检查在归档批次每次触发红 CI。已知问题：
- *   docs/plan/archive/ 下含 16+ 处失效相对链接（roadmap.md / todo.md /
- *   todo-archive-phases-m0-m1.md 等），统一扫描会立即暴露；修复属独立批次。
+ *   docs/plan/archive/ 下含 ~98 处失效相对链接（roadmap.md / todo.md /
+ *   todo-archive-phases-m0-m1.md / ../design/governance/*.md 等）+ 2 处失效
+ *   自锚点（m6-m7 分片引用的 M10 段已迁出至 m10 分片），统一扫描会立即暴露；
+ *   修复属独立批次。2026-09-21 规划文档归档批次已修复 archive/index.md 与
+ *   各分片的 anchor / gh-slug 失配（anchor-dead=0 / gh-slug=0），剩余 file-dead
+ *   为既有路径前缀问题。
  *   决策：维持历史豁免 + 注释登记；待独立 fix 批次统一处理。
+ *   **豁免范围限定为 links 面（file-dead）**（2026-10-14 明确）：锚点子集（自锚点 +
+ *   跨文档锚点）、强调标记配对、畸形链接三类规则已覆盖归档文档（`walkMdFiles` 的
+ *   `includeDirs: ['archive']` 放回该目录）——这三类与「归档导致的路径位置漂移」
+ *   无关，属真实破损；file-dead 仍维持豁免。
  * - `.agents` / `.claude`：opencode / claude code 的 agent 定义目录，
  *   不进 VitePress 编译且非文档，豁免。
  * - `artifacts`：review-gate 审计产物（gitignored），若被扫描，本地存在的
@@ -45,28 +53,69 @@ export const MD_EXCLUDED_DIRS = new Set([
     '.claude',
     '.session',
     'artifacts',
+    // Playwright 产物（gitignored）：`test-results/**/error-context.md` 会污染 md 扫描面
+    // 与「links: N md files」口径（2026-10-13 e2e 产物实测）
+    'playwright-report',
+    'test-results',
 ])
 
 /**
  * 递归扫描目录下所有 .md 文件（不含 EXCLUDED_DIRS 内目录）。
+ *
+ * `excludedPaths` 是**相对遍历起点**的目录前缀（POSIX 分隔符），用于精确定位那些
+ * 不能用目录名概括的运行时目录（gitignored）：按名排除（如 `data`）会误伤同名正常目录，
+ * 而按路径前缀只跳过目标目录。命中在**下降前剪枝**——运行时目录下可能有成千上万个
+ * 克隆 / 产物文件，遍历后再过滤的代价不可接受。
+ *
+ * `options.includeDirs`：把指定目录名从排除集合中放回（默认空）。用于「该目录在
+ * **链接存在性**面整体豁免、但在**其它规则**面仍须扫描」的场景——`archive` 的
+ * 相对链接会因归档动作指向预期外位置（见 MD_EXCLUDED_DIRS 说明），故 links 面继续
+ * 排除；而强调标记配对 / 锚点子集等与「路径位置无关」的规则需要覆盖归档文档。
+ *
  * @param {string} dir 起始目录（绝对路径）
  * @param {string[]} [out] 累积输出，供递归调用
+ * @param {string[]} [excludedPaths] 相对遍历起点的排除目录前缀（POSIX）
+ * @param {{ includeDirs?: string[] }} [options] 放回排除集合的目录名
  * @returns {string[]} .md 文件绝对路径数组
  */
-export function walkMdFiles(dir, out = []) {
+export function walkMdFiles(dir, out = [], excludedPaths = [], options = {}) {
+    return walkDir(dir, dir, out, excludedPaths, new Set(options.includeDirs ?? []))
+}
+
+function walkDir(baseDir, dir, out, excludedPaths, includeDirs) {
     for (const entry of readdirSync(dir)) {
-        if (MD_EXCLUDED_DIRS.has(entry)) {
+        if (MD_EXCLUDED_DIRS.has(entry) && !includeDirs.has(entry)) {
             continue
         }
         const full = join(dir, entry)
-        const st = statSync(full)
-        if (st.isDirectory()) {
-            walkMdFiles(full, out)
+        if (statSync(full).isDirectory()) {
+            if (isExcludedPath(baseDir, full, excludedPaths)) {
+                continue
+            }
+            walkDir(baseDir, full, out, excludedPaths, includeDirs)
         } else if (entry.endsWith('.md')) {
             out.push(full)
         }
     }
     return out
+}
+
+/**
+ * 判断目录是否命中「相对遍历起点的路径前缀」排除项。
+ *
+ * 只做**精确匹配**即可：命中目录在下降前就被剪枝，其子目录不会被访问；
+ * 因此 `startsWith(prefix + '/')` 这类兜底分支实际不可达（不宜保留死代码）。
+ * @param {string} baseDir 遍历起点（绝对路径）
+ * @param {string} absPath 待判目录（绝对路径）
+ * @param {string[]} excludedPaths 排除前缀（POSIX）
+ * @returns {boolean}
+ */
+function isExcludedPath(baseDir, absPath, excludedPaths) {
+    if (excludedPaths.length === 0) {
+        return false
+    }
+    const rel = relative(baseDir, absPath).split(sep).join('/')
+    return excludedPaths.includes(rel)
 }
 
 /**

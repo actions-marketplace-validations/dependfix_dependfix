@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { parse as parseYaml } from 'yaml'
 import type { NormalizedSecurityAlert } from '@dependfix/core'
 import { compareSemver, readLockfileVersions, isCrossMajorFixRequired } from '../fixers/dependency'
-import { runVerification } from '../runners/verification-runner'
+import { formatVerificationError, runVerification } from '../runners/verification-runner'
 import { validateVerifyCommands } from '../verification/validate-commands'
 import type { AppContext } from '../app/helpers'
 
@@ -81,7 +81,7 @@ export function restoreTrackedFiles(workDir: string, snapshot: Record<string, st
 /**
  * 快速验证（逐包）：运行验证命令序列。
  *
- * 有自定义命令时执行完整序列（含 install + setup + lint + build），
+ * 有自定义命令时执行完整序列（命令以自定义链为准，典型形态含 install + setup + lint + build + typecheck + test），
  * 否则仅运行 `pnpm lint`（脚本存在时）。
  *
  * 设计决策（run 33946113272 复盘）：旧版仅跑 `pnpm lint`，但 Nuxt 等框架
@@ -106,7 +106,16 @@ export async function quickVerifyProject(
 
     const result = await runVerification({ workDir, commands: valid })
     if (!result.success) {
-        logger.warn(`[quick-verify] ${repo}: lint failed after upgrade`)
+        // 留痕必须带「失败在哪一段 + 为什么」：有自定义链时 `valid` 是**整链**
+        // （install → setup → lint → build → typecheck → test），失败点可以落在任何一段，
+        // 只写「lint failed」会把 test 段的失败误报成 lint 失败——2026-10-16 定时 run 实证：
+        // 三个版本化 override 探针的泛化文案让失败点只能靠链差推理还原，日志里无从查证。
+        const failed = result.commandResults.at(-1)
+        const detail = failed ? formatVerificationError(failed) : (result.failure ?? 'no error detail')
+        // 命令名优先取 `failedCommand`（「首失败即停」契约下它与末条结果同指一条命令，取它可避免
+        // 标签与明细两个来源各自漂移），缺失时回退末条命令名、再退占位文本
+        const failedLabel = result.failedCommand ?? failed?.command ?? 'verification'
+        logger.warn(`[quick-verify] ${repo}: ${failedLabel} failed after upgrade — ${detail}`)
         return false
     }
     return true

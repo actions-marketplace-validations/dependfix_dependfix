@@ -22,11 +22,17 @@ export type ServerErrorCode =
     | 'REPO_VALIDATION_FAILED'
     | 'SCAN_RUN_NOT_FOUND'
     | 'RUN_ID_MISSING'
+    | 'RUN_LOGS_NOT_FOUND'
+    | 'RUN_LOGS_EXPORT_TOO_LARGE'
     | 'RUNS_VALIDATION_FAILED'
+    | 'SCAN_HISTORY_VALIDATION_FAILED'
     | 'REUSE_RUN_NOT_IN_REPO'
     | 'REUSE_RUN_RUNNING'
     | 'SCAN_PENDING_MERGED'
     | 'SCAN_ALREADY_COMPLETED'
+    | 'RUN_RETRY_NOT_ALLOWED'
+    | 'RUN_RETRY_PARAMS_INVALID'
+    | 'RUN_RETRY_SOURCE_RUNNING'
     | 'CREDENTIAL_NOT_FOUND'
     | 'CREDENTIAL_ID_MISSING'
     | 'CREDENTIAL_VALIDATION_FAILED'
@@ -50,6 +56,13 @@ export type ServerErrorCode =
     | 'ORG_NOT_FOUND'
     | 'AI_CONFIG_VALIDATION_FAILED'
     | 'AI_KEY_REQUIRED'
+    | 'NOTIFICATION_VIEWER_FORBIDDEN'
+    | 'NOTIFICATION_PREFERENCE_VALIDATION_FAILED'
+    | 'NOTIFICATION_PREFERENCE_EMPTY'
+    | 'NOTIFICATION_CATEGORY_DISABLED'
+    | 'NOTIFICATION_QUERY_INVALID'
+    | 'NOTIFICATION_SETTINGS_VALIDATION_FAILED'
+    | 'NOTIFICATION_TEST_FAILED'
     | 'UNKNOWN'
 
 /** locale 标记（与 apps/platform/i18n/nuxt-i18n-config.ts locales.code 对齐） */
@@ -83,7 +96,7 @@ const DEFAULT_LOCALE: ServerLocale = 'zh-CN'
  * getHeader/getCookie 访问 event.node.req.headers 时会抛 TypeError；此处降级到默认 zh-CN，
  * 不影响单测断言 statusCode（locale 仅影响 message 字段）。
  *
- * @see [todo-archive.md §M16.3 audit suggest backlog S2](../../docs/plan/todo-archive.md#m16-平台可用性深化m161--m162--m163--m164--m165-全部已闭环--2026-08-28-归档) — 与 [localeDetector.ts:15]({@link ../i18n/localeDetector.ts}) `tryQueryLocale` 对齐
+ * @see [todo-archive.md §M16.3 audit suggest backlog S2](../../../../docs/plan/archive/todo-archive-phases-m16-m17.md#m16-平台可用性深化m161--m162--m163--m164--m165-全部已闭环--2026-08-28-归档) — 与 [localeDetector.ts:15]({@link ../i18n/localeDetector.ts}) `tryQueryLocale` 对齐
  */
 export function detectServerLocale(event: H3Event): ServerLocale {
     // 防御：单测 mock event 可能不含 node.req（guard.test.ts 走最小 H3Event shape）
@@ -92,7 +105,7 @@ export function detectServerLocale(event: H3Event): ServerLocale {
     if (!reqHeaders) {
         return DEFAULT_LOCALE
     }
-    // 优先级：URL query (?locale=en/zh-CN) > cookie > Accept-Language > 默认（M18.x 治理批次 S2 — 与 localeDetector.ts:15 tryQueryLocale 对齐）
+    // 优先级：URL query (?locale=en/zh-CN) > cookie > Accept-Language > 默认（与 localeDetector.ts:15 tryQueryLocale 对齐）
     // 注意：URL 前缀路由（/en/...）由 @nuxtjs/i18n 路由层处理，本 helper 只补 query 形式；
     // query 解析用 URLSearchParams（Node 22+ 内置，零依赖）
     if (reqUrl) {
@@ -182,6 +195,7 @@ const STATUS_MESSAGES: Record<number, string> = {
     '404': 'Not Found',
     '405': 'Method Not Allowed',
     '409': 'Conflict',
+    '413': 'Payload Too Large',
     '500': 'Internal Server Error',
 }
 

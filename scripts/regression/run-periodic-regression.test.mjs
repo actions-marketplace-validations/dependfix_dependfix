@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { DOC_GATES } from '../run-doc-gates.mjs'
 import {
     LOG_WINDOW_LIMITS,
     PERIODIC_REGRESSION_PROFILES,
@@ -20,6 +21,22 @@ describe('resolveRegressionProfile', () => {
     it('返回 pre-release 配置', () => {
         const profile = resolveRegressionProfile('pre-release')
         expect(profile.key).toBe('pre-release')
+    })
+
+    it('三个 profile 均纳入完整文档与治理门禁集（与 Test / release 同集合）', () => {
+        for (const key of ['weekly', 'pre-release', 'phase-close']) {
+            const labels = PERIODIC_REGRESSION_PROFILES[key].steps.map((step) => step.label)
+            for (const gate of DOC_GATES) {
+                expect(labels, `${key} 缺少 ${gate}`).toContain(gate)
+            }
+        }
+    })
+
+    it('pre-release / phase-close 保留 changelog 校验（weekly 不要求）', () => {
+        const labelsOf = (key) => PERIODIC_REGRESSION_PROFILES[key].steps.map((step) => step.label)
+        expect(labelsOf('pre-release')).toContain('verify:changelog')
+        expect(labelsOf('phase-close')).toContain('verify:changelog')
+        expect(labelsOf('weekly')).not.toContain('verify:changelog')
     })
 
     it('返回 phase-close 配置', () => {
@@ -341,16 +358,14 @@ describe('buildRegressionWindowEntry', () => {
 })
 
 describe('PERIODIC_REGRESSION_PROFILES', () => {
-    it('weekly 有9个步骤', () => {
-        expect(PERIODIC_REGRESSION_PROFILES.weekly.steps.length).toBe(9)
+    it('weekly 步骤数 = 覆盖 / 审计 + 文档门禁集 + lint 门禁 / 样式门禁 / typecheck / build', () => {
+        expect(PERIODIC_REGRESSION_PROFILES.weekly.steps.length).toBe(2 + DOC_GATES.length + 4)
     })
 
-    it('pre-release 有10个步骤', () => {
-        expect(PERIODIC_REGRESSION_PROFILES['pre-release'].steps.length).toBe(10)
-    })
-
-    it('phase-close 有10个步骤', () => {
-        expect(PERIODIC_REGRESSION_PROFILES['phase-close'].steps.length).toBe(10)
+    it('pre-release / phase-close 在 weekly 基础上追加 changelog 校验', () => {
+        const expected = 2 + DOC_GATES.length + 4 + 1
+        expect(PERIODIC_REGRESSION_PROFILES['pre-release'].steps.length).toBe(expected)
+        expect(PERIODIC_REGRESSION_PROFILES['phase-close'].steps.length).toBe(expected)
     })
 
     it('weekly archivePolicy 为 warn', () => {
@@ -359,6 +374,14 @@ describe('PERIODIC_REGRESSION_PROFILES', () => {
 
     it('phase-close archivePolicy 为 block', () => {
         expect(PERIODIC_REGRESSION_PROFILES['phase-close'].archivePolicy).toBe('block')
+    })
+
+    it('证据落点统一指向 artifacts/regression/current.md', () => {
+        for (const profile of Object.values(PERIODIC_REGRESSION_PROFILES)) {
+            const text = profile.responsibilityBoundary.join('\n')
+            expect(text).toContain('artifacts/regression/current.md')
+            expect(text).not.toContain('docs/reports')
+        }
     })
 })
 

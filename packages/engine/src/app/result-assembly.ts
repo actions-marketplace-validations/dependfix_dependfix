@@ -1,24 +1,38 @@
 // result-assembly.ts：从 app/helpers.ts 拆出的"结果汇总"段落。
 // 控制 app/helpers.ts 行数（max-lines 800），保持向后兼容：原 helpers.ts 通过
 // re-export 透出以下函数，内部消费者无需调整 import。
-import type {
-    RunReportConfig,
-    RunResult,
-    AiUsageAggregate,
-    SupplyChainWarning,
+import {
+    buildAlertOutcomes,
+    isAlertFixedByActions,
+    type RunReportConfig,
+    type RunResult,
+    type AiUsageAggregate,
+    type SupplyChainWarning,
 } from '@dependfix/core'
 import type { AiUsage } from '../ai/usage'
+import { isRepoVerificationBlocked } from '../runners/verification-gate'
 import type { AppContext } from './helpers'
 
 // ---------------------------------------------------------------------------
 // Result assembly
 // ---------------------------------------------------------------------------
 
-/** 汇总所有动作到 summary（alertsSkipped 已在 repo-fix 修复管线中累加）。 */
+/**
+ * 汇总所有动作到 summary（alertsSkipped / alertsConverged 已在 repo-fix 修复管线中累加）。
+ *
+ * `environmentalFailures` 取 `ENVIRONMENT_ERROR` 审计条目数：该类别是环境性失败的单一审计事实
+ * （lockfile-repair 与合批 / 多版本 / 成员 / 常规分组 / 跨线安装路径均落此类别），避免同时按 action
+ * 标记计数造成同一事件双计（lockfile-repair 失败会同时产生 action.environmentalFailure 与一条
+ * ENVIRONMENT_ERROR）。
+ * 带 `environmentalFailure` 标记的动作不归因本次运行：不计入 `alertsFixed` / `alertsFailed`
+ * （升级链路四条消费点见 docs/design/modules/dependency-fixer-records.md §12.16）。
+ */
 export function computeSummary(
-    ctx: Pick<AppContext, 'allActions' | 'allAlerts' | 'repoResults' | 'summary'>,
+    ctx: Pick<AppContext, 'allActions' | 'allAlerts' | 'allErrors' | 'alertsDisabled' | 'repoResults' | 'summary'> & {
+        deliverySkips?: AppContext['deliverySkips']
+    },
 ): void {
-    const { allActions, allAlerts, repoResults, summary } = ctx
+    const { allActions, allAlerts, allErrors, alertsDisabled, repoResults, summary } = ctx
 
     let fixed = 0
     let failed = 0
@@ -34,6 +48,11 @@ export function computeSummary(
         // AI 辅助动作（ai-patch 修复 / ai-suggestion 建议）是过程证据，不计入 fixed/failed——
         // 告警结果由主动作（major-upgrade 等）代表，避免同告警重复计数
         if (action.strategy === 'ai-patch' || action.strategy === 'ai-suggestion') {
+            continue
+        }
+        // 环境性安装失败（不归因）：既不计 failed（alertsFailed），也不计 fixed——
+        // 与出口码 `hasFailures` 的非归因谓词同源，计数单列在 `environmentalFailures`
+        if (action.environmentalFailure) {
             continue
         }
         if (action.type === 'dependency-upgrade' || action.type === 'code-scanning-fix') {
@@ -63,14 +82,29 @@ export function computeSummary(
     summary.alertsFound = allAlerts.length
     summary.alertsFixable = fixable
     summary.alertsFixed = fixed
+    // 告警级未修复数：同包多告警可能共用一个成功 action，不能用 alertsFixed（action 数）做减法
+    const fixedAlertCount = allAlerts.filter((alert) => isAlertFixedByActions(alert, allActions)).length
+    summary.alertsUnfixed = Math.max(0, allAlerts.length - fixedAlertCount - summary.alertsConverged)
     summary.alertsFailed = failed
+    // 环境性失败可见性（不归因）：按审计条目计数，与 exitCode / alertsFailed 保持独立口径。
+    summary.environmentalFailures = allErrors.filter((error) => error.category === 'ENVIRONMENT_ERROR').length
+    // 方案 A：未启用 ≠ 失败，单列计数（不计入 alertsFailed / errors）。
+    // 按仓库去重（而非源级记录数）：同仓库多源未启用只计 1 次，与表头「(repos)」口径一致
+    summary.reposWithAlertsDisabled = new Set(alertsDisabled.map((r) => r.repository)).size
     summary.lockfileRepairs = lockfileRepairs
     summary.verificationsPassed = verificationsPassed
     summary.verificationsFailed = verificationsFailed
+    // 交付跳过（基线红）：按去重后的仓库集计数；载体计数按 run 级记录派生（幂等，可重复调用）
+    const deliverySkips = ctx.deliverySkips ?? []
+    summary.deliverySkipped = new Set(deliverySkips.flatMap((record) => record.repositories)).size
+    summary.deliverySkipIssues = deliverySkips.filter((record) => record.carrier.issue?.created === true).length
+    summary.deliverySkipDraftPrs = deliverySkips.filter((record) => Boolean(record.carrier.draftPr)).length
+    // PR 交付计数器由编排层在事件点累加（此处不重置，避免 computeSummary 多次调用清零）：
+    // prsOpened / prsSkippedByFingerprint / prsClosedAfterFailure / checksTimedOut
 }
 
 export function buildRunResult(
-    ctx: Pick<AppContext, 'config' | 'runId' | 'startedAt' | 'finishedAt' | 'summary' | 'repoResults' | 'allAlerts' | 'allActions' | 'allErrors'>,
+    ctx: Pick<AppContext, 'config' | 'runId' | 'startedAt' | 'finishedAt' | 'summary' | 'repoResults' | 'allAlerts' | 'allActions' | 'allErrors' | 'alertsDisabled' | 'ciAlignment' | 'attemptTracking' | 'prCheckWatch' | 'alertOutcomes' | 'deliverySkips'>,
     aiUsage?: AiUsageAggregate, supplyChainWarnings?: SupplyChainWarning[],
 ): RunResult {
     const reportConfig: RunReportConfig = {
@@ -85,6 +119,8 @@ export function buildRunResult(
         codeQualityEnabled: ctx.config.codeQualityEnabled,
     }
 
+    const alertOutcomes = buildAlertOutcomes(ctx.allAlerts, ctx.allActions, ctx.alertOutcomes)
+
     return {
         runId: ctx.runId,
         startedAt: ctx.startedAt,
@@ -97,6 +133,12 @@ export function buildRunResult(
         errors: ctx.allErrors,
         aiUsage: aiUsage && aiUsage.calls > 0 ? aiUsage : undefined,
         supplyChainWarnings: supplyChainWarnings && supplyChainWarnings.length > 0 ? supplyChainWarnings : undefined,
+        alertsDisabled: ctx.alertsDisabled.length > 0 ? ctx.alertsDisabled : undefined,
+        ciAlignment: ctx.ciAlignment && ctx.ciAlignment.length > 0 ? ctx.ciAlignment : undefined,
+        attemptTracking: ctx.attemptTracking && ctx.attemptTracking.length > 0 ? ctx.attemptTracking : undefined,
+        alertOutcomes: alertOutcomes.length > 0 ? alertOutcomes : undefined,
+        prCheckWatch: ctx.prCheckWatch && ctx.prCheckWatch.attempts.length > 0 ? ctx.prCheckWatch : undefined,
+        deliverySkips: ctx.deliverySkips && ctx.deliverySkips.length > 0 ? ctx.deliverySkips : undefined,
     }
 }
 
@@ -134,26 +176,59 @@ export function mergeAiUsage(
 }
 
 /**
+ * "跳过类"审计条目 category 白名单：这些是预期内、**不归因本次运行**的行为，不应影响 exit code。
+ *
+ * - `OVERRIDE_PROTECTED`：保护名单命中，主动跳过 override 写入
+ * - `SCRIPT_NOT_FOUND`：无对应 `package.json#scripts`，跳过该验证命令
+ * - `PRE_EXISTING_FAILURE`：修复前即红的既有基线失败（`verificationBlocking === false`），
+ *   目标仓库本就如此，不归因本次改动（口径见 [isRepoVerificationBlocked] 与
+ *   [docs/design/modules/dependency-fixer-records.md 既有失败基线]）
+ * - `ENVIRONMENT_ERROR`：环境性安装失败（信号终止 / 超时 / 无 stderr 诊断），
+ *   无法归因目标仓库（与既有失败基线同族口径；对应 action 的 `environmentalFailure` 标记）
+ * - `ROLLBACK_GRANULARITY_DEGRADED`：单元级回滚不可用，显式降级整仓回滚（审计性，不归因失败）
+ */
+const SKIPPED_AUDIT_CATEGORIES = new Set<string>([
+    'OVERRIDE_PROTECTED', // 保护名单命中，主动跳过 override 写入
+    'SCRIPT_NOT_FOUND', // 无 test 脚本，跳过 pnpm test 验证
+    'PRE_EXISTING_FAILURE', // 既有基线失败（本次改动前即为红），不归因本次运行
+    'ENVIRONMENT_ERROR', // 环境性安装失败（无法归因目标仓库），不归因本次运行
+    'ROLLBACK_GRANULARITY_DEGRADED', // 单元回滚不可用，显式降级为整仓回滚（审计性，不归因失败）
+    'BUDGET_EXHAUSTED', // 运行预算不足，主动跳过未开始的工作（不归因目标仓库）
+])
+
+/**
  * 计算退出码：
- * - 0: 全部仓库处理成功（无 failed actions、无 errors）
+ * - 0: 全部仓库处理成功（无 failed actions、无 non-skipped errors）
  * - 1: 部分仓库失败
  * - 2: 全部仓库失败（或无仓库被成功处理）
  *
  * 语义注记：AI 辅助动作（ai-patch）失败计入 exit code（fail-safe——AI 修复失败
  * 说明 breaking change 未解决，应报红提醒人工），但不计入 summary.alertsFailed
  * （告警结果由主动作代表；见 computeSummary 的 ai 辅助动作排除规则）。
+ *
+ * "跳过类"审计条目（OVERRIDE_PROTECTED / SCRIPT_NOT_FOUND）不计入 hasErrors，
+ * 避免有意跳过导致 CI 常态非零退出。
  */
 export function computeExitCode(
     ctx: Pick<AppContext, 'config' | 'allErrors' | 'allActions' | 'repoResults'>,
 ): number {
     const { config, allErrors, allActions, repoResults } = ctx
-    const hasErrors = allErrors.length > 0
-    const hasFailures = allActions.some((a) => !a.success)
+    const nonSkippedErrors = allErrors.filter((e) => !SKIPPED_AUDIT_CATEGORIES.has(e.category ?? ''))
+    const hasErrors = nonSkippedErrors.length > 0
+    // 既有失败（`preExisting`，仅验证 action 携带）与环境性安装失败（`environmentalFailure`，
+    // lockfile-repair 与升级链路各消费点携带）均不归因本次运行，不计入失败动作——否则「仅既有失败 /
+    // 环境性失败且无告警/修复产出」的运行仍会被判 exit 2（平台 `engine_exit_2` 误标 failed）
+    const hasFailures = allActions.some((a) => !a.success && !a.preExisting && !a.environmentalFailure)
     // 保守判定：dry-run 下成功仓库的 verificationPassed 为 undefined、alertsCount 可能为 0，
     // 与失败仓库并存时会被判为"无成功"（返回 2 而非 1）——fail-safe 方向可接受
-    // （验证失败 verificationPassed === false 不算成功交付，改动已回滚）
+    //
+    // 归因口径：只有「本次改动引入的验证失败」（`verificationBlocking === true`）才让该仓库不算成功；
+    // **既有基线失败**（`verificationBlocking === false` 且 `verificationPassed === false`）不归因本次
+    // 改动，不得据此判该仓库失败——与交付门禁 [findVerificationFailedRepos] 同源
+    // （原实现直接用原始口径 `verificationPassed !== false`，会把「仅既有失败」的仓库判为失败 → exit 2 →
+    //  平台 `engine_exit_2` 误标整次运行为失败）
     const hasRepoSuccess = repoResults.length > 0
-        && repoResults.some((r) => r.verificationPassed !== false
+        && repoResults.some((r) => !isRepoVerificationBlocked(r)
             && (r.alertsCount > 0 || r.fixed > 0 || r.verificationPassed === true))
     const hasCleanupSuccess = config.mode === 'cleanup-branches' // 该模式不填充 repoResults，以成功 branch-cleanup 判定
         && allActions.some((a) => a.success && a.type === 'branch-cleanup')

@@ -5,7 +5,8 @@ import type { Octokit } from '@octokit/rest'
 import type { FixAction } from '@dependfix/core'
 import { parseMajorVersion } from '../fixers/dependency'
 import type { AiOptions } from '../config'
-import { verifyProject, type AppContext } from '../app/helpers'
+import { type AppContext } from '../app/helpers'
+import { verifyProject } from '../app/verify-project'
 import { createChangelogFetcher } from './changelog-fetcher'
 import { applyChanges, buildVersionLockOverride, buildWaitUpstreamNote } from './patch-applier'
 import { validateAiChanges } from './safety-gate'
@@ -44,7 +45,7 @@ export interface AiIntegrationResult {
  * 执行一次 AI 研判集成（changelog 采集 → 研判 → 分流）。
  *
  * 分流：
- * - code-change → safety-gate → applyChanges → 完整验证（install+lint+build）
+ * - code-change → safety-gate → applyChanges → 完整验证（install+lint+build+typecheck+test）
  *   → 成功 ai-patch；失败回滚转建议
  * - version-lock → 生成 override 建议文本（人工确认执行）
  * - wait-upstream / manual / 研判降级 → 建议区块
@@ -180,7 +181,7 @@ async function applyCodeChangeFix(
         return suggestionAction(repo, request, `AI 修复应用失败：${applied.error}`, assessment.summary)
     }
 
-    // 完整验证（install + lint + build，对齐跨线升级语义）
+    // 完整验证（install + lint + build + typecheck + test，对齐跨线升级语义）
     const verifyActions = await verifyProject(ctx, repo)
     const failed = verifyActions.filter((a) => !a.success)
     if (failed.length > 0) {
@@ -211,6 +212,8 @@ async function applyCodeChangeFix(
         isMajor: isMajorUpgrade(request),
         success: true,
         strategy: 'ai-patch',
+        // 交付提交按声明路径收口（源码不受白名单覆盖）：只在此处声明真正写盘的文件
+        changedPaths: applied.appliedFiles,
         diff: `AI 修复 ${assessment.changes.length} 个文件：${assessment.changes.map((c) => c.filePath).join(', ')}`,
         durationMs: 0,
     }

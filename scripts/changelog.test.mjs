@@ -1,5 +1,31 @@
 import { describe, expect, it, vi } from 'vitest'
-import { cleanupUnreleasedSections, computeDependencyChanges, compareSemverDesc, findPrevTag, mergeUnreleased, renderDependencySection, versionLt } from './changelog.mjs'
+import { cleanupUnreleasedSections, computeDependencyChanges, compareSemverDesc, findPrevTag, mergeUnreleased, renderBaselineSection, renderDependencySection, versionLt } from './changelog.mjs'
+
+describe('renderBaselineSection', () => {
+    it('渲染运行时基线段（供无包内 commit 的版本提升通过 changelog 校验）', () => {
+        const section = renderBaselineSection({
+            version: '0.3.0',
+            prevVersion: '0.2.0',
+            prefix: '@dependfix/skills@',
+            repo: 'dependfix/dependfix',
+            headDate: '2026-10-28',
+        })
+        expect(section).toContain('# [0.3.0](https://github.com/dependfix/dependfix/compare/@dependfix/skills@0.2.0...@dependfix/skills@0.3.0) (2026-10-28)')
+        expect(section).toContain('### ⚙️ 运行时基线更新')
+        expect(section).toContain('无包内功能变更')
+    })
+
+    it('patch 段沿用 ## 标题（与既有分段惯例一致）', () => {
+        const section = renderBaselineSection({
+            version: '0.3.1',
+            prevVersion: '0.3.0',
+            prefix: '@dependfix/skills@',
+            repo: 'dependfix/dependfix',
+            headDate: '2026-10-28',
+        })
+        expect(section.startsWith('## [0.3.1]')).toBe(true)
+    })
+})
 
 describe('versionLt', () => {
     it('compares numeric segments (0.9.0 < 0.10.0)', () => {

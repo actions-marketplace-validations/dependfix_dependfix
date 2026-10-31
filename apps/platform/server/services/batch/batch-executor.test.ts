@@ -36,6 +36,7 @@ import { getQueueService } from '../queue/queue.service'
 import { executeBatchRun } from './batch-executor'
 import { BatchRun } from '#server/entities/batch-run'
 import { ScanRun } from '#server/entities/scan-run'
+import { ScanResult } from '#server/entities/scan-result'
 import { ensureDatabaseInitialized } from '#server/database'
 
 const mockQueueService = (mode: 'async' | 'sync') => {
@@ -58,9 +59,14 @@ const mockDataSource = () => {
             savedBatchRuns.push(saved)
             return saved
         }),
+        update: vi.fn<(criteria?: unknown, partial?: unknown) => Promise<{ affected: number }>>(async () => ({ affected: 1 })),
     }
     const scanRunRepo = {
         save: vi.fn(async (run: ScanRun) => run),
+        find: vi.fn(async () => [] as ScanRun[]),
+    }
+    const scanResultRepo = {
+        find: vi.fn(async () => [] as ScanResult[]),
     }
     vi.mocked(ensureDatabaseInitialized).mockResolvedValue({
         getRepository: (entity: unknown) => {
@@ -70,10 +76,13 @@ const mockDataSource = () => {
             if (entity === ScanRun) {
                 return scanRunRepo
             }
+            if (entity === ScanResult) {
+                return scanResultRepo
+            }
             throw new Error(`unexpected entity: ${String(entity)}`)
         },
     } as never)
-    return { batchRunRepo, scanRunRepo, savedBatchRuns }
+    return { batchRunRepo, scanRunRepo, scanResultRepo, savedBatchRuns }
 }
 
 const baseInput = {
@@ -162,6 +171,9 @@ describe('executeBatchRun（批量执行服务）', () => {
         expect(failedRun.finishedAt).not.toBeNull()
         const errorJson = JSON.parse(failedRun.errorJson ?? '{}') as { code: string }
         expect(errorJson.code).toBe('SCAN_PENDING_MERGED')
+        // 去重合并标记同样落分类（runtime + deterministic）
+        expect(failedRun.failureStage).toBe('runtime')
+        expect(failedRun.failureKind).toBe('deterministic')
     })
 
     it('async 单仓库入队失败：跳过继续（其余仓库正常入队，批次不中断）', async () => {
@@ -197,20 +209,46 @@ describe('executeBatchRun（批量执行服务）', () => {
         expect(failedRun.finishedAt).not.toBeNull()
         const errorJson = JSON.parse(failedRun.errorJson ?? '{}') as { code: string }
         expect(errorJson.code).toBe('enqueue_failed')
+        expect(failedRun.failureCode).toBe('enqueue_failed')
+        expect(failedRun.failureStage).toBe('runtime')
+        expect(failedRun.failureKind).toBe('transient')
         expect(savedBatchRuns[0]!.status).toBe('running')
     })
 
-    it('async 全部入队失败：批次直接 failed 终态（避免永久 running）', async () => {
+    it('async 全部入队失败：批次条件写回 failed 终态（避免永久 running）', async () => {
         mockQueueService('async')
-        const { savedBatchRuns } = mockDataSource()
+        const { batchRunRepo, savedBatchRuns } = mockDataSource()
         createPendingRunMock.mockRejectedValue(new Error('队列不可用'))
 
         await expect(executeBatchRun(baseInput)).resolves.toMatchObject({ repositoryCount: 2 })
 
-        const batch = savedBatchRuns[0]!
-        expect(batch.status).toBe('failed')
-        expect(batch.finishedAt).not.toBeNull()
+        // 条件写回（乐观锁 = 读取时 running）；payload 仅失败终态 + finishedAt，不含计数
+        expect(batchRunRepo.update).toHaveBeenCalledWith(
+            { id: 'batch-1', status: 'running' },
+            expect.objectContaining({ status: 'failed', finishedAt: expect.any(Date) }),
+        )
+        const [, payload] = vi.mocked(batchRunRepo.update).mock.calls[0]!
+        expect(payload).not.toHaveProperty('finishedCount')
+        expect(payload).not.toHaveProperty('summaryJson')
+        // 仅创建时整行 save；失败路径不再整行 save（避免覆盖并发聚合计数）
+        expect(savedBatchRuns).toHaveLength(1)
+        expect(batchRunRepo.save).toHaveBeenCalledTimes(1)
         expect(queueAddMock).not.toHaveBeenCalled()
+    })
+
+    it('async 全部入队失败 + 并发 force-fail 抢先（affected=0）：不追加整行 save 覆盖终态', async () => {
+        mockQueueService('async')
+        const { batchRunRepo, savedBatchRuns } = mockDataSource()
+        createPendingRunMock.mockRejectedValue(new Error('队列不可用'))
+        // 模拟条件写回条件不匹配（库中已被并发改为终态）
+        batchRunRepo.update.mockResolvedValueOnce({ affected: 0 })
+
+        await expect(executeBatchRun(baseInput)).resolves.toMatchObject({ repositoryCount: 2 })
+
+        expect(batchRunRepo.update).toHaveBeenCalledTimes(1)
+        // 失败路径全程无整行 save（仅最初的创建写入）
+        expect(savedBatchRuns).toHaveLength(1)
+        expect(batchRunRepo.save).toHaveBeenCalledTimes(1)
     })
 
     it('sync：逐仓库串行 runScanForRepository（带 batchRunId 关联），不创建 pending run', async () => {
@@ -226,6 +264,40 @@ describe('executeBatchRun（批量执行服务）', () => {
         expect(runSyncMock.mock.calls[1]![0]).toBe('repo-2')
         expect(createPendingRunMock).not.toHaveBeenCalled()
         expect(queueAddMock).not.toHaveBeenCalled()
+    })
+
+    it('sync：串行结束后立即聚合终态化，finishedAt = max(子项 finishedAt)', async () => {
+        mockQueueService('sync')
+        const { savedBatchRuns, scanRunRepo } = mockDataSource()
+        const realFinishedAt = new Date('2026-09-04T04:00:00Z')
+        scanRunRepo.find.mockResolvedValueOnce([
+            { id: 'run-1', status: 'completed', finishedAt: realFinishedAt, batchRunId: 'batch-1', summaryJson: null } as ScanRun,
+        ])
+
+        await executeBatchRun(baseInput)
+
+        expect(savedBatchRuns[0]!.status).toBe('completed')
+        expect(savedBatchRuns[0]!.finishedAt?.toISOString()).toBe(realFinishedAt.toISOString())
+    })
+
+    it('sync：并发 force-fail 抢先（条件写回 affected=0）时不追加 save 覆盖终态', async () => {
+        mockQueueService('sync')
+        const { batchRunRepo, scanRunRepo } = mockDataSource()
+        scanRunRepo.find.mockResolvedValueOnce([
+            { id: 'run-1', status: 'completed', finishedAt: new Date('2026-09-04T04:00:00Z'), batchRunId: 'batch-1', summaryJson: null } as ScanRun,
+        ])
+        // 模拟条件写回条件不匹配（库中已被并发改为 failed）
+        batchRunRepo.update.mockResolvedValueOnce({ affected: 0 })
+
+        await executeBatchRun(baseInput)
+
+        // 以读取时状态 running 为乐观锁条件，payload 写聚合终态 completed
+        expect(batchRunRepo.update).toHaveBeenCalledWith(
+            expect.objectContaining({ id: 'batch-1', status: 'running' }),
+            expect.objectContaining({ status: 'completed' }),
+        )
+        // affected=0 → 不追加 save 覆盖（仅创建时 1 次 save）
+        expect(batchRunRepo.save).toHaveBeenCalledTimes(1)
     })
 
     it('空批次：立即 completed + 零值 summary（终态兜底，避免永久 running）', async () => {

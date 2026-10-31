@@ -3,45 +3,42 @@
 // 提取为模块级函数；通过 AppContext 传入所需状态，行为与原类方法一致。
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { execSync } from 'node:child_process'
+import { execFileSync, execSync } from 'node:child_process'
 import {
-    AppError,
     toErrorMessage,
+    type AlertsDisabledRecord,
+    type CiAlignmentRecord,
     type FixAction,
     type FixError,
     type Logger,
     type NormalizedSecurityAlert,
+    type RepeatedAttemptRecord,
     type RepositoryResult,
+    type PrCheckWatchReport,
     type RunSummary,
+    type AlertFixOutcome,
+    type DeliverySkipRecord,
 } from '@dependfix/core'
 import { stageAndCommit } from '../github/pr-creator'
-import { logNetworkAudit, redactUrlForReport } from '../runners/network-audit'
+import { collectDeclaredPaths } from '../github/commit-scope'
+import type { ClosedAttemptIndex } from '../github/attempt-history'
+import { type AuthProvider } from '../auth'
 import {
     compareSemver,
     parseMajorVersion,
     readLockfileVersions,
-    upgradeDependency,
-    overrideTransitiveDependency,
-    type DependencyFixResult,
+    normalizeOverrideKey,
 } from '../fixers/dependency'
 import { repairLockfile, type LockfileRepairResult } from '../fixers/pnpm'
 import { applyCodeScanningFix, restoreSourceFile, snapshotSourceFile } from '../fixers/code-scanning'
 import { inferRepoFromGitRemote, type RuntimeConfig } from '../config'
 
-import { formatVerificationError, runVerification, type VerificationResult } from '../runners/verification-runner'
-
 import { quickVerifyProject } from '../helpers'
-import { validateVerifyCommands } from '../verification/validate-commands'
+import { collectFailingInstallCommands, findInstallBlockedReposWithFixes, hasDeliverableFixes, recordDeliverySkip } from './delivery'
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-
-const DEFAULT_VERIFY_COMMANDS = [
-    'pnpm install --frozen-lockfile',
-    'pnpm lint',
-    'pnpm build',
-]
 
 /** 匹配 `pnpm <singleWord>` 模式的命令（可能是 package.json script 引用） */
 
@@ -124,83 +121,6 @@ function buildCommitTitle(upgrades: FixAction[]): string {
     return FIX_COMMIT_MESSAGE
 }
 
-/**
- * PR 创建失败的用户指引。
- * 识别 GITHUB_TOKEN 创建 PR 被仓库设置禁用的 403（"GitHub Actions is not
- * permitted to create or approve pull requests"），返回解决指引；其他错误返回 null。
- */
-export function pullRequestCreationHint(error: unknown): string | null {
-    const message = toErrorMessage(error)
-    if (message.includes('not permitted to create or approve pull requests')) {
-        return 'GitHub Actions 创建 PR 被仓库设置禁用：仓库 Settings → Actions → General → Workflow permissions → 勾选 "Allow GitHub Actions to create and approve pull requests"；或改用具备 pull-requests: write 权限的 PAT 作为 github-token'
-    }
-    return null
-}
-
-/**
- * Dependabot alerts fetch 错误用户指引（GITHUB_TOKEN 无法读取 Dependabot alerts）。
- * 仅用于 alerts fetch 错误路径；按精确 context 匹配（`fetch dependabot alerts for`），
- * 不依赖裸关键字（仓库名可能包含对方关键字，如 dependabot/dependabot-core）。
- */
-export function dependabotAlertsTokenHint(error: unknown): string | null {
-    if (!(error instanceof AppError)) {
-        return null
-    }
-    if (!error.message.includes('fetch dependabot alerts for')) {
-        return null
-    }
-    if (error.code === 'PERMISSION_DENIED') {
-        return '请检查 token 是否具备 Dependabot alerts 读取权限（classic PAT 需 security_events、fine-grained 需 Dependabot alerts: read、GitHub App 需对应仓库权限；Actions 默认 GITHUB_TOKEN 永远无法获得）。本地场景可切换 --alerts-source pnpm-audit 使用 pnpm audit 回退'
-    }
-    if (error.code === 'AUTHENTICATION_FAILED') {
-        return 'token 无效或已过期，请检查 GITHUB_TOKEN / alertsToken 配置'
-    }
-    return null
-}
-
-/**
- * Code Scanning alerts fetch 错误用户指引（token 需 `security-events: read`）。
- * 仅用于 Code Scanning fetch 错误路径；按精确 context 匹配（`fetch code scanning alerts for`），
- * 不依赖裸关键字（仓库名可能包含对方关键字，如 dependabot/dependabot-core）。
- */
-export function codeScanningAlertsTokenHint(error: unknown): string | null {
-    if (!(error instanceof AppError)) {
-        return null
-    }
-    if (!error.message.includes('fetch code scanning alerts for')) {
-        return null
-    }
-    if (error.code === 'PERMISSION_DENIED') {
-        return '请检查 token 是否具备 Code Scanning alerts 读取权限（security-events: read；Actions 默认 GITHUB_TOKEN 具备，本地 PAT 需勾选 Security events 或 fine-grained 的 Code scanning alerts: read）'
-    }
-    if (error.code === 'AUTHENTICATION_FAILED') {
-        return 'token 无效或已过期，请检查 GITHUB_TOKEN / alertsToken 配置'
-    }
-    return null
-}
-
-/**
- * Code Quality findings fetch 错误用户指引（token 需 fine-grained `Code quality: read`
- * 或 classic PAT `repo`/`public_repo` scope）。
- * 仅用于 Code Quality fetch 错误路径；按精确 context 匹配（`fetch code quality findings for`），
- * 不依赖裸关键字。
- */
-export function codeQualityAlertsTokenHint(error: unknown): string | null {
-    if (!(error instanceof AppError)) {
-        return null
-    }
-    if (!error.message.includes('fetch code quality findings for')) {
-        return null
-    }
-    if (error.code === 'PERMISSION_DENIED') {
-        return '请检查 token 是否具备 Code Quality findings 读取权限（fine-grained PAT 需 Code quality: read；classic PAT 需 repo / public_repo scope；GitHub App 需对应仓库权限）'
-    }
-    if (error.code === 'AUTHENTICATION_FAILED') {
-        return 'token 无效或已过期，请检查 GITHUB_TOKEN / alertsToken 配置'
-    }
-    return null
-}
-
 // ---------------------------------------------------------------------------
 // Context
 // ---------------------------------------------------------------------------
@@ -215,10 +135,61 @@ export interface AppContext {
     allAlerts: NormalizedSecurityAlert[]
     allActions: FixAction[]
     allErrors: FixError[]
+    /** alerts 功能未启用记录（方案 A：未启用 ≠ 失败，不计入 allErrors） */
+    alertsDisabled: AlertsDisabledRecord[]
     repoResults: RepositoryResult[]
     summary: RunSummary
     startedAt: string
     finishedAt: string
+    /** GitHub App 认证提供者（用于 commit author 真实 bot 身份） */
+    authProvider?: AuthProvider
+    /**
+     * 验证链口径记录（run 级累积；`verifyProject` 写入，报告与 PR 正文消费）。
+     *
+     * 缺省（测试直接构造 ctx）⇒ 不记录；同一仓库多次验证取命令并集（按首次出现顺序），
+     * 并集未增长时复用既有记录与首轮健康预检结果，避免重复发起 API 调用。
+     */
+    ciAlignment?: CiAlignmentRecord[]
+    /**
+     * 同告警尝试记录（run 级累积；`repo-fix` 的计划阶段写入，报告与 PR 正文标记消费）。
+     * 缺省（测试直接构造 ctx）⇒ 不记录。
+     */
+    attemptTracking?: RepeatedAttemptRecord[]
+    /**
+     * 最近关闭 dependfix PR 的尝试索引（运行级缓存；仅 fix-and-pr 模式注入）。
+     * 缺省 ⇒ 不做同告警尝试判定（行为与引入前一致）。
+     */
+    attemptIndex?: ClosedAttemptIndex
+    /**
+     * PR 落点仓库（`owner/repo`，= 本次运行的第一个仓库）。
+     *
+     * 尝试标记只能写进该仓库的 PR，故只有该仓库的告警参与尝试计数；多仓运行其余仓库
+     * 不做跳过判定（避免「在 A 仓计 B 仓的尝试」造成永久跳过）。
+     */
+    attemptRepo?: string
+    /**
+     * 告警级修复结果收集器（run 级；修复管线在无法由 actions 反推的判定点写入，
+     * 报告 `alertOutcomes` 与平台 `ScanResult.fixStatus` 回写消费）。
+     * 缺省（测试直接构造 ctx）⇒ 报告只按 actions 与告警属性推导，不含收敛 / 跳过等显式判定。
+     */
+    alertOutcomes?: Map<string, AlertFixOutcome>
+    /**
+     * PR check 回环结果（仅 `--wait-pr-checks` 且实际创建 PR 时存在）。
+     * 缺省 ⇒ 不等待（行为与引入前一致）。
+     */
+    prCheckWatch?: PrCheckWatchReport
+    /**
+     * 交付跳过记录（修复后安装仍为既有失败 → 有修复但不交付）。
+     * 缺省（测试直接构造 ctx）⇒ 不记录，summary 计数保持 0。
+     */
+    deliverySkips?: DeliverySkipRecord[]
+    /**
+     * 运行截止时间（epoch ms；来自 `RuntimeConfig.deadlineAt`）。
+     * 缺省 ⇒ 不限预算（CLI 本地运行），所有预算检查放行。
+     */
+    deadlineAt?: number
+    /** 已记录的预算跳过（`stage:work`；避免同一跳过来回刷审计）。缺省 ⇒ 不去重。 */
+    budgetSkips?: Set<string>
 }
 
 // ---------------------------------------------------------------------------
@@ -284,11 +255,27 @@ export function buildVersionedOverrides(
 
     // 大版本冲突判定：多 major 共存才用版本化 key；单 major 已有版本化条目则沿用
     const majors = [...new Set(versions.map((v) => String(parseMajorVersion(v))))]
+    // 已有 overrides 按归一化 key 建索引：`pkg@^1` 与 `pkg@1` 视为同一 selector（override-key.ts）
+    const existingKeyByNormalized = new Map<string, string>()
+    for (const key of Object.keys(existingOverrides)) {
+        const normalized = normalizeOverrideKey(key)
+        // 文件已存在重复等价 key 时取首个（与 upsertOverride 的首次命中策略一致）
+        if (!existingKeyByNormalized.has(normalized)) {
+            existingKeyByNormalized.set(normalized, key)
+        }
+    }
     const useVersionedKey = majors.length > 1
-        || existingOverrides[`${packageName}@${majors[0] ?? ''}`] !== undefined
+        || existingKeyByNormalized.has(normalizeOverrideKey(`${packageName}@${majors[0] ?? ''}`))
+    // 命中已有等价 key 时沿用其原写法，避免同一 selector 并存两种写法（2026-10-02 PR #298 复盘）
+    const resolveWriteKey = (canonicalKey: string): string =>
+        existingKeyByNormalized.get(normalizeOverrideKey(canonicalKey)) ?? canonicalKey
     // 剥离 ^ / ~ 前缀后比较（compareSemver 不处理前缀）
-    const existingTarget = (key: string): string | undefined =>
-        existingOverrides[key]?.replace(/^\s*[\^~>=<]*\s*/, '')
+    const existingTarget = (canonicalKey: string): string | undefined => {
+        const actualKey = existingKeyByNormalized.get(normalizeOverrideKey(canonicalKey))
+        return actualKey === undefined
+            ? undefined
+            : existingOverrides[actualKey]?.replace(/^\s*[\^~>=<]*\s*/, '')
+    }
 
     const overrides: Record<string, string> = {}
     for (const version of versions) {
@@ -296,102 +283,63 @@ export function buildVersionedOverrides(
         const target = targetByMajor.get(major)
         // 该大版本线存在推荐目标且实例低于目标 → 脆弱，覆盖整条线
         if (target && compareSemver(version, target) < 0) {
-            const key = useVersionedKey ? `${packageName}@${major}` : packageName
+            const canonicalKey = useVersionedKey ? `${packageName}@${major}` : packageName
             // 与已有条目协同：目标取 max，已有 >= 推荐则无需写入
-            const existing = existingTarget(key)
+            const existing = existingTarget(canonicalKey)
             if (!existing || compareSemver(target, existing) > 0) {
-                overrides[key] = `^${target}`
+                overrides[resolveWriteKey(canonicalKey)] = `^${target}`
             }
+        }
+    }
+
+    // 路径级补丁（顶层兜底 + 路径级补丁策略）：有 dependencyPath 时额外生成
+    // `parent>child` key，精确覆盖特定父包的传递依赖。顶层与路径级正交叠加。
+    // 按 pathKey 预聚合取 max（对齐顶层 targetByMajor 模式），避免同 key 跨告警
+    // last-write-wins 导致写入低于修复所需的版本。
+    const pathTargetByKey = new Map<string, string>()
+    for (const alert of alerts) {
+        if (!alert.dependencyPath) {
+            continue
+        }
+        const target = alert.recommendedVersion
+        if (!target) {
+            continue
+        }
+        for (const path of alert.dependencyPath) {
+            const pathKey = extractPathOverrideKey(path)
+            if (!pathKey) {
+                continue
+            }
+            const current = pathTargetByKey.get(pathKey)
+            if (!current || compareSemver(target, current) > 0) {
+                pathTargetByKey.set(pathKey, target)
+            }
+        }
+    }
+    for (const [pathKey, target] of pathTargetByKey) {
+        const existing = existingTarget(pathKey)
+        if (!existing || compareSemver(target, existing) > 0) {
+            overrides[resolveWriteKey(pathKey)] = `^${target}`
         }
     }
     return overrides
 }
 
 /**
- * 升级单个告警对应的依赖（dry-run 仅记录）。
- * 优先直接升级，失败且为间接依赖时回退到 pnpm overrides。
+ * 从依赖链提取路径级 override key（`parent>child`）。
+ *
+ * 取最后两级（pnpm 官方语义「只覆盖特定父包」）：
+ * 链 `docs>vitepress>@vitejs/plugin-vue>vite` → key `@vitejs/plugin-vue>vite`。
+ * 少于两级返回 undefined（无法形成 `parent>child` 结构）。
  */
-export async function upgradeAlert(
-    ctx: Pick<AppContext, 'config' | 'logger' | 'workDir'>,
-    alert: NormalizedSecurityAlert,
-): Promise<FixAction> {
-    const { config, logger, workDir } = ctx
-    const startMs = Date.now()
-
-    if (config.dryRun) {
-        logger.info(`[dry-run] Would upgrade ${alert.packageName} to ${alert.recommendedVersion}`)
-        return {
-            type: 'dependency-upgrade',
-            repository: alert.repository,
-            target: alert.packageName,
-            fromVersion: alert.recommendedVersion ? `< ${alert.recommendedVersion}` : undefined,
-            toVersion: alert.recommendedVersion,
-            isMajor: false,
-            success: true,
-            durationMs: 0,
-        }
+export function extractPathOverrideKey(dependencyPath: string): string | undefined {
+    const segments = dependencyPath.split('>').map((s) => s.trim()).filter(Boolean)
+    if (segments.length < 2) {
+        return undefined
     }
-
-    try {
-        // 优先尝试直接升级，失败自动回退到 overrides（处理间接依赖）
-        let result: DependencyFixResult = await upgradeDependency({
-            packageName: alert.packageName,
-            targetVersion: alert.recommendedVersion,
-            workDir,
-        })
-        let strategy: 'override' | undefined
-
-        if (!result.success && result.error?.includes('not found in dependencies')) {
-            // 间接依赖 — 通过 pnpm overrides 升级
-            strategy = 'override'
-            result = await overrideTransitiveDependency({
-                packageName: alert.packageName,
-                targetVersion: alert.recommendedVersion,
-                workDir,
-            })
-            logger.info(
-                result.success
-                    ? `Upgraded ${result.packageName}: ${result.fromVersion} → ${result.toVersion} (pnpm overrides)`
-                    : `Failed to upgrade ${result.packageName}: ${result.error}`,
-            )
-        } else {
-            logger.info(
-                result.success
-                    ? `Upgraded ${result.packageName}: ${result.fromVersion} → ${result.toVersion}`
-                    : `Failed to upgrade ${result.packageName}: ${result.error}`,
-            )
-        }
-
-        if (result.success && result.warning) {
-            logger.warn(`[upgrade] ${result.packageName}: ${result.warning}`)
-        }
-
-        return {
-            type: 'dependency-upgrade',
-            repository: alert.repository,
-            target: alert.packageName,
-            fromVersion: result.fromVersion,
-            toVersion: result.toVersion,
-            isMajor: result.isMajor,
-            strategy,
-            success: result.success,
-            error: result.error,
-            durationMs: Date.now() - startMs,
-        }
-    } catch (error: unknown) {
-        const message = toErrorMessage(error)
-        logger.error(`Upgrade error for ${alert.packageName}: ${message}`)
-        return {
-            type: 'dependency-upgrade',
-            repository: alert.repository,
-            target: alert.packageName,
-            toVersion: alert.recommendedVersion,
-            success: false,
-            error: message,
-            durationMs: Date.now() - startMs,
-        }
-    }
+    return `${segments[segments.length - 2]}>${segments[segments.length - 1]}`
 }
+
 
 // ---------------------------------------------------------------------------
 // Lockfile repair
@@ -405,7 +353,7 @@ export async function upgradeAlert(
  * - 写盘失败 → 立即失败（不计 lint）+ 整批回滚
  * - lint 验证失败 → 整批回滚（粒度 = batchSize；vs 旧版每个告警回滚，回滚粒度变粗但 lint 提速 ~10x）
  *
- * 性能权衡（M28.2 实证）：
+ * 性能权衡（批处理实证）：
  * - N 个 cs 告警（旧版）→ N 次 spawn `pnpm lint` 子进程：N=100 平均 2593 ms（基准 commit 395ee29）
  * - N 个 cs 告警（批处理）→ ceil(N/batchSize) 次 lint：N=100 平均 ~300 ms（提速 ~10x）
  * - 合并验证可提速 ~96x 但回滚粒度过粗（整次 fix 全失败）；批处理折中
@@ -530,7 +478,7 @@ export async function runCodeScanningFixes(
 }
 
 /**
- * Code Scanning 修复批处理默认大小（M28.2 决策）。
+ * Code Scanning 修复批处理默认大小（批处理决策）。
  *
  * 决策依据（commit 395ee29 baseline）：
  * - 旧版（每个告警 1 次 lint）：N=10 平均 263 ms / N=50 平均 1294 ms / N=100 平均 2593 ms
@@ -542,11 +490,11 @@ export async function runCodeScanningFixes(
 const DEFAULT_CS_BATCH_SIZE = 10
 
 /** 尝试修复 pnpm-lock.yaml（dry-run 仅记录）。 */
-export function tryLockfileRepair(
-    ctx: Pick<AppContext, 'config' | 'logger' | 'workDir'>,
+export async function tryLockfileRepair(
+    ctx: Pick<AppContext, 'config' | 'logger' | 'workDir' | 'allErrors'>,
     repo: string,
-): FixAction {
-    const { config, logger, workDir } = ctx
+): Promise<FixAction> {
+    const { config, logger, workDir, allErrors } = ctx
     const startMs = Date.now()
 
     if (config.dryRun) {
@@ -561,22 +509,46 @@ export function tryLockfileRepair(
     }
 
     try {
-        const result: LockfileRepairResult = repairLockfile({
+        const result: LockfileRepairResult = await repairLockfile({
             workDir,
             // 未配置 toolchainPnpmVersion 时省略（缺省从 packageManager 解析）
             ...(config.toolchainPnpmVersion ? { toolchain: { pnpmVersion: config.toolchainPnpmVersion } } : {}),
         })
 
-        logger.info(
-            result.success
-                ? `Lockfile repaired for ${repo} (strategy: ${result.strategy ?? 'N/A'})`
-                : `Lockfile repair failed for ${repo}: ${result.failureDetail ?? 'unknown'}`,
-        )
+        // 「已合规」与「修复生效」必须区分：旧文案对两者都输出 repaired，
+        // 用户读成「修好了但没提交」（口径见 docs/design/modules/dependency-fixer-records.md §12.15）。
+        const noChange = result.success && result.changed === false
+        let logMessage: string
+        if (!result.success) {
+            logMessage = `Lockfile repair failed for ${repo}: ${result.failureDetail ?? 'unknown'}`
+        } else if (noChange) {
+            logMessage = `Lockfile already compliant for ${repo} — no repair needed`
+        } else if (result.changed === true) {
+            logMessage = `Lockfile repair applied for ${repo} (strategy: ${result.strategy ?? 'N/A'})`
+        } else {
+            // changed 缺省（类型可选）：不把「可能改动」说成「已修复」
+            logMessage = `Lockfile repair completed for ${repo} (change status unknown)`
+        }
+        logger.info(logMessage)
 
         // 格式漂移检测：lockfileVersion 变化时 diff 摘要附加标注（wisdom: pnpm v11 迁移教训）
         let diffSummary = result.diff?.summary
         if (result.lockfileVersionChanged && diffSummary) {
             diffSummary = `${diffSummary} (lockfileVersion changed)`
+        }
+
+        // 环境性安装失败（诊断步无 stderr 诊断）：无法归因目标仓库——记非归因审计条目
+        // （`ENVIRONMENT_ERROR` 进 SKIPPED_AUDIT_CATEGORIES），并在 action 上标记，
+        // 使 computeExitCode 不计入失败动作（与既有失败基线同族口径）。
+        const environmentalFailure = !result.success && result.environmental === true
+        if (environmentalFailure) {
+            allErrors.push({
+                repository: repo,
+                target: 'pnpm-lock.yaml',
+                stage: 'repair',
+                category: 'ENVIRONMENT_ERROR',
+                message: result.failureDetail ?? 'environmental install failure',
+            })
         }
 
         return {
@@ -588,6 +560,8 @@ export function tryLockfileRepair(
             strategy: result.strategy,
             durationMs: Date.now() - startMs,
             diff: diffSummary,
+            ...(noChange ? { noOp: true } : {}),
+            ...(environmentalFailure ? { environmentalFailure: true } : {}),
         }
     } catch (error: unknown) {
         const message = toErrorMessage(error)
@@ -603,97 +577,6 @@ export function tryLockfileRepair(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Verification
-// ---------------------------------------------------------------------------
-
-/** 执行验证命令链，返回逐命令结果。 */
-export async function verifyProject(
-    ctx: Pick<AppContext, 'config' | 'customCommands' | 'logger' | 'workDir' | 'allErrors'>,
-    repo: string,
-): Promise<FixAction[]> {
-    const { config, customCommands, logger, workDir, allErrors } = ctx
-
-    // 确定要执行的命令：用户自定义 > 默认命令链
-    let rawCommands = customCommands ?? DEFAULT_VERIFY_COMMANDS
-
-    // 默认命令链的 install 与策略命令同版本（显式 toolchainPnpmVersion 时）
-    // 避免系统裸 pnpm 版本架空 PIN_TOOLCHAIN（旧版 pnpm 可能无法处理新版 lockfile）
-    if (!customCommands && config.toolchainPnpmVersion) {
-        rawCommands = rawCommands.map((cmd) => (
-            cmd === 'pnpm install --frozen-lockfile'
-                ? `corepack pnpm@${config.toolchainPnpmVersion} install --frozen-lockfile`
-                : cmd
-        ))
-    }
-
-    // 仅对默认命令链做脚本存在性校验
-    const isDefault = !customCommands
-    const { valid, skipped } = isDefault
-        ? validateVerifyCommands(rawCommands, workDir)
-        : { valid: rawCommands, skipped: [] as string[] }
-
-    // 记录被跳过的命令
-    for (const cmd of skipped) {
-        logger.info(`Skipping command "${cmd}": script not found in package.json`)
-        allErrors.push({
-            repository: repo,
-            target: cmd,
-            stage: 'verify',
-            category: 'SCRIPT_NOT_FOUND',
-            message: `Skipped: no matching script in package.json for "${cmd}"`,
-        })
-    }
-
-    if (valid.length === 0) {
-        logger.info(`No verification commands to run for ${repo}`)
-        return []
-    }
-
-    try {
-        const result: VerificationResult = await runVerification({
-            workDir,
-            commands: valid,
-        })
-
-        // 执行期网络外联审计（备查：恶意脚本外联事故溯源；总数 info、明细 debug）
-        logNetworkAudit(logger, repo, result.networkAudit ?? [])
-
-        // 非白名单外联违规 → 报告 error 区（verify 阶段，deny-by-default 拦截证据；逐条记录保证可审计）
-        // target 经 redactUrlForReport 最小化为 host[:port]——恶意 URL 的 path/query 可能携带
-        // 外带凭据，拦截后不得原样回显进报告/日志（防御纵深，最小暴露）
-        for (const violation of result.networkViolations ?? []) {
-            const redacted = redactUrlForReport(violation.target)
-            allErrors.push({
-                repository: repo,
-                target: redacted,
-                stage: 'verify',
-                category: 'network_violation',
-                message: `outbound blocked by allowlist: ${violation.method} ${redacted}`,
-            })
-            logger.error(`[network-audit] ${repo}: outbound blocked (network_violation): ${violation.method} ${redacted}`)
-        }
-
-        return result.commandResults.map((cr) => {
-            // 失败时附 stdout/stderr 摘要（已脱敏截断）供日志/报告定位失败原因（run 31552922137 教训：仅 "exit code 1" 无法定位）
-            const error = cr.exitCode !== 0 ? formatVerificationError(cr) : undefined
-            if (error) {
-                logger.error(`Verification failed for ${repo}: ${cr.command} — ${error}`)
-            }
-            return { type: 'verification' as const, repository: repo, target: cr.command, success: cr.exitCode === 0, error, durationMs: cr.durationMs }
-        })
-    } catch (error: unknown) {
-        const message = toErrorMessage(error)
-        logger.error(`Verification error for ${repo}: ${message}`)
-        return [{
-            type: 'verification',
-            repository: repo,
-            target: 'verification',
-            success: false,
-            error: message,
-        }]
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Local commit helpers
@@ -702,17 +585,58 @@ export async function verifyProject(
 /**
  * 将修复产生的变更提交到本地当前分支。
  *
+ * - 工作目录不是 git 仓库时跳过（warn，不抛错）——避免异常路径（如 report-only 被误降级为
+ *   `fix + commit` 却未 clone）上以 `git config` 硬失败污染整次运行结果
+ * - 该守卫**有意 fail-open**（仅 warn、不写 `allErrors`、不影响退出码）：非仓库意味着「无可提交内容」
+ *   而非「交付失败」，故不产生 `COMMIT_FAILED`（平台会把该 category 判为 `failed`，见 run-failure-taxonomy）。
+ *   平台 fix / fix-and-pr 路径必先 clone（workDir 恒为仓库），故该分支仅在 CLI 于非 git cwd 运行 `--commit` 时可达。
+ *   代价是「请求 commit 但未交付」在 run 结果里只留日志、不留结构化信号（已登记 backlog 候选评估补信号）。
  * - 无任何变更（含已暂存变更）时跳过
  * - config 校验已保证 `commit` 与 `dryRun` / `createPullRequest` 互斥，
  *   因此这里不需要再检查这两个开关
+ * - 提交集合由白名单 + fixer 声明路径决定（`stageAndCommit`）；含未声明的已跟踪改动时抛
+ *   `CommitScopeError('UNEXPECTED_CHANGES')`，仅供生成物 / 未跟踪文件时抛 `NO_CHANGES`
  */
-export function commitLocalChanges(
-    ctx: Pick<AppContext, 'logger' | 'workDir' | 'allActions'>,
-): void {
-    const { logger, workDir, allActions } = ctx
+export async function commitLocalChanges(
+    ctx: Pick<AppContext, 'logger' | 'workDir' | 'allActions' | 'authProvider' | 'deliverySkips'>,
+): Promise<void> {
+    const { logger, workDir, allActions, authProvider } = ctx
+
+    // 纵深防御（不依赖 `hasGitChanges` 的内部非仓库守卫）：非 git 仓库时不能提交
+    // （`git config` / `git add` 均会失败），且需要与「仓库但无变更」区分日志级别。
+    // 2026-10-11 生产实证：report-only 扫描被降级为 fix+commit 且未 clone → 走到 stageAndCommit
+    // 并以 `git config user.name` 抛 `fatal: not in a git directory` → COMMIT_FAILED → 平台误标失败。
+    if (!isGitRepository(workDir)) {
+        logger.warn(`工作目录不是 git 仓库 — 跳过本地提交（${workDir}）`)
+        return
+    }
 
     if (!hasGitChanges(workDir)) {
         logger.info('No changes to commit — skipping local commit')
+        return
+    }
+
+    // 修复后安装仍为既有失败：PR 的 CI 会以同一错误失败，普通交付不应继续。
+    // 放在 hasGitChanges 之后：无改动的运行仍保留原有「No changes」日志。
+    const installBlockedRepos = findInstallBlockedReposWithFixes(allActions)
+    if (installBlockedRepos.length > 0) {
+        // run 标记：平台执行链（fix + commit）不经引擎 PR 面 → 只记录跳过，供平台展示「交付跳过」
+        // （载体恒为 `skip`：该路径不产出 issue / draft PR，不能在报告里谎报载体）
+        recordDeliverySkip(ctx, {
+            repositories: installBlockedRepos,
+            failingCommands: collectFailingInstallCommands(allActions, installBlockedRepos),
+            carrier: { mode: 'skip' },
+        })
+        logger.warn(
+            `Install verification is still failing (pre-existing) after the fix for ${installBlockedRepos.join(', ')} `
+            + '— skipping local commit; fix the execution environment or target repository lockfile first',
+        )
+        return
+    }
+
+    // 零修复（只有 .gitignore / allowBuilds 等 side-effect 改动）不产生提交 / PR。
+    if (!hasDeliverableFixes(allActions)) {
+        logger.info('No deliverable fixes produced — skipping local commit')
         return
     }
 
@@ -720,14 +644,50 @@ export function commitLocalChanges(
     ensureGitignore(workDir)
 
     const commitMessage = buildCommitMessage(allActions)
-    stageAndCommit(commitMessage, workDir)
+    const author = authProvider?.getCommitAuthor()
+    // 提交集合 = 固定白名单 ∪ 声明路径；未声明改动 / 空集合由 stageAndCommit 抛
+    // CommitScopeError（调用方据此写 UNEXPECTED_CHANGES / NO_CHANGES，而不是笼统的 COMMIT_FAILED）
+    const scope = await stageAndCommit(commitMessage, workDir, author, {
+        declaredPaths: collectDeclaredPaths(allActions),
+    })
+    if (scope.ignored.length > 0) {
+        logger.info(`Not committing ${scope.ignored.length} generated / undeclared path(s): ${scope.ignored.join(', ')}`)
+    }
+    if (scope.missing.length > 0) {
+        // 声明了但工作区没有对应改动（被 .gitignore 忽略 / 内容无 diff）→ PR 会少文件，必须留痕
+        logger.warn(`Declared path(s) had no changes in the worktree: ${scope.missing.join(', ')}`)
+    }
     logger.info(`Committed fix changes to current branch: ${commitMessage.split('\n')[0]}`)
 }
 
 /**
+ * 判断 workDir 是否为 git 仓库工作树。
+ *
+ * 必须显式探测：git 在非仓库目录下的错误文案随子命令而异（`fatal: not in a git directory`
+ * vs `fatal: not a git repository`），且 `--local` / 写入类命令与只读类命令的行为并不统一，
+ * 因此**不能**用「某条 git 命令是否失败」反推仓库存在。
+ */
+export function isGitRepository(workDir: string): boolean {
+    try {
+        execFileSync('git', ['rev-parse', '--git-dir'], { cwd: workDir, stdio: 'pipe' })
+        return true
+    } catch {
+        return false
+    }
+}
+
+/**
  * 检查工作目录是否有未提交的变更（含未暂存与已暂存）。
+ *
+ * **非 git 仓库返回 `false`**（`isGitRepository` 前置判定）：不存在可判定的工作树 ⇒ 不存在变更。
+ * 若把「git 命令失败」当作「有变更」（旧行为），调用方会被推进 branch / commit / push 链路，
+ * 并以 `fatal: not in a git directory` 收尾 → `COMMIT_FAILED` → 平台把整次运行误标失败
+ * （2026-10-11 生产实证的同类盲区）。
  */
 export function hasGitChanges(workDir: string): boolean {
+    if (!isGitRepository(workDir)) {
+        return false
+    }
     try {
         execSync('git diff --quiet', { cwd: workDir, stdio: 'pipe' })
         execSync('git diff --cached --quiet', { cwd: workDir, stdio: 'pipe' })
@@ -738,10 +698,59 @@ export function hasGitChanges(workDir: string): boolean {
 }
 
 /**
+ * `.gitignore` 行的归一化形态（判定「目标目录是否已被忽略」的等价类）。
+ *
+ * 处理顺序：去尾随空格与 `\r`（CRLF 行结束符；**保留尾随 tab**，与 git 一致）→ 行首 `#`（注释）/ `!`（取反）
+ * → 前导 globstar 前缀（双星号加斜杠）与根路径斜杠 → 尾部内容通配（斜杠 + 双星号 / 斜杠 + 星号）→ 尾部 `/`（目录标记）。
+ *
+ * 与 git 语义对齐的三条边界（**安全方向优先：宁可多追加，不可漏追加**——漏追加会让报告目录
+ * 出现在工作区变更集里（污染「无变更」判定，并需要交付侧额外排除）：
+ * - **行中 `#` 是字面字符**（git 仅把行首 `#` 当注释）——`dir/ # note` 在 git 中并不生效，不视为已忽略；
+ * - **前导空白属于模式本身**（git 仅忽略尾随空白）——` dir/` 不视为已忽略；
+ * - **以「斜杠 + 双星号 + 斜杠」结尾的形态只忽略目录内层级**，不忽略目录自身，不视为已忽略。
+ *
+ * 返回 `undefined` 表示该行不构成对目标目录的忽略（空行 / 注释行 / 取反行 / 首尾处理后为空）。
+ */
+export function normalizeGitignoreEntry(line: string): string | undefined {
+    // git 只剥离尾随空格与行结束符 `\r`（**不**剥离尾随 tab）；仅行首 `#` / `!` 有特殊含义
+    const trimmedEnd = line.replace(/[ \r]+$/, '')
+    if (!trimmedEnd || trimmedEnd.startsWith('#') || trimmedEnd.startsWith('!')) {
+        return undefined
+    }
+    let t = trimmedEnd
+    if (t.startsWith('**/')) {
+        t = t.slice(3)
+    }
+    if (t.startsWith('/')) {
+        t = t.slice(1)
+    }
+    if (t.endsWith('/**') || t.endsWith('/*')) {
+        t = t.slice(0, t.lastIndexOf('/'))
+    } else if (t.endsWith('/')) {
+        t = t.slice(0, -1)
+    }
+    return t || undefined
+}
+
+/**
+ * 判定 `.gitignore` 内容中是否已存在对 `entry` 的等价忽略条目。
+ *
+ * 语义等价集见 [normalizeGitignoreEntry]——用户已用 `/dependfix-reports`、`dependfix-reports`、
+ * globstar 前缀 + 目录名、目录名 + 双星号通配等等价写法忽略时，均视为已忽略，不再重复追加。
+ */
+export function isGitignoreEntryIgnored(content: string, entry: string): boolean {
+    const target = normalizeGitignoreEntry(entry)
+    if (!target) {
+        return false
+    }
+    return content.split('\n').some((line) => normalizeGitignoreEntry(line) === target)
+}
+
+/**
  * 确保目标仓库的 `.gitignore` 中包含 `dependfix-reports/`。
  *
  * - 仅在 workDir 是 git 仓库时执行
- * - 已存在该条目时幂等跳过
+ * - 已存在该条目时幂等跳过（**语义等价写法**亦视为存在，见 [isGitignoreEntryIgnored]）
  * - 失败（权限、磁盘满等）静默降级
  */
 export function ensureGitignore(workDir: string): void {
@@ -759,9 +768,8 @@ export function ensureGitignore(workDir: string): void {
             content = readFileSync(gitignorePath, 'utf-8')
         }
 
-        // 幂等检查
-        const lines = content.split('\n')
-        if (lines.some((l) => l.trim() === entry)) {
+        // 幂等检查：精确写法与语义等价写法（前导 `/`、尾部 `/`、`**/` 前缀、`/**` 与 `/*` 通配、行内注释）均视为已忽略
+        if (isGitignoreEntryIgnored(content, entry)) {
             return
         }
 

@@ -96,30 +96,87 @@ const installRoutes = async (
 
 test.describe('alerts 去重视图受影响运行 Sidebar', () => {
     test('展示运行元数据并打开详情', async ({ page }) => {
-        const run = makeRun()
+        const run = makeRun({
+            summary: {
+                alertsFound: 20,
+                alertsFixed: 0,
+                alertsUnfixed: 20,
+                alertsConverged: 0,
+                environmentalFailures: 1,
+                alertsSkipped: 4,
+                alertsSkippedByReason: { 'cross-major': 4 },
+                alertsTruncated: 6,
+                alertsTruncatedBySeverity: { critical: 2, high: 4 },
+            },
+            exitCode: 1,
+            environmentalFailureCount: 1,
+            buildVersion: '2026.10.23',
+            buildCommit: 'deadbeefcafe',
+        })
         await installRoutes(page, [run])
 
         await page.goto('/alerts')
         await waitForHydration(page)
         await page.locator('#view-mode').click()
-        await page.locator('.p-select-overlay li').filter({ hasText: '原始列表' }).click()
-        const row = page.locator('.p-datatable tbody tr').filter({ hasText: 'lodash' }).first()
+        await page.locator('.caomei-select__content .caomei-select__item').filter({ hasText: '原始列表' }).click()
+        const row = page.locator('.caomei-data-table__row').filter({ hasText: 'lodash' }).first()
         await expect(row).toBeVisible()
 
         await row.locator('button[aria-label="详情"]').click()
-        const sidebar = page.locator('.p-drawer')
+        const sidebar = page.locator('.caomei-drawer__content')
         await expect(sidebar).toContainText('12345678')
         await expect(sidebar).toContainText('仅报告')
-        await expect(sidebar).toContainText('high')
+        // 阈值展示口径已统一（级别首字母大写，与扫描选项 / 运行列表同源）
+        await expect(sidebar).toContainText('High')
         await expect(sidebar).toContainText('GitHub Action')
-        await expect(sidebar).toContainText('2')
+        await expect(sidebar).toContainText('20')
 
         await sidebar.locator('button[aria-label="详情"]').click()
-        const detail = page.locator('.p-dialog')
+        const detail = page.locator('.caomei-dialog__content')
         await expect(detail).toContainText('扫描详情')
         await expect(detail).toContainText('仅报告')
         await expect(detail).toContainText('12.3 秒')
+        // 结果可信度：未修复 / 环境性失败 / 退出码（run-detail-dialog 是 alerts 侧栏实际挂载的详情）
+        await expect(detail).toContainText('未修复告警')
+        await expect(detail).toContainText('环境性失败')
+        await expect(detail).toContainText('退出码')
+        // 构建版本回执：本次 run 由哪个部署产物执行（版本 · 短 commit）
+        const buildMeta = detail.locator('.run-detail__meta-item').filter({ hasText: '构建版本' })
+        await expect(buildMeta).toContainText('2026.10.23 · deadbeef')
+        const breakdown = detail.locator('.run-outcome-breakdown')
+        await expect(breakdown).toContainText('未修复 20 / 26')
+        await expect(breakdown).toContainText('跨大版本 / 人工复核 4')
+        await expect(breakdown).toContainText('Critical 2')
         await expect(page.locator('.run-detail__run-url')).toHaveAttribute('href', String(run.runUrl))
+    })
+
+    test('结果缺失时详情显示结果缺失而非告警 0', async ({ page }) => {
+        const run = makeRun({
+            status: 'failed',
+            summary: null,
+            error: { code: 'execution_timeout', message: '执行超时' },
+            runUrl: null,
+        })
+        await installRoutes(page, [run])
+
+        await page.goto('/alerts')
+        await waitForHydration(page)
+        await page.locator('#view-mode').click()
+        await page.locator('.caomei-select__content .caomei-select__item').filter({ hasText: '原始列表' }).click()
+        const row = page.locator('.caomei-data-table__row').filter({ hasText: 'lodash' }).first()
+        await expect(row).toBeVisible()
+        await row.locator('button[aria-label="详情"]').click()
+        const sidebar = page.locator('.caomei-drawer__content')
+        await expect(sidebar).toContainText('12345678')
+        await sidebar.locator('button[aria-label="详情"]').click()
+
+        const detail = page.locator('.caomei-dialog__content')
+        await expect(detail).toContainText('扫描详情')
+        const alertsMeta = detail.locator('.run-detail__meta-item').filter({ hasText: '告警数' })
+        await expect(alertsMeta).toContainText('结果缺失')
+        await expect(alertsMeta).not.toContainText('0')
+        // 构建版本缺失（旧数据 / 未注入）显示「未知」，不进入错误态
+        await expect(detail.locator('.run-detail__meta-item').filter({ hasText: '构建版本' })).toContainText('未知')
     })
 
     test('容器执行不显示内部 Run URL', async ({ page }) => {
@@ -129,23 +186,48 @@ test.describe('alerts 去重视图受影响运行 Sidebar', () => {
             executorKind: 'container',
             runUrl: null,
         })
-        // M20.6 per-alert 模型：sidebar 只显示 alert.runId 关联的 1 个 run（affectedRunIds 移除）；
+        // per-alert 模型：sidebar 只显示 alert.runId 关联的 1 个 run（affectedRunIds 移除）；
         // 构造 alert.runId 指向 actionRun 验证 sidebar 拉取单个 run 详情
         await installRoutes(page, [actionRun, containerRun])
 
         await page.goto('/alerts')
         await waitForHydration(page)
         await page.locator('#view-mode').click()
-        await page.locator('.p-select-overlay li').filter({ hasText: '原始列表' }).click()
-        const row = page.locator('.p-datatable tbody tr').filter({ hasText: 'lodash' }).first()
+        await page.locator('.caomei-select__content .caomei-select__item').filter({ hasText: '原始列表' }).click()
+        const row = page.locator('.caomei-data-table__row').filter({ hasText: 'lodash' }).first()
         await expect(row).toBeVisible()
         await row.locator('button[aria-label="详情"]').click()
 
-        const sidebar = page.locator('.p-drawer')
-        // M20.6 后 sidebar 仅显示 alert.runId 单 run 详情（每行 1 run）
+        const sidebar = page.locator('.caomei-drawer__content')
+        // sidebar 仅显示 alert.runId 单 run 详情（每行 1 run）
         await expect(sidebar.locator('button[aria-label="详情"]')).toHaveCount(1)
         // 链接指向 actionRun.runUrl（mock alert.runId = affectedRunIds[0] = actionRun.id）
         await expect(sidebar.locator('a')).toHaveCount(1)
         await expect(sidebar.locator('a')).toHaveAttribute('href', String(actionRun.runUrl))
+    })
+
+    test('关闭侧栏后抽屉隐藏且可再次打开（hide 清理语义回归）', async ({ page }) => {
+        const run = makeRun()
+        await installRoutes(page, [run])
+
+        await page.goto('/alerts')
+        await waitForHydration(page)
+        await page.locator('#view-mode').click()
+        await page.locator('.caomei-select__content .caomei-select__item').filter({ hasText: '原始列表' }).click()
+        const row = page.locator('.caomei-data-table__row').filter({ hasText: 'lodash' }).first()
+        await expect(row).toBeVisible()
+
+        await row.locator('button[aria-label="详情"]').click()
+        const sidebar = page.locator('.caomei-drawer__content')
+        await expect(sidebar).toBeVisible()
+
+        // 关闭按钮走「drawer 内部关闭 → update:open → 父级置 false → 补发 hide → closeSidebar 清理」链路
+        await sidebar.locator('.caomei-drawer__close').click()
+        await expect(sidebar).toBeHidden()
+
+        // 清理未破坏后续打开（sidebarAlert / sidebarRuns 已复位后重新赋值）
+        await row.locator('button[aria-label="详情"]').click()
+        await expect(sidebar).toBeVisible()
+        await expect(sidebar).toContainText('12345678')
     })
 })

@@ -122,7 +122,7 @@ describe('withEnvEventSeverityRank', () => {
     })
 })
 
-describe('RUN_STATUS_RANK (RG-W03 runs.vue 专用)', () => {
+describe('RUN_STATUS_RANK (runs.vue 专用)', () => {
     it('pending 落到 0 (初始化未启动)', () => {
         expect(RUN_STATUS_RANK.pending).toBe(0)
     })
@@ -138,7 +138,7 @@ describe('RUN_STATUS_RANK (RG-W03 runs.vue 专用)', () => {
     })
 })
 
-describe('withRunStatusRank (RG-W03)', () => {
+describe('withRunStatusRank', () => {
     it('覆盖 runs.vue 全集状态（pending/dispatched/running/completed/failed）', () => {
         const items = [
             { id: '1', status: 'pending' },
@@ -278,7 +278,7 @@ describe('集成: withXxxRank + DataTable 排序契约', () => {
             { id: '4', severity: 'high', packageName: 'd' },
         ]
         const enriched = withSeverityRank(items)
-        // DataTable 默认 asc（PrimeVue 4 行为），数值小排前
+        // DataTable 默认 asc（迁移前组件库 4.x 行为），数值小排前
         const sorted = [...enriched].sort((a, b) => a._severityRank - b._severityRank)
         expect(sorted.map((x) => x.severity)).toEqual(['unknown', 'low', 'high', 'critical'])
     })
@@ -295,7 +295,7 @@ describe('集成: withXxxRank + DataTable 排序契约', () => {
     })
 })
 
-describe('RG-B07 修复: 运行时状态/角色变更同步 rank', () => {
+describe('运行时状态/角色变更同步 rank', () => {
     it('updateStatusRank 同步 status + _statusRank (running → completed)', () => {
         const item = { id: '1', status: 'running', _statusRank: 3 }
         updateStatusRank(item, 'completed')

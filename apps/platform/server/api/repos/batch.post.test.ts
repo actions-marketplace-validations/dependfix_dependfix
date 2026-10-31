@@ -28,13 +28,13 @@ const repoItem = (owner: string, name: string) => ({
 describe('POST /api/repos/batch', () => {
     beforeAll(() => {
         setupMemoryDatabase()
-        // 注：M18.x 治理批次 S-5 — 删除 `process.env.ENCRYPTION_KEY` 死代码；
+        // 注：删除 `process.env.ENCRYPTION_KEY` 死代码；
         // stub 默认值由 `apps/platform/tests/setup-nuxt-server.ts:26` 全局 useRuntimeConfig 提供
     })
 
     afterAll(() => {
         teardownMemoryDatabase()
-        // 注：M18.x 治理批次 S-5 — 删除 `delete process.env.ENCRYPTION_KEY` 死代码
+        // 注：删除 `delete process.env.ENCRYPTION_KEY` 死代码
     })
 
     beforeEach(() => {
@@ -44,6 +44,10 @@ describe('POST /api/repos/batch', () => {
     it('rejects invalid body with 400', async () => {
         await expectError(call({ repos: [{ owner: 'x' }] }), 400)
         await expectError(call({}), 400)
+    })
+
+    it('rejects sandbox executor with 400 (entry disabled)', async () => {
+        await expectError(call({ repos: [{ ...repoItem('demo', 'sandbox'), executorKind: 'sandbox' }] }), 400)
     })
 
     it('imports new repositories and skips duplicates', async () => {

@@ -191,6 +191,33 @@ export function renderDependencySection({ version, prevVersion, prefix, repo, he
 }
 
 /**
+ * 纯函数：渲染「运行时基线更新」段。
+ *
+ * 触发场景：包版本被提升，但该包路径下没有可渲染的 conventional commit（典型：仅
+ * `build(deps)!` 的 engines 基线变更，或依赖传导之外的仓库级基线调整），且依赖范围
+ * 没有变化（`renderDependencySection` 无内容）。此时仍必须写出当前版本段，否则
+ * `verify:changelog` 会阻断发布。
+ *
+ * - 标题：`## [version](compare_url) (date)`
+ * - 内容：`### ⚙️ 运行时基线更新` + 指向根 CHANGELOG 的一行说明
+ */
+export function renderBaselineSection({ version, prevVersion, prefix, repo, headDate }) {
+    const compareUrl = `https://github.com/${repo}/compare/${prefix}${prevVersion}...${prefix}${version}`
+    // 与既有分段惯例一致：minor / major 段用 `#`，patch 段用 `##`
+    const [major, minor] = version.split('.')
+    const [prevMajor, prevMinor] = prevVersion.split('.')
+    const heading = major !== prevMajor || minor !== prevMinor ? '#' : '##'
+    return [
+        `${heading} [${version}](${compareUrl}) (${headDate})`,
+        '',
+        '### ⚙️ 运行时基线更新',
+        '',
+        '* 本版本仅随仓库基线调整（依赖 / 运行时 / 构建配置）提升，无包内功能变更；对照根 CHANGELOG 同版本段。',
+        '',
+    ].join('\n')
+}
+
+/**
  * 清理残留未发布段（发布中断恢复的防重复增强，经验归档 §三十七）：
  * 上次发布中断会遗留"版本低于当前版本、无对应 tag、npm 未发布"的旧版本段
  * （如 0.3.0 段未发布残留，本轮提升到 0.3.1 后旧段不再被 mergeUnreleased 管理），
@@ -401,6 +428,32 @@ async function buildDependencyFallback({ pkgPath, currentPkgJson, prefix, versio
     return renderDependencySection({ version, prevVersion, prefix, repo, headDate, changes })
 }
 
+/**
+ * 基线兜底：无包内可渲染 commit、无依赖变化，但版本相对上一 tag 已提升时，
+ * 写一个「运行时基线更新」段；无历史 tag / 版本未提升 → 空串（保持幂等）。
+ */
+function buildBaselineFallback({ prefix, version, repo, headDate }) {
+    const listTags = () => {
+        try {
+            return execSync(`git tag --list "${prefix}*"`, { cwd: repoRoot })
+                .toString()
+                .split('\n')
+                .filter(Boolean)
+        } catch {
+            return []
+        }
+    }
+    const prevTag = findPrevTag(prefix, version, listTags)
+    if (!prevTag) {
+        return ''
+    }
+    const prevVersion = prevTag.slice(prefix.length)
+    if (!versionLt(prevVersion, version)) {
+        return ''
+    }
+    return renderBaselineSection({ version, prevVersion, prefix, repo, headDate })
+}
+
 for (const target of targets) {
     const dest = join(repoRoot, target.file)
     const pkgJsonPath = join(repoRoot, target.pkg)
@@ -465,6 +518,14 @@ for (const target of targets) {
             repo,
             headDate,
         })
+        if (!unreleased) {
+            unreleased = buildBaselineFallback({
+                prefix: target.tags.prefix,
+                version,
+                repo,
+                headDate,
+            })
+        }
         if (!unreleased) {
             console.log(`unchanged ${target.file}`)
             continue

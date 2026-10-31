@@ -1,10 +1,22 @@
-import { spawn, spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import {
     startNetworkAudit,
     extractUrlsFromOutput,
     type NetworkAudit,
     type NetworkAuditEntry,
 } from './network-audit'
+import {
+    getAbortReason,
+    isAbortRequested,
+    killProcessTree,
+    STREAM_CLOSE_GRACE_MS,
+    trackChildProcess,
+    untrackChildProcess,
+} from './process-control'
+import { sanitizeOutput } from './output-sanitizer'
+import { discoverRegistryHosts } from './registry-discovery'
+
+export { sanitizeOutput } from './output-sanitizer'
 
 /**
  * 单条命令的执行结果
@@ -18,6 +30,8 @@ export interface CommandResult {
     durationMs: number
     /** 是否因超时被中止（默认 false） */
     timedOut?: boolean
+    /** 超时兜底落定时是否未能确认直接子进程已退出 */
+    terminationUnconfirmed?: boolean
     /** stdout 摘要（截断到 200 行，已脱敏） */
     stdout: string
     /** stderr 摘要（截断到 200 行，已脱敏） */
@@ -32,12 +46,13 @@ export interface VerificationParams {
     workDir: string
     /**
      * 要执行的命令序列。
-     * 默认: `pnpm install --frozen-lockfile` → `pnpm lint` → `pnpm build`
+     * 默认: `pnpm install --frozen-lockfile` → `pnpm lint` → `pnpm build` → `pnpm typecheck` → `pnpm test`
      */
     commands?: string[]
     /**
      * 单命令超时（毫秒），超时中止该命令并终止其进程树。
-     * 默认 10 分钟（恶意死循环脚本超时中止，防长时间占用）。
+     * 默认 10 分钟（恶意死循环脚本超时中止，防长时间占用）；
+     * 未显式提供时读取 `DEPENDFIX_VERIFY_TIMEOUT_MS`（10s-30min，越界回退默认）。
      */
     commandTimeoutMs?: number
     /**
@@ -46,6 +61,12 @@ export interface VerificationParams {
      * 仅当环境无既有代理时注入（覆盖用户代理会破坏其网络行为）。
      */
     networkAuditDisabled?: boolean
+    /**
+     * 遇首个失败命令后是否立即停止（默认 true，保持修复后验证的短路语义）。
+     * 修复前基线采样传 false：完整执行整条链并逐段记录，避免 install 失败遮蔽
+     * test 的既有失败（nest-template 形态）。
+     */
+    stopOnFailure?: boolean
 }
 
 /**
@@ -66,13 +87,80 @@ export interface VerificationResult {
     networkViolations?: NetworkAuditEntry[]
 }
 
-const DEFAULT_COMMANDS = [
+/**
+ * 默认验证命令链（**唯一事实源**——app 层经此导入，消除此前的双副本漂移）。
+ *
+ * **顺序** install → lint → build → typecheck → test：
+ * - 便宜且失败信息明确的命令靠前，先失败可快速短路；test 置于最后（通常是链中最慢一步）。
+ * - typecheck 必须排在 build 之后：workspace 包的 `tsc` 依赖前置包已发射的 `dist` 声明
+ *   （实测移出 `packages/{core,engine,cli}/dist` 后 `pnpm --filter @dependfix/platform typecheck`
+ *   报大量 `TS2307 Cannot find module`）。
+ * - typecheck 排在 test 之前：类型错误优先于测试运行短路；修复前基线使用
+ *   完整链（`stopOnFailure:false`），不再受首失败前缀覆盖。
+ *
+ * **为何纳入 typecheck**：改动前的四条命令互不重叠地都不做类型检查——lint 只跑规则
+ * （类型解析失败通常降级为规则告警而非错误）、tsdown 的 `dts` 只发射声明、vitest 走 esbuild
+ * 转译。实证：消费方 `nodemailer.Transporter` 在依赖升到 10.x 后不再存在（TS2503），
+ * 而 install / lint / build / test 四条全绿——类型面破坏被判 `verificationPassed = true`
+ * 并交付成 PR，直到目标仓库 CI 才红。**边界**：`"build": "tsc"` 形态的仓库 build 本身即
+ * 类型检查，此时本命令为冗余（只增耗时，无害），并非新增防线。
+ *
+ * **为何纳入 test**：仅 install/lint/build 的矩阵无法捕获「lint/build 通过但测试无法运行或失败」
+ * 的破坏。实证：目标仓库把 `decode-uri-component` 升到纯 ESM 版本后，CJS 消费方
+ * `query-string@7.1.3` 在 Jest 下无法加载该模块（`SyntaxError: Unexpected token 'export'`），
+ * 而 install / lint / build 三条全绿——坏修复被交付成 PR。
+ *
+ * 无 `typecheck` / `test` 脚本的仓库由 `validateVerifyCommands` 跳过并记 `SCRIPT_NOT_FOUND` 审计，
+ * 不会误伤未配置对应脚本的仓库。
+ *
+ * **已知边界**：脚本语义不实（如 `"typecheck": "tsc --noEmit || true"`）无法机检；
+ * 「typecheck / test 长期为红」的仓库由命令级既有失败基线豁免；基线完整链采样全部命令
+ * （`sampleVerificationBaseline` 传 `stopOnFailure:false`），修复后验证仍首失败即停；
+ * 需 `nuxt prepare` 之类前置步骤的仓库默认链不成立，走 `--commands` / 平台 `verifyCommands` /
+ * action `commands` 逃生舱。
+ */
+export const DEFAULT_VERIFY_COMMANDS = [
     'pnpm install --frozen-lockfile',
     'pnpm lint',
     'pnpm build',
+    'pnpm typecheck',
+    'pnpm test',
 ]
 
-const DEFAULT_COMMAND_TIMEOUT_MS = 10 * 60 * 1000
+/**
+ * 单命令超时（10 分钟）：与纳入 test 前保持一致，不因命令数增加而调整。
+ * 注意：test 通常是链中最慢一步，大型测试套件超 10 分钟会被判超时 → 该命令计为失败。
+ * 修复前即红的既有失败不归因本次改动（命令级基线判定，见 `sampleVerificationBaseline`），
+ * 但超时本身仍按失败记录（不作独立超时豁免）。
+ *
+ * CI 镜像脚本（`--mirror-ci-scripts`）与默认链共用本超时——镜像不引入第二个计时器。
+ */
+export const DEFAULT_COMMAND_TIMEOUT_MS = 10 * 60 * 1000
+
+/** 验证命令超时覆盖 env（运维面；默认链与 CI 镜像脚本同源）。 */
+export const VERIFY_TIMEOUT_ENV = 'DEPENDFIX_VERIFY_TIMEOUT_MS'
+/** 允许的最小单命令超时（低于 10s 无实际意义，按配置错误回退默认）。 */
+export const MIN_COMMAND_TIMEOUT_MS = 10_000
+/** 允许的最大单命令超时（30 分钟，与平台单仓执行上限同量级）。 */
+export const MAX_COMMAND_TIMEOUT_MS = 30 * 60 * 1000
+
+/**
+ * 解析单命令超时（毫秒）：合法正整数且落在 [10s, 30min] 内才采纳，否则回退默认。
+ * 与安装类超时（`fixers/install-timeouts.ts`）同族口径，但两者刻意不同源、互不覆盖。
+ */
+export function resolveCommandTimeoutMs(
+    env: NodeJS.ProcessEnv = process.env,
+    fallback: number = DEFAULT_COMMAND_TIMEOUT_MS,
+): number {
+    const raw = env[VERIFY_TIMEOUT_ENV]?.trim()
+    if (!raw || !/^\d+$/.test(raw)) {
+        return fallback
+    }
+    const value = Number(raw)
+    return Number.isInteger(value) && value >= MIN_COMMAND_TIMEOUT_MS && value <= MAX_COMMAND_TIMEOUT_MS
+        ? value
+        : fallback
+}
 
 const MAX_OUTPUT_LINES = 200
 
@@ -118,7 +206,9 @@ export function summarizeVerificationOutput(output: string): string {
  */
 export function formatVerificationError(cr: CommandResult): string {
     if (cr.timedOut) {
-        return `timed out after ${cr.durationMs}ms`
+        return cr.terminationUnconfirmed
+            ? `timed out after ${cr.durationMs}ms (termination unconfirmed)`
+            : `timed out after ${cr.durationMs}ms`
     }
     const detail = [cr.stdout, cr.stderr].filter(Boolean).join('\n--- stderr ---\n').trim()
     return detail
@@ -138,13 +228,22 @@ export function formatVerificationError(cr: CommandResult): string {
  * ```
  */
 export async function runVerification(params: VerificationParams): Promise<VerificationResult> {
-    const commands = params.commands ?? DEFAULT_COMMANDS
+    const commands = params.commands ?? DEFAULT_VERIFY_COMMANDS
+    const stopOnFailure = params.stopOnFailure !== false
     const commandResults: CommandResult[] = []
+    let firstFailure: { command: string, failure: string } | undefined
 
-    // 执行期网络外联审计（默认开启；代理仅在环境无既有代理时注入，防覆盖用户代理）
+    // 执行期网络外联审计（默认开启；代理仅在环境无既有代理时注入，防覆盖用户代理）。
+    // 白名单 = 默认清单 + 环境变量扩展 + workDir 配置面动态发现的 registry host——
+    // registry 指向镜像源 / 企业私服时，非白名单 registry 的 CONNECT 被拒会弄挂
+    // `pnpm install` 并触发门禁全量回滚（安装链路的合法外联不应被误拦）。
     let audit: NetworkAudit | undefined
     if (!params.networkAuditDisabled) {
-        audit = await startNetworkAudit().catch(() => undefined)
+        const discovery = discoverRegistryHosts(params.workDir)
+        if (discovery.warning) {
+            console.warn(`[network-audit] registry 动态发现降级（fail-open）：${discovery.warning}`)
+        }
+        audit = await startNetworkAudit({ extraAllowedDomains: discovery.hosts }).catch(() => undefined)
     }
     const hasExistingProxy = Boolean(
         process.env.HTTP_PROXY || process.env.HTTPS_PROXY || process.env.ALL_PROXY
@@ -154,6 +253,17 @@ export async function runVerification(params: VerificationParams): Promise<Verif
 
     try {
         for (const command of commands) {
+            // 运行级取消（平台执行超时 / 运维中止）后不再启动新命令：链的余下命令一律不 spawn，
+            // 直接以失败收尾并如实记录"因取消而未执行"（不静默截断）
+            if (isAbortRequested()) {
+                return {
+                    success: false,
+                    commandResults,
+                    failedCommand: command,
+                    failure: `run aborted before "${command}": ${getAbortReason() ?? 'abort requested'}`,
+                    ...(audit ? { networkAudit: audit.entries, networkViolations: audit.violations } : {}),
+                }
+            }
             const result = await execCommand(command, params.workDir, params.commandTimeoutMs, proxyUrl)
             commandResults.push(result)
 
@@ -175,20 +285,34 @@ export async function runVerification(params: VerificationParams): Promise<Verif
             }
 
             if (result.exitCode !== 0 || result.timedOut) {
-                return {
-                    success: false,
-                    commandResults,
-                    failedCommand: command,
-                    failure: result.timedOut
-                        ? `command "${command}" timed out after ${result.durationMs}ms`
-                        : `command "${command}" exited with code ${result.exitCode}`,
-                    ...(audit ? { networkAudit: audit.entries, networkViolations: audit.violations } : {}),
+                const failure = result.timedOut
+                    ? `command "${command}" timed out after ${result.durationMs}ms`
+                    : `command "${command}" exited with code ${result.exitCode}`
+                firstFailure ??= { command, failure }
+                if (stopOnFailure) {
+                    return {
+                        success: false,
+                        commandResults,
+                        failedCommand: command,
+                        failure,
+                        ...(audit ? { networkAudit: audit.entries, networkViolations: audit.violations } : {}),
+                    }
                 }
             }
         }
     } finally {
         if (audit) {
             await audit.stop().catch(() => { /* 停止失败静默 */ })
+        }
+    }
+
+    if (firstFailure) {
+        return {
+            success: false,
+            commandResults,
+            failedCommand: firstFailure.command,
+            failure: firstFailure.failure,
+            ...(audit ? { networkAudit: audit.entries, networkViolations: audit.violations } : {}),
         }
     }
 
@@ -237,7 +361,7 @@ function buildSpawnEnv(proxyUrl?: string): NodeJS.ProcessEnv {
 function execCommand(
     command: string,
     workDir: string,
-    timeoutMs: number = DEFAULT_COMMAND_TIMEOUT_MS,
+    timeoutMs: number = resolveCommandTimeoutMs(),
     proxyUrl?: string,
 ): Promise<CommandResult> {
     return new Promise((resolve) => {
@@ -255,11 +379,62 @@ function execCommand(
         const stdoutChunks: string[] = []
         const stderrChunks: string[] = []
 
+        // 受管登记：运行级取消（`requestAbort`）时按进程树终止（防僵尸命令与新仓库争抢资源）
+        trackChildProcess(cp.pid)
+
+        let settled = false
+        let exited = false
+        let closeGraceTimer: NodeJS.Timeout | undefined
+
         const timer = setTimeout(() => {
             timedOut = true
             killProcessTree(cp.pid)
             cp.kill('SIGKILL')
+            settleAfterStreamGrace(-1)
         }, timeoutMs)
+
+        function finish(exitCode: number, errorMessage?: string): void {
+            if (settled) {
+                return
+            }
+            settled = true
+            clearTimeout(timer)
+            if (closeGraceTimer) {
+                clearTimeout(closeGraceTimer)
+            }
+            untrackChildProcess(cp.pid)
+            const stdout = truncateLines(stdoutChunks.join(''), MAX_OUTPUT_LINES)
+            const stderr = errorMessage ?? truncateLines(stderrChunks.join(''), MAX_OUTPUT_LINES)
+            resolve({
+                command,
+                exitCode,
+                durationMs: Date.now() - startTime,
+                timedOut,
+                terminationUnconfirmed: timedOut && !exited ? true : undefined,
+                stdout: sanitizeOutput(stdout),
+                stderr: sanitizeOutput(stderr),
+            })
+        }
+
+        /**
+         * 子进程退出后等待 stdio 关闭的有界窗口：验证链同样可能派生持有管道的孙进程
+         * （测试 runner / 构建 watcher），只等 `close` 会让单命令超时无限延后。
+         */
+        function settleAfterStreamGrace(exitCode: number): void {
+            if (settled) {
+                return
+            }
+            if (closeGraceTimer) {
+                clearTimeout(closeGraceTimer)
+            }
+            closeGraceTimer = setTimeout(() => {
+                // 直接子进程已退出，但进程组内可能仍有幸存孙进程：落定前再收一次
+                killProcessTree(cp.pid)
+                cp.stdout?.destroy?.()
+                cp.stderr?.destroy?.()
+                finish(exitCode)
+            }, STREAM_CLOSE_GRACE_MS)
+        }
 
         cp.stdout.on('data', (data: Buffer) => {
             stdoutChunks.push(data.toString('utf-8'))
@@ -270,53 +445,18 @@ function execCommand(
         })
 
         cp.on('error', (err) => {
-            clearTimeout(timer)
-            resolve({
-                command,
-                exitCode: -1,
-                durationMs: Date.now() - startTime,
-                stdout: '',
-                stderr: sanitizeOutput(err.message),
-            })
+            finish(-1, err.message)
+        })
+
+        cp.on('exit', (code) => {
+            exited = true
+            settleAfterStreamGrace(code ?? -1)
         })
 
         cp.on('close', (code) => {
-            clearTimeout(timer)
-            const stdout = truncateLines(stdoutChunks.join(''), MAX_OUTPUT_LINES)
-            const stderr = truncateLines(stderrChunks.join(''), MAX_OUTPUT_LINES)
-            resolve({
-                command,
-                exitCode: code ?? -1,
-                durationMs: Date.now() - startTime,
-                timedOut,
-                stdout: sanitizeOutput(stdout),
-                stderr: sanitizeOutput(stderr),
-            })
+            finish(code ?? -1)
         })
     })
-}
-
-/**
- * 终止进程树：POSIX 杀进程组（detached 进程组组长），Windows 用 taskkill /T /F。
- * 失败时静默退化（主终止路径已由调用方 cp.kill 兜底）。
- */
-function killProcessTree(pid?: number): void {
-    if (pid === undefined || pid <= 0) {
-        return
-    }
-    if (process.platform === 'win32') {
-        try {
-            spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' })
-        } catch {
-            // taskkill 不可用时由调用方 cp.kill 兜底
-        }
-    } else {
-        try {
-            process.kill(-pid, 'SIGKILL')
-        } catch {
-            // 进程组不存在时由调用方 cp.kill 兜底
-        }
-    }
 }
 
 /** 截断文本到指定行数 */
@@ -326,34 +466,4 @@ function truncateLines(text: string, maxLines: number): string {
         return text
     }
     return `${lines.slice(0, maxLines).join('\n')}\n... (truncated, ${lines.length - maxLines} more lines)`
-}
-
-/**
- * 脱敏处理：移除命令输出中可能包含的敏感信息。
- *
- * 过滤规则：
- * - 包含 `token=` / `secret=` / `password=` 的行
- * - `npm_config_` / `GITHUB_TOKEN` / `NPM_TOKEN` 等环境变量暴露
- * - URL 中的 user:password@ 模式
- */
-const SECRET_PATTERNS: [RegExp, string][] = [
-    // 环境变量赋值（大写下划线变量 = 敏感值）
-    [/^(GITHUB_TOKEN|NPM_TOKEN|NODE_AUTH_TOKEN|DOCKER_PASSWORD)=.+/gim, '$1=***'],
-    // Token=xxx / secret=xxx 模式
-    [/\b(token|secret|password|api[_-]?key)\s*[=:]\s*\S+/gi, '$1=***'],
-    // URL 中的认证信息 user:pass@host
-    [/\/\/[^@\n]+@/g, '//***@'],
-    // npm_config 环境变量（可能包含 registry token）
-    [/npm_config_[a-z_]+=\S+/g, 'npm_config_***=***'],
-]
-
-/**
- * 对外暴露以支持单独测试
- */
-export function sanitizeOutput(output: string): string {
-    let result = output
-    for (const [pattern, replacement] of SECRET_PATTERNS) {
-        result = result.replace(pattern, replacement)
-    }
-    return result
 }

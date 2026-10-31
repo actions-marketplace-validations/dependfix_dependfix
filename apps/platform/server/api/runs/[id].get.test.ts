@@ -2,10 +2,12 @@ import 'reflect-metadata'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { expectError, makeEvent, setupMemoryDatabase, teardownMemoryDatabase } from '../../../tests/api-helper'
 import reposIndexHandler from '../repos/index'
+import { BUILD_UNKNOWN_VALUE } from '../../../app/utils/run-view'
 import runsIdHandler from './[id].get'
 import { ScanRun } from '#server/entities/scan-run'
 import { ScanResult } from '#server/entities/scan-result'
 import { ensureDatabaseInitialized } from '#server/database'
+import { UNKNOWN_BUILD_VALUE } from '#server/utils/build-info'
 
 vi.mock('#server/utils/guard', () => ({
     requireAuth: vi.fn(async () => ({ user: { id: 'u1', email: 'admin@test.dev' } })),
@@ -17,6 +19,11 @@ const call = (method: string, url: string, params: Record<string, string> = {}) 
 describe('GET /api/runs/[id]', () => {
     let runId: string
     let repositoryId: string
+
+    it('keeps the client-side unknown sentinel in sync with the server one', () => {
+        // 前端镜像常量（app/utils/run-view.ts）必须与服务端权威值同值（同 EXPORT_RUNS_LIMIT 模式）
+        expect(BUILD_UNKNOWN_VALUE).toBe(UNKNOWN_BUILD_VALUE)
+    })
 
     beforeAll(async () => {
         setupMemoryDatabase()
@@ -37,7 +44,15 @@ describe('GET /api/runs/[id]', () => {
             severityThreshold: 'high',
             executorKind: 'container',
             status: 'completed',
-            summaryJson: JSON.stringify({ alertsTotal: 1 }),
+            summaryJson: JSON.stringify({ alertsTotal: 1, environmentalFailures: 1 }),
+            exitCode: 1,
+            environmentalFailureCount: 1,
+            buildVersion: '2026.10.23',
+            buildCommit: 'deadbeefcafe',
+            memoryMaxBytes: 8 * 1024 ** 3,
+            peakRssBytes: 6 * 1024 ** 3,
+            oomKilled: true,
+            resourceJson: JSON.stringify({ source: 'cgroup-v2', samples: 4 }),
         }))
         runId = run.id
 
@@ -71,6 +86,29 @@ describe('GET /api/runs/[id]', () => {
         vi.clearAllMocks()
     })
 
+    it('returns failure classification and retry source columns', async () => {
+        const ds = await ensureDatabaseInitialized()
+        const source = await ds.getRepository(ScanRun).save(ds.getRepository(ScanRun).create({
+            repositoryId,
+            mode: 'fix',
+            severityThreshold: 'high',
+            executorKind: 'container',
+            status: 'failed',
+            failureCode: 'ETIMEDOUT',
+            failureStage: 'clone',
+            failureKind: 'transient',
+            retriedFromRunId: 'source-run-9',
+        }))
+
+        const detail = await call('GET', `/api/runs/${source.id}`, { id: source.id }) as Record<string, unknown>
+        expect(detail).toMatchObject({
+            failureCode: 'ETIMEDOUT',
+            failureStage: 'clone',
+            failureKind: 'transient',
+            retriedFromRunId: 'source-run-9',
+        })
+    })
+
     it('returns run detail with results', async () => {
         const detail = await call('GET', `/api/runs/${runId}`, { id: runId }) as Record<string, unknown>
         expect(detail).toMatchObject({
@@ -78,7 +116,15 @@ describe('GET /api/runs/[id]', () => {
             owner: 'demo',
             name: 'app',
             status: 'completed',
-            summary: { alertsTotal: 1 },
+            summary: { alertsTotal: 1, environmentalFailures: 1 },
+            exitCode: 1,
+            environmentalFailureCount: 1,
+            buildVersion: '2026.10.23',
+            buildCommit: 'deadbeefcafe',
+            memoryMaxBytes: 8 * 1024 ** 3,
+            peakRssBytes: 6 * 1024 ** 3,
+            oomKilled: true,
+            resource: { source: 'cgroup-v2', samples: 4 },
         })
         expect((detail.results as Record<string, unknown>[])).toHaveLength(1)
         expect((detail.results as Record<string, unknown>[])[0]).toMatchObject({
@@ -111,6 +157,12 @@ describe('GET /api/runs/[id]', () => {
         const detail = await call('GET', `/api/runs/${noMeta.id}`, { id: noMeta.id }) as Record<string, unknown>
         expect(detail.summary).toBeNull()
         expect(detail.error).toBeNull()
+        // 无 result 的失败：结果可信度两列为 null（UI 显示「结果缺失」，不显示「告警 0」）
+        expect(detail.exitCode).toBeNull()
+        expect(detail.environmentalFailureCount).toBeNull()
+        // 存量行（列上线前）：构建版本回执为 null，UI 按「未知」降级
+        expect(detail.buildVersion).toBeNull()
+        expect(detail.buildCommit).toBeNull()
     })
 
     it('returns parsed error when errorJson is set', async () => {

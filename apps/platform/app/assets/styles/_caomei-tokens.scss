@@ -1,0 +1,113 @@
+// caomei-ui 主题 token 覆盖（迁移期双库并存；亮色档见 nuxt.config.ts 的 `caomeiUI.theme`）
+
+// 显式声明依赖：本文件可能被 `@use` 引入，此时 Vite 的 `additionalData` 不会注入变量层
+@use './variables' as *;
+
+// 分工依据（caomei-ui 主题与样式设计 §2 / §4）：
+// - **跨明暗稳定的 token**（`--caomei-color-primary-solid` 等实底背景色）由 Nuxt 模块的 `theme` 声明——
+//   模块只生成一条 `:root` 规则，语义上正好对应「跨主题稳定」。
+// - **随明暗自适应的 token**（primary / bg / text / border）必须在 CSS 中按明暗分别覆盖：
+//   模块 `theme` 无法表达明暗分档；且库内暗色档由 `caomei-ui/theme.css` 的
+//   `:is(.dark, [data-theme="dark"])`（特异性 0,1,0）提供，会被模块生成的 `:root`（同为 0,1,0，
+//   但后加载）覆盖。此处用 `:root.dark` / `:root[data-theme="dark"]`（特异性 0,2,0）确保暗色档生效，
+//   与「main.scss 先于模块注入的 theme.css 加载」这一顺序无关。
+// 映射来源：`docs/design/governance/caomei-ui-migration.md` §6（值经真实浏览器复核）
+
+// DataTable 单元格密度对齐迁移前 `size="small"`：
+// 迁移前主题（Aura）small 尺寸为 `0.375rem 0.5rem`（6px 8px），caomei 默认为
+// `var(--caomei-space-2) var(--caomei-space-3)`（8px 12px）→ 行高与单元格内边距偏大。
+// 仓库内 DataTable 标签共 20 处（迁移前组件库 14 处，其中 13 处显式 size="small"；caomei 6 处），
+// 故统一按迁移前的 small 收敛；唯一例外 pr-checks.vue 未设 size，已按用户裁定恢复 caomei 默认密度（见评估文档 §15.11 第 8 条）。
+// 注意：caomei 的单元格规则为 scoped 形式 `.caomei-data-table__th[data-v-xxx]`（特异性 0,2,0），
+// 故此处用 `.caomei-data-table__table th.caomei-data-table__th`（0,2,1）确保胜出（不依赖加载顺序）。
+.caomei-data-table__table th.caomei-data-table__th,
+.caomei-data-table__table td.caomei-data-table__td {
+    padding: 0.375rem 0.5rem;
+}
+
+// 选择器家族（Select / MultiSelect / AutoComplete）默认上限 20rem：
+// 迁移前组件库侧 32 处里 29 处显式 `fluid`（全宽），caomei 无 `fluid` prop。为对齐迁移前
+// 「表单字段 / 过滤项随容器全宽」的既有布局，把上限收敛为 none，宽度约束交由**外层容器**
+// 承担（选择器的可见根是 Reka `SelectTrigger`，页面/全局样式写在选择器上约束不了宽度）——
+// 例如 `.platform__lang`（容器 div，main.scss）与 `users.vue` 的 `.users__role-select`（inline-block 容器）。
+// 特异性必须高于库：`caomei-ui/theme.css` 的 `:root`（0,1,0）在 main.scss 之后加载，
+// 同特异性的 `:root` 会被它压过（实测仍解析为 20rem）——与下方暗色档用 `:root.dark` 同理。
+:root:root {
+    --caomei-select-max-width: none;
+}
+
+// 语义文本角色（caomei-ui 1.0.0 起 Tag / Badge / Message / Tabs / Toast / 指示器等把「文本色」从
+// `--caomei-color-primary` 拆到 `--caomei-color-primary-text`）：库内亮色档为该角色给了静态值
+// `#1d4ed8`（蓝），与平台把 `--caomei-color-primary` 改为 teal-600 的事实脱钩——不覆盖就会出现
+// 「teal 底 + 蓝字」的错配。故亮色档按主色加深到 teal-700（实测在 8% teal soft 底上 4.97:1，达 AA）。
+// 取值与 nuxt.config.ts 的 `caomeiUI.theme['primary-solid']` 同源（teal-700）：调整主色时两处一起改。
+:root:root {
+    --caomei-color-primary-text: #0f766e;
+}
+
+:root.dark,
+:root[data-theme='dark'] {
+    // 暗底强调色取 teal-300，在深背景上保持充分对比度
+    --caomei-color-primary: #5eead4;
+
+    // 注意：暗色档的 `--caomei-color-primary-foreground` 未在此覆盖，依赖 nuxt.config.ts 的
+    // `caomeiUI.theme` 单值 `#0b0b0d`——它与 caomei-ui 基础预设的暗色默认值一致
+    // （实测暗色 13.29:1）。**已随 caomei-ui 0.5.0 复核：该暗色默认值未变，假设继续成立**
+    // （见 caomei-ui-migration.md §15.14；库升级或更换预设后仍需重新核验）。
+    --caomei-color-bg: #{$color-bg-dark};
+    --caomei-color-bg-elevated: #{$color-surface-dark};
+    --caomei-color-text: #{$color-text-dark};
+    --caomei-color-text-muted: #{$color-text-muted};
+    --caomei-color-border: #{$color-border-dark};
+
+    // 控件边界（1.0.0 新增 token）：上游单值 #67676a 按自家暗底标定（bg #0b0b0d 3.49:1 / elevated #17171a 3.17:1），
+    // 平台暗色面更亮（page #0f172a / elevated #1e293b）→ 原值在 elevated 只有 2.59:1，低于 WCAG 1.4.11 的 3:1。
+    // 故暗色档抬到 #7b8494（page 4.74:1 / elevated 3.88:1）；亮色档保持上游值（白底 3.41:1 / elevated 3.26:1）。
+    --caomei-color-control-border: #{$color-control-border-dark};
+
+    // 文本角色随暗色主色走（亮青）：库内暗色档本就用 `var(--caomei-color-primary)` 动态解析，
+    // 此处显式引用同一 token，避免未来上游改回静态值时静默错配（暗色 8% soft 底上 10.19:1）。
+    --caomei-color-primary-text: var(--caomei-color-primary);
+}
+
+// 亮色档主按钮实底：改用 `primary-solid`（teal-700 #0f766e）+ `on-solid`（白）= 5.47:1（AA）。
+// 库内默认 `variant="primary"` 取 `var(--caomei-button-bg, var(--caomei-color-primary))`，即 teal-600 底 +
+// nuxt.config 的近黑前景（为达 5.25:1 刻意选的深色），视觉发闷；改白字后 teal-600 仅 3.74:1 不再达
+// AA，故同步加深底色——与「实底按钮统一用 `primary-solid` teal-700」的既有口径一致
+// （来源见 `docs/plan/todo-archive.md` 的 M31 决策 D4）。
+// **必须排除语调档**：库内 `tone` 不改变 `variant`，`<CaomeiButton tone="neutral">` 同时带
+// `--primary` 与 `--tone-neutral`，而且语调档用 `:where()` 归零特异性声明同一批按钮自定义属性，
+// 不排除就会把 neutral / success / danger 等实底按钮一律染成主色（首轮审计实测）。
+// 暗色档保持既有覆盖（亮青 #5eead4 + 近黑前景 13.29:1），避免深底上主按钮失去强调。
+// 特异性 (0,5,0)：高于库内 `:where(...)` 语调档与 `:root`，不依赖加载顺序。
+:root:root:not(.dark, [data-theme='dark']) .caomei-button--primary:not(
+    .caomei-button--tone-neutral,
+    .caomei-button--tone-primary,
+    .caomei-button--tone-success,
+    .caomei-button--tone-warning,
+    .caomei-button--tone-danger
+) {
+    --caomei-button-bg: var(--caomei-color-primary-solid);
+    --caomei-button-fg: var(--caomei-color-on-solid);
+}
+
+// loading 态在 reduced-motion 下的可感知兜底：库内 `@media (prefers-reduced-motion: reduce)`
+// 把 spinner 旋转动画置为 `none`（静态圆环 → 用户读成"loading 没有动画"）。此处改为不依赖
+// 位移 / 旋转的透明度脉冲：既尊重 reduced-motion，又保留"正在处理"的反馈。
+// 特异性 (0,3,0) 高于库内 `.caomei-button__spinner[data-v-*]`（0,2,0）。
+@media (prefers-reduced-motion: reduce) {
+    :root:root .caomei-button__spinner {
+        animation: dependfix-button-spinner-pulse 1.2s ease-in-out infinite;
+    }
+}
+
+@keyframes dependfix-button-spinner-pulse {
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.25;
+    }
+}

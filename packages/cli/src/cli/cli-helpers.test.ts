@@ -156,6 +156,27 @@ describe('parseCliArgs', () => {
         expect(result.configOverrides.commands).toEqual(['lint', 'test'])
     })
 
+    it('解析 mirror-ci-scripts（三态）', () => {
+        expect(parseCliArgs(['--mirror-ci-scripts']).configOverrides.mirrorCiScripts).toBe(true)
+        expect(parseCliArgs(['--no-mirror-ci-scripts']).configOverrides.mirrorCiScripts).toBe(false)
+        expect(parseCliArgs([]).configOverrides.mirrorCiScripts).toBeUndefined()
+    })
+
+    it('解析 retry-failed（三态）', () => {
+        expect(parseCliArgs(['--retry-failed']).configOverrides.retryFailed).toBe(true)
+        expect(parseCliArgs(['--no-retry-failed']).configOverrides.retryFailed).toBe(false)
+        expect(parseCliArgs([]).configOverrides.retryFailed).toBeUndefined()
+    })
+
+    it('解析 wait-pr-checks / close-failed-pr（三态）', () => {
+        expect(parseCliArgs(['--wait-pr-checks']).configOverrides.waitPrChecks).toBe(true)
+        expect(parseCliArgs(['--no-wait-pr-checks']).configOverrides.waitPrChecks).toBe(false)
+        expect(parseCliArgs([]).configOverrides.waitPrChecks).toBeUndefined()
+        expect(parseCliArgs(['--close-failed-pr']).configOverrides.closeFailedPr).toBe(true)
+        expect(parseCliArgs(['--no-close-failed-pr']).configOverrides.closeFailedPr).toBe(false)
+        expect(parseCliArgs([]).configOverrides.closeFailedPr).toBeUndefined()
+    })
+
     it('解析 history', () => {
         const result = parseCliArgs(['--history', 'owner/repo'])
         expect(result.configOverrides.history).toBe('owner/repo')

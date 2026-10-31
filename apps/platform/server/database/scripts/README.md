@@ -70,6 +70,37 @@ pnpm db:backfill
   保留修复记录:     5  (fixStatus='success' 永不被 supersede)
   标记已关闭:       8
 ```
+## backfill-run-failure（运行失败分类回填）
+
+### 背景
+
+运行列表支持按失败阶段筛选后，`ScanRun` 新增 `failure_code` / `failure_stage` / `failure_kind` 三列
+（见 [platform.md §6.2](../../../../../docs/standards/platform.md)）。新增列对存量行为 NULL，
+本脚本按落库的 `errorJson` 尽力归一：`failed` / `dispatched` 行写阶段与处置建议，无法判定一律写
+`unknown`（不猜测）；`completed` / `running` / `pending` / `degraded` 行若残留分类则清空。
+
+### 用法
+
+```bash
+# 1. 预览订正计划（默认模式，不写库）
+pnpm db:backfill:run-failure:dry-run
+
+# 2. 实跑（必须 --apply + y/N 二次确认）
+pnpm db:backfill:run-failure
+```
+
+### 安全门
+
+1. **默认 dry-run**：未传 `--apply` 时只打印计划（含阶段分布与逐行明细前 50 条）。
+2. **y/N 二次确认**：apply 模式必须交互式确认。
+3. **整批事务化**：所有 UPDATE 包在一个事务里，失败回滚。
+4. **幂等**：仅写与当前列值不同的行，二次运行 0 变更。
+
+### 边界
+
+引擎 `result.errors` 未落库，无法直接按类别细分；细分依赖 `engine_delivery_failed` 的 message 中
+回读的 `（CATEGORY）`，其余一律 `unknown`。
+
 ## db-restore（运维脚本）
 
 ### 背景
@@ -104,7 +135,7 @@ pnpm db:restore --help
    校验未通过时直接拒绝，当前数据库不被触碰。
 3. **覆盖前自动备份**：当前数据库先原子备份到 `data/backups/auto.<timestamp>-<ms>.bak`（复用
    `backup.ts` 的 `writeFileAtomicSync`），这份文件是"撤销恢复"的唯一凭据。文件名带毫秒，
-   同一秒内二次恢复不会互相覆盖；这批文件同样受保留策略约束（默认最近 10 份，
+   同一秒内二次恢复不会互相覆盖；这批文件同样受保留策略约束（默认最近 5 份，
    `BACKUP_RETENTION_COUNT` 环境变量可覆盖）。
 4. **旁文件清理**：恢复后删除属于旧数据库的 `-wal` / `-shm` / `-journal` 文件，避免陈旧 WAL 或
    回滚日志被当作新库的崩溃恢复数据回放。
@@ -191,5 +222,106 @@ PRAGMA
   ...
 
 结论
-  - 数据正常：12 张业务表共 87 行
+  - 数据正常：13 张业务表共 87 行
 ```
+
+## db-migrate（运维脚本）
+
+### 背景
+
+`synchronize` 与 `migrationsRun` 自 M22.4 / M22.5 起均为显式 opt-in，但仓库此前没有可用的
+"手动执行迁移"入口——`.env.example` 记录的命令缺少 `-d <data-source>`，实测直接报
+`Missing required argument: dataSource`。结果是 pending migration 无人执行、schema 漂移静默累积，
+直到运行时查询报 `no such column`（2026-09-30 实测 `ScanRun__ScanRun_repository.verify_commands`）。
+本脚本补齐入口，并复用 `createDataSourceOptions`（与运行时同一套连接 / 前缀 / 迁移注册）。
+
+### 用法
+
+```bash
+# 1. 只读查看迁移状态（executed / pending，不写库）
+pnpm db:migrate:show
+
+# 2. 执行全部 pending migration
+pnpm db:migrate
+
+# 3. 回退最近一次已执行迁移（--yes 为必填双门控）
+pnpm db:migrate:revert -- --yes
+```
+
+> 全新空库可直接用 `pnpm db:init`（一键初始化，见下节）或 `pnpm db:migrate`：迁移链首条
+> `CreateInitialSchema1600000000000` 会从实体元数据创建全部基础表 / 索引 / 外键，其后增量迁移
+> 因列已存在而 no-op。存量库仅补 pending，基线与守卫保证幂等、不破坏既有数据。
+
+### 数据库连接
+
+沿用 `createDataSourceOptions` 逻辑，通过 `DATABASE_*` 环境变量配置（`DATABASE_TYPE` /
+`DATABASE_PATH` / `DATABASE_URL` / `DATABASE_ENTITY_PREFIX`）。
+
+### 安全门
+
+1. **显式动作**：不传动作即拒绝执行（exit 1），不猜"用户想 apply"
+2. **动作互斥**：`--show` / `--apply` / `--revert` 同时出现即拒绝执行
+3. **revert 双门控**：`--revert` 必须配 `--yes`，与 `db-restore` 同口径
+4. **环境无关的确定性**：DataSource 强制 `synchronize: false` + `migrationsRun: false` —— 只锁后者不够：
+   `DATABASE_SYNCHRONIZE=true` 时 `initialize()` 会先同步 schema，令 `--show` 实际写库
+5. **只读保守**：`--show` 不创建迁移表；SQLite 库文件缺失时只报告状态，不创建空库文件
+
+回退前建议先 `pnpm db:doctor` 自检；需要整库回滚时用 `pnpm db:restore`。
+
+### 输出示例
+
+```text
+[MIGRATE] 迁移状态
+  [X] 已执行  CreateInitialSchema1600000000000
+  [X] 已执行  CreateAuditEventTable1700000000000
+  [X] 已执行  AddScanResultIdentifiers1750000000000
+  ...
+  [ ] 待执行  AddRepositoryVerifyCommands2100000000000
+
+  合计 9 条，待执行 1 条
+```
+
+## db-init（一键初始化）
+
+### 背景
+
+全新部署（尤其 Docker 首次启动）需要一个「一条命令建库」入口：空库既要执行 pending migration，
+又要能确认业务表确实建好。`db-init` 复用 `db-migrate` 的连接配置与执行逻辑，额外打印初始化摘要，
+适合部署脚本调用；可安全重复执行（幂等）。
+
+### 用法
+
+```bash
+# 源码环境（apps/platform 下）：执行 pending migration 并打印摘要
+pnpm db:init
+
+# 帮助
+pnpm db:init --help
+```
+
+Docker 场景：
+
+- 常规启动时 compose 默认 `DATABASE_MIGRATIONS_RUN=true` 自动迁移，通常无需手动初始化；
+- 需要显式初始化（如关闭了自动迁移）时用宿主脚本 `apps/platform/docker/init-db.sh`，
+  以一次性容器执行迁移后退出（成功 0 / 失败 1）；
+- 运行期镜像为 `.output`-only，**不含 `tsx` 与运维脚本**，因此容器内不能直接跑 `pnpm db:init`。
+  源码环境用 `pnpm db:init`；容器场景用 `docker/init-db.sh`。
+
+### 数据库连接
+
+沿用 `createMigrateDataSource`：通过 `DATABASE_*` 环境变量配置（`DATABASE_TYPE` / `DATABASE_PATH` /
+`DATABASE_URL` / `DATABASE_ENTITY_PREFIX`），强制 `synchronize=false` + `migrationsRun=false`，
+不受 `DATABASE_MIGRATIONS_RUN` / `DATABASE_SYNCHRONIZE` 开关影响。
+
+### 输出示例
+
+```text
+[INIT] 数据库初始化完成
+  本次执行迁移: 9 条
+    [X] CreateInitialSchema1600000000000
+    [X] CreateAuditEventTable1700000000000
+    ...
+  业务表: 13 张
+```
+
+

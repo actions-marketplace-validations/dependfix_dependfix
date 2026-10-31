@@ -70,7 +70,7 @@
 
 > 归档日期: 2026-08-19~20
 > 阶段摘要: 用户实测反馈平台可用性问题（导入对话框默认全勾、批量导入无过滤、单仓库扫描无模式选择、扫描历史子路由不可达、Dialog 默认可拖拽等）一次性收口三个 PR；同时修复 unrouting 0.2.x 兼容 bug（应用层 Dialog 化）
-> 状态: ✅ 全部完成（PR1 / PR2 / PR3 + C51 子路由 Dialog 修复；5 commits 待推送）
+> 状态: ✅ 全部完成（PR1 / PR2 / PR3 + C51 子路由 Dialog 修复；5 commits 当时待推送）
 
 **批次成果**: 批量导入对话框（C46 三维过滤 + C48 默认不勾选 + C49 分页缓存 + C50 默认关联凭据）+ 单仓库扫描模式（C52）+ Dialog 默认不可拖动（C47）+ 扫描历史 Dialog 化（C51 兼容修复）共 7 个 backlog 项批量收口。
 
@@ -105,7 +105,7 @@
 ### 阶段治理记录
 
 - **提交序列**: C51 修复 (`b067b3a` → `2102894` → `0b9411b`) → PR1 (`cb788e7` → `9e26b56`) → PR2 (`1a663f3`) → PR3 (`2a7f99f`) → docs 同步 (`0b8088f` → `9ae1767`)
-- **累计 commits**: PR1+PR2+PR3 共 5 commits 待推送 + C51 相关 3 commits 待推送
+- **累计 commits**: PR1+PR2+PR3 共 5 commits 当时待推送 + C51 相关 3 commits 当时待推送
 - **审计覆盖**: 每个 PR reviewer standard 第 1 轮 + 第 2 轮 Pass；UI validator 视觉验证 Pass
 - **历史教训**（已迁移至 docs/standards/，对应 8d02cce wisdom 蒸馏批次）:
   - W10 删除"自动逻辑"必须搜遍被动接收态路径 → [开发规范 §5.1.10](../../../standards/development.md)
@@ -142,7 +142,7 @@
 
 ### 阶段治理记录
 
-- **提交序列**: C54 (`3a2757b` → `edb066c`) → C55 (`ce523d4` → `4c813f8`) 共 4 commits 待推送
+- **提交序列**: C54 (`3a2757b` → `edb066c`) → C55 (`ce523d4` → `4c813f8`) 共 4 commits 当时待推送
 - **关联**: C54 + C55 同页面但解决不同问题（C54 轮询+防抖 / C55 孤儿兜底）；与 PR1-PR3 互不阻塞
 - **历史教训**: C54 D 阶段踩过 unshift 反转顺序 bug 后切 splice(0,0,...)；RG-B1 `loading` 初值 true 误吞首屏请求是经典"UI 态与并发守卫复用 ref"反模式
 
@@ -213,7 +213,7 @@
 - **交付物**: 函数体 degraded 分支实现 + orchestrator 降级信号透传 + `apps/platform/server/services/batch/batch-aggregate.ts` 新增 `degradedCount`（独立计）+ TERMINAL_STATUSES 含 `'degraded'` + 14 个新断言
 - **关键 commit**: `64135ed` feat(platform): T1005-C 状态机扩展 degraded 终态
 - **完成定义**: A 场景 → degraded + info UI（业务完整 + 路径偏离）；B 场景 → failed + warn UI（环境变化，避免掩盖真实错误）
-- **关联**: 设计契约落盘于 [executor-sandbox.md §7.8](../../../design/governance/executor-sandbox.md)
+- **关联**: 设计契约落盘于 [executor-sandbox.md §7.8](../../../design/governance/executor-sandbox-implementation.md)
 - **审计**: 1 轮 standard Pass with Warning（warning 全部闭环）
 
 #### T1005-D: quick-start.md 同步 ✅
@@ -227,7 +227,7 @@
 
 - **总变更**: 5 commits + 27 个 sandboxLimits 相关测试（branches 80.44% ≥ 80%；`parseSandboxLimits` 单元测试全分支覆盖（entities/repository.ts 100%）；144 files / 1996 tests 全绿）
 - **审计覆盖**: 2 核心 commit standard Pass + 1 quick Pass
-- **关联升级**: 状态机扩展与 B 模式 `dispatched` 语义对齐（A 模式 PR 失败也走 dispatched 兜底）；设计契约统一收口于 [executor-sandbox.md §7.8](../../../design/governance/executor-sandbox.md)
+- **关联升级**: 状态机扩展与 B 模式 `dispatched` 语义对齐（A 模式 PR 失败也走 dispatched 兜底）；设计契约统一收口于 [executor-sandbox.md §7.8](../../../design/governance/executor-sandbox-implementation.md)
 
 ---
 
@@ -310,7 +310,7 @@
 - **测试覆盖**: +56 新测试（composable 27 + audit-events 15 + notification 41 + scan-orchestrator 集成 4 + alerts rowGroup 4 + e2e 11）= 681 tests pass
 - **branches coverage**: 80.49% ≥ 80% 阈值
 - **审计覆盖**: 2 轮深度 standard Pass（C58 + C-ENV-CHANGE-ALERT）+ 多轮 quick Pass（其他 sub-task）
-- **文档落盘**: `docs/standards/security.md` §5.4 + §5.5 / `docs/design/governance/executor-sandbox.md` §7.8 / `docs/guide/quick-start.md` 同步
+- **文档落盘**: `docs/standards/security.md` §5.4 + §5.5 / `docs/design/governance/executor-sandbox-implementation.md` §7.8 / `docs/guide/quick-start.md` 同步
 - **历史教训**（已迁移至 docs/standards/）:
   - **TypeORM 1.x 复合索引必须类级声明**：列级 `@Index(['col1', 'col2'])` 会生成仅含末列的单列索引；e2e 二次运行会暴露第二个仓库的 500 错误 → [开发规范 §5.1.13](../../../standards/development.md)
   - **PrimeVue 4 rowGroup 模式数据排序**：必须预排序（相邻行字段值变化触发 subheader）+ `sortMode="multiple"` 保留 groupRowsBy 为第一排序键 + `expandableRowGroups` + DataTableExpandedRows 期望 `Record<string, boolean>` 而非 Set

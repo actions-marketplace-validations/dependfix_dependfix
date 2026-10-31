@@ -1,4 +1,10 @@
 import { defineConfig } from 'vitepress'
+import {
+    CLICK_HANDLER_MARKER,
+    injectFallbackTargetMeta,
+    LANGUAGE_SWITCH_CLICK_HANDLER,
+    writeFallbackEntries,
+} from './i18n-fallback.mjs'
 
 // VitePress 多语言配置（[archive/todo-archive-phases-m26.md §M26.3](https://github.com/dependfix/dependfix/blob/master/docs/plan/archive/todo-archive-phases-m26.md#m263-p2--治理--ux-c69-文档站--包-readme-多语言-en-us-p07-commits--860-行--standard-depth-audit) + [docs-and-readme-i18n.md §6.1](../design/governance/docs-and-readme-i18n.md)）。
 //
@@ -18,7 +24,6 @@ const enNav = [
     { text: 'Home', link: '/en-US/' },
     { text: 'Quick Start', link: '/en-US/guide/quick-start' },
     { text: 'Architecture', link: '/en-US/design/governance/architecture' },
-    { text: 'Roadmap', link: '/en-US/plan/roadmap' },
 ]
 
 const zhSidebar = {
@@ -29,6 +34,7 @@ const zhSidebar = {
                 { text: '快速开始', link: '/guide/quick-start' },
                 { text: '技术栈详解', link: '/guide/tech-stack' },
                 { text: '配置说明', link: '/guide/configuration' },
+                { text: 'Docker 部署', link: '/guide/deployment' },
                 { text: 'PR 自动合并配置', link: '/guide/auto-merge' },
                 { text: '发布指南', link: '/guide/release' },
                 { text: 'AI 协同开发', link: '/guide/ai-development' },
@@ -37,23 +43,24 @@ const zhSidebar = {
     ],
     '/design/': [
         {
-            text: '模块设计（packages）',
+            text: '模块设计',
             items: [
-                { text: '模块索引', link: '/design/packages/index' },
+                { text: '模块索引', link: '/design/modules/index' },
                 { text: '系统架构', link: '/design/governance/architecture' },
-                { text: '数据模型', link: '/design/packages/data-model' },
-                { text: '依赖分组升级', link: '/design/packages/dependency-grouping' },
-                { text: 'pnpm audit fallback', link: '/design/packages/pnpm-audit-fallback' },
+                { text: '数据模型', link: '/design/modules/data-model' },
+                { text: 'Dependabot 拉取', link: '/design/modules/dependabot-fetcher' },
+                { text: '依赖升级修复器', link: '/design/modules/dependency-fixer' },
+                { text: '依赖分组升级', link: '/design/modules/dependency-grouping' },
+                { text: 'GitHub 客户端', link: '/design/modules/github-client' },
+                { text: 'pnpm audit fallback', link: '/design/modules/pnpm-audit-fallback' },
+                { text: 'pnpm lockfile 修复器', link: '/design/modules/pnpm-lockfile-fixer' },
+                { text: '报告生成器', link: '/design/modules/report-generator' },
             ],
         },
         {
             text: '专项设计与治理（governance）',
             items: [
                 { text: '治理索引', link: '/design/governance/index' },
-                { text: '安全设计', link: '/design/governance/security' },
-                { text: 'GitHub Action 工作流', link: '/design/governance/github-action-workflow' },
-                { text: 'MCP Server 设计（M6）', link: '/design/governance/mcp-server' },
-                { text: '平台 AI 研判集成设计', link: '/design/governance/platform-ai-integration' },
             ],
         },
     ],
@@ -81,6 +88,9 @@ const zhSidebar = {
                 { text: 'Git 规范', link: '/standards/git' },
                 { text: '规划规范', link: '/standards/planning' },
                 { text: 'API 规范', link: '/standards/api' },
+                { text: '平台规范', link: '/standards/platform' },
+                { text: 'i18n 规范', link: '/standards/i18n' },
+                { text: '外部 Skills 准入', link: '/standards/external-skills-intake' },
                 { text: '性能规范', link: '/standards/performance' },
             ],
         },
@@ -91,10 +101,11 @@ const zhSidebar = {
             items: [
                 { text: '调研规范', link: '/research/README' },
                 { text: '竞品分析（2026-07）', link: '/research/2026-07-26-competitive-research' },
-                { text: 'GITHUB_TOKEN 调研（2026-08）', link: '/research/2026-08-04-github-token-dependabot-bug-or-design' },
                 { text: '发布工具对比（2026-08）', link: '/research/2026-08-02-release-tools-comparison' },
-                { text: '成本估算（2026-06）', link: '/research/2026-06-01-cost-estimate' },
-                { text: '战略思考（2026-07）', link: '/research/2026-07-26-strategy' },
+                { text: 'momei 平台参考（2026-08）', link: '/research/2026-08-07-momei-platform-reference' },
+                { text: '第三方可观测性评估（2026-10）', link: '/research/2026-10-27-third-party-observability-evaluation' },
+                { text: 'better-auth cookie 路径审计', link: '/research/better-auth-set-cookie-path-audit' },
+                { text: 'Code Scanning B 类样本', link: '/research/code-scanning-b-class-samples' },
             ],
         },
     ],
@@ -108,6 +119,7 @@ const enSidebar = {
                 { text: 'Quick Start', link: '/en-US/guide/quick-start' },
                 { text: 'Tech Stack', link: '/en-US/guide/tech-stack' },
                 { text: 'Configuration', link: '/en-US/guide/configuration' },
+                { text: 'Docker Deployment', link: '/en-US/guide/deployment' },
             ],
         },
     ],
@@ -117,16 +129,6 @@ const enSidebar = {
             items: [
                 { text: 'Governance Index', link: '/en-US/design/governance/index' },
                 { text: 'Architecture', link: '/en-US/design/governance/architecture' },
-                { text: 'Spec & Doc Governance', link: '/en-US/design/governance/spec-and-doc-governance' },
-                { text: 'Platform AI Integration', link: '/en-US/design/governance/platform-ai-integration' },
-            ],
-        },
-    ],
-    '/en-US/plan/': [
-        {
-            text: 'Planning',
-            items: [
-                { text: 'Roadmap', link: '/en-US/plan/roadmap' },
             ],
         },
     ],
@@ -154,10 +156,24 @@ export default defineConfig({
     // 复制而非符号链接，避免 Windows + WSL 跨平台 symlink 兼容问题）
     head: [
         ['link', { rel: 'icon', type: 'image/svg+xml', href: '/brand/favicon.svg' }],
+        // 未翻译页语言菜单走整页导航的客户端补丁（捕获阶段先于 VitePress 路由处理器）；
+        // 标记用 data 属性（内联脚本的注释会被构建期压缩移除）
+        ['script', { 'data-i18n-fallback-handler': CLICK_HANDLER_MARKER }, LANGUAGE_SWITCH_CLICK_HANDLER],
     ],
 
     rewrites(id) {
         return id.replace(translatedDocSourcePattern, '$1/')
+    },
+
+    // 语言切换兜底入口页：未翻译页的 `/en-US/<同路径>` 在构建产物中补一个可用入口页，
+    // 避免语言菜单落到 404（依据 [i18n 规范 §2.1](../standards/i18n.md) `source-only` 分层）。
+    // 入口页不在客户端路由表中，故注入「目标标记 + 捕获阶段点击补丁」让语言切换走整页导航。
+    transformPageData(pageData, ctx) {
+        return injectFallbackTargetMeta(pageData, ctx)
+    },
+
+    async buildEnd(siteConfig) {
+        await writeFallbackEntries(siteConfig)
     },
 
     locales: {

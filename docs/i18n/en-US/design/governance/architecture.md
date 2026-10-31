@@ -11,7 +11,7 @@ dependfix consists of the following parts:
 | CLI | `packages/cli` | ✅ Shipped |
 | MCP Server | `packages/mcp` | ✅ Shipped (M6) |
 | Skill | `packages/skills` | ✅ Shipped (M5.5) |
-| GitHub Action | `apps/action` | ✅ Shipped |
+| GitHub Action | `action.yml` (composite) | ✅ Shipped |
 | Management Platform | `apps/platform` | ✅ Shipped (M6-M11) |
 
 ## 2. Overall plan
@@ -23,7 +23,7 @@ dependfix follows a layered architecture:
 │ User entry                                                │
 ├─────────────────────────────────────────────────────────┤
 │ CLI / GitHub Action / MCP Server / Skill                  │
-│  (packages/cli / apps/action / packages/mcp / skills)    │
+│  (packages/cli / action.yml / packages/mcp / skills)    │
 ├─────────────────────────────────────────────────────────┤
 │ Engine layer (packages/engine)                            │
 │  - fetcher: Dependabot / pnpm-audit / Code Scanning       │
@@ -49,7 +49,7 @@ The dependency direction is top-down (UI / entry → engine → core), and lower
 ### Entry layer
 
 - **CLI** (`packages/cli`): commander-based CLI, four modes (`report-only` / `fix` / `fix-and-pr` / `cleanup-branches`), flags via Commander
-- **GitHub Action** (`apps/action`): wraps CLI, exposes `uses: dependfix/dependfix@v1` to GitHub Actions
+- **GitHub Action** (root `action.yml`, composite): wraps CLI, exposes `uses: dependfix/dependfix@v0.6.0` to GitHub Actions
 - **MCP Server** (`packages/mcp`): exposes scan / fix tools to AI agents (Claude Code / Copilot / Cursor) via Model Context Protocol
 - **Skill** (`packages/skills`): Markdown + YAML frontmatter, lets AI agents converse and drive fixes
 
@@ -93,23 +93,23 @@ Four execution modes form a progressive chain (each mode is a refinement of the 
 
 | Layer | Language | Runtime | Build tool |
 |:------|:---------|:--------|:-----------|
-| `packages/core` | TypeScript (strict) | Node.js >= 20 (LTS) | tsdown |
-| `packages/engine` | TypeScript (strict) | Node.js >= 20 (LTS) | tsdown |
-| `packages/cli` | TypeScript (strict) | Node.js >= 20 (LTS) | tsdown (ESM only since 0.2.0) |
-| `packages/mcp` | TypeScript (strict) | Node.js >= 20 (LTS) | tsdown |
+| `packages/core` | TypeScript (strict) | Node.js ^22.23.4 \|\| ^24.22.1 | tsdown |
+| `packages/engine` | TypeScript (strict) | Node.js ^22.23.4 \|\| ^24.22.1 | tsdown |
+| `packages/cli` | TypeScript (strict) | Node.js ^22.23.4 \|\| ^24.22.1 | tsdown (ESM only since 0.2.0) |
+| `packages/mcp` | TypeScript (strict) | Node.js ^22.23.4 \|\| ^24.22.1 | tsdown |
 | `packages/skills` | Markdown + YAML | N/A | N/A |
-| `apps/platform` | Vue 3 + TypeScript | Node.js >= 20 (LTS) | Nuxt 4 + Vite |
-| `apps/action` | TypeScript | Node.js 20 (GitHub Actions runner) | tsdown |
+| `apps/platform` | Vue 3 + TypeScript | Node.js ^22.23.4 \|\| ^24.22.1 | Nuxt 4 + Vite |
+| `action.yml` (composite, not a package) | YAML | per consumer `actions/setup-node` | N/A |
 
 ## 6. Platform architecture (apps/platform)
 
 ### Stack
 
-- **Frontend**: Nuxt 4 + Vue 3 + PrimeVue 4 + Pinia + Vite
+- **Frontend**: Nuxt 4 + Vue 3 + caomei-ui + Pinia + Vite
 - **Backend**: Nuxt server routes (h3) + TypeORM + better-sqlite3
 - **Auth**: better-auth (email password + GitHub OAuth + Google OAuth + genericOAuth/OIDC SSO)
 - **State management**: Pinia (Nuxt auto-import)
-- **UI components**: PrimeVue 4 DataTable / Select / Dialog / ToggleSwitch / Tag / Card / Message
+- **UI components**: caomei-ui DataTable / Select / Dialog / Switch / Tag / Card / Message
 
 ### Module layering
 
@@ -157,16 +157,16 @@ Four execution modes form a progressive chain (each mode is a refinement of the 
 | GitHub API rate limit | Batch pagination; concurrency control; record rate-limited requests in reports |
 | Lockfile fix instability | Fix Node + pnpm version; save install logs + lockfile diff |
 | Code Scanning scope too large | Phase 1 only whitelist rules; unmatched rules only suggest output |
-| AI assessment misjudgment | AI fix code must pass lint/typecheck/build; PR not auto-merged; only output suggestions below confidence threshold; limit patch scope |
+| AI assessment misjudgment | AI fix code must pass install/lint/build/typecheck/test; PR not auto-merged; only output suggestions below confidence threshold; limit patch scope |
 | Prompt injection attacks | Restrict trigger permission to admin; inputs only structured data; system instructions hard-coded; external content sanitized |
 | Multi-tenant security | Repo-level data isolation; user tokens encrypted; complete operation audit log |
-| Monitoring system vs auto-merge decoupling (M24.1 key decision D8) | Monitoring system (PRCheck) does NOT block mergify auto-merge: `mergify responsible for merge on pass` (rebase merge triggered by `check-success=Test` single condition); `PRCheck responsible for fail-to-show` (monitor + alert firing + ack UI) — two chains do not interfere, monitoring alert firing only writes alert_event + UI alert, does NOT modify check status / does NOT modify `check-success=Test` judgment. M24.1 implementation: `.github/mergify.yml` annotations + dependfix README + experience-archive §56 three-way sync |
+| Monitoring system vs auto-merge decoupling (M24.1 key decision D8) | Monitoring system (PRCheck) does NOT block mergify auto-merge: `mergify responsible for merge on pass` (rebase merge triggered by the same batch of PR jobs' `check-success`: Test / Coverage / E2E / Visual Regression); `PRCheck responsible for fail-to-show` (monitor + alert firing + ack UI) — two chains do not interfere, monitoring alert firing only writes alert_event + UI alert, does NOT modify check status / does NOT modify the mergify `check-success` judgment. M24.1 implementation: `.github/mergify.yml` annotations + dependfix README + experience-archive §56 three-way sync |
 
 ## 8. apps/platform end-to-end AI assessment integration (M26 phase)
 
 apps/platform as the management platform entry point takes the end-to-end AI breaking-change assessment integration responsibility. Engine layer (`packages/engine/src/ai/`) closed in M5 (commit `3475e6e`); CLI / MCP / GitHub Action all support `--ai` flags; M26 phase completes the integration in apps/platform (click "Scan" to enable AI assessment + observe usage and assessment results).
 
-Full design draft: [platform-ai-integration.md](./platform-ai-integration.md); stage slice: see [todo-archive.md §M26](https://github.com/dependfix/dependfix/blob/master/docs/plan/todo-archive.md#m26-平台-ai-研判应用层--批量导入-resource-owner-化--文档站-i18n--license-收口--经验沉淀m261m262m263m264m264bm264cm265-全部已闭环--2026-09-10-归档) + [archive/todo-archive-phases-m26.md §M26.1](https://github.com/dependfix/dependfix/blob/master/docs/plan/archive/todo-archive-phases-m26.md#m261-p1--能力--ux-m252b-应用层10-commits--1130-行--standard-depth-audit) (M26 phase closed on 2026-09-10).
+Full design draft: [platform-ai-integration.md](./platform-ai-integration.md); stage slice: see [todo-archive.md §M26](../../../../plan/archive/todo-archive-phases-m26.md) + [archive/todo-archive-phases-m26.md §M26.1](https://github.com/dependfix/dependfix/blob/master/docs/plan/archive/todo-archive-phases-m26.md#m261-p1--能力--ux-m252b-应用层10-commits--1130-行--standard-depth-audit) (M26 phase closed on 2026-09-10).
 
 ### Data model extension (M25.2a commit `1c65582`)
 
@@ -199,7 +199,7 @@ Error rules: `aiEnabled=true` but Organization has no Key → `400 AI_KEY_REQUIR
 
 ### Governance validation (consistent with engine layer)
 
-- AI output must pass `lint` / `typecheck` / `build` (reusing existing safety-gate from §7 row "AI assessment misjudgment")
+- AI output must pass `install` / `lint` / `build` / `typecheck` / `test` (reusing existing safety-gate from §7 row "AI assessment misjudgment")
 - AI-generated PR not auto-merged (consistent with [standards/index.md §AI assessment not auto-merged by default](https://github.com/dependfix/dependfix/blob/master/docs/standards/development.md))
 - Below confidence threshold only outputs suggestions (engine layer `safety-gate.ts` already implemented)
 - AI API Key logs redacted (reusing `packages/engine/src/ai/secrets.ts:maskSecrets`)

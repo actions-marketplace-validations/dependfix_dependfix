@@ -1,12 +1,15 @@
 pull_request_rules:
   - name: automatic merge for Dependabot pull requests
     conditions:
-      # Coverage 与 Test / E2E 是 test.yml 中并列的独立 job，各自生成独立 check run，
-      # 因此 check-success=Test 不覆盖 Coverage job。覆盖率工具链断裂只会在 Coverage job
-      # 暴露（表现为覆盖率归零而非显式依赖错误），必须单独作为合并门禁，
-      # 否则该类回归会被自动合并进 master。
+      # test.yml 的 Test / Coverage / E2E / Visual Regression 是并列的独立 job，各自生成独立
+      # check run：check-success=Test 不覆盖其余三个。门禁必须覆盖**同批全部 PR job**，
+      # 否则 Coverage 归零、E2E 失败、视觉基线漂移都会被自动合并进 master。
+      # 漂移由 `pnpm run check:mergify` 机检（CI Test job 阻断）；skipped ≠ success，
+      # 目标仓若对 job 做路径过滤需自行裁剪条件。
       - check-success=Test
       - check-success=Coverage
+      - check-success=E2E
+      - check-success=Visual Regression
       - author~=^dependabot(|-preview)\[bot\]$
       - label=dependencies
     actions:
@@ -20,16 +23,22 @@ pull_request_rules:
   # 足够约束范围 + 防止误合并外部贡献者 PR。
   #
   # 与 M24.1 PR Check 监测的边界（docs/plan/todo.md §M24.1 关键决策 D8）：
-  # mergify 负责「通过即合」（按 check-success=Test 触发 rebase merge）；
+  # mergify 负责「通过即合」（按同批全部 PR job 触发 rebase merge）；
   # dependfix 平台 PR Check（apps/platform/app/pages/pr-checks.vue）负责「失败即显」
   # （监测 + alert firing + ack UI）。两条链路互不干扰：
-  # - mergify 在 check-success=Test 触发合并；CI 失败时 mergify 不合并
+  # - mergify 在同批全部 PR job（Test / Coverage / E2E / Visual Regression）通过时触发合并；
+  #   任一 job 失败 / 跳过时 mergify 不合并
   # - PRCheck 在 alert firing 时仅显示 UI 告警 + 写 alert_event，不阻止合并
-  # 因此 PR Check alert firing 不会影响 mergify 决策；mergify 仍按 `check-success=Test`
-  # 单条件触发。详见 docs/design/governance/experience-archive.md §五十六 M24.1 案例。
+  # 因此 PR Check alert firing 不会影响 mergify 决策；mergify 仍按上述四条 `check-success`
+  # 触发（check 归因只作解释、不构成豁免）。详见 docs/design/governance/experience-archive.md
+  # §五十六 M24.1 案例。
   - name: automatic merge for dependfix bot pull requests
     conditions:
+      # 与 Dependabot 规则同批 job（漂移由 `pnpm run check:mergify` 阻断）
       - check-success=Test
+      - check-success=Coverage
+      - check-success=E2E
+      - check-success=Visual Regression
       - author~=^(.+?\+)?dependfix\[bot\]$
     actions:
       merge:

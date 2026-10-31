@@ -1,7 +1,10 @@
 <script setup lang="ts">
 // 定时计划管理：新建/编辑/删除/启用禁用/手动触发（cron 到点自动触发批量扫描）
-import type { RepoView, ScheduleSelectorKind, ScheduleView } from '~/types/platform'
+import { Check, CirclePlay, Pause, Pencil, Play, Plus, Trash } from '@lucide/vue'
+import type { DataTableColumn } from 'caomei-ui'
+import type { RepoView, ScheduleKind, ScheduleSelectorKind, ScheduleTriggerResult, ScheduleView } from '~/types/platform'
 import { previewCron } from '~/utils/cron-preview'
+import { scanModeOptions, scanSeverityOptions } from '~/utils/scan-options'
 
 definePageMeta({
     middleware: 'auth',
@@ -11,6 +14,7 @@ const { t, d } = useI18n()
 
 interface ScheduleForm {
     name: string
+    kind: ScheduleKind
     cron: string
     timezone: string
     selectorKind: ScheduleSelectorKind
@@ -30,11 +34,19 @@ const dialogVisible = ref(false)
 const editingId = ref<string | null>(null)
 const error = ref('')
 const success = ref('')
-/** 浏览器解析的 IANA 时区（todo.md §M12 C65-C2 时区选择框默认选项 + C65-C1 cron 预览 fallback） */
+/** 非阻断提示（如 pr-check 计划触达但总开关未启用 → 触发被跳过） */
+const warning = ref('')
+/**
+ * PR Check 监测总开关状态（进程级 env，经 /api/schedules/monitor-status 读取）。
+ * null = 未加载；用于在存在 pr-check 计划但开关未启用时给出提示。
+ */
+const monitorEnabled = ref<boolean | null>(null)
+/** 浏览器解析的 IANA 时区（时区选择框默认选项 + cron 预览 fallback） */
 const browserTimezone = ref('')
 
 const emptyForm = (): ScheduleForm => ({
     name: '',
+    kind: 'scan',
     cron: '0 2 * * 1',
     timezone: '',
     selectorKind: 'all',
@@ -54,21 +66,29 @@ const selectorOptions = computed(() => [
     { label: t('schedules.selector.explicit'), value: 'explicit' },
 ])
 
-const modeOptions = computed(() => [
-    { label: t('common.scanMode.reportOnly'), value: 'report-only' },
-    { label: t('common.scanMode.fix'), value: 'fix' },
-    { label: t('common.scanMode.fixAndPr'), value: 'fix-and-pr' },
+/** 计划业务类型选项（scan=定时批量扫描 / pr-check=PR Check 状态监测） */
+const kindOptions = computed(() => [
+    { label: t('schedules.kind.scan'), value: 'scan' },
+    { label: t('schedules.kind.prCheck'), value: 'pr-check' },
 ])
 
-const severityOptions = computed(() => [
-    { label: 'Critical', value: 'critical' },
-    { label: 'High', value: 'high' },
-    { label: 'Medium', value: 'medium' },
-    { label: t('common.severity.all'), value: 'all' },
-])
+/** 是否存在 pr-check 计划（决定总开关关闭时是否展示提示横幅） */
+const hasPrCheckSchedule = computed(() => schedules.value.some((s) => s.kind === 'pr-check'))
+
+/** 展示「总开关未启用」提示：存在 pr-check 计划且已确认开关关闭 */
+const showMonitorDisabledHint = computed(() => hasPrCheckSchedule.value && monitorEnabled.value === false)
+
+// 模式 / 严重级别选项复用 utils/scan-options 单一事实源（与扫描弹窗、设置页默认值口径一致，
+// 避免多处漂移；抽取边界见 docs/standards/platform.md §7.3）
+const modeOptions = computed(() => scanModeOptions(t))
+
+const severityOptions = computed(() => scanSeverityOptions(t))
 
 const selectorLabel = (kind: string) =>
     selectorOptions.value.find((o) => o.value === kind)?.label ?? kind
+
+const kindLabel = (kind: string) =>
+    kindOptions.value.find((o) => o.value === kind)?.label ?? kind
 
 const fetchSchedules = async () => {
     loading.value = true
@@ -90,9 +110,19 @@ const fetchRepos = async () => {
     }
 }
 
+/** 拉取 PR Check 监测总开关状态（失败时保持 null → 不展示提示，避免误导） */
+const fetchMonitorStatus = async () => {
+    try {
+        const status = await $fetch<{ actionStatusMonitorEnabled: boolean }>('/api/schedules/monitor-status')
+        monitorEnabled.value = status.actionStatusMonitorEnabled
+    } catch {
+        monitorEnabled.value = null
+    }
+}
+
 onMounted(async () => {
     browserTimezone.value = Intl.DateTimeFormat().resolvedOptions().timeZone
-    await Promise.all([fetchSchedules(), fetchRepos()])
+    await Promise.all([fetchSchedules(), fetchRepos(), fetchMonitorStatus()])
 })
 
 /** Intl.supportedValuesOf('timeZone') 时区列表（运行时探测，旧 Node 不可用时兜底） */
@@ -116,7 +146,7 @@ const timezoneOptions = computed<string[]>(() => {
     return [browser, ...list.slice(0, idx), ...list.slice(idx + 1)]
 })
 
-/** cron 实时预览（todo.md §M12 C65-C1）：随 form.cron / form.timezone 变更重算，复用 server 已依赖的 cron-parser 5.x */
+/** cron 实时预览：随 form.cron / form.timezone 变更重算，复用 server 已依赖的 cron-parser 5.x */
 const cronPreview = computed(() => previewCron(form.value.cron, {
     timezone: form.value.timezone.trim() || null,
     count: 3,
@@ -170,6 +200,7 @@ const openEdit = (schedule: ScheduleView) => {
     const data = parseSelectorData(schedule)
     form.value = {
         name: schedule.name,
+        kind: schedule.kind,
         cron: schedule.cron,
         timezone: schedule.timezone ?? '',
         selectorKind: schedule.selectorKind,
@@ -216,6 +247,7 @@ const submit = async () => {
     try {
         const payload = {
             name: form.value.name,
+            kind: form.value.kind,
             cron: form.value.cron,
             timezone: form.value.timezone.trim() || null,
             selectorKind: form.value.selectorKind,
@@ -259,10 +291,22 @@ const remove = async (schedule: ScheduleView) => {
 
 const trigger = async (schedule: ScheduleView) => {
     error.value = ''
+    warning.value = ''
     triggering.value = schedule.id
     try {
-        const result = await $fetch<{ batchRunId: string, repositoryCount: number }>(`/api/schedules/${schedule.id}/trigger`, { method: 'POST' })
-        success.value = t('schedules.success.triggered', { count: result.repositoryCount })
+        const result = await $fetch<ScheduleTriggerResult>(`/api/schedules/${schedule.id}/trigger`, { method: 'POST' })
+        if (result.kind === 'pr-check') {
+            if (result.skipped) {
+                warning.value = t('schedules.warnings.prCheckSkipped')
+            } else {
+                success.value = t('schedules.success.prCheckTriggered', { processed: result.processed, errors: result.errors })
+            }
+        } else if (result.kind === 'scan') {
+            success.value = t('schedules.success.triggered', { count: result.repositoryCount })
+        } else {
+            // 防御性兜底：服务端新增 kind 而前端未同步时，避免静默按 scan 渲染 count=undefined
+            warning.value = t('schedules.warnings.unknownTriggerResult')
+        }
         await fetchSchedules()
     } catch (e: any) {
         error.value = t('schedules.errors.triggerFailed', { message: e?.data?.message ?? e?.message ?? t('common.errors.unknown') })
@@ -285,6 +329,21 @@ const toggleEnabled = async (schedule: ScheduleView) => {
     }
 }
 
+/**
+ * 列定义（caomei DataTable 用 `columns` 数组 + `#cell-{key}` 插槽替代迁移前的 `<Column>`）。
+ * `key` 即排序字段（原 `field`），非排序列（status / actions）取语义唯一 key。
+ */
+const columns = computed<DataTableColumn<ScheduleView>[]>(() => [
+    { key: 'name', header: t('schedules.colName'), sortable: true },
+    { key: 'kind', header: t('schedules.colKind'), sortable: true },
+    { key: 'cron', header: t('schedules.colCron'), sortable: true },
+    { key: 'selectorKind', header: t('schedules.colStrategy'), sortable: true },
+    { key: 'mode', header: t('schedules.colMode'), sortable: true },
+    { key: 'status', header: t('schedules.colStatus') },
+    { key: 'lastTriggeredAt', header: t('schedules.colLastTriggered'), sortable: true },
+    { key: 'actions', header: t('schedules.colActions'), width: '220px' },
+])
+
 const toastMessage = computed(() => success.value)
 watch(toastMessage, (v) => {
     if (v) {
@@ -304,172 +363,186 @@ watch(toastMessage, (v) => {
                     {{ t('schedules.subtitle') }}
                 </p>
             </div>
-            <Button
-                icon="pi pi-plus"
-                :label="t('schedules.newPlan')"
-                @click="openCreate"
-            />
+            <CaomeiButton @click="openCreate">
+                <template #icon>
+                    <CaomeiIcon :icon="Plus" />
+                </template>
+                {{ t('schedules.newPlan') }}
+            </CaomeiButton>
         </div>
 
-        <Message
+        <CaomeiMessage
             v-if="error"
-            severity="error"
+            tone="danger"
             :closable="false"
         >
             {{ error }}
-        </Message>
-        <Message
+        </CaomeiMessage>
+        <CaomeiMessage
             v-if="success"
-            severity="success"
+            tone="success"
             :closable="false"
         >
             {{ success }}
-        </Message>
+        </CaomeiMessage>
+        <CaomeiMessage
+            v-if="warning"
+            tone="warning"
+            :closable="false"
+        >
+            {{ warning }}
+        </CaomeiMessage>
+        <CaomeiMessage
+            v-if="showMonitorDisabledHint"
+            tone="warning"
+            :closable="false"
+        >
+            {{ t('schedules.monitorDisabledBanner') }}
+        </CaomeiMessage>
 
-        <Card v-if="!loading">
-            <template #content>
-                <DataTable
-                    :value="schedules"
-                    striped-rows
-                    size="small"
-                    removable-sort
-                    :empty-message="t('schedules.empty')"
-                >
-                    <Column
-                        field="name"
-                        :header="t('schedules.colName')"
-                        sortable
-                    />
-                    <Column
-                        field="cron"
-                        :header="t('schedules.colCron')"
-                        sortable
+        <CaomeiCard v-if="!loading">
+            <CaomeiDataTable
+                :data="schedules"
+                :columns="columns"
+                row-key="id"
+                striped
+                :empty-text="t('schedules.empty')"
+            >
+                <template #cell-cron="{row}">
+                    <code>{{ row.cron }}</code>
+                    <small
+                        v-if="row.timezone"
+                        class="text-muted"
+                    >{{ t('schedules.timezoneSuffix', {timezone: row.timezone}) }}</small>
+                </template>
+                <template #cell-kind="{row}">
+                    <CaomeiTag :tone="row.kind === 'pr-check' ? 'primary' : 'neutral'">
+                        {{ kindLabel(row.kind) }}
+                    </CaomeiTag>
+                </template>
+                <template #cell-selectorKind="{row}">
+                    {{ selectorLabel(row.selectorKind) }}
+                </template>
+                <template #cell-mode="{row}">
+                    <CaomeiTag v-if="row.kind === 'scan'">
+                        {{ modeOptions.find((m) => m.value === row.mode)?.label ?? row.mode }}
+                    </CaomeiTag>
+                    <span v-else class="text-muted">—</span>
+                </template>
+                <template #cell-status="{row}">
+                    <CaomeiTag :tone="row.enabled ? 'success' : 'warning'">
+                        {{ row.enabled ? t('schedules.enabled') : t('schedules.disabled') }}
+                    </CaomeiTag>
+                </template>
+                <template #cell-lastTriggeredAt="{row}">
+                    {{ row.lastTriggeredAt ? d(new Date(row.lastTriggeredAt), 'long') : '—' }}
+                </template>
+                <template #cell-actions="{row}">
+                    <CaomeiButton
+                        variant="ghost"
+                        rounded
+                        size="sm"
+                        :label="t('schedules.actionTrigger')"
+                        :title="t('schedules.actionTrigger')"
+                        :loading="triggering === row.id"
+                        @click="trigger(row)"
                     >
-                        <template #body="{data}">
-                            <code>{{ data.cron }}</code>
-                            <small
-                                v-if="data.timezone"
-                                class="text-muted"
-                            >{{ t('schedules.timezoneSuffix', {timezone: data.timezone}) }}</small>
+                        <template #icon>
+                            <CaomeiIcon :icon="Play" />
                         </template>
-                    </Column>
-                    <Column
-                        field="selectorKind"
-                        :header="t('schedules.colStrategy')"
-                        sortable
+                    </CaomeiButton>
+                    <CaomeiButton
+                        variant="ghost"
+                        rounded
+                        size="sm"
+                        :label="row.enabled ? t('schedules.actionDisable') : t('schedules.actionEnable')"
+                        :title="row.enabled ? t('schedules.actionDisable') : t('schedules.actionEnable')"
+                        @click="toggleEnabled(row)"
                     >
-                        <template #body="{data}">
-                            {{ selectorLabel(data.selectorKind) }}
+                        <template #icon>
+                            <CaomeiIcon :icon="row.enabled ? Pause : CirclePlay" />
                         </template>
-                    </Column>
-                    <Column
-                        field="mode"
-                        :header="t('schedules.colMode')"
-                        sortable
+                    </CaomeiButton>
+                    <CaomeiButton
+                        variant="ghost"
+                        rounded
+                        size="sm"
+                        :label="t('schedules.actionEdit')"
+                        @click="openEdit(row)"
                     >
-                        <template #body="{data}">
-                            <Tag :value="modeOptions.find((m) => m.value === data.mode)?.label ?? data.mode" />
+                        <template #icon>
+                            <CaomeiIcon :icon="Pencil" />
                         </template>
-                    </Column>
-                    <Column :header="t('schedules.colStatus')">
-                        <template #body="{data}">
-                            <Tag
-                                :value="data.enabled ? t('schedules.enabled') : t('schedules.disabled')"
-                                :severity="data.enabled ? 'success' : 'warn'"
-                            />
-                        </template>
-                    </Column>
-                    <Column
-                        field="lastTriggeredAt"
-                        :header="t('schedules.colLastTriggered')"
-                        sortable
+                    </CaomeiButton>
+                    <CaomeiButton
+                        variant="ghost"
+                        rounded
+                        size="sm"
+                        tone="danger"
+                        :label="t('schedules.actionDelete')"
+                        @click="remove(row)"
                     >
-                        <template #body="{data}">
-                            {{ data.lastTriggeredAt ? d(new Date(data.lastTriggeredAt), 'long') : '—' }}
+                        <template #icon>
+                            <CaomeiIcon :icon="Trash" />
                         </template>
-                    </Column>
-                    <Column :header="t('schedules.colActions')" :style="{width: '220px'}">
-                        <template #body="{data}">
-                            <Button
-                                icon="pi pi-play"
-                                text
-                                rounded
-                                size="small"
-                                :title="t('schedules.actionTrigger')"
-                                :loading="triggering === data.id"
-                                @click="trigger(data)"
-                            />
-                            <Button
-                                :icon="data.enabled ? 'pi pi-pause' : 'pi pi-play-circle'"
-                                text
-                                rounded
-                                size="small"
-                                :title="data.enabled ? t('schedules.actionDisable') : t('schedules.actionEnable')"
-                                @click="toggleEnabled(data)"
-                            />
-                            <Button
-                                icon="pi pi-pencil"
-                                text
-                                rounded
-                                size="small"
-                                :aria-label="t('schedules.actionEdit')"
-                                @click="openEdit(data)"
-                            />
-                            <Button
-                                icon="pi pi-trash"
-                                text
-                                rounded
-                                size="small"
-                                severity="danger"
-                                :aria-label="t('schedules.actionDelete')"
-                                @click="remove(data)"
-                            />
-                        </template>
-                    </Column>
-                </DataTable>
-            </template>
-        </Card>
+                    </CaomeiButton>
+                </template>
+            </CaomeiDataTable>
+        </CaomeiCard>
         <p v-else class="text-muted">
             {{ t('common.empty.loading') }}
         </p>
 
-        <Dialog
-            v-model:visible="dialogVisible"
-            :header="editingId ? t('schedules.dialogEditTitle') : t('schedules.dialogCreateTitle')"
+        <CaomeiDialog
+            v-model:open="dialogVisible"
+            :title="editingId ? t('schedules.dialogEditTitle') : t('schedules.dialogCreateTitle')"
             modal
-            :draggable="false"
             :style="{width: '560px'}"
         >
             <form class="schedule-form" @submit.prevent="submit">
                 <div class="schedule-form__field">
                     <label for="name">{{ t('schedules.fieldName') }}</label>
-                    <InputText
+                    <CaomeiInput
                         id="name"
                         v-model="form.name"
                         :placeholder="t('schedules.fieldNamePlaceholder')"
-                        fluid
                         required
                     />
                 </div>
                 <div class="schedule-form__field">
+                    <label for="kind">{{ t('schedules.fieldKind') }}</label>
+                    <CaomeiSelect
+                        id="kind"
+                        v-model="form.kind"
+                        :options="kindOptions"
+                        option-label="label"
+                        option-value="value"
+                    />
+                    <small class="text-muted">
+                        {{ t('schedules.fieldKindHint') }}
+                    </small>
+                </div>
+                <div class="schedule-form__field">
                     <label for="cron">{{ t('schedules.fieldCron') }}</label>
-                    <InputText
+                    <CaomeiInput
                         id="cron"
                         v-model="form.cron"
                         placeholder="0 2 * * 1"
                         :invalid="!!cronPreview.errorKey"
-                        fluid
                         required
                     />
                     <small class="text-muted">
                         {{ t('schedules.fieldCronHint') }}
                     </small>
-                    <!-- todo.md §M12 C65-C1: cron 实时预览（合法=next 3 次触发时间；非法=错误提示；空=无显示） -->
+                    <!-- cron 实时预览（合法=next 3 次触发时间；非法=错误提示；空=无显示）：
+                         触发时间由当前时刻 + cron 派生（逐日/逐周变化），属视觉回归的动态区域，
+                         以 data-visual-mask 显式遮蔽，不依赖像素容差兜底（selector 见
+                         apps/platform/tests/visual/helpers/visual.ts） -->
                     <section
                         v-if="cronPreview.isValid && cronPreview.nextRuns"
                         :aria-label="t('schedules.cronPreviewTitle')"
                     >
-                        <ul class="schedule-form__cron-preview">
+                        <ul class="schedule-form__cron-preview" data-visual-mask>
                             <li
                                 v-for="(date, idx) in cronPreview.nextRuns"
                                 :key="idx"
@@ -488,16 +561,14 @@ watch(toastMessage, (v) => {
                 </div>
                 <div class="schedule-form__field">
                     <label for="timezone">{{ t('schedules.fieldTimezone') }}</label>
-                    <!-- todo.md §M12 C65-C2: 时区 InputText 改 PrimeVue Select（含 filter，IANA 列表 Intl.supportedValuesOf） -->
-                    <Select
+                    <!-- 时区取值必须来自 IANA 列表：AutoComplete 的 strict 模式拒绝自由文本写入 -->
+                    <CaomeiAutoComplete
                         id="timezone"
                         v-model="form.timezone"
                         :options="timezoneOptions"
                         :placeholder="t('schedules.fieldTimezonePlaceholder')"
-                        :filter="true"
-                        filter-match-mode="contains"
-                        :empty-filter-message="t('schedules.timezoneEmpty')"
-                        fluid
+                        :empty-label="t('schedules.timezoneEmpty')"
+                        strict
                     />
                     <small class="text-muted">
                         {{ t('schedules.timezoneHint', {default: browserTimezone}) }}
@@ -505,13 +576,12 @@ watch(toastMessage, (v) => {
                 </div>
                 <div class="schedule-form__field">
                     <label for="selectorKind">{{ t('schedules.fieldSelector') }}</label>
-                    <Select
+                    <CaomeiSelect
                         id="selectorKind"
                         v-model="form.selectorKind"
                         :options="selectorOptions"
                         option-label="label"
                         option-value="value"
-                        fluid
                     />
                 </div>
 
@@ -520,11 +590,10 @@ watch(toastMessage, (v) => {
                     class="schedule-form__field"
                 >
                     <label for="tag">{{ t('schedules.fieldTag') }}</label>
-                    <InputText
+                    <CaomeiInput
                         id="tag"
                         v-model="form.tag"
                         :placeholder="t('schedules.fieldTagPlaceholder')"
-                        fluid
                     />
                 </div>
                 <div
@@ -532,16 +601,13 @@ watch(toastMessage, (v) => {
                     class="schedule-form__field"
                 >
                     <label for="repositoryIds">{{ t('schedules.fieldRepos', {count: form.repositoryIds.length}) }}</label>
-                    <MultiSelect
+                    <CaomeiMultiSelect
                         id="repositoryIds"
                         v-model="form.repositoryIds"
                         :options="repos"
                         option-label="name"
                         option-value="id"
-                        filter
-                        display="chip"
                         :placeholder="t('schedules.fieldReposPlaceholder')"
-                        fluid
                     />
                     <small class="text-muted">
                         {{ t('schedules.fieldReposHint') }}
@@ -556,53 +622,62 @@ watch(toastMessage, (v) => {
                     </small>
                 </div>
 
-                <div class="schedule-form__row">
+                <div v-if="form.kind === 'scan'" class="schedule-form__row">
                     <div class="schedule-form__field">
                         <label for="mode">{{ t('schedules.fieldMode') }}</label>
-                        <Select
+                        <CaomeiSelect
                             id="mode"
                             v-model="form.mode"
                             :options="modeOptions"
                             option-label="label"
                             option-value="value"
-                            fluid
                         />
                     </div>
                     <div class="schedule-form__field">
                         <label for="severityThreshold">{{ t('schedules.fieldSeverity') }}</label>
-                        <Select
+                        <CaomeiSelect
                             id="severityThreshold"
                             v-model="form.severityThreshold"
                             :options="severityOptions"
                             option-label="label"
                             option-value="value"
-                            fluid
                         />
                     </div>
                 </div>
+                <CaomeiMessage
+                    v-else
+                    tone="neutral"
+                    :closable="false"
+                >
+                    {{ t('schedules.prCheckHint') }}
+                </CaomeiMessage>
                 <div class="schedule-form__field">
                     <div class="schedule-form__switch">
                         <span>{{ t('schedules.enableTrigger') }}</span>
-                        <InputSwitch v-model="form.enabled" />
+                        <CaomeiSwitch v-model="form.enabled" />
                     </div>
                 </div>
 
                 <div class="schedule-form__actions">
-                    <Button
-                        :label="t('common.actions.cancel')"
-                        severity="secondary"
-                        text
+                    <CaomeiButton
+                        tone="neutral"
+                        variant="ghost"
                         @click="closeDialog"
-                    />
-                    <Button
+                    >
+                        {{ t('common.actions.cancel') }}
+                    </CaomeiButton>
+                    <CaomeiButton
                         type="submit"
-                        :label="t('common.actions.save')"
-                        icon="pi pi-check"
                         :loading="saving"
-                    />
+                    >
+                        <template #icon>
+                            <CaomeiIcon :icon="Check" />
+                        </template>
+                        {{ t('common.actions.save') }}
+                    </CaomeiButton>
                 </div>
             </form>
-        </Dialog>
+        </CaomeiDialog>
     </div>
 </template>
 
@@ -631,9 +706,7 @@ watch(toastMessage, (v) => {
     gap: $space-4;
 
     &__field {
-        display: flex;
-        flex-direction: column;
-        gap: $space-1;
+        @include field-stack;
     }
 
     &__field label {

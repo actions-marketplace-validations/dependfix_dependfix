@@ -64,7 +64,7 @@ const MODERN_AUDIT_JSON = {
                     cwe: ['CWE-1333'],
                     cvss: { score: 7.5, vectorString: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H' },
                     range: '<=3.1.4',
-                    // M23.3 C66-A2：GitHub Advisory ID + CVE 列表透传
+                    // GitHub Advisory ID + CVE 列表透传
                     github_advisory_id: 'GHSA-f8p3-7c7w-h6x4',
                     cves: ['CVE-2023-36661'],
                 },
@@ -132,7 +132,7 @@ describe('parseAuditReport', () => {
         expect(fastUri?.severity).toBe('high')
         expect(fastUri?.patchedVersion).toBe('3.1.5')
         expect(fastUri?.htmlUrl).toContain('GHSA-f8p3-7c7w-h6x4')
-        // M23.3 C66-A2：透传 GitHub Advisory ID + CVE 列表（fixture 含 github_advisory_id + cves）
+        // 透传 GitHub Advisory ID + CVE 列表（fixture 含 github_advisory_id + cves）
         expect(fastUri?.ghsaId).toBe('GHSA-f8p3-7c7w-h6x4')
         expect(fastUri?.cveIds).toEqual(['CVE-2023-36661'])
 
@@ -143,6 +143,76 @@ describe('parseAuditReport', () => {
         // lodash fixture 无 github_advisory_id/cves 字段 → 透传 undefined
         expect(lodash?.ghsaId).toBeUndefined()
         expect(lodash?.cveIds).toBeUndefined()
+    })
+
+    it('extracts dependencyPath from advisories[].findings[].paths[] (flat merge + dedup)', () => {
+        const report = {
+            advisories: {
+                '100': {
+                    findings: [
+                        { version: '1.0.0', paths: ['docs>vitepress>@vitejs/plugin-vue>vite'] },
+                        { version: '1.0.0', paths: ['docs>vitepress>vite'] },
+                    ],
+                    id: 100,
+                    module_name: 'vite',
+                    patched_versions: '>=2.0.0',
+                    severity: 'high',
+                    title: 'Vite vulnerability',
+                    url: 'https://github.com/advisories/GHSA-x',
+                },
+            },
+            metadata: { vulnerabilities: { high: 1 }, dependencies: 5 },
+        }
+        const risks = parseAuditReport(report)
+        const vite = risks.find((r) => r.packageName === 'vite')
+        expect(vite).toBeDefined()
+        expect(vite?.dependencyPaths).toEqual([
+            'docs>vitepress>@vitejs/plugin-vue>vite',
+            'docs>vitepress>vite',
+        ])
+    })
+
+    it('deduplicates dependencyPath across multiple findings', () => {
+        const report = {
+            advisories: {
+                '101': {
+                    findings: [
+                        { version: '1.0.0', paths: ['a>b>vuln', 'a>c>vuln'] },
+                        { version: '1.0.0', paths: ['a>b>vuln'] },
+                    ],
+                    id: 101,
+                    module_name: 'vuln',
+                    patched_versions: '>=2.0.0',
+                    severity: 'high',
+                    title: 'test',
+                    url: '',
+                },
+            },
+            metadata: { vulnerabilities: { high: 1 }, dependencies: 5 },
+        }
+        const risks = parseAuditReport(report)
+        const vuln = risks.find((r) => r.packageName === 'vuln')
+        expect(vuln?.dependencyPaths).toEqual(['a>b>vuln', 'a>c>vuln'])
+    })
+
+    it('omits dependencyPaths when findings[].paths[] is empty or missing', () => {
+        const report = {
+            advisories: {
+                '102': {
+                    findings: [{ version: '1.0.0', paths: [] }],
+                    id: 102,
+                    module_name: 'clean',
+                    patched_versions: '>=1.0.0',
+                    severity: 'low',
+                    title: 'clean advisory',
+                    url: '',
+                },
+            },
+            metadata: { vulnerabilities: { low: 1 }, dependencies: 5 },
+        }
+        const risks = parseAuditReport(report)
+        const clean = risks.find((r) => r.packageName === 'clean')
+        expect(clean?.dependencyPaths).toBeUndefined()
     })
 
     it('parses legacy format (advisories/actions) with action target', () => {
@@ -159,7 +229,7 @@ describe('parseAuditReport', () => {
 
     it('strips range prefix from patched_versions (legacy without actions)', () => {
         // pnpm 11 的 advisories 输出常不带 actions（actionMap 为空）→ patched_versions 为 range 字符串；
-        // 不剥离前缀会让 compareSemver 退化为 [0,0,0]，当前版本被误判已达标而假跳过（T801 实证回归）
+        // 不剥离前缀会让 compareSemver 退化为 [0,0,0]，当前版本被误判已达标而假跳过（已实证的回归）
         const risks = parseAuditReport({
             advisories: {
                 '123': {
@@ -358,7 +428,7 @@ describe('fetchPnpmAuditAlerts', () => {
         expect(alerts[0].recommendedVersion).toBe('3.1.5')
         expect(alerts[0].packageEcosystem).toBe('npm')
         expect(alerts[0].dependencyType).toBeUndefined()
-        // M23.3 C66-A2：透传 GitHub Advisory ID + CVE 列表
+        // 透传 GitHub Advisory ID + CVE 列表
         expect(alerts[0].ghsaId).toBe('GHSA-f8p3-7c7w-h6x4')
         expect(alerts[0].cveIds).toEqual(['CVE-2023-36661'])
 
@@ -382,7 +452,7 @@ describe('fetchPnpmAuditAlerts', () => {
         }
         emitSpawn(JSON.stringify(report))
         const alerts = await fetchPnpmAuditAlerts({ workDir: '/repo', repository: 'local' })
-        // fixAvailable string 形态同样剥离 range 前缀（compareSemver 无法解析 ">=x.y.z"，T801 实证）
+        // fixAvailable string 形态同样剥离 range 前缀（compareSemver 无法解析 ">=x.y.z"，实证）
         expect(alerts[0].recommendedVersion).toBe('3.14.1')
     })
 

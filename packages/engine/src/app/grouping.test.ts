@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import nock from 'nock'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { resolveRuntimeConfig } from '../config'
+import { requestAbort, resetProcessControlState } from '../runners/process-control'
 import { DependfixApp } from './index'
 
 // ---------------------------------------------------------------------------
@@ -21,11 +22,12 @@ beforeEach(() => {
 // 验证 app/index.ts 的组级循环语义：组级验证 / 整组回滚 / 拆组兜底 / 验证次数。
 // ---------------------------------------------------------------------------
 
-const { mockRunVerification, mockUpgradeDependency, mockOverrideTransitiveDependency, mockTryLockfileRepair } = vi.hoisted(() => ({
+const { mockRunVerification, mockUpgradeDependency, mockOverrideTransitiveDependency, mockTryLockfileRepair, mockRunTrackedCommand } = vi.hoisted(() => ({
     mockRunVerification: vi.fn(),
     mockUpgradeDependency: vi.fn(),
     mockOverrideTransitiveDependency: vi.fn(),
     mockTryLockfileRepair: vi.fn(),
+    mockRunTrackedCommand: vi.fn(),
 }))
 
 vi.mock('../runners/verification-runner', async (importOriginal) => {
@@ -51,6 +53,15 @@ vi.mock('./helpers', async (importOriginal) => {
     return {
         ...actual,
         tryLockfileRepair: mockTryLockfileRepair,
+    }
+})
+
+// 家族锁步写入会真实调用 pnpm install——替身为「改写 lockfile 的成功安装」
+vi.mock('../runners/process-control', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('../runners/process-control')>()
+    return {
+        ...actual,
+        runTrackedCommand: mockRunTrackedCommand,
     }
 })
 
@@ -146,6 +157,18 @@ describe('DependfixApp group upgrade', () => {
             isMajor: true,
             success: true,
         }))
+        mockRunTrackedCommand.mockReset()
+        mockRunTrackedCommand.mockResolvedValue({
+            started: true,
+            exitCode: 0,
+            signal: null,
+            timedOut: false,
+            aborted: false,
+            errno: null,
+            stdout: '',
+            stderr: '',
+            durationMs: 0,
+        })
     })
 
     afterEach(() => {
@@ -182,6 +205,7 @@ describe('DependfixApp group upgrade', () => {
     it('upgrades a group together with a single group verification (N verifications → G)', async () => {
         nockAlerts([alertJson('a-pkg', 1), alertJson('b-pkg', 2)])
         mockRunVerification
+            .mockImplementationOnce(() => Promise.resolve(verificationResult(true))) // 修复前基线采样（pristine 绿）
             .mockImplementationOnce(() => Promise.resolve(verificationResult(true))) // 组级验证
             .mockImplementationOnce(() => Promise.resolve(verificationResult(true))) // 最终 verifyProject
 
@@ -190,7 +214,7 @@ describe('DependfixApp group upgrade', () => {
         expect(exitCode).toBe(0)
         expect(result.repositories[0].fixed).toBe(2)
         // 一次组级验证 + 一次最终验证，而不是逐包 2 次 + 最终 1 次
-        expect(mockRunVerification).toHaveBeenCalledTimes(2)
+        expect(mockRunVerification).toHaveBeenCalledTimes(3)
         const upgrades = result.actions.filter((a) => a.type === 'dependency-upgrade')
         expect(upgrades).toHaveLength(2)
         expect(upgrades.every((a) => a.success)).toBe(true)
@@ -199,6 +223,7 @@ describe('DependfixApp group upgrade', () => {
     it('rolls back the whole group and retries per-package when group verification fails', async () => {
         nockAlerts([alertJson('a-pkg', 1), alertJson('b-pkg', 2)])
         mockRunVerification
+            .mockImplementationOnce(() => Promise.resolve(verificationResult(true))) // 修复前基线采样（pristine 绿）
             .mockImplementationOnce(() => Promise.resolve(verificationResult(false))) // 组级验证失败
             .mockImplementationOnce(() => Promise.resolve(verificationResult(true))) // 拆组 a-pkg 单独通过
             .mockImplementationOnce(() => Promise.resolve(verificationResult(false))) // 拆组 b-pkg 单独失败
@@ -209,7 +234,7 @@ describe('DependfixApp group upgrade', () => {
         expect(exitCode).toBe(1)
         expect(result.repositories[0].fixed).toBe(1)
         expect(result.repositories[0].failed).toBe(1)
-        expect(mockRunVerification).toHaveBeenCalledTimes(4)
+        expect(mockRunVerification).toHaveBeenCalledTimes(5)
 
         const upgrades = result.actions.filter((a) => a.type === 'dependency-upgrade')
         expect(upgrades).toHaveLength(2)
@@ -220,9 +245,164 @@ describe('DependfixApp group upgrade', () => {
         expect(bPkg?.error).toContain('per-package verification failed')
     })
 
+    it('marks environmental install failures without attributing them to the repo (group path)', async () => {
+        nockAlerts([alertJson('a-pkg', 1), alertJson('b-pkg', 2)])
+        // 安装被信号杀死 / 超时：environmental 标记由依赖升级链透出
+        mockUpgradeDependency.mockImplementation(({ packageName }: { packageName: string }) => ({
+            packageName,
+            fromVersion: '1.0.0',
+            toVersion: '2.0.0',
+            isMajor: false,
+            success: false,
+            error: 'pnpm install failed: timed out',
+            environmental: true,
+        }))
+        mockRunVerification.mockResolvedValue(verificationResult(true))
+
+        const { exitCode, result } = await runFix([alertJson('a-pkg', 1), alertJson('b-pkg', 2)], { g: ['a-pkg', 'b-pkg'] })
+
+        // 不归因：出口码 0、失败计数 0，环境性失败单列可见
+        expect(exitCode).toBe(0)
+        expect(result.summary.environmentalFailures).toBe(1)
+        expect(result.summary.alertsFailed).toBe(0)
+        expect(result.repositories[0].failed).toBe(0)
+        const failed = result.actions.find((action) => action.target === 'a-pkg')
+        expect(failed).toMatchObject({ success: false, environmentalFailure: true })
+        expect(result.errors.some((error) => error.category === 'ENVIRONMENT_ERROR')).toBe(true)
+        // 环境性失败后不再尝试组内后续包
+        expect(mockUpgradeDependency).toHaveBeenCalledTimes(1)
+    })
+
+    it('keeps already-applied upgrades when the group verifies green after an environmental stop', async () => {
+        nockAlerts([alertJson('a-pkg', 1), alertJson('b-pkg', 2)])
+        mockUpgradeDependency
+            .mockImplementationOnce(({ packageName }: { packageName: string }) => ({
+                packageName, fromVersion: '1.0.0', toVersion: '2.0.0', isMajor: false, success: true,
+            }))
+            .mockImplementationOnce(({ packageName }: { packageName: string }) => ({
+                packageName,
+                fromVersion: '1.0.0',
+                toVersion: '2.0.0',
+                isMajor: false,
+                success: false,
+                error: 'pnpm install failed: timed out',
+                environmental: true,
+            }))
+        mockRunVerification
+            .mockResolvedValueOnce(verificationResult(true)) // 修复前基线采样
+            .mockResolvedValueOnce(verificationResult(true)) // 环境性停机前的组级验证（通过 → 保留已应用改动）
+            .mockResolvedValueOnce(verificationResult(true)) // 最终验证
+
+        const { exitCode, result } = await runFix([alertJson('a-pkg', 1), alertJson('b-pkg', 2)], { g: ['a-pkg', 'b-pkg'] })
+
+        expect(exitCode).toBe(0)
+        expect(result.summary.environmentalFailures).toBe(1)
+        expect(result.summary.alertsFailed).toBe(0)
+        expect(result.repositories[0].fixed).toBe(1)
+        expect(result.repositories[0].failed).toBe(0)
+        // 基线 + 组级验证 + 最终验证：停机前仍跑一次组级验证，不把已应用改动留成未验证状态
+        expect(mockRunVerification).toHaveBeenCalledTimes(3)
+    })
+
+    it('rolls back the group and counts verification failure when an environmental stop fails verification', async () => {
+        nockAlerts([alertJson('a-pkg', 1), alertJson('b-pkg', 2)])
+        mockUpgradeDependency
+            .mockImplementationOnce(({ packageName }: { packageName: string }) => ({
+                packageName, fromVersion: '1.0.0', toVersion: '2.0.0', isMajor: false, success: true,
+            }))
+            .mockImplementationOnce(({ packageName }: { packageName: string }) => ({
+                packageName,
+                fromVersion: '1.0.0',
+                toVersion: '2.0.0',
+                isMajor: false,
+                success: false,
+                error: 'pnpm install failed: signal SIGKILL',
+                environmental: true,
+            }))
+        mockRunVerification
+            .mockResolvedValueOnce(verificationResult(true)) // 修复前基线采样
+            .mockResolvedValueOnce(verificationResult(false)) // 停机前的组级验证失败
+            .mockResolvedValueOnce(verificationResult(true)) // 最终验证（整组已回滚）
+
+        const { exitCode, result } = await runFix([alertJson('a-pkg', 1), alertJson('b-pkg', 2)], { g: ['a-pkg', 'b-pkg'] })
+
+        // 已应用动作随整组回滚改判失败（真实验证失败）→ 归因；环境性动作仍不归因
+        expect(result.summary.alertsFailed).toBe(1)
+        expect(result.summary.environmentalFailures).toBe(1)
+        expect(result.repositories[0].failed).toBe(1)
+        expect(exitCode).toBe(1)
+        // 环境已不可用：不再逐包重试（仅组内两次安装尝试）
+        expect(mockUpgradeDependency).toHaveBeenCalledTimes(2)
+        const rolledBack = result.actions.find((action) => action.target === 'a-pkg')
+        expect(rolledBack).toMatchObject({ success: false })
+        expect(rolledBack?.error).toContain('environmental stop; changes rolled back')
+    })
+
+    it('does not attribute aborted installs or spam failed actions when the run is cancelled', async () => {
+        nockAlerts([alertJson('a-pkg', 1), alertJson('b-pkg', 2)])
+        mockRunVerification.mockResolvedValue(verificationResult(true))
+        mockUpgradeDependency.mockImplementationOnce(({ packageName }: { packageName: string }) => {
+            // 取消与安装失败竞争：取消态下的失败不得被当成仓库失败（也不得逐包产出失败动作）
+            requestAbort('execution timeout')
+            return {
+                packageName,
+                fromVersion: '1.0.0',
+                toVersion: '2.0.0',
+                isMajor: false,
+                success: false,
+                error: 'run aborted — install not started',
+            }
+        })
+
+        try {
+            const { result } = await runFix([alertJson('a-pkg', 1), alertJson('b-pkg', 2)], { g: ['a-pkg', 'b-pkg'] })
+
+            expect(mockUpgradeDependency).toHaveBeenCalledTimes(1)
+            expect(result.actions.filter((action) => action.type === 'dependency-upgrade')).toHaveLength(0)
+            expect(result.summary.environmentalFailures).toBe(0)
+            expect(result.summary.alertsFailed).toBe(0)
+        } finally {
+            resetProcessControlState()
+        }
+    })
+
+    it('stops per-package retries when the retry install fails environmentally', async () => {
+        nockAlerts([alertJson('a-pkg', 1), alertJson('b-pkg', 2)])
+        mockUpgradeDependency
+            .mockImplementationOnce(({ packageName }: { packageName: string }) => ({
+                packageName, fromVersion: '1.0.0', toVersion: '2.0.0', isMajor: false, success: true,
+            }))
+            .mockImplementationOnce(({ packageName }: { packageName: string }) => ({
+                packageName, fromVersion: '1.0.0', toVersion: '2.0.0', isMajor: false, success: true,
+            }))
+            .mockImplementationOnce(({ packageName }: { packageName: string }) => ({
+                packageName,
+                fromVersion: '1.0.0',
+                toVersion: '2.0.0',
+                isMajor: false,
+                success: false,
+                error: 'pnpm install failed: signal SIGKILL',
+                environmental: true,
+            }))
+        mockRunVerification
+            .mockResolvedValueOnce(verificationResult(true)) // 修复前基线采样
+            .mockResolvedValueOnce(verificationResult(false)) // 组级验证失败 → 拆组重试
+            .mockResolvedValueOnce(verificationResult(true)) // 最终验证
+
+        const { exitCode, result } = await runFix([alertJson('a-pkg', 1), alertJson('b-pkg', 2)], { g: ['a-pkg', 'b-pkg'] })
+
+        expect(exitCode).toBe(0)
+        expect(result.summary.environmentalFailures).toBe(1)
+        expect(result.summary.alertsFailed).toBe(0)
+        expect(result.repositories[0].failed).toBe(0)
+        // 拆组第一个包即环境性失败 → 第二个包不再重试
+        expect(mockUpgradeDependency).toHaveBeenCalledTimes(3)
+    })
+
     it('keeps per-package verification behavior without grouping config (backward compatible)', async () => {
         nockAlerts([alertJson('a-pkg', 1), alertJson('b-pkg', 2)])
         mockRunVerification
+            .mockImplementationOnce(() => Promise.resolve(verificationResult(true))) // 修复前基线采样（pristine 绿）
             .mockImplementationOnce(() => Promise.resolve(verificationResult(true))) // 组 a-pkg
             .mockImplementationOnce(() => Promise.resolve(verificationResult(true))) // 组 b-pkg
             .mockImplementationOnce(() => Promise.resolve(verificationResult(true))) // 最终 verifyProject
@@ -232,12 +412,13 @@ describe('DependfixApp group upgrade', () => {
         expect(exitCode).toBe(0)
         expect(result.repositories[0].fixed).toBe(2)
         // 无分组配置 → 单包组逐包验证（2 次）+ 最终 1 次
-        expect(mockRunVerification).toHaveBeenCalledTimes(3)
+        expect(mockRunVerification).toHaveBeenCalledTimes(4)
     })
 
     it('isolates group rollback: failing group does not affect successful group', async () => {
         nockAlerts([alertJson('a-pkg', 1), alertJson('b-pkg', 2), alertJson('c-pkg', 3)])
         mockRunVerification
+            .mockImplementationOnce(() => Promise.resolve(verificationResult(true))) // 修复前基线采样（pristine 绿）
             .mockImplementationOnce(() => Promise.resolve(verificationResult(true))) // 组1（a-pkg, b-pkg）通过
             .mockImplementationOnce(() => Promise.resolve(verificationResult(false))) // 组2（c-pkg）失败
             .mockImplementationOnce(() => Promise.resolve(verificationResult(true))) // 拆组 c-pkg 单独通过
@@ -260,7 +441,7 @@ describe('DependfixApp group upgrade', () => {
 
         expect(exitCode).toBe(0)
         expect(result.repositories[0].fixed).toBe(3)
-        expect(mockRunVerification).toHaveBeenCalledTimes(4)
+        expect(mockRunVerification).toHaveBeenCalledTimes(5)
         // 组2 拆组后 c-pkg 单独通过 → 所有包最终都成功
         const upgrades = result.actions.filter((a) => a.type === 'dependency-upgrade')
         expect(upgrades).toHaveLength(3)
@@ -300,6 +481,7 @@ describe('DependfixApp group upgrade', () => {
         nockAlerts([alertJson('a-pkg', 1), alertJson('b-pkg', 2)])
         // 组级验证失败 → 拆组：a-pkg 升级成功（验证通过）、b-pkg 升级本身失败
         mockRunVerification
+            .mockImplementationOnce(() => Promise.resolve(verificationResult(true))) // 修复前基线采样（pristine 绿）
             .mockImplementationOnce(() => Promise.resolve(verificationResult(false))) // 组级验证失败
             .mockImplementationOnce(() => Promise.resolve(verificationResult(true))) // 拆组 a-pkg 验证
             .mockImplementationOnce(() => Promise.resolve(verificationResult(true))) // 最终 verifyProject
@@ -315,7 +497,7 @@ describe('DependfixApp group upgrade', () => {
         expect(exitCode).toBe(1)
         expect(result.repositories[0].fixed).toBe(1)
         expect(result.repositories[0].failed).toBe(1)
-        expect(mockRunVerification).toHaveBeenCalledTimes(3)
+        expect(mockRunVerification).toHaveBeenCalledTimes(4)
 
         const upgrades = result.actions.filter((a) => a.type === 'dependency-upgrade')
         const bPkg = upgrades.find((a) => a.target === 'b-pkg')
@@ -349,6 +531,7 @@ describe('DependfixApp group upgrade', () => {
 
         nockAlerts([viteAlert, fastUriAlert])
         mockRunVerification
+            .mockImplementationOnce(() => Promise.resolve(verificationResult(true))) // 修复前基线采样（pristine 绿）
             .mockImplementationOnce(() => Promise.resolve(verificationResult(true))) // fast-uri 组级验证
             .mockImplementationOnce(() => Promise.resolve(verificationResult(true))) // 最终 verifyProject
 
@@ -360,8 +543,96 @@ describe('DependfixApp group upgrade', () => {
         expect(mockUpgradeDependency.mock.calls[0]?.[0].packageName).toBe('fast-uri')
         const upgrades = result.actions.filter((a) => a.type === 'dependency-upgrade')
         expect(upgrades.map((a) => a.target)).toEqual(['fast-uri'])
-        // 报告保留 vite 告警 + 计入 skipped
+        // 报告保留 vite 告警 + 计入 skipped（根 lockfile / 子目录 manifest 桶）
         expect(result.alerts.some((a) => a.packageName === 'vite' && a.manifestPath === 'pnpm-lock.yaml')).toBe(true)
         expect(result.summary.alertsSkipped).toBe(1)
+        expect(result.summary.alertsSkippedByReason['subdirectory-manifest']).toBe(1)
+        expect(Object.values(result.summary.alertsSkippedByReason).reduce((sum, value) => sum + value, 0)).toBe(1)
+    })
+
+    it('applies family lockstep as one action and re-applies it after group rollback', async () => {
+        // 双成员家族进入同一显式分组：组级验证失败 → 整组回滚 → 逐包重试再次家族写盘
+        writeFileSync(join(workDir, 'package.json'), JSON.stringify({
+            name: 'fixture',
+            scripts: { lint: 'exit 0' },
+            devDependencies: { vitest: '^3.2.4', '@vitest/coverage-v8': '^3.2.4' },
+        }, null, 2))
+        writeFileSync(join(workDir, 'pnpm-lock.yaml'), [
+            `lockfileVersion: '9.0'`,
+            '',
+            '  vitest@3.2.4:',
+            '    resolution: {integrity: sha512-a}',
+            '',
+            `  '@vitest/coverage-v8@3.2.4':`,
+            '    resolution: {integrity: sha512-b}',
+            '',
+        ].join('\n'))
+        const vitestAlert = alertJson('vitest', 1)
+        const coverageAlert = alertJson('@vitest/coverage-v8', 2)
+        const withTarget = (alert: Record<string, unknown>, name: string, target: string) => ({
+            ...alert,
+            security_advisory: {
+                ...(alert.security_advisory as Record<string, unknown>),
+                vulnerabilities: [{
+                    package: { ecosystem: 'npm', name },
+                    severity: 'high',
+                    vulnerable_version_range: `< ${target}`,
+                    first_patched_version: { identifier: target },
+                }],
+            },
+            security_vulnerability: {
+                package: { ecosystem: 'npm', name },
+                severity: 'high',
+                vulnerable_version_range: `< ${target}`,
+                first_patched_version: { identifier: target },
+            },
+        })
+        nockAlerts([withTarget(vitestAlert, 'vitest', '4.0.1'), withTarget(coverageAlert, '@vitest/coverage-v8', '4.6.3')])
+        mockRunTrackedCommand.mockImplementation(async () => {
+            writeFileSync(join(workDir, 'pnpm-lock.yaml'), [
+                `lockfileVersion: '9.0'`,
+                '',
+                '  vitest@4.0.1:',
+                '    resolution: {integrity: sha512-a}',
+                '',
+                `  '@vitest/coverage-v8@4.6.3':`,
+                '    resolution: {integrity: sha512-b}',
+                '',
+            ].join('\n'))
+            return {
+                started: true,
+                exitCode: 0,
+                signal: null,
+                timedOut: false,
+                aborted: false,
+                errno: null,
+                stdout: '',
+                stderr: '',
+                durationMs: 0,
+            }
+        })
+        mockRunVerification
+            .mockImplementationOnce(() => Promise.resolve(verificationResult(true))) // 修复前基线
+            .mockImplementationOnce(() => Promise.resolve(verificationResult(false))) // 组级验证失败
+            .mockResolvedValue(verificationResult(true)) // 逐包重试 + 最终验证
+
+        const { exitCode, result } = await runFix(
+            [withTarget(vitestAlert, 'vitest', '4.0.1'), withTarget(coverageAlert, '@vitest/coverage-v8', '4.6.3')],
+            { fam: ['vitest', '@vitest/coverage-v8'] },
+        )
+
+        expect(exitCode).toBe(0)
+        // 组级失败回滚后，逐包重试再次执行家族写盘（共两次安装）
+        expect(mockRunTrackedCommand).toHaveBeenCalledTimes(2)
+        expect(result.repositories[0].fixed).toBe(1)
+        const upgradeActions = result.actions.filter((action) => action.type === 'dependency-upgrade')
+        expect(upgradeActions).toHaveLength(1)
+        expect(upgradeActions[0]?.success).toBe(true)
+        expect(upgradeActions[0]?.family?.members).toEqual(['vitest', '@vitest/coverage-v8'])
+        const pkg = JSON.parse(readFileSync(join(workDir, 'package.json'), 'utf-8')) as {
+            devDependencies: Record<string, string>
+        }
+        expect(pkg.devDependencies.vitest).toBe('^4.0.1')
+        expect(pkg.devDependencies['@vitest/coverage-v8']).toBe('^4.6.3')
     })
 })

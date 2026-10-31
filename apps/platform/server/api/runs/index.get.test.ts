@@ -40,6 +40,16 @@ const seedRun = async (repositoryId: string, overrides: {
     severityThreshold?: string
     status?: 'pending' | 'running' | 'completed' | 'failed' | 'dispatched' | 'degraded'
     summaryJson?: string | null
+    errorJson?: string | null
+    exitCode?: number | null
+    environmentalFailureCount?: number | null
+    memoryMaxBytes?: number | null
+    peakRssBytes?: number | null
+    oomKilled?: boolean | null
+    resourceJson?: string | null
+    failureCode?: string | null
+    failureStage?: 'source' | 'clone' | 'install' | 'fix' | 'verify' | 'deliver' | 'runtime' | 'cleanup' | 'unknown' | null
+    failureKind?: 'transient' | 'deterministic' | 'unknown' | null
 } = {}) => {
     const ds = await ensureDatabaseInitialized()
     const entity = ds.getRepository(ScanRun).create({
@@ -49,6 +59,16 @@ const seedRun = async (repositoryId: string, overrides: {
         executorKind: 'container',
         status: overrides.status ?? 'completed',
         summaryJson: overrides.summaryJson ?? JSON.stringify({ alertsTotal: 2 }),
+        errorJson: overrides.errorJson ?? null,
+        exitCode: overrides.exitCode ?? null,
+        environmentalFailureCount: overrides.environmentalFailureCount ?? null,
+        memoryMaxBytes: overrides.memoryMaxBytes ?? null,
+        peakRssBytes: overrides.peakRssBytes ?? null,
+        oomKilled: overrides.oomKilled ?? null,
+        resourceJson: overrides.resourceJson ?? null,
+        failureCode: overrides.failureCode ?? null,
+        failureStage: overrides.failureStage ?? null,
+        failureKind: overrides.failureKind ?? null,
     })
     const saved = await ds.getRepository(ScanRun).save(entity)
     // TypeORM save 返回 Entity | Entity[]；单条保存断言为 ScanRun
@@ -92,6 +112,87 @@ describe('GET /api/runs', () => {
             name: 'app',
             status: 'completed',
             summary: { alertsTotal: 2 },
+            // 旧数据 / 未写入 → null（消费方降级；不得伪造成 0 成功）
+            exitCode: null,
+            environmentalFailureCount: null,
+        })
+    })
+
+    it('serializes exitCode and environmentalFailureCount when persisted', async () => {
+        const seeded = await seedRun(repositoryId, {
+            status: 'completed',
+            summaryJson: JSON.stringify({ alertsFound: 3, environmentalFailures: 2 }),
+            exitCode: 1,
+            environmentalFailureCount: 2,
+        })
+        const zero = await seedRun(repositoryId, {
+            status: 'completed',
+            summaryJson: JSON.stringify({ alertsFound: 0, environmentalFailures: 0 }),
+            exitCode: 0,
+            environmentalFailureCount: 0,
+        })
+
+        const res = await call('GET', '/api/runs') as PaginatedRunsResponse
+        expect(res.items.find((r) => r.id === seeded.id)).toMatchObject({
+            exitCode: 1,
+            environmentalFailureCount: 2,
+            summary: { alertsFound: 3, environmentalFailures: 2 },
+        })
+        // 0 必须原样返回，不得被折叠为 null（否则 UI 会误判「结果缺失」）
+        expect(res.items.find((r) => r.id === zero.id)).toMatchObject({
+            exitCode: 0,
+            environmentalFailureCount: 0,
+        })
+    })
+
+    it('serializes resource / OOM columns and parsed resource JSON', async () => {
+        const seeded = await seedRun(repositoryId, {
+            status: 'failed',
+            memoryMaxBytes: 8 * 1024 ** 3,
+            peakRssBytes: 6 * 1024 ** 3,
+            oomKilled: true,
+            resourceJson: JSON.stringify({
+                source: 'cgroup-v2',
+                samples: 7,
+                degradedReason: 'memory.events oom_kill unavailable',
+            }),
+        })
+
+        const falseRun = await seedRun(repositoryId, {
+            status: 'completed',
+            memoryMaxBytes: 8 * 1024 ** 3,
+            peakRssBytes: 2 * 1024 ** 3,
+            oomKilled: false,
+            resourceJson: JSON.stringify({ source: 'cgroup-v2', samples: 2 }),
+        })
+        const partial = await seedRun(repositoryId, {
+            status: 'completed',
+            memoryMaxBytes: 8 * 1024 ** 3,
+            peakRssBytes: 3 * 1024 ** 3,
+            oomKilled: null,
+            resourceJson: JSON.stringify({
+                source: 'cgroup-v2',
+                degradedReason: 'memory.events oom_kill unavailable',
+            }),
+        })
+
+        const res = await call('GET', '/api/runs') as PaginatedRunsResponse
+        expect(res.items.find((r) => r.id === seeded.id)).toMatchObject({
+            memoryMaxBytes: 8 * 1024 ** 3,
+            peakRssBytes: 6 * 1024 ** 3,
+            oomKilled: true,
+            resource: {
+                source: 'cgroup-v2',
+                samples: 7,
+                degradedReason: 'memory.events oom_kill unavailable',
+            },
+        })
+        // false 必须原样返回（不得折叠为 null）；null + 原因 = 可采峰值 + OOM 不可采
+        expect(res.items.find((r) => r.id === falseRun.id)).toMatchObject({ oomKilled: false })
+        expect(res.items.find((r) => r.id === partial.id)).toMatchObject({
+            peakRssBytes: 3 * 1024 ** 3,
+            oomKilled: null,
+            resource: { degradedReason: 'memory.events oom_kill unavailable' },
         })
     })
 
@@ -133,12 +234,12 @@ describe('GET /api/runs', () => {
         expect(seeded).toHaveLength(5)
     })
 
-    it('clamps pageSize to PAGE_SIZE_MAX (200)', async () => {
+    it('clamps pageSize to shared RUNS_PAGE_SIZE_MAX (200)', async () => {
         const res = await call('GET', '/api/runs?pageSize=500') as PaginatedRunsResponse
         expect(res.pageSize).toBe(200)
     })
 
-    it('clamps pageSize to PAGE_SIZE_MAX (silently, no error)', async () => {
+    it('clamps pageSize to shared RUNS_PAGE_SIZE_MAX (silently, no error)', async () => {
         // 上限钳制是静默的：pageSize=300 → 200，page/total 仍正常返回
         const res = await call('GET', '/api/runs?pageSize=300&page=1') as PaginatedRunsResponse
         expect(res.pageSize).toBe(200)
@@ -297,5 +398,101 @@ describe('GET /api/runs', () => {
         // 应包含基线 run（未被过滤掉）
         const ids = res.items.map((r) => r.id as string)
         expect(ids).toContain(seeded.id)
+    })
+
+    it('响应包含失败分类三字段（非失败终态为 null）', async () => {
+        const completed = await seedRun(repositoryId, { status: 'completed' })
+        const failed = await seedRun(repositoryId, {
+            status: 'failed',
+            failureCode: 'VERIFICATION_FAILED',
+            failureStage: 'verify',
+            failureKind: 'deterministic',
+        })
+
+        const res = await call('GET', '/api/runs') as PaginatedRunsResponse
+        const completedItem = res.items.find((r) => r.id === completed.id)
+        expect(completedItem).toMatchObject({ failureCode: null, failureStage: null, failureKind: null })
+        const failedItem = res.items.find((r) => r.id === failed.id)
+        expect(failedItem).toMatchObject({
+            failureCode: 'VERIFICATION_FAILED',
+            failureStage: 'verify',
+            failureKind: 'deterministic',
+        })
+    })
+
+    it('filters by status query (single + multi value)', async () => {
+        const failed = await seedRun(repositoryId, { status: 'failed' })
+        const dispatched = await seedRun(repositoryId, { status: 'dispatched' })
+
+        const single = await call('GET', '/api/runs?status=failed') as PaginatedRunsResponse
+        expect(single.items.every((r) => r.status === 'failed')).toBe(true)
+        expect(single.items.map((r) => r.id)).toContain(failed.id)
+
+        const multi = await call('GET', '/api/runs?status=failed,dispatched') as PaginatedRunsResponse
+        const ids = multi.items.map((r) => r.id)
+        expect(ids).toContain(failed.id)
+        expect(ids).toContain(dispatched.id)
+        expect(multi.items.every((r) => r.status === 'failed' || r.status === 'dispatched')).toBe(true)
+    })
+
+    it('filters by failureStage / failureKind query', async () => {
+        const verifyFailed = await seedRun(repositoryId, {
+            status: 'failed',
+            failureStage: 'verify',
+            failureKind: 'deterministic',
+        })
+        const cloneFailed = await seedRun(repositoryId, {
+            status: 'failed',
+            failureStage: 'clone',
+            failureKind: 'transient',
+        })
+
+        const byStage = await call('GET', '/api/runs?failureStage=verify') as PaginatedRunsResponse
+        const stageIds = byStage.items.map((r) => r.id)
+        expect(stageIds).toContain(verifyFailed.id)
+        expect(stageIds).not.toContain(cloneFailed.id)
+
+        const byKind = await call('GET', '/api/runs?failureKind=transient') as PaginatedRunsResponse
+        const kindIds = byKind.items.map((r) => r.id)
+        expect(kindIds).toContain(cloneFailed.id)
+        expect(kindIds).not.toContain(verifyFailed.id)
+
+        // 维度组合（AND）：clone + transient 仅命中 cloneFailed
+        const combined = await call('GET', '/api/runs?failureStage=clone&failureKind=transient') as PaginatedRunsResponse
+        expect(combined.items.map((r) => r.id)).toEqual([cloneFailed.id])
+    })
+
+    it('多值分类过滤与分页组合正确', async () => {
+        await seedRun(repositoryId, { status: 'failed', failureStage: 'verify', failureKind: 'deterministic' })
+        await seedRun(repositoryId, { status: 'failed', failureStage: 'verify', failureKind: 'deterministic' })
+
+        const first = await call('GET', '/api/runs?failureStage=verify&page=1&pageSize=1') as PaginatedRunsResponse
+        expect(first.items).toHaveLength(1)
+        expect(first.total).toBeGreaterThanOrEqual(2)
+        expect(first.pageSize).toBe(1)
+
+        const second = await call('GET', '/api/runs?failureStage=verify&page=2&pageSize=1') as PaginatedRunsResponse
+        expect(second.items).toHaveLength(1)
+        expect(second.items[0]?.id).not.toBe(first.items[0]?.id)
+    })
+
+    it('throws 400 on invalid status / failureStage / failureKind enum value', async () => {
+        await expect(call('GET', '/api/runs?status=not-a-status')).rejects.toMatchObject({ statusCode: 400 })
+        await expect(call('GET', '/api/runs?failureStage=not-a-stage')).rejects.toMatchObject({ statusCode: 400 })
+        await expect(call('GET', '/api/runs?failureKind=maybe')).rejects.toMatchObject({ statusCode: 400 })
+        // 合法多值组合不应报错
+        await expect(call('GET', '/api/runs?status=failed,dispatched&failureKind=deterministic,unknown')).resolves.toBeTruthy()
+    })
+
+    it('throws 400 on over-long multi-value query (原始串限长)', async () => {
+        const longValue = 'failed,'.repeat(100)
+        await expect(call('GET', `/api/runs?status=${longValue}`)).rejects.toMatchObject({ statusCode: 400 })
+    })
+
+    it('仅分隔符的 status / failureStage 不应用过滤（等价于缺省）', async () => {
+        await seedRun(repositoryId, { status: 'completed' })
+        const baseline = await call('GET', '/api/runs') as PaginatedRunsResponse
+        const sep = await call('GET', '/api/runs?status=,&failureStage=%20&failureKind=,,') as PaginatedRunsResponse
+        expect(sep.total).toBe(baseline.total)
     })
 })

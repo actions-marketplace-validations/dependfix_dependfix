@@ -1,12 +1,28 @@
 import { execSync } from 'node:child_process'
-import { AppError, isValidRepoIdentifier, type SeverityThreshold, type AlertSourceKind } from '@dependfix/core'
+import { AppError, type BaselineRedDelivery, type SeverityThreshold, type AlertSourceKind } from '@dependfix/core'
+import { parseOverrideProtectEntries } from '../github/repo-policy'
 import { resolveRepoList } from '../github/repo-selector'
-import { isValidPnpmVersion } from '../fixers/pnpm'
-import { isValidConcurrency } from '../multirepo/scheduler'
+import { readBaselineRedDelivery, validateRuntimeConfig } from './validation'
 
 export const RUNTIME_MODES = ['report-only', 'fix', 'fix-and-pr', 'cleanup-branches'] as const
 export const SEVERITY_THRESHOLDS = ['critical', 'high', 'medium', 'all'] as const
 export const ALERT_SOURCES: readonly AlertSourceKind[] = ['github-dependabot', 'pnpm-audit']
+
+/**
+ * GitHub App 认证配置。
+ * 通过 GitHub App installation token 认证时使用，用于生成真实 bot 身份的 commit author。
+ * 仅在 fix / fix-and-pr 模式下创建 commit 时生效；PAT 路径保持不变。
+ */
+export interface GitHubAppConfig {
+    /** GitHub App ID */
+    appId: string
+    /** PEM 格式私钥 */
+    privateKey: string
+    /** Installation ID */
+    installationId: string
+    /** Bot 用户名（用于 commit author 动态生成；缺省 fallback `dependfix[bot]`） */
+    botLogin?: string
+}
 
 /**
  * 环境变量统一前缀（v0.2 起替代旧项目名遗留的 `AUTO_FIX_GITHUB_SECURITY_`）。
@@ -25,6 +41,8 @@ export function readEnv(env: NodeJS.ProcessEnv, name: string): string | undefine
 
 export type RuntimeMode = typeof RUNTIME_MODES[number]
 export type { SeverityThreshold, AlertSourceKind }
+
+export type RollbackGranularity = 'unit' | 'repo'
 
 export interface RuntimeConfig {
     mode: RuntimeMode
@@ -56,6 +74,12 @@ export interface RuntimeConfig {
      * 排除含任一指定 topic 的仓库。仅作用于发现结果（显式列表无 topics 元数据）。
      */
     repoTopicsExclude?: string[]
+    /**
+     * overrides 保护名单（`--override-protect` / `DEPENDFIX_OVERRIDE_PROTECT`）：
+     * 仓库 glob（`owner/*` / `owner/pkg-*`；全局兜底需写两段通配，因单星号不跨斜杠）→ 不得自动写入 override 的包名列表。
+     * 命中时跳过该包的 override 写入并记 `OVERRIDE_PROTECTED` 审计（防历史上被人工移除的破坏性 override 复发）。
+     */
+    overrideProtect?: Record<string, string[]>
     dryRun: boolean
     createPullRequest: boolean
     /** 修复完成后是否在本地当前分支直接提交（不推送、不创建 PR） */
@@ -65,6 +89,11 @@ export interface RuntimeConfig {
     /** fix-and-pr 模式下结束后是否自动删除已合并/已关闭的 dependfix 分支（非交互） */
     cleanupBranchesAuto: boolean
     githubToken: string
+    /**
+     * GitHub App 认证配置（用于 commit author 真实 bot 身份）。
+     * 仅 fix-and-pr / fix 模式下创建 commit 时使用；PAT 路径保持不变。
+     */
+    githubApp?: GitHubAppConfig
     /**
      * 告警数据源。默认 `github-dependabot`（GitHub Dependabot alerts API）；
      * `pnpm-audit` 为本地无 token 回退（`pnpm audit --json`），repository 解析
@@ -94,10 +123,60 @@ export interface RuntimeConfig {
      *
      * 开启后仅对「根 package.json 直接依赖（workspace 成员独占声明维持人工）
      * + lockfile 单版本」的跨线告警自动升级，升级后复核脆弱实例消除、
-     * 强制完整验证（install + lint + build），失败自动回滚；
+     * 强制完整验证（install + lint + build + typecheck + test），失败自动回滚；
      * 间接依赖 / 多版本共存跨线告警维持人工处理（skipped + warn）。
      */
     allowMajorUpgrade: boolean
+    /**
+     * 验证失败回滚粒度：`unit`（默认）回退最近一个已通过 probe 的变更单元并重验一次；
+     * `repo` 保持既有整仓 `git reset --hard` 逃生语义。
+     */
+    rollbackGranularity?: RollbackGranularity
+    /**
+     * 把目标仓库 CI 独有的 `pnpm/npm/yarn run` 脚本追加到验证链（`--mirror-ci-scripts` /
+     * `DEPENDFIX_MIRROR_CI_SCRIPTS`，默认 `false`）。
+     *
+     * 开启后在默认链**之后**执行（≤3 条、首失败即停），与默认链共用同一超时 / 取消面，
+     * 并同样纳入修复前基线采样（基线已红 → `preExisting`，不回滚、不改 exit code）。
+     * `docker` / `gh` / 任意 shell 与非脚本片段只记 `mirrorSkipped`，不执行。
+     * 显式自定义链（`--commands` / Action `commands` / 平台 `verifyCommands`）整链替换默认链，
+     * **不与 mirror 叠加**。
+     */
+    mirrorCiScripts?: boolean
+    /**
+     * 忽略同告警尝试上限，强制再试一次（`--retry-failed` / `DEPENDFIX_RETRY_FAILED`，默认 `false`）。
+     *
+     * 仅 fix-and-pr 生效：同一告警 / 目标版本 / 修复策略连续两次关闭后，第 3 次起默认跳过
+     * （`alertsSkippedByReason['repeated-failure']`）；开启后仍执行并在报告标注「人工强制」。
+     * 尝试计数载体为 PR 正文 HTML 注释，计数口径见
+     * [pr-delivery-closure.md §6](../../../../docs/design/governance/pr-delivery-closure.md)。
+     */
+    retryFailed?: boolean
+    /**
+     * 基线红（修复后安装仍既有失败）时的交付降级档位（`DEPENDFIX_ON_BASELINE_RED`，默认 `skip`）：
+     * `skip` 回滚并留痕 / `issue` 按失败指纹开 issue / `draft` 不回滚、创建**草稿** PR（仅 fix-and-pr；
+     * 平台只记录 summary）。口径见 [§16](../../../../docs/design/governance/pr-delivery-closure.md)。
+     */
+    onBaselineRed?: BaselineRedDelivery
+    /** PR 创建后等待 check 终态（`--wait-pr-checks` / `DEPENDFIX_WAIT_PR_CHECKS`，默认 false；仅 fix-and-pr，口径见 [§8](../../../../docs/design/governance/pr-delivery-closure.md)） */
+    waitPrChecks?: boolean
+    /** check 失败且归因 self_caused 时关闭 PR 并删分支（`--close-failed-pr`，默认 false；需同时等待，其余归因只评论） */
+    closeFailedPr?: boolean
+    /** 单个 PR 的 check 等待上限（毫秒；默认 900000，60000-1800000） */
+    prCheckTimeoutMs?: number
+    /** 运行内 check 等待总预算（毫秒；默认 1200000，60000-1800000，且 ≤ 剩余 job 预算 70%） */
+    prCheckRunBudgetMs?: number
+    /** job 总预算基线（毫秒；`DEPENDFIX_JOB_BUDGET_MS`）。缺省仅在 `GITHUB_ACTIONS=true` 按 25 分钟套用 */
+    jobBudgetMs?: number
+    /** 运行截止时间（epoch ms；平台计算、引擎消费）：预算不足时停止启动新工作并写 `BUDGET_EXHAUSTED` 审计。 */
+    deadlineAt?: number
+    /** 执行宿主的构建版本回执（平台注入；缺省回退引擎包版本，最终 `unknown`；与 `/api/health` 同源）。 */
+    buildVersion?: string
+    /**
+     * 执行宿主的构建 commit（平台容器注入）。只有宿主构建期能提供；
+     * 本地执行场景固定回退 `unknown`，不参与任何判定。
+     */
+    buildCommit?: string
     /**
      * Dependabot alerts 专用 token（可选）。
      * 提供时仅用于拉取 Dependabot alerts（GITHUB_TOKEN 无法读取该 API，
@@ -199,6 +278,8 @@ export interface CliConfigOverrides {
     repoExclude?: string[]
     /** 发现结果 topic 黑名单（排除含任一指定 topic 的仓库） */
     repoTopicsExclude?: string[]
+    /** overrides 保护名单（仓库 glob → 包名列表；命中则跳过 override 写入） */
+    overrideProtect?: Record<string, string[]>
     dryRun?: boolean
     createPullRequest?: boolean
     /** 修复完成后是否在本地当前分支直接提交 */
@@ -219,6 +300,24 @@ export interface CliConfigOverrides {
      * 无 env 通道；Action 不支持）。详见 RuntimeConfig.allowMajorUpgrade。
      */
     allowMajorUpgrade?: boolean
+    /** 验证失败回滚粒度（unit / repo；默认 unit） */
+    rollbackGranularity?: RollbackGranularity
+    /** 把目标仓库 CI 独有的包管理器脚本追加到验证链（`--mirror-ci-scripts`；默认关闭） */
+    mirrorCiScripts?: boolean
+    /** 忽略同告警尝试上限并强制再试（`--retry-failed`；默认关闭，仅 fix-and-pr 生效） */
+    retryFailed?: boolean
+    /** 基线红的交付降级档位（`DEPENDFIX_ON_BASELINE_RED`；默认 `skip`，仅 fix-and-pr 生效） */
+    onBaselineRed?: BaselineRedDelivery
+    /** 等待本次 PR 的 check 终态（`--wait-pr-checks`；默认关闭，仅 fix-and-pr 生效） */
+    waitPrChecks?: boolean
+    /** check 失败且归因 self_caused 时关闭 PR（`--close-failed-pr`；默认关闭，需同时等待） */
+    closeFailedPr?: boolean
+    /** 单 PR check 等待上限（毫秒） */
+    prCheckTimeoutMs?: number
+    /** 运行级 check 等待总预算（毫秒） */
+    prCheckRunBudgetMs?: number
+    /** job 总预算基线（毫秒；缺省按 Actions 25 分钟兜底） */
+    jobBudgetMs?: number
     /** Dependabot alerts 专用 token（可选，最小权限；缺省回退 githubToken） */
     alertsToken?: string
     maxAlertsPerRepository?: number
@@ -253,13 +352,18 @@ export interface CliConfigOverrides {
     aiTrigger?: AiTriggerKind
     /** 是否输出详细日志 */
     verbose?: boolean
-    /** 自定义验证命令（覆盖默认的 `pnpm install --frozen-lockfile` / `pnpm lint` / `pnpm build`） */
+    /** 自定义验证命令（覆盖默认的 `pnpm install --frozen-lockfile` / `pnpm lint` / `pnpm build` / `pnpm typecheck` / `pnpm test`） */
     commands?: string[]
     /**
      * 历史查询（仅 CLI `--history`）：读取归档索引列出仓库历史运行摘要，
      * 不进入运行配置（resolveRuntimeConfig 不消费），由 CLI 层直接处理。
      */
     history?: string
+    /**
+     * GitHub App 认证配置（用于 commit author 真实 bot 身份）。
+     * 仅 fix / fix-and-pr 模式下创建 commit 时使用；PAT 路径保持不变。
+     */
+    githubApp?: GitHubAppConfig
 }
 
 export interface ResolveRuntimeConfigOptions {
@@ -276,6 +380,14 @@ export const DEFAULT_RUNTIME_CONFIG: Omit<RuntimeConfig, 'githubToken' | 'reposi
     codeScanningEnabled: false,
     codeQualityEnabled: false,
     allowMajorUpgrade: false,
+    rollbackGranularity: 'unit',
+    mirrorCiScripts: false,
+    retryFailed: false,
+    onBaselineRed: 'skip',
+    waitPrChecks: false,
+    closeFailedPr: false,
+    prCheckTimeoutMs: 900_000,
+    prCheckRunBudgetMs: 1_200_000,
     maxAlertsPerRepository: 20,
     maxConcurrency: 1,
     maxRetries: 3,
@@ -428,6 +540,24 @@ function normalizeUpgradeGroups(value: string | undefined): Record<string, strin
     return Object.keys(result).length > 0 ? result : undefined
 }
 
+/**
+ * 解析 `DEPENDFIX_OVERRIDE_PROTECT`：`repo-glob:pkg1,pkg2;repo-glob2:pkg3`。
+ *
+ * 语法与 `normalizeUpgradeGroups` 一致（`;` 分隔条目 / `:` 分隔仓库 glob 与包列表 / `,` 分隔包名）；
+ * 解析逻辑复用 `parseOverrideProtectEntries`（与 CLI 同源），非法条目 fail-fast。
+ */
+function normalizeOverrideProtect(value: string | undefined): Record<string, string[]> | undefined {
+    if (value === undefined || value.trim() === '') {
+        return undefined
+    }
+    const parsed = parseOverrideProtectEntries(
+        value,
+        (message) => new AppError('CONFIG_VALIDATION_ERROR', message),
+        `${ENV_PREFIX}OVERRIDE_PROTECT`,
+    )
+    return Object.keys(parsed).length > 0 ? parsed : undefined
+}
+
 /** 原型链风险键名过滤 */
 function isSafeUpgradeGroupName(name: string): boolean {
     return name !== '__proto__' && name !== 'constructor' && name !== 'prototype'
@@ -457,6 +587,19 @@ function readSeverityThreshold(value: string | undefined, fieldName: string): Se
     return value
 }
 
+const ROLLBACK_GRANULARITIES: readonly RollbackGranularity[] = ['unit', 'repo']
+
+function readRollbackGranularity(value: string | undefined, fieldName: string): RollbackGranularity | undefined {
+    if (value === undefined || value.trim() === '') {
+        return undefined
+    }
+    const normalized = value.trim().toLowerCase()
+    if (!ROLLBACK_GRANULARITIES.includes(normalized as RollbackGranularity)) {
+        throw new AppError('CONFIG_VALIDATION_ERROR', `${fieldName} must be one of: ${ROLLBACK_GRANULARITIES.join(', ')}`)
+    }
+    return normalized as RollbackGranularity
+}
+
 function readAlertSource(value: string | undefined, fieldName: string): AlertSourceKind | undefined {
     if (value === undefined || value.trim() === '') {
         return undefined
@@ -479,6 +622,7 @@ export function readEnvConfig(env: NodeJS.ProcessEnv = process.env): CliConfigOv
         repoInclude: normalizeList(readEnv(env, 'REPO_INCLUDE')),
         repoExclude: normalizeList(readEnv(env, 'REPO_EXCLUDE')),
         repoTopicsExclude: normalizeList(readEnv(env, 'REPO_TOPICS_EXCLUDE')),
+        overrideProtect: normalizeOverrideProtect(readEnv(env, 'OVERRIDE_PROTECT')),
         dryRun: normalizeBoolean(readEnv(env, 'DRY_RUN'), `${ENV_PREFIX}DRY_RUN`),
         createPullRequest: normalizeBoolean(readEnv(env, 'CREATE_PR'), `${ENV_PREFIX}CREATE_PR`),
         commit: normalizeBoolean(readEnv(env, 'COMMIT'), `${ENV_PREFIX}COMMIT`),
@@ -489,6 +633,15 @@ export function readEnvConfig(env: NodeJS.ProcessEnv = process.env): CliConfigOv
         alertSource: readAlertSource(readEnv(env, 'ALERTS_SOURCE'), `${ENV_PREFIX}ALERTS_SOURCE`),
         codeScanningEnabled: normalizeBoolean(readEnv(env, 'CODE_SCANNING'), `${ENV_PREFIX}CODE_SCANNING`),
         codeQualityEnabled: normalizeBoolean(readEnv(env, 'CODE_QUALITY'), `${ENV_PREFIX}CODE_QUALITY`),
+        rollbackGranularity: readRollbackGranularity(readEnv(env, 'ROLLBACK_GRANULARITY'), `${ENV_PREFIX}ROLLBACK_GRANULARITY`),
+        mirrorCiScripts: normalizeBoolean(readEnv(env, 'MIRROR_CI_SCRIPTS'), `${ENV_PREFIX}MIRROR_CI_SCRIPTS`),
+        retryFailed: normalizeBoolean(readEnv(env, 'RETRY_FAILED'), `${ENV_PREFIX}RETRY_FAILED`),
+        onBaselineRed: readBaselineRedDelivery(readEnv(env, 'ON_BASELINE_RED'), `${ENV_PREFIX}ON_BASELINE_RED`),
+        waitPrChecks: normalizeBoolean(readEnv(env, 'WAIT_PR_CHECKS'), `${ENV_PREFIX}WAIT_PR_CHECKS`),
+        closeFailedPr: normalizeBoolean(readEnv(env, 'CLOSE_FAILED_PR'), `${ENV_PREFIX}CLOSE_FAILED_PR`),
+        prCheckTimeoutMs: normalizeInteger(readEnv(env, 'PR_CHECK_TIMEOUT_MS'), `${ENV_PREFIX}PR_CHECK_TIMEOUT_MS`),
+        prCheckRunBudgetMs: normalizeInteger(readEnv(env, 'PR_CHECK_RUN_BUDGET_MS'), `${ENV_PREFIX}PR_CHECK_RUN_BUDGET_MS`),
+        jobBudgetMs: normalizeInteger(readEnv(env, 'JOB_BUDGET_MS'), `${ENV_PREFIX}JOB_BUDGET_MS`),
         maxAlertsPerRepository: normalizeInteger(readEnv(env, 'MAX_ALERTS_PER_REPOSITORY'), `${ENV_PREFIX}MAX_ALERTS_PER_REPOSITORY`),
         maxConcurrency: normalizeInteger(readEnv(env, 'MAX_CONCURRENCY'), `${ENV_PREFIX}MAX_CONCURRENCY`),
         maxRetries: normalizeNonNegativeInteger(readEnv(env, 'MAX_RETRIES'), `${ENV_PREFIX}MAX_RETRIES`),
@@ -503,6 +656,7 @@ export function readEnvConfig(env: NodeJS.ProcessEnv = process.env): CliConfigOv
         aiApiUrl: readEnv(env, 'AI_API_URL')?.trim() || undefined,
         aiApiKey: readEnv(env, 'AI_API_KEY')?.trim() || undefined,
         aiTrigger: readAiTrigger(readEnv(env, 'AI_TRIGGER'), `${ENV_PREFIX}AI_TRIGGER`),
+        githubApp: readGitHubAppConfig(readEnv(env, 'GITHUB_APP_CONFIG')),
     }
 }
 
@@ -526,6 +680,33 @@ function readAiTrigger(value: string | undefined, name: string): AiTriggerKind |
         return normalized
     }
     throw new AppError('CONFIG_PARSE_ERROR', `Invalid ${name} value: "${value}". Expected "failure", "major" or "both".`)
+}
+
+interface ParsedGitHubAppConfig {
+    appId?: unknown
+    privateKey?: unknown
+    installationId?: unknown
+    botLogin?: unknown
+}
+
+function readGitHubAppConfig(value: string | undefined): GitHubAppConfig | undefined {
+    if (value === undefined || value.trim() === '') {
+        return undefined
+    }
+    try {
+        const parsed = JSON.parse(value.trim()) as ParsedGitHubAppConfig
+        if (!parsed.appId || !parsed.privateKey || !parsed.installationId) {
+            throw new Error('Missing required fields: appId, privateKey, installationId')
+        }
+        return {
+            appId: String(parsed.appId),
+            privateKey: String(parsed.privateKey),
+            installationId: String(parsed.installationId),
+            botLogin: parsed.botLogin ? String(parsed.botLogin) : undefined,
+        }
+    } catch {
+        throw new AppError('CONFIG_PARSE_ERROR', 'Invalid GITHUB_APP_CONFIG: expected JSON with appId, privateKey, installationId, optional botLogin')
+    }
 }
 
 function resolveDryRun(mode: RuntimeMode, cliOverrides: CliConfigOverrides, envConfig: CliConfigOverrides): boolean {
@@ -588,171 +769,6 @@ function resolveCleanupBranchesAuto(cliOverrides: CliConfigOverrides, envConfig:
     return false
 }
 
-function validateRuntimeConfig(config: RuntimeConfig): RuntimeConfig {
-    const isAuditSource = config.alertSource === 'pnpm-audit'
-
-    // pnpm-audit 模式不要求 GitHub token（本地回退的核心场景）
-    if (!isAuditSource && !config.githubToken) {
-        throw new AppError(
-            'CONFIG_VALIDATION_ERROR',
-            'Missing GitHub token. Provide GITHUB_TOKEN or DEPENDFIX_GITHUB_TOKEN.',
-        )
-    }
-
-    // owner 发现需要 GitHub API，pnpm-audit 本地场景无法发现
-    if (isAuditSource && config.owner && config.owner.length > 0) {
-        throw new AppError(
-            'CONFIG_VALIDATION_ERROR',
-            '--owner / DEPENDFIX_OWNER requires the github-dependabot alert source (owner discovery uses the GitHub API).',
-        )
-    }
-
-    // cleanup-branches 模式不做 owner 发现（分支清理需明确目标仓库）
-    if (config.mode === 'cleanup-branches' && config.owner && config.owner.length > 0) {
-        throw new AppError(
-            'CONFIG_VALIDATION_ERROR',
-            '--owner / DEPENDFIX_OWNER is not supported in cleanup-branches mode (branch cleanup requires explicit target repositories).',
-        )
-    }
-
-    // cleanup-branches 模式串行执行（不走并发管线）；maxConcurrency>1 属无效配置，fail-fast
-    if (config.mode === 'cleanup-branches' && config.maxConcurrency > 1) {
-        throw new AppError(
-            'CONFIG_VALIDATION_ERROR',
-            'maxConcurrency > 1 is not supported in cleanup-branches mode (branch cleanup runs sequentially).',
-        )
-    }
-
-    if (config.repositories.length === 0 && !(config.owner && config.owner.length > 0)) {
-        if (isAuditSource) {
-            // pnpm-audit 模式允许无 --repo：repository 由 app 层解析（git remote → local 兜底）
-        } else {
-            throw new AppError(
-                'CONFIG_VALIDATION_ERROR',
-                'Missing target repositories. Provide --repo, --repository, --repos-file, --owner or DEPENDFIX_REPOSITORIES / DEPENDFIX_OWNER.',
-            )
-        }
-    }
-
-    for (const repo of config.repositories) {
-        if (!isValidRepoIdentifier(repo)) {
-            throw new AppError('CONFIG_VALIDATION_ERROR', `Invalid repository identifier: "${repo}". Expected format: owner/repo`)
-        }
-    }
-
-    // pnpm-audit 只扫当前目录一个 lockfile，无法对应多个仓库
-    if (isAuditSource && config.repositories.length > 1) {
-        throw new AppError(
-            'CONFIG_VALIDATION_ERROR',
-            'pnpm-audit alert source supports at most one repository (it scans the current workspace lockfile).',
-        )
-    }
-
-    // Code Scanning 是 GitHub API 并行源，pnpm-audit 本地场景无法拉取
-    if (isAuditSource && config.codeScanningEnabled) {
-        throw new AppError(
-            'CONFIG_VALIDATION_ERROR',
-            'code-scanning requires the github-dependabot alert source (Code Scanning alerts are fetched from the GitHub API).',
-        )
-    }
-
-    // Code Quality 与 Code Scanning 同源：pnpm-audit 本地场景无对应 GitHub 仓库
-    if (isAuditSource && config.codeQualityEnabled) {
-        throw new AppError(
-            'CONFIG_VALIDATION_ERROR',
-            'code-quality requires the github-dependabot alert source (Code Quality findings are fetched from the GitHub API).',
-        )
-    }
-
-    // PR 必须 GitHub，audit 数据无对应仓库
-    if (isAuditSource && config.mode === 'fix-and-pr') {
-        throw new AppError(
-            'CONFIG_VALIDATION_ERROR',
-            'fix-and-pr mode requires the github-dependabot alert source. Use pnpm-audit with report-only/fix mode instead.',
-        )
-    }
-
-    // 分支清理完全依赖 GitHub API，与 audit 数据源语义无关；
-    // 不校验则无 remote 目录 + audit 模式会 exit 0 静默空跑（同构缺陷）
-    if (isAuditSource && config.mode === 'cleanup-branches') {
-        throw new AppError(
-            'CONFIG_VALIDATION_ERROR',
-            'cleanup-branches mode requires the github-dependabot alert source (branch cleanup needs GitHub API).',
-        )
-    }
-
-    if (config.mode === 'report-only' && config.createPullRequest) {
-        throw new AppError('CONFIG_VALIDATION_ERROR', 'createPullRequest cannot be enabled when mode is report-only.')
-    }
-
-    if (config.dryRun && config.createPullRequest) {
-        throw new AppError('CONFIG_VALIDATION_ERROR', 'createPullRequest cannot be enabled while dryRun is true.')
-    }
-
-    if (config.commit && config.mode !== 'fix') {
-        throw new AppError('CONFIG_VALIDATION_ERROR', 'commit is only supported in fix mode.')
-    }
-
-    if (config.commit && config.dryRun) {
-        throw new AppError('CONFIG_VALIDATION_ERROR', 'commit cannot be enabled while dryRun is true.')
-    }
-
-    if (config.commit && config.createPullRequest) {
-        throw new AppError('CONFIG_VALIDATION_ERROR', 'commit cannot be enabled together with createPullRequest. Use fix-and-pr mode instead.')
-    }
-
-    // 工具链 pnpm 版本格式校验（用户显式输入 fail-fast；格式非法拒绝，防命令注入）
-    if (config.toolchainPnpmVersion !== undefined && !isValidPnpmVersion(config.toolchainPnpmVersion)) {
-        throw new AppError(
-            'CONFIG_VALIDATION_ERROR',
-            `Invalid toolchainPnpmVersion: "${config.toolchainPnpmVersion}". Expected semver like 10.5.2 (optionally +sha512.<hash>).`,
-        )
-    }
-
-    // 多仓库并发窗口：1-16；超过上限 fail-fast，避免无意打爆 GitHub API
-    if (!isValidConcurrency(config.maxConcurrency)) {
-        throw new AppError(
-            'CONFIG_VALIDATION_ERROR',
-            `maxConcurrency must be between 1 and 16 (got ${config.maxConcurrency}).`,
-        )
-    }
-
-    // fix / fix-and-pr 共享单一 workDir（package.json + pnpm-lock.yaml + node_modules），
-    // 并发写存在快照覆盖 / 互踩回滚 / install 竞争，仅 report-only 允许并发
-    if (config.maxConcurrency > 1 && (config.mode === 'fix' || config.mode === 'fix-and-pr')) {
-        throw new AppError(
-            'CONFIG_VALIDATION_ERROR',
-            'maxConcurrency > 1 is only supported in report-only mode (fix / fix-and-pr share a single workDir — parallel writes are unsafe).',
-        )
-    }
-
-    // 限流重试次数：0-10；超过 10 次重试属异常配置
-    if (!Number.isInteger(config.maxRetries) || config.maxRetries < 0 || config.maxRetries > 10) {
-        throw new AppError(
-            'CONFIG_VALIDATION_ERROR',
-            `maxRetries must be between 0 and 10 (got ${config.maxRetries}).`,
-        )
-    }
-
-    // 退避等待上限：100ms-120s；过低会频繁重试打爆 API，过高会长时间空转
-    if (!Number.isInteger(config.maxBackoffMs) || config.maxBackoffMs < 100 || config.maxBackoffMs > 120_000) {
-        throw new AppError(
-            'CONFIG_VALIDATION_ERROR',
-            `maxBackoffMs must be between 100 and 120000 (got ${config.maxBackoffMs}).`,
-        )
-    }
-
-    // AI 研判：开启时必须提供 apiKey（防静默不生效 / 意外产生费用）；dry-run 不触发
-    if (config.ai?.enabled && !config.ai.apiKey) {
-        throw new AppError(
-            'CONFIG_VALIDATION_ERROR',
-            'AI 研判已开启但缺少 API Key。请设置 DEPENDFIX_AI_API_KEY 或 --ai-api-key（OpenAI 兼容端点 / Anthropic）。',
-        )
-    }
-
-    return config
-}
-
 export function resolveRuntimeConfig(options: ResolveRuntimeConfigOptions = {}): RuntimeConfig {
     const envConfig = readEnvConfig(options.env)
     const cliOverrides = options.cliOverrides ?? {}
@@ -792,14 +808,25 @@ export function resolveRuntimeConfig(options: ResolveRuntimeConfigOptions = {}):
         codeScanningEnabled: cliOverrides.codeScanningEnabled ?? envConfig.codeScanningEnabled ?? DEFAULT_RUNTIME_CONFIG.codeScanningEnabled,
         codeQualityEnabled: cliOverrides.codeQualityEnabled ?? envConfig.codeQualityEnabled ?? DEFAULT_RUNTIME_CONFIG.codeQualityEnabled,
         allowMajorUpgrade: cliOverrides.allowMajorUpgrade ?? DEFAULT_RUNTIME_CONFIG.allowMajorUpgrade,
+        rollbackGranularity: cliOverrides.rollbackGranularity ?? envConfig.rollbackGranularity ?? DEFAULT_RUNTIME_CONFIG.rollbackGranularity,
+        mirrorCiScripts: cliOverrides.mirrorCiScripts ?? envConfig.mirrorCiScripts ?? DEFAULT_RUNTIME_CONFIG.mirrorCiScripts,
+        retryFailed: cliOverrides.retryFailed ?? envConfig.retryFailed ?? DEFAULT_RUNTIME_CONFIG.retryFailed,
+        onBaselineRed: cliOverrides.onBaselineRed ?? envConfig.onBaselineRed ?? DEFAULT_RUNTIME_CONFIG.onBaselineRed,
+        waitPrChecks: cliOverrides.waitPrChecks ?? envConfig.waitPrChecks ?? DEFAULT_RUNTIME_CONFIG.waitPrChecks,
+        closeFailedPr: cliOverrides.closeFailedPr ?? envConfig.closeFailedPr ?? DEFAULT_RUNTIME_CONFIG.closeFailedPr,
+        prCheckTimeoutMs: cliOverrides.prCheckTimeoutMs ?? envConfig.prCheckTimeoutMs ?? DEFAULT_RUNTIME_CONFIG.prCheckTimeoutMs,
+        prCheckRunBudgetMs: cliOverrides.prCheckRunBudgetMs ?? envConfig.prCheckRunBudgetMs ?? DEFAULT_RUNTIME_CONFIG.prCheckRunBudgetMs,
+        jobBudgetMs: cliOverrides.jobBudgetMs ?? envConfig.jobBudgetMs,
         maxAlertsPerRepository: cliOverrides.maxAlertsPerRepository ?? envConfig.maxAlertsPerRepository ?? DEFAULT_RUNTIME_CONFIG.maxAlertsPerRepository,
         maxConcurrency: cliOverrides.maxConcurrency ?? envConfig.maxConcurrency ?? DEFAULT_RUNTIME_CONFIG.maxConcurrency,
         maxRetries: cliOverrides.maxRetries ?? envConfig.maxRetries ?? DEFAULT_RUNTIME_CONFIG.maxRetries,
         maxBackoffMs: cliOverrides.maxBackoffMs ?? envConfig.maxBackoffMs ?? DEFAULT_RUNTIME_CONFIG.maxBackoffMs,
         maxRepos: cliOverrides.maxRepos ?? envConfig.maxRepos ?? DEFAULT_RUNTIME_CONFIG.maxRepos,
         upgradeGroups: cliOverrides.upgradeGroups ?? envConfig.upgradeGroups,
+        overrideProtect: cliOverrides.overrideProtect ?? envConfig.overrideProtect,
         toolchainPnpmVersion: cliOverrides.toolchainPnpmVersion ?? envConfig.toolchainPnpmVersion,
         ai: resolveAiOptions(cliOverrides, envConfig),
+        githubApp: cliOverrides.githubApp ?? envConfig.githubApp,
     }
 
     return validateRuntimeConfig(config)

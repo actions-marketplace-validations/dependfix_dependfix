@@ -20,6 +20,7 @@ const call = (method: string, url: string, params: Record<string, string> = {}, 
 describe('GET /api/batch-runs/[id]', () => {
     let batchRunId: string
     let repositoryId: string
+    const completedAt = new Date('2026-09-04T04:00:00Z')
 
     beforeAll(async () => {
         setupMemoryDatabase()
@@ -52,6 +53,7 @@ describe('GET /api/batch-runs/[id]', () => {
             severityThreshold: 'high',
             executorKind: 'container',
             status: 'completed',
+            finishedAt: completedAt,
         }))
     })
 
@@ -77,7 +79,8 @@ describe('GET /api/batch-runs/[id]', () => {
         const persisted = await ds.getRepository(BatchRun).findOne({ where: { id: batchRunId } })
         expect(persisted?.status).toBe('completed')
         expect(persisted?.finishedCount).toBe(1)
-        expect(persisted?.finishedAt).toBeTruthy()
+        // finishedAt = max(子项 finishedAt)，而非聚合触发时刻
+        expect(persisted?.finishedAt?.toISOString()).toBe(completedAt.toISOString())
     })
 
     it('returns 404 for unknown batch run', async () => {
@@ -115,6 +118,29 @@ describe('GET /api/batch-runs/[id]', () => {
         const persisted = await ds.getRepository(BatchRun).findOne({ where: { id: emptyBatch.id } })
         expect(persisted?.status).toBe('completed')
         expect(persisted?.finishedCount).toBe(0)
+        expect(persisted?.finishedAt).toBeNull()
+    })
+
+    /**
+     * 零子项 + running（终态未定）：不得在详情通道按 completed 收敛——否则孤儿被永久固化，
+     * 周期对账只扫 running 将永远无法纠正。
+     */
+    it('keeps running status for zero-child running batch (undecided, no write-back)', async () => {
+        const ds = await ensureDatabaseInitialized()
+        const organizationId = await resolveOrganizationId(ds)
+        const runningEmpty = await ds.getRepository(BatchRun).save(ds.getRepository(BatchRun).create({
+            organizationId,
+            source: 'manual',
+            mode: 'fix',
+            severityThreshold: 'high',
+            repositoryCount: 5,
+            status: 'running',
+        }))
+        const detail = await call('GET', `/api/batch-runs/${runningEmpty.id}`, { id: runningEmpty.id }) as Record<string, unknown>
+        expect(detail.status).toBe('running')
+
+        const persisted = await ds.getRepository(BatchRun).findOne({ where: { id: runningEmpty.id } })
+        expect(persisted?.status).toBe('running')
         expect(persisted?.finishedAt).toBeNull()
     })
 
@@ -194,6 +220,98 @@ describe('GET /api/batch-runs/[id]', () => {
         expect(persisted?.status).toBe('running')
         expect(persisted?.pendingCount).toBe(1)
         expect(persisted?.finishedAt).toBeNull()
+    })
+
+    /**
+     * 并发竞态：GET 读取 running 批次后、条件写回落库前，admin force-fail 抢先。
+     * 条件写回以「读取时状态 running」为乐观锁 → affected=0 跳过；响应与库均保持 failed，
+     * finishedAt 不被聚合值覆盖。修复前 `batchRepo.save(batchRun)`（整行）会把库中 failed 回写成 completed。
+     *
+     * 说明：本用例为**注入式模拟**（替换 `batchRepo.update` 在条件 UPDATE 前插入 force-fail），
+     * 用于锁定「WHERE 含读取时状态 → 跳过写回 → 重读兜底」语义；非真实并发压测。
+     */
+    it('concurrent force-fail wins: conditional write-back skips and preserves failed terminal', async () => {
+        const ds = await ensureDatabaseInitialized()
+        const organizationId = await resolveOrganizationId(ds)
+        const batchRepo = ds.getRepository(BatchRun)
+        const raceBatch = await batchRepo.save(batchRepo.create({
+            organizationId,
+            source: 'manual',
+            mode: 'fix',
+            severityThreshold: 'high',
+            repositoryCount: 1,
+            status: 'running',
+        }))
+        await ds.getRepository(ScanRun).save(ds.getRepository(ScanRun).create({
+            repositoryId,
+            batchRunId: raceBatch.id,
+            mode: 'fix',
+            severityThreshold: 'high',
+            executorKind: 'container',
+            status: 'completed',
+            finishedAt: completedAt,
+        }))
+
+        const failedAt = new Date('2026-10-01T00:00:00Z')
+        const originalUpdate = batchRepo.update.bind(batchRepo)
+        // 在条件写回真正落库前注入并发 force-fail（模拟 admin 抢先）
+        batchRepo.update = (async (criteria: unknown, partial: unknown) => {
+            await originalUpdate({ id: raceBatch.id }, { status: 'failed', finishedAt: failedAt })
+            return originalUpdate(criteria as never, partial as never)
+        }) as typeof batchRepo.update
+
+        try {
+            const detail = await call('GET', `/api/batch-runs/${raceBatch.id}`, { id: raceBatch.id }) as Record<string, unknown>
+            expect(detail.status).toBe('failed')
+            const persisted = await batchRepo.findOne({ where: { id: raceBatch.id } })
+            expect(persisted?.status).toBe('failed')
+            expect(persisted?.finishedAt?.toISOString()).toBe(failedAt.toISOString())
+        } finally {
+            batchRepo.update = originalUpdate
+        }
+    })
+
+    /**
+     * 「无字段变化 + 并发 force-fail」：零子项 running 批次的聚合无字段变化（终态未定 → 不发起条件 UPDATE），
+     * 但并发 admin force-fail 已把库置 failed。响应必须与库一致。
+     * 修复前仅在 `changed && !persisted` 时重读 → 该场景响应停留在 running。
+     *
+     * 注入方式：包裹 `batchRepo.findOne`（读取批次后立即改库），模拟「读取之后、响应之前」并发终态。
+     */
+    it('concurrent force-fail with no field change: response reflects stored failed', async () => {
+        const ds = await ensureDatabaseInitialized()
+        const organizationId = await resolveOrganizationId(ds)
+        const batchRepo = ds.getRepository(BatchRun)
+        const emptyBatch = await batchRepo.save(batchRepo.create({
+            organizationId,
+            source: 'manual',
+            mode: 'fix',
+            severityThreshold: 'high',
+            repositoryCount: 0,
+            status: 'running',
+        }))
+
+        const failedAt = new Date('2026-10-07T00:00:00Z')
+        const originalFindOne = batchRepo.findOne.bind(batchRepo)
+        const originalUpdate = batchRepo.update.bind(batchRepo)
+        let injected = false
+        batchRepo.findOne = (async (...args: Parameters<typeof originalFindOne>) => {
+            const found = await originalFindOne(...args)
+            if (!injected) {
+                injected = true
+                await originalUpdate({ id: emptyBatch.id }, { status: 'failed', finishedAt: failedAt })
+            }
+            return found
+        }) as typeof batchRepo.findOne
+
+        try {
+            const detail = await call('GET', `/api/batch-runs/${emptyBatch.id}`, { id: emptyBatch.id }) as Record<string, unknown>
+            expect(detail.status).toBe('failed')
+            expect((detail.finishedAt as Date | null)?.toISOString()).toBe(failedAt.toISOString())
+        } finally {
+            batchRepo.findOne = originalFindOne
+            batchRepo.update = originalUpdate
+        }
     })
 })
 

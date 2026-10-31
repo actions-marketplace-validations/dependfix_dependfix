@@ -1,5 +1,5 @@
 import type { Octokit } from '@octokit/rest'
-import { toErrorMessage, type FixError, type Logger, type NormalizedSecurityAlert } from '@dependfix/core'
+import { toErrorMessage, type AlertsDisabledRecord, type FixError, type Logger, type NormalizedSecurityAlert } from '@dependfix/core'
 import { fetchPnpmAuditAlerts } from '../alerts'
 import type { RuntimeConfig } from '../config'
 import { fromPat } from '../auth'
@@ -10,10 +10,11 @@ import {
     fetchDependabotAlerts,
 } from '../github'
 import {
-    codeQualityAlertsTokenHint,
-    codeScanningAlertsTokenHint,
-    dependabotAlertsTokenHint,
-} from './helpers'
+    alertSourceLabel,
+    alertsDisabledHint,
+    alertsFetchTokenHint,
+    isAlertsDisabledError,
+} from './token-hints'
 
 /** fetchRepoAlerts 所需的最小上下文切片（AppContext 满足此结构）。 */
 export interface FetchAlertsDeps {
@@ -21,6 +22,8 @@ export interface FetchAlertsDeps {
     workDir: string
     logger: Logger
     allErrors: FixError[]
+    /** alerts 功能未启用记录（方案 A：未启用 ≠ 失败，不计入 allErrors） */
+    alertsDisabled: AlertsDisabledRecord[]
 }
 
 /**
@@ -32,8 +35,9 @@ export interface FetchAlertsDeps {
  * - `pnpm-audit`：本地 `pnpm audit --json` 回退（无 token；repository 已由 resolveAlertRepositories 解析）
  *
  * per-source 错误隔离：并行源任一失败 → 记录该源 FETCH_FAILED 错误
- * （退出码保持非 0）并保留成功源数据继续处理；**全部源失败**才抛错
- * （调用方 catch 记录仓库失败，保持 hint 语义）。
+ * （退出码保持非 0）并保留成功源数据继续处理；**无任何成功源且存在失败源**才抛错
+ * （调用方 catch 记录仓库失败，保持 hint 语义）。未启用源（ALERTS_DISABLED）既不计成功
+ * 也不计失败，但若其余源全部失败则判定仓库失败（避免以 0 告警冒充扫描成功）。
  */
 export async function fetchRepoAlerts(deps: FetchAlertsDeps, repo: string): Promise<NormalizedSecurityAlert[]> {
     const { config, workDir } = deps
@@ -55,43 +59,39 @@ export async function fetchRepoAlerts(deps: FetchAlertsDeps, repo: string): Prom
 
     const alerts: NormalizedSecurityAlert[] = []
     const failedSources: string[] = []
+    let successfulSources = 0
 
     if (dependabotResult.status === 'fulfilled') {
         alerts.push(...dependabotResult.value)
-    } else {
+        successfulSources++
+    } else if (!recordAlertSourceError(deps, repo, 'dependabot', dependabotResult.reason)) {
+        // 未启用（ALERTS_DISABLED）不算失败源；真实失败才推入
         failedSources.push('dependabot')
-        recordAlertSourceError(deps, repo, 'dependabot', dependabotResult.reason)
     }
 
     if (config.codeScanningEnabled) {
         if (codeScanningResult.status === 'fulfilled') {
             alerts.push(...codeScanningResult.value)
+            successfulSources++
             deps.logger.info(`Fetched ${codeScanningResult.value.length} code scanning alerts for ${repo}`)
-        } else {
+        } else if (!recordAlertSourceError(deps, repo, 'code-scanning', codeScanningResult.reason)) {
             failedSources.push('code-scanning')
-            recordAlertSourceError(deps, repo, 'code-scanning', codeScanningResult.reason)
         }
     }
 
     if (config.codeQualityEnabled) {
         if (codeQualityResult.status === 'fulfilled') {
             alerts.push(...codeQualityResult.value)
+            successfulSources++
             deps.logger.info(`Fetched ${codeQualityResult.value.length} code quality findings for ${repo}`)
-        } else {
+        } else if (!recordAlertSourceError(deps, repo, 'code-quality', codeQualityResult.reason)) {
             failedSources.push('code-quality')
-            recordAlertSourceError(deps, repo, 'code-quality', codeQualityResult.reason)
         }
     }
 
-    // 全部源失败 → 抛第一个失败（调用方 catch 保持仓库失败语义 + token hint）
-    let totalSources = 1
-    if (config.codeScanningEnabled) {
-        totalSources++
-    }
-    if (config.codeQualityEnabled) {
-        totalSources++
-    }
-    if (failedSources.length === totalSources) {
+    // 无任何成功源且存在失败源 → 抛第一个失败（调用方 catch 保持仓库失败语义 + token hint）。
+    // 未启用源不计失败，但若其余启用源全失败，仓库仍应按失败处理（避免以 0 告警冒充扫描成功）。
+    if (failedSources.length > 0 && successfulSources === 0) {
         let firstReason: unknown
         if (dependabotResult.status === 'rejected') {
             firstReason = dependabotResult.reason
@@ -126,12 +126,41 @@ function createAlertsClientFromConfig(config: RuntimeConfig): Octokit {
     })
 }
 
-/** 记录单个告警源的拉取失败（不中断另一源的处理）。 */
-function recordAlertSourceError(deps: FetchAlertsDeps, repo: string, source: string, error: unknown): void {
+/**
+ * 该仓库是否已记录「带 `source` 的 `FETCH_FAILED`」（per-source 信号）。
+ *
+ * 供仓库级 catch 去重：全部启用源失败时 `fetchRepoAlerts` 已逐源记录错误，
+ * 再追加无 `source` 的仓库级同类信号会造成重复（日志汇总还会把它归入 unknown 分组）。
+ */
+export function hasSourceScopedFetchFailure(errors: readonly FixError[], repo: string): boolean {
+    return errors.some(
+        (error) => error.repository === repo
+            && error.stage === 'fetch'
+            && error.category === 'FETCH_FAILED'
+            && Boolean(error.source),
+    )
+}
+
+/**
+ * 记录单个告警源的拉取结果（不中断另一源的处理）。
+ *
+ * 方案 A：`ALERTS_DISABLED`（alerts 功能未启用）≠ 获取失败——
+ * 不计入 `allErrors` / 不触发 exitCode 非 0，改记 `alertsDisabled` + 准确日志文案。
+ *
+ * @returns `true` = 未启用（预期状态，不算失败源）；`false` = 真实失败
+ */
+function recordAlertSourceError(deps: FetchAlertsDeps, repo: string, source: string, error: unknown): boolean {
+    // 未启用 ≠ 失败：独立记录，不入 allErrors（方案 A）；提示文案按告警源给出对应开启路径
+    if (isAlertsDisabledError(error)) {
+        const message = toErrorMessage(error)
+        const hint = alertsDisabledHint(source)
+        deps.logger.warn(`${alertSourceLabel(source)} disabled for ${repo}: ${message} — ${hint}`)
+        deps.alertsDisabled.push({ repository: repo, source, message })
+        return true
+    }
+
     const message = toErrorMessage(error)
-    const hint = dependabotAlertsTokenHint(error)
-        ?? codeScanningAlertsTokenHint(error)
-        ?? codeQualityAlertsTokenHint(error)
+    const hint = alertsFetchTokenHint(error)
     deps.logger.error(`Failed to fetch ${source} alerts for ${repo}: ${message}${hint ? ` — ${hint}` : ''}`)
     deps.allErrors.push({
         repository: repo,
@@ -140,6 +169,7 @@ function recordAlertSourceError(deps: FetchAlertsDeps, repo: string, source: str
         source,
         message: hint ? `${message}（${hint}）` : message,
     })
+    return false
 }
 
 /**

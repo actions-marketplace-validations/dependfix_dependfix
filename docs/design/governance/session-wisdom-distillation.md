@@ -3,6 +3,8 @@
 > 将 `.session/wisdom.md` 中的临时知识点定期提纯为永久文档，解决跨机器丢失、内容膨胀与过时残留问题。
 > 参照 momei [session-wisdom-distillation](https://github.com/CaoMeiYouRen/momei/blob/master/docs/design/governance/session-wisdom-distillation.md) 机制，按 dependfix 目录结构适配。
 
+> **与经验三层体系的关系**：本机制的产物（pattern / principle）属 L3 经验索引层；收敛出口（复现 >= 2 次 → L1 脚本或 L2 检查点）与准入标准见 [经验归档](./experience-archive.md#1-经验三层体系)。
+
 ## 1. 背景
 
 `.session/wisdom.md` 存储跨 session 值得复用的发现（pattern / bug / decision / env / test / baseline），已融入 `Full Stack Master (全栈大师)` agent 的 Session 感知协议（`.github/agents/full-stack-master.agent.md`）。
@@ -28,7 +30,7 @@
 
 ### 2.1 阶段开工前归档检查（PDTFC+ 衔接工作流）
 
-启动下一阶段 P 阶段规划前，必须执行**强制归档检查**（PDTFC+ 闭环后下一阶段开始前的衔接工作流），避免数据漂移。详细规范见 [ai-collaboration.md §1.5 阶段归档检查 + 沉淀工作流](../../../docs/standards/ai-collaboration.md) + [规划规范 §4.4 第 10 条预防性迁出后 cross-reference 更新](../../../docs/standards/planning.md)：
+启动下一阶段 P 阶段规划前，必须执行**强制归档检查**（PDTFC+ 闭环后下一阶段开始前的衔接工作流），避免数据漂移。详细规范见 [ai-collaboration.md §2.4 阶段归档检查 + 沉淀工作流](../../../docs/standards/ai-collaboration.md) + [规划规范 §4.4 第 10 条预防性迁出后 cross-reference 更新](../../../docs/standards/planning.md)：
 
 ```bash
 # 1. 检查 todo.md 数据漂移信号（数据漂移 = [ ] 但实际已闭环）
@@ -150,7 +152,7 @@ pnpm distill:wisdom                      # package.json script 别名
 | 触发点 | 集成方式 |
 |:---|:---|
 | **Session 收尾**（Full Stack Master (全栈大师) agent） | 当 wisdom 条目数 >= 20 时，附加一句提醒："wisdom 条目数已达 N，建议执行蒸馏" |
-| **Session 开局**（Full Stack Master (全栈大师) agent） | 启动下一阶段 P 阶段前必须执行**强制归档检查**（见 §2.1）；当 todo.md `[ ]` 数据漂移信号时主动询问用户"是否需要先归档上一阶段？"——不得直接添加下一阶段待办。详见 [ai-collaboration.md §1.5 阶段归档检查 + 沉淀工作流](../../../docs/standards/ai-collaboration.md) |
+| **Session 开局**（Full Stack Master (全栈大师) agent） | 启动下一阶段 P 阶段前必须执行**强制归档检查**（见 §2.1）；当 todo.md `[ ]` 数据漂移信号时主动询问用户"是否需要先归档上一阶段？"——不得直接添加下一阶段待办。详见 [ai-collaboration.md §2.4 阶段归档检查 + 沉淀工作流](../../../docs/standards/ai-collaboration.md) |
 | **阶段归档**（planning.md §4.3） | 在阶段归档最低验证中增加蒸馏检查项（已落地 2026-08-06） |
 | **阶段闭环 F → 下一阶段 P** | PDTFC+ 闭环后下一阶段开始前的衔接工作流（见 §2.1）：归档批次 → 沉淀工作流 → 下一阶段 P 阶段规划——**不**是归档阶段本身，是阶段间的衔接工作 |
 | **归档/沉淀 commits 治理审计**（code-auditor.agent.md 必查项） | 归档/沉淀 commits 涉及的 `docs/standards/*.md` / `docs/design/governance/*.md` / `.github/agents/*.agent.md` 等治理定义修改必须 A 阶段深度审计（与 D 阶段 feature commits 同等标准），不得因为"仅文档改动"就跳过审计 |
@@ -195,3 +197,22 @@ Full Stack Master (全栈大师) 压缩 wisdom.md，删除/精简已迁移条目
 ### Q: 迁移后的文档需要什么格式？
 
 使用项目标准 Markdown 格式，遵守 `markdownlint` 规则和现有文档的目录约定。不做全景重写，只做增量插入。
+
+### Q: wisdom 条目的可接受书写形态有哪些？（解析器契约）
+
+`distill-wisdom` 的条目统计按下表形态识别（另有**历史兼容**形态：`### N. 标题`，以及不带 `-` 列表前缀的摘要行——两者亦被计数）；若**活跃条目为 0 条**且活跃区出现含 `[YYYY-MM-DD]` 的未识别行，`--check` 会在 **stderr** 显式告警，防止「格式漂移 → 静默输出 0 条」再次通过：
+
+| 场景 | 形态 | 说明 |
+|:--|:--|:--|
+| 活跃条目 | `### [YYYY-MM-DD] [type] 标题` | 本文件实际写法；其后以 `-`（连字符 + 空格）开头的行作为正文（参与报告预览），`---` 为条目分隔 |
+| 活跃条目 | `- **[YYYY-MM-DD] [type] 标题**：正文` | 单行摘要写法；尾部亦可写 `→ <target>`（`详见` / `已迁移至` 前缀可省） |
+| 已蒸馏摘要 | `- [YYYY-MM-DD] [type] 单行摘要 → docs/path/to/doc.md` | 历史区写法（`详见` / `已迁移至` 前缀可省） |
+| 已蒸馏摘要 | `- **[type-N]** 摘要 → 详见 <target>` | 早期历史区写法（type-id 形态） |
+
+> stdout / 退出码契约见 [§4.3 脚本辅助](#43-脚本辅助)：`--check` 退出码恒为 0（供 hook 无脑调用）、是否需要蒸馏只读 stdout 的 `WISDOM_OK:` / `WISDOM_NEEDS_DISTILL:` 行；本节新增的**告警一律走 stderr**，与上述契约互不污染。
+>
+> **`→` 为保留分隔符**：解析器在**首个** `→` 处切分「摘要 / 指针」，故条目标题正文内不要出现裸 `→`（否则其后内容会被并入 target）。
+
+### Q: 为什么 `.session/wisdom.md` 不在门禁扫描面内？
+
+`.session/` 由 `check-orphan-ids` 与 `check-docs` 的排除面覆盖（本地会话状态，不参与交付物校验）；其中条目的编号（如 `M43.3`）属溯源信息，不适用「孤立规划编号」判定。

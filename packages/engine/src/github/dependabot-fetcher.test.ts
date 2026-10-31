@@ -62,7 +62,7 @@ describe('fetchDependabotAlerts', () => {
         expect(alert.fixable).toBe(true)
         expect(alert.fixStrategy).toBe('upgrade')
         expect(alert.recommendedVersion).toBe('4.17.21')
-        // M23.3 C66-A2：透传 GHSA + CVE 字段
+        // 透传 GHSA + CVE 字段
         expect(alert.ghsaId).toBe('GHSA-xxxx-xxxx-xxxx')
         expect(alert.cveIds).toEqual(['CVE-2021-23337'])
     })
@@ -256,6 +256,40 @@ describe('fetchDependabotAlerts', () => {
             .get(GET_ALERTS_PATH)
             .query(true)
             .reply(403, { message: 'Resource not accessible by integration' })
+
+        const client = setupClient()
+
+        try {
+            await fetchDependabotAlerts(client, { owner: 'foo', repo: 'bar' })
+            expect.fail('Expected fetchDependabotAlerts to throw')
+        } catch (error) {
+            expect(error).toBeInstanceOf(AppError)
+            expect((error as AppError).code).toBe('PERMISSION_DENIED')
+        }
+    })
+
+    it('throws ALERTS_DISABLED on 403 with Dependabot alerts disabled message', async () => {
+        nock(API_BASE)
+            .get(GET_ALERTS_PATH)
+            .query(true)
+            .reply(403, { message: 'Dependabot alerts are disabled for this repository.' })
+
+        const client = setupClient()
+
+        try {
+            await fetchDependabotAlerts(client, { owner: 'foo', repo: 'bar' })
+            expect.fail('Expected fetchDependabotAlerts to throw')
+        } catch (error) {
+            expect(error).toBeInstanceOf(AppError)
+            expect((error as AppError).code).toBe('ALERTS_DISABLED')
+        }
+    })
+
+    it('falls back to PERMISSION_DENIED when 403 message does not match disabled pattern', async () => {
+        nock(API_BASE)
+            .get(GET_ALERTS_PATH)
+            .query(true)
+            .reply(403, { message: 'Dependabot alerts are disabled' })
 
         const client = setupClient()
 

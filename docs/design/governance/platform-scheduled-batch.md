@@ -1,8 +1,8 @@
 # 定时扫描与批量处理设计
 
-> 状态：🔶 设计先行（T704，2026-08-10）——契约与数据模型落盘，供实现阶段参考。
+> 状态：✅ 已落地（T704 实现 + M21.5 async 定时触发 / Schedule CRUD e2e 补强）；真实环境验收跟踪见 [backlog T704](../../plan/backlog.md#t704-async-定时触发)。
 > 依赖：T702 任务队列与并发控制（已交付，BullMQ + Redis + 渐进式降级）。
-> 相关文档：[架构设计 §扫描调度策略](./architecture.md)、[安全设计 §批量处理](./security.md)、[执行器设计与沙箱评估](./executor-sandbox.md)、[T702 待人工验收（真实环境）记录](../../plan/backlog.md#t702-http-层状态流转)
+> 相关文档：[架构设计 §扫描调度策略](./architecture-platform.md)、[安全设计 §批量处理](./security.md)、[执行器设计与沙箱评估](./executor-sandbox.md)、[T702 待人工验收（真实环境）记录](../../plan/backlog.md#t702-http-层状态流转)
 
 ---
 
@@ -217,7 +217,7 @@ batchRunId!: string | null
 | Redis | 调度机制 | 持久化 | 多实例安全 | 降级说明 |
 |:---|:---|:---|:---|:---|
 | ✅ async | BullMQ `upsertJobScheduler` | Redis 持久化 | ✅ 多实例只一个触发 | BullMQ 原生 repeat job，到点自动 add 新 job |
-| ❌ sync | 进程内 `node-cron` + DB | DB（Schedule 实体） | ⚠️ 单实例（多实例会重复触发） | 降级单实例可用；多实例部署需配 `QUEUE_ENABLED=true`（强制 Redis） |
+| ❌ sync | 进程内 `node-cron` + DB | DB（Schedule 实体） | ⚠️ 单实例（多实例会重复触发） | 降级单实例可用；多实例部署需配 `QUEUE_ENABLED=true`（强制 Redis）+ 存在消费者 |
 
 ### 4.2 async 模式：BullMQ Job Scheduler
 
@@ -238,13 +238,13 @@ await queue.upsertJobScheduler(
 await queue.removeJobScheduler(`schedule-${schedule.id}`)
 ```
 
-**ScanQueue 封装扩展**：T702 的 `ScanQueue` 接口当前仅暴露 `add/close`，T704-2 实现时需扩展 `upsertJobScheduler` / `removeJobScheduler` 透传（BullMQ Queue 原生方法），保持封装一致性。
+**ScanQueue 封装扩展**：T702 的 `ScanQueue` 已扩展 `upsertJobScheduler` / `removeJobScheduler` 透传（BullMQ Queue 原生方法），由 `scheduler.service.ts` 实际调用，保持封装一致性。
 
 **Worker 处理**：Worker processor 收到 `scheduled-scan` job 时：
 1. 读取 Schedule 实体 → 解析 selectorKind + selectorJson → 查询目标仓库列表
 2. 创建 BatchRun（source='scheduled'）
 3. 逐仓库 `createPendingScanRun` + `queue.add`（priority=scheduled，runId 关联 batchRunId）
-4. 返回（BatchRun 聚合由异步回调或轮询更新，见 §5）
+4. 返回（BatchRun 聚合由详情实时聚合 + 周期兜底对账，见 §5）
 
 **jobId 规范**：`scheduled-scan` job 不设自定义 jobId（BullMQ job scheduler 自动生成），避免与单仓库 scan jobId 冲突。每个 scheduler 产生的 job 是独立的，无需去重（到点触发一次即一次）。
 
@@ -265,7 +265,7 @@ const scheduledTasks = new Map<string, cron.ScheduledTask>()  // scheduleId → 
 
 **降级约束**：
 - sync 模式下扫描仍为同步执行（复用 T702 同步降级路径），定时触发会在进程内逐仓库串行扫描
-- 多实例部署时 sync 模式会重复触发（每个实例都跑 cron）——文档明确提示：多实例部署必须配置 `QUEUE_ENABLED=true` + Redis 可用
+- 多实例部署时 sync 模式会重复触发（每个实例都跑 cron）——文档明确提示：多实例部署必须配置 `QUEUE_ENABLED=true` + Redis 可用，且需存在消费者（当前阶段为进程内 worker）
 - BullMQ `upsertJobScheduler` 与 node-cron 共存策略：`getQueueService().mode === 'async'` 时用 BullMQ，否则用 node-cron；两者不混用
 
 ---
@@ -286,16 +286,24 @@ const scheduledTasks = new Map<string, cron.ScheduledTask>()  // scheduleId → 
 
 ### 5.2 聚合更新策略
 
-BatchRun 的 `finishedCount / completedCount / failedCount / summaryJson` 需要随下属 ScanRun 完成而更新。两种方案：
+BatchRun 的 `finishedCount / completedCount / failedCount / summaryJson / status / finishedAt` 需要随下属 ScanRun 完成而更新。**采用「详情实时聚合 + 周期兜底对账」双通道**：
 
-| 方案 | 机制 | 优缺点 |
+| 通道 | 机制 | 定位 |
 |:---|:---|:---|
-| **A. 轮询更新**（采用） | 前端轮询 `GET /api/batch-runs/[id]` 时，后端实时查询下属 ScanRun 统计并更新 BatchRun | 实现简单，无需额外回调机制；缺点是聚合更新滞后于轮询频率 |
-| B. Worker 回调 | ScanRun 完成时 Worker 回调更新 BatchRun | 实时性好；缺点是 Worker 需感知 BatchRun 上下文，增加耦合 |
+| **详情实时聚合** | 用户打开 `GET /api/batch-runs/[id]` 时，后端实时查询下属 ScanRun 统计并写回 BatchRun | 用户查看时即时收敛；不引入 Worker 回调 |
+| **周期兜底对账** | `stale-cleanup` 插件每 5 分钟调用 `reconcileRunningBatchRuns()`，扫描全部 `running` BatchRun 聚合写回 | 覆盖「子项已全部终态但父批次从未被查看」与「零子项孤儿」两类盲区，摆脱「看才发生」 |
 
-**采用方案 A**：`GET /api/batch-runs/[id]` 时聚合统计——查询 `ScanRun where batchRunId = ?`，计算 finishedCount/completedCount/failedCount/pendingCount + summaryJson（跨仓库 alertsTotal/severityCounts/fixedCount），写回 BatchRun 并返回。聚合计算是只读推导，无需 Worker 回调。
+**实现口径**（`batch-aggregate.ts` 纯推导 + `batch-writeback.ts` 单一写回，详情接口 / 周期对账 / sync 立即终结三处共用）：
 
-**终态判定**：`pendingCount === 0` 时 BatchRun.status → `completed`（有 failed 也算 completed，整体完成而非全部成功）；写回 `finishedAt`。
+- `aggregateScanRuns(runs, results)`：`pendingCount === 0` 时整体状态 → `completed`（含部分失败，整体完成而非全部成功）；计数与 `summary` 按下属 run 派生。
+- `finishedAt`：首次到达 `completed` 时取 `resolveBatchFinishedAt(runs)` = **`max(子项 finishedAt)`**（真实完成时间），而非聚合触发时刻——避免把「首次查看时间」误记为完成时间。无带 `finishedAt` 的子项时回退当前时刻。
+- 状态流转复用 `shouldWriteBackStatus`：仅 `running` 允许流转，`failed` 终态受保护（executor 显式落库的 async 全部入队失败）。
+- **零子项兜底**：`running` 且无任何下属 ScanRun，创建超过 30 分钟 → 判定为孤儿 `failed`（触发进程在建子项前异常 / 子仓库级联删除）；未超阈值（async 正在逐个建子项）保持不动。
+- **sync 模式**：逐仓库串行结束后立即聚合终态化，不等周期对账；零子项时不在此终结（异常场景交由周期对账按孤儿处理，避免误标 completed）。
+- **失败路径条件写回**：`persistBatchFailedIfRunning`（仅 `running` 命中）用于两处持有**创建期 / 读取期内存实体**的失败写回——「async 全部入队失败」与 `stale-cleanup` 孤儿批次；只写 `status` / `finishedAt` / `updatedAt`（可选空 `summaryJson` 兜底），**不写计数与 summary 快照**，避免整行 `save()` 把并发详情 GET 已聚合的计数覆盖回初值；并发 admin `force-fail` 抢先时条件不匹配 → 不改库、也不改内存实体。
+- **详情 GET 响应一致性**：条件写回未落库（无字段变化，或并发终态保护跳过）时一律重读库中状态再组装响应，消除「无字段变化 + 并发 `force-fail`」下响应停留在旧状态的瞬时窗口。
+
+**兼容性说明**：历史 `finished_at` 可能被旧的「查看时刻」口径污染；存量订正由 `database/scripts/` 一次性脚本按 `max(子项 finishedAt)` 重算（详见 [M35.5](../../plan/archive/todo-archive-phases-m35.md#m35-批量运行终态兜底对账--进度可见性修复m351m356-全部已闭环--2026-10-02-归档)）。
 
 ### 5.3 仓库选择策略解析
 
@@ -382,123 +390,8 @@ export const batchScanSchema = z.object({
 
 ---
 
-## 7. 前端页面
+## 分片索引（迁出章节）
 
-### 7.1 新增页面
-
-| 页面 | 路径 | 功能 |
-|:---|:---|:---|
-| 定时计划 | `/schedules` | 列表 + 新建/编辑/删除/手动触发 |
-| 批量运行 | `/batch-runs` | 列表 + 详情（聚合统计 + 下属 ScanRun） |
-
-### 7.2 仓库页面扩展
-
-- `repos.vue` 表格加复选框列 + 「批量扫描」按钮（勾选后激活）
-- 仓库编辑表单加 tags 输入（PrimeVue Chips 组件，输入标签回车添加）
-
-### 7.3 导航
-
-`layouts/default.vue` 导航栏新增「定时计划」「批量运行」入口（admin/org_admin 可见，viewer 隐藏定时计划管理但可见批量运行只读）。
-
----
-
-## 8. 子任务拆分
-
-按 [规划规范 §1.1 任务粒度约束](../../standards/planning.md) 拆分为 3 个独立提交子任务，每批 ≤ 10 文件 / ≤ 800 行：
-
-### T704-1 数据模型 + 仓库标签扩展
-
-- Schedule 实体 + BatchRun 实体
-- Repository.tags 字段 + ScanRun.batchRunId 字段
-- database/index.ts 注册新实体
-- Zod 校验 schema（schedule.ts / batch-scan.ts）
-- 仓库更新 API 扩展 tags 字段
-- 单测：实体字段、Zod 校验、cron 表达式校验
-
-### T704-2 定时调度服务 + API
-
-- scheduler.service.ts：调度服务单例（async 用 BullMQ upsertJobScheduler / sync 用 node-cron）
-- selector.ts：仓库选择策略解析纯函数
-- Schedule CRUD API（含 BullMQ scheduler 同步 / node-cron 注册同步）
-- 手动触发 API
-- 前端 `/schedules` 页面
-- 单测：selector 策略、cron 校验、调度注册/销毁
-
-### T704-3 批量执行 + 聚合报告 + 前端
-
-- 批量扫描 API（`POST /api/repos/batch-scan`）
-- BatchRun 聚合更新（`GET /api/batch-runs/[id]` 时实时聚合）
-- scheduled-scan job processor（Worker 处理定时触发的批量入队）
-- 前端 `repos.vue` 复选框 + 批量扫描按钮
-- 前端 `/batch-runs` 页面
-- e2e：批量触发 → 聚合统计闭环（sync 模式验证）
-- 单测：聚合统计纯函数、批量入队逻辑
-
----
-
-## 9. 降级与边界
-
-### 9.1 降级矩阵（对齐 T702）
-
-| Redis | 定时调度 | 批量执行 | 聚合报告 |
-|:---|:---|:---|:---|
-| ✅ async | BullMQ upsertJobScheduler | 逐仓库入队（priority=scheduled） | 轮询聚合 |
-| ❌ sync | node-cron 进程内 | 逐仓库同步串行 runScanForRepository | 轮询聚合 |
-
-### 9.2 多实例约束
-
-- sync 模式（无 Redis）：多实例部署会重复触发定时任务——**文档明确提示**多实例部署必须 `QUEUE_ENABLED=true` + Redis 可用
-- async 模式：BullMQ job scheduler 多实例只一个触发（Redis 原子操作），安全
-
-### 9.3 cron 表达式安全
-
-- 用户输入 cron 表达式经 `cron-parser` 校验，无效即 400 拒绝
-- 禁止 `* * * * *`（每分钟）等高频表达式？——**不硬禁**，但 UI 提示最小间隔建议 1 小时，避免队列压力
-- timezone 必须是有效 IANA 名称（`Intl.DateTimeFormat.supportedTimezonesOf` 校验）
-
-### 9.4 批量规模上限
-
-- `batchScanSchema.repositoryIds` 限制 max 100（单次批量上限）
-- `selectorKind='all'` 时无硬上限（按组织仓库数），但逐仓库入队复用 jobId 去重，不会压垮队列
-- 大规模（> 50 仓库）批量触发时，async 模式由 Worker concurrency 控制实际并发；sync 模式逐个串行（可能耗时较长，UI 提示）
-
----
-
-## 10. 依赖变更
-
-- `node-cron`：sync 降级模式进程内调度（仅 sync 模式加载，async 模式不依赖）
-- `cron-parser`：cron 表达式校验（BullMQ 已传递依赖，显式声明避免 pnpm 严格模式提升问题）
-- 无新增 BullMQ/ioredis 依赖（T702 已落地）
-
----
-
-## 11. 验收标准
-
-### 11.1 完成定义
-
-- [ ] 能配置定时任务（cron 表达式 + 仓库选择策略 + 扫描参数）并保存
-- [ ] 定时到点自动触发批量扫描（async 用 BullMQ scheduler / sync 用 node-cron）
-- [ ] 手动批量选择多个仓库一次触发扫描
-- [ ] BatchRun 聚合统计跨仓库结果（告警数 / 修复数 / 成功失败比）
-- [ ] 降级矩阵覆盖：无 Redis 时定时 + 批量仍可用（node-cron + 同步串行）
-
-### 11.2 最小验证矩阵
-
-| 验证项 | 方法 |
-|:---|:---|
-| Schedule CRUD | 单测 + e2e（新建/编辑/删除/启用禁用） |
-| cron 校验 | 单测（合法/非法表达式） |
-| 仓库选择策略 | 单测（4 种 selectorKind + 权限隔离） |
-| 定时触发（async） | 集成测试（BullMQ upsertJobScheduler + 短间隔 every 触发） |
-| 定时触发（sync） | 单测（node-cron mock + handler 调用断言） |
-| 批量手动触发 | e2e（勾选多仓库 → 批量扫描 → BatchRun 进度 → 聚合统计） |
-| 聚合统计 | 单测（纯函数：多 ScanRun → BatchRun summary） |
-| 降级路径 | e2e（QUEUE_ENABLED=false 强制 sync，批量扫描闭环） |
-
-### 11.3 非目标
-
-- webhook 触发（T702 已预留 priority=5，webhook 接入登记后续）
-- 标签管理独立 UI（本版 tags 通过仓库编辑表单输入，无标签增删改查页面）
-- 定时计划执行历史趋势图（本版仅列表 + 详情，趋势统计属仪表板增强后续）
-- 邮件通知（定时扫描完成发送邮件通知，依赖 SMTP 配置，登记后续）
-- 跨组织批量选择（当前单组织模型，多组织体系随 D3 多租户 backlog 触发）
+| 分片 | 章节范围 | 主题 |
+|:--|:--|:--|
+| [platform-scheduled-batch-rollout.md](./platform-scheduled-batch-rollout.md) | §7 - §11 | 前端页面 / 子任务拆分 / 降级与边界 / 依赖变更 / 验收标准 |

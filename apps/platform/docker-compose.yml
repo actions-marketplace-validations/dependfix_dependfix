@@ -1,4 +1,10 @@
 # dependfix 平台部署编排（SQLite 数据卷持久化 + Redis 扫描队列）
+#
+# 默认拉取已发布镜像，不在本地构建（避免每次部署重跑 pnpm install + nuxt build）：
+#   docker compose pull && docker compose up -d
+# 仅在需要本地打包时使用构建覆盖文件（开发 / 自定义改动）：
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+# 镜像可换 registry：DEPENDFIX_IMAGE=ghcr.io/dependfix/dependfix:latest 或阿里云 ACR 地址。
 services:
   # Redis（BullMQ 扫描队列存储；BullMQ 6 要求 Redis >= 5.0，redis:7-alpine 满足）
   redis:
@@ -9,16 +15,29 @@ services:
     # 仅平台服务内部访问，不映射宿主机端口
 
   platform:
-    build:
-      context: ../..
-      dockerfile: apps/platform/Dockerfile
+    # 默认已发布镜像（Docker Hub）；本地构建见 docker-compose.build.yml 覆盖文件
+    image: ${DEPENDFIX_IMAGE:-caomeiyouren/dependfix:latest}
+    # 资源建议：默认单容器同时跑控制面与执行面（clone / 安装 / 验证），建议 ≥ 2 CPU / 8GB；
+    # 控制面单独部署（worker 拆出）最低 1 CPU / 1GB。4GB 已验证会 OOM。
+    # 需要硬上限时取消下行注释（不要在命令上注入 Node 堆大小）：
+    # mem_limit: 8g
     ports:
       - "${PORT:-3000}:3000"
     environment:
       PORT: 3000
+      # 运行身份（控制 /app/data 数据卷与 $HOME 的宿主侧所有权）：
+      # 默认 100:101 = 镜像内 dependfix 用户（uid 100 / gid 101）；NAS / 多用户场景设为宿主用户 uid:gid。
+      # PUID/PGID 解析为 0 时入口 fail-closed 拒绝启动（保持非 root 执行基线）。
+      # 入口仅在 root 启动时能修复卷所有权并降权；若改用 user: 字段需宿主预先授权卷与 $HOME。
+      PUID: ${PUID:-100}
+      PGID: ${PGID:-101}
       # Nuxt runtimeConfig 运行时覆盖只认 NUXT_ 前缀（AUTH_SECRET 在构建期已烘焙，运行时无效）
       NUXT_AUTH_SECRET: ${AUTH_SECRET:-change-me-to-a-random-secret}
       DATABASE_PATH: /app/data/dependfix.sqlite
+      # 首次启动自动执行 pending migration（镜像内已默认 true，此处显式声明并支持环境变量覆盖）。
+      # 全新库由基线迁移创建全部基础表，存量库仅补 pending（已记录迁移不重跑）。
+      # 如需完全手动控制，设 DATABASE_MIGRATIONS_RUN=false 并改用 docker/init-db.sh 初始化。
+      DATABASE_MIGRATIONS_RUN: ${DATABASE_MIGRATIONS_RUN:-true}
       NUXT_ENCRYPTION_KEY: ${NUXT_ENCRYPTION_KEY:-}
       # 关闭注册（保留登录）：公开部署时设 REGISTRATION_DISABLED=true。
       # 注意：首次部署需保持 false 注册首个管理员后再关闭，否则平台无管理员。
@@ -27,26 +46,47 @@ services:
       # 扫描任务队列（渐进式降级）：Redis 可达且版本 >= 5.0 时异步队列，否则自动降级同步。
       # 运行时覆盖需 NUXT_ 前缀（构建产物烘焙默认值）
       NUXT_REDIS_URL: redis://redis:6379
-      NUXT_QUEUE_ENABLED: ${QUEUE_ENABLED:-auto}
+      NUXT_QUEUE_ENABLED: ${QUEUE_ENABLED:-true}
       NUXT_QUEUE_JOB_RETRIES: ${QUEUE_JOB_RETRIES:-}
       NUXT_QUEUE_BACKOFF_MS: ${QUEUE_BACKOFF_MS:-}
-      # 单容器直接部署形态：Nuxt 进程内消费队列（SQLite 单写者安全）。
-      # 独立 worker 进程形态（多容器）需等 PostgreSQL 迁移（SQLite 多进程写不兼容）后启用
+      # 队列执行进程隔离（默认开启）：入口启动独立 worker 进程消费队列，本进程（HTTP）不消费 →
+      # HTTP event loop 不再被扫描执行（引擎同步子进程调用）阻塞，消除 BullMQ 锁续期失败（stalled 重排）。
+      # 设 0 回退单进程形态（此时由 NUXT_IN_PROCESS_WORKER=true 在本进程内消费）。口径见 platform.md §10.6。
+      DEPENDFIX_QUEUE_WORKER: ${QUEUE_WORKER:-1}
+      # 单进程形态专用（DEPENDFIX_QUEUE_WORKER=0 时生效）：Nuxt 进程内消费队列。
+      # 启用独立 worker 进程后，入口会分别覆盖两进程的 NUXT_IN_PROCESS_WORKER 取值（worker=true / HTTP=false）。
       NUXT_IN_PROCESS_WORKER: ${IN_PROCESS_WORKER:-true}
+      # worker 连续快速失败后的慢重试间隔（秒，空值回退 300；范围 1-3600）。
+      DEPENDFIX_QUEUE_WORKER_SLOW_RETRY_SECONDS: ${DEPENDFIX_QUEUE_WORKER_SLOW_RETRY_SECONDS:-}
+      # pnpm store 持久化（目标仓库依赖安装共用）：落在数据卷内，跨 run / 容器重建复用；
+      # 与 run 工作目录同卷时走硬链接（不额外占一份磁盘）。入口对不可写路径会 warn 并回退
+      # $HOME 下的 pnpm 默认位置（每次冷安装）。见 docs/guide/deployment.md「pnpm store 与依赖缓存」。
+      PNPM_CONFIG_STORE_DIR: ${PNPM_CONFIG_STORE_DIR:-/app/data/pnpm-store}
+      # 进程级日志目录：入口默认 $DATA_DIR/logs（数据卷内，按日落盘 + 31 天保留）；
+      # 自定义时显式设置（建议绝对路径）。见 docs/guide/deployment.md「日志文件」。
+      LOG_DIR: ${LOG_DIR:-}
+      # 进程级日志级别与文件开关（空值 = 用镜像默认：info / true）；见 deployment.md「日志文件」。
+      LOG_LEVEL: ${LOG_LEVEL:-}
+      LOGFILES: ${LOGFILES:-}
+      # 孤儿清理宽限（毫秒，空值回退 300000；不要设 0）。
+      STALE_CLEANUP_RUNNING_GRACE_MS: ${STALE_CLEANUP_RUNNING_GRACE_MS:-}
+      STALE_CLEANUP_PENDING_GRACE_MS: ${STALE_CLEANUP_PENDING_GRACE_MS:-}
     depends_on:
       - redis
     volumes:
       - dependfix-data:/app/data
     restart: unless-stopped
 
-  # 独立 worker 进程（预留，PostgreSQL 生产迁移后启用）：
-  # SQLite 下多容器共享 DB 存在写锁冲突，当前阶段使用单容器 in-process worker 形态。
+  # 多容器独立 worker 形态（预留）：当前容器内已默认启同镜像双进程隔离（DEPENDFIX_QUEUE_WORKER=1），
+  # 本段仅在需要"worker 与 HTTP 分属不同容器/主机"时启用——要求数据库支持多写者（PostgreSQL），
+  # SQLite 多进程写依赖 WAL 且不推荐跨主机。启用时可删除主服务的 worker 开关（QUEUE_WORKER=0）。
   # worker:
-  #   build:
-  #     context: ../..
-  #     dockerfile: apps/platform/Dockerfile
+  #   image: ${DEPENDFIX_IMAGE:-caomeiyouren/dependfix:latest}
   #   environment:
+  #     PUID: ${PUID:-100}
+  #     PGID: ${PGID:-101}
   #     NUXT_REDIS_URL: redis://redis:6379
+  #     NUXT_QUEUE_ENABLED: "true"
   #     NUXT_IN_PROCESS_WORKER: "true"
   #     DATABASE_PATH: /app/data/dependfix.sqlite
   #     NUXT_ENCRYPTION_KEY: ${NUXT_ENCRYPTION_KEY:-}

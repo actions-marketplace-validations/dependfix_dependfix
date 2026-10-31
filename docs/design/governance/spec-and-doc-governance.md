@@ -1,8 +1,9 @@
 # 规范与文档治理设计（spec-and-doc-governance）
 
-> **状态**：专项设计先行稿（2026-09-09 落地）
+> **状态**：📚 历史参考（2026-09-09 v1；v2 由 [standards-experience-refactor.md](./standards-experience-refactor.md) 承接）。**现行执行流程**以 [文档治理执行规范](./doc-governance.md) 为准；本文件保留 v1/v2 的历史问题诊断与设计依据，不再作为操作手册。
 > **范围**：`docs/standards/` / `docs/design/` / `docs/plan/` 三类文档的治理边界、写作规范与维护规则
 > **目标**：消除当前规范文件膨胀（ai-collaboration 448 行 / development 447 行 / platform 350 行 / planning 242 行）+ 调研/归档混杂 + modules/governance 边界模糊等问题，建立可审计的文档治理基线
+> **后续演进（v2，2026-10-10）**：G1-G6 落地后再次 drift，已启动重构 —— 规范方法论层化 + 经验三层收敛 + 导航分层 + 阈值/门禁统一；本文件 §7 的 G 批次计划由 [规范与经验管理体系重构设计 §4](./standards-experience-refactor.md) 承接。
 
 ## 1. 背景与问题
 
@@ -85,23 +86,9 @@
 - `governance/security.md`（安全治理）—— governance/ 因为跨模块安全决策
 - `governance/experience-archive.md`（经验归档）—— governance/ 因为跨模块跨阶段的经验沉淀
 
-### 2.3 文档健康窗口（统一阈值表）
+### 2.3 文档健康窗口（阈值引用）
 
-> 与 `documentation.md §3` 一致，本表作为项目级权威阈值引用源。
-
-| 文档类型 | 健康窗口 | warning 触发 | 强制分片 |
-|---|:---:|:---:|:---:|
-| `docs/standards/*.md`（规范）| ≤ 200 行 | 201-400 | > 400 行 |
-| `docs/design/modules/*.md`（模块设计）| ≤ 300 行 | 301-500 | > 500 行 |
-| `docs/design/governance/*.md`（治理）| ≤ 400 行 | 401-700 | > 700 行 |
-| `docs/plan/roadmap.md`（路线图）| ≤ 800 行 | 801-900 | > 900 行 |
-| `docs/plan/todo.md`（当前阶段）| ≤ 500 行 | 501-600 | > 600 行 |
-| `docs/plan/todo-archive.md`（归档主窗口）| ≤ 500 行 | 501-700 | > 700 行 |
-| `docs/plan/backlog.md`（积压）| ≤ 500 行 | 501-700 | > 700 行 |
-| `docs/research/*.md`（调研）| ≤ 500 行 | 501-800 | > 800 行 |
-| `docs/guide/*.md`（使用指南）| ≤ 500 行 | 501-800 | > 800 行 |
-
-**强制分片执行规则**：超阈值文档必须按内容逻辑拆分（如 todo-archive.md 按阶段分片 → `archive/todo-archive-phases-m{xx}.md`；experience-archive.md 按章节分片 → `experience-archive-§{xx}-{slug}.md`），主文档保留近线窗口 + 索引入口。分片方案参见 §4。
+文档行数阈值以 [文档规范 §3 文档行数阈值](../../standards/documentation.md#3-文档行数阈值) 为**唯一权威**（本文件不再重复声明阈值表）；计量脚本 `scripts/check-doc-size.mjs` 直接解析该表。
 
 ### 2.4 设计文档硬阈值（hard requirement）
 

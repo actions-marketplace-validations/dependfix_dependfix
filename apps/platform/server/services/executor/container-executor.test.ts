@@ -1,11 +1,5 @@
-import { vi, describe, expect, it, beforeEach, afterEach, beforeAll } from 'vitest'
-
 /**
- * ContainerExecutor 补单测（M27.4 W4 / 2026-09-10）
- *
- * 现有 container-executor.test.ts 仅覆盖基础场景（isAvailable + report-only + 超时）
- * + sanitizeErrorMessage + parsePositiveInt + extractGitErrorMessage + clone config 环境变量。
- *
+ * ContainerExecutor 补单测（2026-09-10）
  * 本文件扩展覆盖 ContainerExecutor.execute 主体分支（fix / fix-and-pr 模式 + 失败路径）+
  * cloneRepository 重试 / 超时 / 认证 / 网络中断 + pushFixBranch token / AuthProvider / 无凭据
  * + extractBranchName detached HEAD + extractBranchName exec throws + pushFixBranch stderr 错误。
@@ -76,6 +70,7 @@ vi.mock('@dependfix/engine', async (importOriginal) => {
 import { mkdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { vi, describe, expect, it, beforeEach, afterEach, beforeAll } from 'vitest'
 
 import type { RunResult } from '@dependfix/core'
 import {
@@ -192,6 +187,10 @@ describe('ContainerExecutor.execute - report-only mode', () => {
         expect(result.exitCode).toBe(0)
         expect(result.result).toBe(runResult)
         expect(result.runUrl).toBeUndefined()
+        // 资源快照由 execute 包装层注入（不可采集时也返回对象 + 原因，不伪造 0）
+        expect(result.resource).toBeDefined()
+        expect(result.resource?.sigkillDetected).toBe(false)
+        expect(['cgroup-v2', 'cgroup-v1', 'none']).toContain(result.resource?.source)
         // report-only 不调用 clone / push / PR
         expect(childProcessMock.execFile).not.toHaveBeenCalled()
         expect(platformDeliveryMock.deliverFixAndPr).not.toHaveBeenCalled()
@@ -328,7 +327,7 @@ describe('ContainerExecutor.execute - fix-and-pr mode', () => {
         const result = await executor.execute(ctx)
 
         expect(result.exitCode).toBe(0)
-        expect(result.runUrl).toBe('https://github.com/owner-a/repo-b/pull/42')
+        expect(result).toMatchObject({ runUrl: 'https://github.com/owner-a/repo-b/pull/42', prNumber: 42 })
         expect(platformDeliveryMock.createPlatformOctokit).toHaveBeenCalledWith('ghp_test')
         expect(platformDeliveryMock.planFixAndPrDelivery).toHaveBeenCalledWith(fakeOctokit, 'owner-a', 'repo-b', runResult)
         expect(engineMock.createFixBranch).toHaveBeenCalledWith('dependfix/auto-fix-test', expect.any(String))
@@ -465,18 +464,25 @@ describe('ContainerExecutor.execute - error paths', () => {
         expect(result.error?.code).toBe('execution_failed')
     })
 
-    it('returns execution_timeout when withTimeout triggers', async () => {
-        // 让 DependfixApp.run 返回永不解决的 promise → withTimeout 在 timeoutMs 后抛 ExecutionTimeoutError
-        dependfixAppMock.mockImplementation(function (this: { run: ReturnType<typeof vi.fn> }) {
-            this.run = vi.fn().mockImplementation(() => new Promise(() => { /* never resolves */ }))
+    it('returns execution_timeout, requests cancellation and waits out the grace period', async () => {
+        // 引擎永不主动结束；abort 后**异步**落定（超时错误先交付 → 覆盖"已落定"宽限期分支，
+        // 同步 resolve 会让 race 由引擎结果胜出、测不到该分支）
+        const abort = vi.fn()
+        dependfixAppMock.mockImplementation(function (this: { run: ReturnType<typeof vi.fn>, abort: ReturnType<typeof vi.fn> }) {
+            this.abort = abort
+            this.run = vi.fn().mockImplementation(() => new Promise((resolve) => {
+                abort.mockImplementation(() => setTimeout(() => resolve(fakeDependfixRunResult(makeRunResult(), 1)), 20))
+            }))
         } as never)
-
-        const executor = new ContainerExecutor({ workRoot: tempRoot, timeoutMs: 50 })
+        const executor = new ContainerExecutor({ workRoot: tempRoot, timeoutMs: 30, abortGraceMs: 2_000 })
         const ctx = makeCtx({ config: { ...baseConfig, mode: 'report-only' } })
         const result = await executor.execute(ctx)
 
         expect(result.exitCode).toBe(2)
         expect(result.error?.code).toBe('execution_timeout')
+        // 超时不再只是"放弃等待"：必须请求运行级取消，且在清理工作目录前等引擎落定并留痕
+        expect(abort).toHaveBeenCalledWith(expect.stringContaining('execution timeout'))
+        expect(result.logsJson).toContain('已在宽限期内落定')
     })
 
     it('does not leak workDir after execution (cleanup)', async () => {
@@ -629,9 +635,11 @@ describe('pushFixBranch', () => {
         const callArgs = childProcessMock.execFile.mock.calls[0] as unknown as [string, string[], Record<string, unknown>]
         const [bin, args] = callArgs
         expect(bin).toBe('git')
-        expect(args[0]).toBe('-c')
-        expect(args[1]).toMatch(/^http\.extraheader=Authorization: basic /)
-        expect(args[1]).not.toContain('ghp_test')
+        // 前置签名隔离参数（push.gpgSign=false）必须存在
+        expect(args.slice(0, 2)).toEqual(['-c', 'push.gpgSign=false'])
+        expect(args[2]).toBe('-c')
+        expect(args[3]).toMatch(/^http\.extraheader=Authorization: basic /)
+        expect(args[3]).not.toContain('ghp_test')
         expect(args).toContain('push')
         expect(args).toContain('origin')
         expect(args).toContain('dependfix/auto-fix-abc')
@@ -650,11 +658,12 @@ describe('pushFixBranch', () => {
 
         const callArgs = childProcessMock.execFile.mock.calls[0] as unknown as [string, string[]]
         const [, args] = callArgs
-        expect(args[1]).toMatch(/^http\.extraheader=Authorization: basic /)
+        expect(args.slice(0, 2)).toEqual(['-c', 'push.gpgSign=false'])
+        expect(args[3]).toMatch(/^http\.extraheader=Authorization: basic /)
         // base64(app-user:ghs_app_token) 不应包含原 token 明文
-        expect(args[1]).not.toContain('ghs_app_token')
+        expect(args[3]).not.toContain('ghs_app_token')
         // base64 解码后是 'app-user:ghs_app_token'
-        const extraHeader = args[1]
+        const extraHeader = args[3]
         if (extraHeader) {
             const base64 = extraHeader.replace('http.extraheader=Authorization: basic ', '')
             expect(Buffer.from(base64, 'base64').toString('utf-8')).toBe('app-user:ghs_app_token')
@@ -671,7 +680,7 @@ describe('pushFixBranch', () => {
 
         const callArgs = childProcessMock.execFile.mock.calls[0] as unknown as [string, string[]]
         const [, args] = callArgs
-        expect(args).toEqual(['push', 'origin', 'main'])
+        expect(args).toEqual(['-c', 'push.gpgSign=false', 'push', '--no-verify', 'origin', 'main'])
     })
 
     it('throws when stderr does not match /^To / pattern', async () => {

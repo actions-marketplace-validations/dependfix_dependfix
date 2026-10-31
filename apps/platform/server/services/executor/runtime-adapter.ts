@@ -6,7 +6,7 @@ const execFileAsync = promisify(execFile)
 /**
  * OCI runtime 抽象层。
  *
- * 设计要点（见 docs/design/governance/executor-sandbox.md §7.1 与 todo.md §M10 决策会议结论）：
+ * 设计要点（见 docs/design/governance/executor-sandbox-implementation.md §7.1 与 todo.md §M10 决策会议结论）：
  * - 接口契约按 OCI runtime 兼容设计：当前实现 `DockerAdapter` 走 Docker Engine；
  *   未来切 Sysbox 仅切换启动参数 `--runtime=sysbox-runc`，业务代码无需改动
  * - daemon 探测：注入 sandbox-executor 时先 `isAvailable()`，探测失败降级回

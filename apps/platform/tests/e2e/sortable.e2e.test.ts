@@ -9,37 +9,40 @@ import { waitForHydration } from './helpers/hydration.helper'
  */
 test.use({ storageState: 'tests/e2e/.auth/admin.json' })
 
-test.describe('C60 平台表格 sortable', () => {
-    test('alerts 页面 severity 列可点击排序（removableSort 三态）', async ({ page }) => {
+test.describe('平台表格 sortable', () => {
+    test('alerts 页面 severity 列可点击排序（三态循环 asc → desc → 移除）', async ({ page }) => {
         await page.goto('/alerts')
         await waitForHydration(page)
         // DataTable 渲染（无 alerts 时仍可见空态）
-        await expect(page.locator('.p-datatable')).toBeVisible({ timeout: 15000 })
-        // severity 列 header 含 sortable 标记（PrimeVue 4 用 data-p-sortable-column 属性）
-        const severityHeader = page.locator('.p-datatable th:has-text("严重级别")')
-        await expect(severityHeader).toHaveAttribute('data-p-sortable-column', 'true')
-        // 默认状态（e5bf11d 落地后）已是 desc 排序：multiSortMeta = [{ _severityRank, -1 }, ...]，
-        // 因此首击触发 PrimeVue 4 removableSort 三态切换链路：
-        //   desc → unsorted（removableSort=true 且 -1 * -1 === DataTable defaultSortOrder(1)，
-        //                    触发 splice 移除；datatable/index.mjs:4706）
-        //   unsorted → asc（再点一次按 defaultSortOrder=1 push 入 multiSortMeta）
-        // 双击后断言 data-p-sorted='true' 覆盖「可点击 + 排序状态正确循环」。
-        await severityHeader.click()
-        await severityHeader.click()
-        await expect(severityHeader).toHaveAttribute('data-p-sorted', 'true', { timeout: 5000 })
+        await expect(page.locator('.caomei-data-table')).toBeVisible({ timeout: 15000 })
+        // 可排序列头渲染排序按钮（caomei 用 `.caomei-data-table__sort` 按钮 + th[aria-sort] 承载状态）
+        const severityHeader = page.locator('.caomei-data-table th:has-text("严重级别")').first()
+        await expect(severityHeader.locator('.caomei-data-table__sort')).toBeVisible()
+        // 默认排序契约：multiSortMeta 初值已按严重级别降序
+        await expect(severityHeader).toHaveAttribute('aria-sort', 'descending')
+        // 三态循环（选取初始未排序的「出现次数」列）：asc → desc → 移除
+        const occHeader = page.locator('.caomei-data-table th:has-text("出现次数")').first()
+        const occSort = occHeader.locator('.caomei-data-table__sort')
+        await occSort.click()
+        await expect(occHeader).toHaveAttribute('aria-sort', 'ascending', { timeout: 5000 })
+        await occSort.click()
+        await expect(occHeader).toHaveAttribute('aria-sort', 'descending', { timeout: 5000 })
+        await occSort.click()
+        await expect(occHeader).toHaveAttribute('aria-sort', 'none', { timeout: 5000 })
     })
 
     test('repos 页面 owner 列可点击排序 + selectedRows 保留', async ({ page }) => {
         await page.goto('/repos')
         await waitForHydration(page)
-        await expect(page.locator('.p-datatable')).toBeVisible({ timeout: 15000 })
-        // owner 列 sortable
-        const ownerHeader = page.locator('.p-datatable th:has-text("Owner")')
-        await expect(ownerHeader).toHaveAttribute('data-p-sortable-column', 'true')
-        await ownerHeader.click()
-        await expect(ownerHeader).toHaveAttribute('data-p-sorted', 'true', { timeout: 5000 })
-        // 排序后批量选择 checkbox 仍可用（PR1 W10 教训：selectedRows 不应被排序重置）
-        const checkboxes = page.locator('.p-datatable .p-checkbox')
+        await expect(page.locator('.caomei-data-table')).toBeVisible({ timeout: 15000 })
+        // owner 列可排序（caomei 用 `.caomei-data-table__sort` 按钮 + th[aria-sort]）
+        const ownerHeader = page.locator('.caomei-data-table th:has-text("Owner")')
+        const ownerSort = ownerHeader.locator('.caomei-data-table__sort')
+        await expect(ownerSort).toBeVisible()
+        await ownerSort.click()
+        await expect(ownerHeader).toHaveAttribute('aria-sort', 'ascending', { timeout: 5000 })
+        // 排序后批量选择 checkbox 仍可用（教训：selectedRows 不应被排序重置）
+        const checkboxes = page.locator('.caomei-data-table .caomei-checkbox__control')
         await expect(checkboxes.first()).toBeVisible()
     })
 
@@ -47,10 +50,9 @@ test.describe('C60 平台表格 sortable', () => {
         for (const route of ['/schedules', '/credentials', '/users', '/batch-runs']) {
             await page.goto(route)
             await waitForHydration(page)
-            await expect(page.locator('.p-datatable')).toBeVisible({ timeout: 15000 })
-            // 至少一个 sortable 列存在（PrimeVue 4 data-p-sortable-column 属性）
-            const sortableHeaders = page.locator('.p-datatable th[data-p-sortable-column="true"]')
-            await expect(sortableHeaders.first()).toBeVisible()
+            await expect(page.locator('.caomei-data-table')).toBeVisible({ timeout: 15000 })
+            // 至少一个可排序列存在（caomei 用 `.caomei-data-table__sort` 按钮）
+            await expect(page.locator('.caomei-data-table th .caomei-data-table__sort').first()).toBeVisible()
         }
     })
 
@@ -60,9 +62,9 @@ test.describe('C60 平台表格 sortable', () => {
         }))
         await page.goto('/env-events')
         await waitForHydration(page)
-        await expect(page.locator('.p-datatable')).toBeVisible({ timeout: 15000 })
-        // 6 列均含 sortable 标记（PrimeVue 4 data-p-sortable-column 属性）
-        const sortableHeaders = page.locator('.p-datatable th[data-p-sortable-column="true"]')
+        await expect(page.locator('.caomei-data-table')).toBeVisible({ timeout: 15000 })
+        // 6 列均渲染排序按钮（caomei 用 `.caomei-data-table__sort`）
+        const sortableHeaders = page.locator('.caomei-data-table th .caomei-data-table__sort')
         await expect(sortableHeaders).toHaveCount(6, { timeout: 5000 })
     })
 })

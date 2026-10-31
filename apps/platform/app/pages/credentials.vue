@@ -1,5 +1,7 @@
 <script setup lang="ts">
 // 凭据管理：创建/编辑/删除（token 加密存储于服务端，永不回传明文）
+import { Check, CircleCheck, CircleX, Pencil, Plus, Trash, Upload } from '@lucide/vue'
+import type { DataTableColumn } from 'caomei-ui'
 import type { CredentialView } from '~/types/platform'
 import { computePemFingerprint, validateGithubAppId, validatePemSize, type PemParseResult } from '~/utils/pem'
 
@@ -204,6 +206,18 @@ const remove = async (credential: CredentialView) => {
     }
 }
 
+/**
+ * 列定义（caomei DataTable 用 `columns` 数组 + `#cell-{key}` 插槽替代迁移前的 `<Column>`）。
+ * `key` 即排序字段（原 `field`），非排序列（token / actions）取语义唯一 key。
+ */
+const columns = computed<DataTableColumn<CredentialView>[]>(() => [
+    { key: 'name', header: t('credentials.colName'), sortable: true },
+    { key: 'type', header: t('credentials.colType'), sortable: true },
+    { key: 'token', header: t('credentials.colToken') },
+    { key: 'createdAt', header: t('credentials.colCreatedAt'), sortable: true },
+    { key: 'actions', header: t('credentials.colActions'), width: '160px' },
+])
+
 const toastMessage = computed(() => success.value)
 watch(toastMessage, (v) => {
     if (v) {
@@ -223,123 +237,107 @@ watch(toastMessage, (v) => {
                     {{ t('credentials.subtitle') }}
                 </p>
             </div>
-            <Button
-                icon="pi pi-plus"
-                :label="t('credentials.add')"
-                @click="openCreate"
-            />
+            <CaomeiButton @click="openCreate">
+                <template #icon>
+                    <CaomeiIcon :icon="Plus" />
+                </template>
+                {{ t('credentials.add') }}
+            </CaomeiButton>
         </div>
 
-        <Message
+        <CaomeiMessage
             v-if="error"
-            severity="error"
+            tone="danger"
             :closable="false"
         >
             {{ error }}
-        </Message>
-        <Message
+        </CaomeiMessage>
+        <CaomeiMessage
             v-if="success"
-            severity="success"
+            tone="success"
             :closable="false"
         >
             {{ success }}
-        </Message>
+        </CaomeiMessage>
 
-        <Card v-if="!loading">
-            <template #content>
-                <DataTable
-                    :value="credentials"
-                    striped-rows
-                    size="small"
-                    removable-sort
-                    :empty-message="t('credentials.empty')"
-                >
-                    <Column
-                        field="name"
-                        :header="t('credentials.colName')"
-                        sortable
-                    />
-                    <Column
-                        field="type"
-                        :header="t('credentials.colType')"
-                        sortable
+        <CaomeiCard v-if="!loading">
+            <CaomeiDataTable
+                :data="credentials"
+                :columns="columns"
+                row-key="id"
+                striped
+                :empty-text="t('credentials.empty')"
+            >
+                <template #cell-type="{row}">
+                    <CaomeiTag>{{ typeLabel(row.type) }}</CaomeiTag>
+                </template>
+                <template #cell-token="{row}">
+                    <CaomeiTag
+                        v-if="row.hasToken"
+                        tone="success"
                     >
-                        <template #body="{data}">
-                            <Tag :value="typeLabel(data.type)" />
-                        </template>
-                    </Column>
-                    <Column :header="t('credentials.colToken')">
-                        <template #body="{data}">
-                            <Tag
-                                v-if="data.hasToken"
-                                :value="t('credentials.tokenConfigured')"
-                                severity="success"
-                            />
-                            <Tag
-                                v-else
-                                :value="t('credentials.tokenNotConfigured')"
-                                severity="warn"
-                            />
-                        </template>
-                    </Column>
-                    <Column
-                        field="createdAt"
-                        :header="t('credentials.colCreatedAt')"
-                        sortable
+                        {{ t('credentials.tokenConfigured') }}
+                    </CaomeiTag>
+                    <CaomeiTag
+                        v-else
+                        tone="warning"
                     >
-                        <template #body="{data}">
-                            {{ d(new Date(data.createdAt), 'long') }}
+                        {{ t('credentials.tokenNotConfigured') }}
+                    </CaomeiTag>
+                </template>
+                <template #cell-createdAt="{row}">
+                    {{ d(new Date(row.createdAt), 'long') }}
+                </template>
+                <template #cell-actions="{row}">
+                    <CaomeiButton
+                        variant="ghost"
+                        rounded
+                        size="sm"
+                        :label="t('repos.actionEdit')"
+                        @click="openEdit(row)"
+                    >
+                        <template #icon>
+                            <CaomeiIcon :icon="Pencil" />
                         </template>
-                    </Column>
-                    <Column :header="t('credentials.colActions')" :style="{width: '160px'}">
-                        <template #body="{data}">
-                            <Button
-                                icon="pi pi-pencil"
-                                text
-                                rounded
-                                size="small"
-                                :aria-label="t('repos.actionEdit')"
-                                @click="openEdit(data)"
-                            />
-                            <Button
-                                icon="pi pi-trash"
-                                text
-                                rounded
-                                size="small"
-                                severity="danger"
-                                :aria-label="t('repos.actionDelete')"
-                                @click="remove(data)"
-                            />
+                    </CaomeiButton>
+                    <CaomeiButton
+                        variant="ghost"
+                        rounded
+                        size="sm"
+                        tone="danger"
+                        :label="t('repos.actionDelete')"
+                        @click="remove(row)"
+                    >
+                        <template #icon>
+                            <CaomeiIcon :icon="Trash" />
                         </template>
-                    </Column>
-                </DataTable>
-            </template>
-        </Card>
+                    </CaomeiButton>
+                </template>
+            </CaomeiDataTable>
+        </CaomeiCard>
         <p v-else class="text-muted">
             {{ t('common.empty.loading') }}
         </p>
 
-        <Dialog
-            v-model:visible="dialogVisible"
-            :header="editingId ? t('credentials.dialogEditTitle') : t('credentials.dialogAddTitle')"
+        <CaomeiDialog
+            v-model:open="dialogVisible"
+            :title="editingId ? t('credentials.dialogEditTitle') : t('credentials.dialogAddTitle')"
             modal
-            :draggable="false"
             :style="{width: '480px'}"
         >
             <form class="credential-form" @submit.prevent="submit">
                 <div class="credential-form__field">
                     <label for="name">{{ t('credentials.fieldName') }}</label>
-                    <InputText
+                    <CaomeiInput
                         id="name"
                         v-model="form.name"
                         :placeholder="t('credentials.fieldNamePlaceholder')"
-                        fluid
                         required
                     />
                 </div>
                 <div class="credential-form__field">
                     <label for="type">{{ t('credentials.fieldType') }}</label>
-                    <Select
+                    <CaomeiSelect
                         id="type"
                         v-model="form.type"
                         :options="[
@@ -349,18 +347,15 @@ watch(toastMessage, (v) => {
                         ]"
                         option-label="label"
                         option-value="value"
-                        fluid
                     />
                 </div>
                 <div class="credential-form__field">
                     <label for="token">{{ editingId ? t('credentials.fieldTokenEdit') : t('credentials.fieldTokenNew') }}</label>
-                    <Password
+                    <!-- Token / 私钥类字段：强度指示无意义，不开启 feedback（库默认关闭） -->
+                    <CaomeiPassword
                         id="token"
                         v-model="form.token"
-                        :feedback="false"
-                        toggle-mask
                         :placeholder="editingId ? t('credentials.fieldTokenPlaceholderEdit') : t('credentials.fieldTokenPlaceholderNew')"
-                        fluid
                         :required="!editingId"
                     />
                     <small class="text-muted">
@@ -375,15 +370,14 @@ watch(toastMessage, (v) => {
                     </small>
                 </div>
 
-                <!-- GitHub App 路径专属字段（M18.3 接入） -->
+                <!-- GitHub App 路径专属字段 -->
                 <template v-if="form.type === 'github-app'">
                     <div class="credential-form__field">
                         <label for="appId">{{ t('credentials.fieldAppId') }}</label>
-                        <InputText
+                        <CaomeiInput
                             id="appId"
                             v-model="form.appId"
                             :placeholder="t('credentials.fieldAppIdPlaceholder')"
-                            fluid
                             required
                         />
                         <small v-if="validateAppIdField && !validateAppIdField.valid" class="text-error">
@@ -392,11 +386,10 @@ watch(toastMessage, (v) => {
                     </div>
                     <div class="credential-form__field">
                         <label for="installationId">{{ t('credentials.fieldInstallationId') }}</label>
-                        <InputText
+                        <CaomeiInput
                             id="installationId"
                             v-model="form.installationId"
                             :placeholder="t('credentials.fieldInstallationIdPlaceholder')"
-                            fluid
                             required
                         />
                         <small v-if="validateInstallationIdField && !validateInstallationIdField.valid" class="text-error">
@@ -407,14 +400,16 @@ watch(toastMessage, (v) => {
                         <label for="privateKey">
                             {{ editingId ? t('credentials.fieldPrivateKeyEdit') : t('credentials.fieldPrivateKey') }}
                         </label>
-                        <Textarea
+                        <!-- 用 `@update:model-value` 而非 `@input`：caomei Input/Textarea 的 v-model 由
+                             `vModelDynamic` / `vModelText` 指令在 created 阶段注册监听，晚于透传的
+                             `onInput`，故 `@input` 会先于 v-model 写回触发、读到上一帧的值 -->
+                        <CaomeiTextarea
                             id="privateKey"
                             v-model="form.privateKey"
-                            rows="6"
+                            :rows="6"
                             :placeholder="t('credentials.fieldPrivateKeyPlaceholder')"
-                            fluid
                             :required="!editingId"
-                            @input="handlePemInput"
+                            @update:model-value="handlePemInput"
                         />
                         <div class="credential-form__pem-actions">
                             <input
@@ -424,22 +419,25 @@ watch(toastMessage, (v) => {
                                 style="display: none"
                                 @change="handlePemFileUpload"
                             >
-                            <Button
+                            <CaomeiButton
                                 type="button"
-                                :label="t('credentials.pemUpload')"
-                                icon="pi pi-upload"
-                                size="small"
-                                severity="secondary"
+                                size="sm"
+                                tone="neutral"
                                 @click="triggerPemFileUpload"
-                            />
+                            >
+                                <template #icon>
+                                    <CaomeiIcon :icon="Upload" />
+                                </template>
+                                {{ t('credentials.pemUpload') }}
+                            </CaomeiButton>
                             <span v-if="pemParseResult?.valid" class="text-success">
-                                <i class="pi pi-check-circle" /> {{ t('credentials.pemValid') }}
+                                <CaomeiIcon :icon="CircleCheck" /> {{ t('credentials.pemValid') }}
                                 <small v-if="pemParseResult.keyType" class="text-muted">
                                     ({{ pemParseResult.keyType }})
                                 </small>
                             </span>
                             <span v-else-if="pemParseResult && !pemParseResult.valid" class="text-error">
-                                <i class="pi pi-times-circle" /> {{ t('credentials.pemInvalid') }}: {{ pemParseResult.error }}
+                                <CaomeiIcon :icon="CircleX" /> {{ t('credentials.pemInvalid') }}: {{ pemParseResult.error }}
                             </span>
                         </div>
                         <small v-if="pemParseResult?.valid" class="text-muted">
@@ -448,11 +446,10 @@ watch(toastMessage, (v) => {
                     </div>
                     <div class="credential-form__field">
                         <label for="botLogin">{{ t('credentials.fieldBotLogin') }}</label>
-                        <InputText
+                        <CaomeiInput
                             id="botLogin"
                             v-model="form.botLogin"
                             :placeholder="t('credentials.fieldBotLoginPlaceholder')"
-                            fluid
                         />
                     </div>
                     <small class="text-muted">
@@ -469,30 +466,33 @@ watch(toastMessage, (v) => {
 
                 <div class="credential-form__field">
                     <label for="note">{{ t('repos.fieldNote') }}</label>
-                    <Textarea
+                    <CaomeiTextarea
                         id="note"
                         v-model="form.note"
-                        rows="2"
-                        fluid
+                        :rows="2"
                     />
                 </div>
 
                 <div class="credential-form__actions">
-                    <Button
-                        :label="t('common.actions.cancel')"
-                        severity="secondary"
-                        text
+                    <CaomeiButton
+                        variant="ghost"
+                        tone="neutral"
                         @click="closeDialog"
-                    />
-                    <Button
+                    >
+                        {{ t('common.actions.cancel') }}
+                    </CaomeiButton>
+                    <CaomeiButton
                         type="submit"
-                        :label="t('common.actions.save')"
-                        icon="pi pi-check"
                         :loading="saving"
-                    />
+                    >
+                        <template #icon>
+                            <CaomeiIcon :icon="Check" />
+                        </template>
+                        {{ t('common.actions.save') }}
+                    </CaomeiButton>
                 </div>
             </form>
-        </Dialog>
+        </CaomeiDialog>
     </div>
 </template>
 
@@ -521,9 +521,7 @@ watch(toastMessage, (v) => {
     gap: $space-4;
 
     &__field {
-        display: flex;
-        flex-direction: column;
-        gap: $space-1;
+        @include field-stack;
     }
 
     &__field label {
@@ -548,7 +546,7 @@ watch(toastMessage, (v) => {
         gap: $space-1;
         margin-top: $space-1;
         padding: $space-2;
-        background: var(--p-surface-50);
+        background: var(--caomei-color-bg-elevated);
         border-radius: $radius-sm;
 
         code {

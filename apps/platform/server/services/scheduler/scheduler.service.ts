@@ -19,6 +19,7 @@ import type { ScanRequest } from '../scan-orchestrator.service'
 import { executeBatchRun } from '../batch/batch-executor'
 import { ActionStatusMonitor } from '../monitor/action-status-monitor'
 import { PollingSource } from '../monitor/polling-source'
+import { runPrFeedbackForRepository } from '../pr-feedback/service'
 import { decryptToken, getEncryptionKey } from '../credential.service'
 import { resolveRepositoryIds, type ScheduleSelectorData } from './selector'
 import { Credential } from '#server/entities/credential'
@@ -136,6 +137,13 @@ export type ScheduleTriggerResult =
     | { kind: 'pr-check', processed: number, errors: number, skipped?: boolean }
 
 /**
+ * PR Check 状态监测总开关（进程级 env，只读、不可热更）。
+ * 供触发链路门控与前端状态提示共用，避免多处直接读 env 造成口径漂移。
+ */
+export const isActionStatusMonitorEnabled = (): boolean =>
+    process.env.ACTION_STATUS_MONITOR_ENABLED === 'true'
+
+/**
  * 统一触发：按 schedule.kind 分支。
  * - kind='scan'：解析仓库列表 → executeBatchRun → 回填触发信息
  * - kind='pr-check'：解析仓库列表 → ActionStatusMonitor.pollOnce → 回填触发信息（env 关闭时跳过更新 lastTriggeredAt）
@@ -188,23 +196,27 @@ export const triggerSchedule = async (scheduleId: string): Promise<ScheduleTrigg
 }
 
 /**
- * pr-check schedule 触发：按仓库聚合 credential → 构造 Octokit → ActionStatusMonitor.pollOnce。
+ * PR Check polling 执行（不依赖 schedule 实体）：按 credential 聚合 → Octokit → ActionStatusMonitor.pollOnce。
+ *
+ * 供两条链路共用：
+ * - schedule 触发（cron / 手动计划触发，经 `triggerSchedule`）
+ * - 手动触发端点 `POST /api/pr-checks/poll`（无 pr-check 计划时也能即时刷新列表缓存）
  *
  * env 开关（详见 docs/plan/todo.md §M24.1 关键决策 D7）：
- * - ACTION_STATUS_MONITOR_ENABLED=false（默认）→ skip + log warn + 返回 { skipped: true }
- *   （caller 据此不更新 lastTriggeredAt，避免运维调试时每分钟落触发时间戳）
- * - ACTION_STATUS_MONITOR_ENABLED=true → 实际 polling
+ * - `ACTION_STATUS_MONITOR_ENABLED=false`（默认）→ log warn + 返回 `{ processed: 0, errors: 0, skipped: true }`
+ *   （caller 据此不更新 lastTriggeredAt；前端据此显示「监测未启用」提示）
+ * - `ACTION_STATUS_MONITOR_ENABLED=true` → 实际 polling
  *
- * 当前实现仅支持 PAT 路径（GitHub App 路径留作后续阶段，本批次抛 not-implemented）。
+ * 当前实现仅支持 PAT 路径（GitHub App 路径留作后续阶段，本批次按错误计数处理）。
  */
-const triggerPrCheckSchedule = async (
+export const runPrCheckPoll = async (
     ds: Awaited<ReturnType<typeof ensureDatabaseInitialized>>,
-    schedule: Schedule,
     repositoryIds: string[],
+    options: { organizationId?: string | null, logLabel: string },
 ): Promise<PrCheckTriggerResult> => {
-    if (process.env.ACTION_STATUS_MONITOR_ENABLED !== 'true') {
+    if (!isActionStatusMonitorEnabled()) {
         console.warn(
-            `[scheduler] pr-check schedule ${schedule.id} 跳过触发：ACTION_STATUS_MONITOR_ENABLED 未启用（默认 false）。`
+            `[scheduler] pr-check ${options.logLabel} 跳过触发：ACTION_STATUS_MONITOR_ENABLED 未启用（默认 false）。`
             + '设置 ACTION_STATUS_MONITOR_ENABLED=true 后重启进程。',
         )
         return { processed: 0, errors: 0, skipped: true }
@@ -242,7 +254,7 @@ const triggerPrCheckSchedule = async (
             continue
         }
 
-        // 仅 PAT 路径（M24.1 Phase 2）；GitHub App 路径留作后续阶段
+        // 仅 PAT 路径；GitHub App 路径留作后续阶段
         if (credential.type !== 'classic-pat' && credential.type !== 'fine-grained-pat') {
             console.warn(
                 `[scheduler] credential ${credentialId} 类型 ${credential.type} 在 M24.1 Phase 2 不支持，仅 classic-pat / fine-grained-pat；`
@@ -259,15 +271,48 @@ const triggerPrCheckSchedule = async (
         const monitor = new ActionStatusMonitor(ds, pollingSource)
 
         const result = await monitor.pollOnce({
-            organizationId: schedule.organizationId ?? null,
+            organizationId: options.organizationId ?? null,
             repositoryIds: ids,
         })
         totalProcessed += result.processed
         totalErrors += result.errors
+
+        // PR 回环反馈（同一节拍）：对已交付 PR 做幂等评论 / 关闭；失败只 warn，不影响轮询结果
+        let feedbackErrors = 0
+        for (const id of ids) {
+            try {
+                const feedback = await runPrFeedbackForRepository({
+                    ds,
+                    octokit,
+                    repositoryId: id,
+                    logger: { info() { /* 反馈仅需要 warn 通道 */ }, warn: (message: string) => console.warn(message) },
+                })
+                feedbackErrors += feedback.errors
+            } catch (error) {
+                feedbackErrors += 1
+                console.warn(
+                    `[scheduler] PR 回环反馈失败（仓库 ${id}，不影响轮询）：`,
+                    error,
+                )
+            }
+        }
+        if (feedbackErrors > 0) {
+            console.warn(`[scheduler] 本轮 PR 回环反馈失败 ${feedbackErrors} 次（已降级，不影响轮询结果）`)
+        }
     }
 
     return { processed: totalProcessed, errors: totalErrors }
 }
+
+/** schedule 触发的薄封装（保持 `triggerSchedule` 调用点不变） */
+const triggerPrCheckSchedule = async (
+    ds: Awaited<ReturnType<typeof ensureDatabaseInitialized>>,
+    schedule: Schedule,
+    repositoryIds: string[],
+): Promise<PrCheckTriggerResult> => runPrCheckPoll(ds, repositoryIds, {
+    organizationId: schedule.organizationId ?? null,
+    logLabel: `schedule ${schedule.id}`,
+})
 
 /** 供手动触发 API 与 Worker processor 复用；关闭清理（进程退出时调用，防御性） */
 export const shutdownScheduler = (): void => {

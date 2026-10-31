@@ -31,7 +31,7 @@ dependfix report-only --repo owner/repo --github-token $GITHUB_TOKEN
 
 ### `fix` — Fix alerts
 
-Execute dependency upgrade, lockfile fix and verification (lint / build), modifications limited to local files, no branch or PR creation.
+Execute dependency upgrade, lockfile fix and verification (lint / build / typecheck / test), modifications limited to local files, no branch or PR creation.
 
 ```bash
 dependfix fix --repo owner/repo --github-token $GITHUB_TOKEN --severity-threshold high
@@ -60,7 +60,8 @@ dependfix fix-and-pr --repo owner/repo --github-token $GITHUB_TOKEN
 | `--create-pr` | — | Create Pull Request (auto-enabled in `fix-and-pr` mode) | `false` |
 | `--commit` | — | After fix, commit on local current branch (`fix` mode only; no push, no PR) | `false` |
 | `--max-alerts-per-repository` | — | Max alerts processed per repo | `20` |
-| `--commands` | — | Custom verification commands (comma-separated), override default `install/lint/build` | — |
+| `--commands` | — | Custom verification commands (comma-separated); **replaces the whole default chain** `install/lint/build/typecheck/test` (no merging; default-chain additions do not carry over — keep the entries you need) | — |
+| `--override-protect` | — | Overrides protection list (per-repository, `repo-glob:pkg1,pkg2;...`); on a hit the override is not written | — |
 | `--verbose` | — | Verbose logging | `false` |
 
 ### Environment variables
@@ -88,7 +89,7 @@ const { result, exitCode } = await app.run()
 2. **Filter and sort** — filter by severity, sort by priority, limit count
 3. **Upgrade dependencies** — `pnpm update <package>` to recommended version
 4. **Lockfile fix** — detect and fix `pnpm frozen-lockfile` issues
-5. **Verify** — execute `pnpm install --frozen-lockfile` → `pnpm lint` → `pnpm build`
+5. **Verify** — execute `pnpm install --frozen-lockfile` → `pnpm lint` → `pnpm build` → `pnpm typecheck` → `pnpm test`
 6. **Branch and PR** — in `fix-and-pr` mode, create branch, commit, push, PR
 
 ## Related packages

@@ -7,7 +7,7 @@ import { waitForHydration } from './helpers/hydration.helper'
  * 2. 点击按钮 → POST /api/repos/[id]/scan 携带 reuseScanRunId → 跳转 /scans?repository=xxx&run=xxx
  * 3. 成功消息 toast 显示 + 5s 自动清除
  *
- * 依赖：todo.md §M14.2 /api/runs 分页契约 + §M16.2 reuseScanRunId API + `alert-run-sidebar` 组件 + useFixNow composable
+ * 依赖：/api/runs 分页契约 + reuseScanRunId API + `alert-run-sidebar` 组件 + useFixNow composable
  * 共享：e2e 测试账号（global-setup 注册首用户 admin）
  */
 test.use({ storageState: 'tests/e2e/.auth/admin.json' })
@@ -135,12 +135,12 @@ test.describe('alerts "立即修复此仓库" 入口', () => {
         await page.goto('/alerts')
         await waitForHydration(page)
         await page.locator('#view-mode').click()
-        await page.locator('.p-select-overlay li').filter({ hasText: '原始列表' }).click()
-        const row = page.locator('.p-datatable tbody tr').filter({ hasText: 'lodash' }).first()
+        await page.locator('.caomei-select__content .caomei-select__item').filter({ hasText: '原始列表' }).click()
+        const row = page.locator('.caomei-data-table__row').filter({ hasText: 'lodash' }).first()
         await expect(row).toBeVisible()
         await row.locator('button[aria-label="详情"]').click()
 
-        const sidebar = page.locator('.p-drawer')
+        const sidebar = page.locator('.caomei-drawer__content')
         await expect(sidebar).toContainText('12345678')
 
         // 按钮可见（aria-label 中文 "立即修复此仓库"）
@@ -175,12 +175,12 @@ test.describe('alerts "立即修复此仓库" 入口', () => {
         await page.goto('/alerts')
         await waitForHydration(page)
         await page.locator('#view-mode').click()
-        await page.locator('.p-select-overlay li').filter({ hasText: '原始列表' }).click()
-        const row = page.locator('.p-datatable tbody tr').filter({ hasText: 'lodash' }).first()
+        await page.locator('.caomei-select__content .caomei-select__item').filter({ hasText: '原始列表' }).click()
+        const row = page.locator('.caomei-data-table__row').filter({ hasText: 'lodash' }).first()
         await expect(row).toBeVisible()
         await row.locator('button[aria-label="详情"]').click()
 
-        const sidebar = page.locator('.p-drawer')
+        const sidebar = page.locator('.caomei-drawer__content')
         await expect(sidebar).toContainText('12345678')
         // 修复模式运行不应展示 "立即修复此仓库" 按钮
         await expect(sidebar.locator('button[aria-label="立即修复此仓库"]')).toHaveCount(0)
@@ -206,19 +206,61 @@ test.describe('alerts "立即修复此仓库" 入口', () => {
         await page.goto('/alerts')
         await waitForHydration(page)
         await page.locator('#view-mode').click()
-        await page.locator('.p-select-overlay li').filter({ hasText: '原始列表' }).click()
-        const row = page.locator('.p-datatable tbody tr').filter({ hasText: 'lodash' }).first()
+        await page.locator('.caomei-select__content .caomei-select__item').filter({ hasText: '原始列表' }).click()
+        const row = page.locator('.caomei-data-table__row').filter({ hasText: 'lodash' }).first()
         await expect(row).toBeVisible()
         await row.locator('button[aria-label="详情"]').click()
 
-        const sidebar = page.locator('.p-drawer')
+        const sidebar = page.locator('.caomei-drawer__content')
         const fixBtn = sidebar.locator('button[aria-label="立即修复此仓库"]')
         await expect(fixBtn).toBeVisible()
         await fixBtn.click()
 
         // 错误消息显示（success 不会显示，因为没成功）
-        await expect(sidebar.locator('.p-message-error')).toContainText('该扫描正在执行中', { timeout: 10000 })
+        await expect(sidebar.locator('.caomei-message--danger')).toContainText('该扫描正在执行中', { timeout: 10000 })
         // URL 不变（仍在 /alerts）
+        await expect(page).toHaveURL(/\/alerts$/)
+    })
+
+    test('扫描 API 返回去重合并（顶层 merged）→ sidebar 显示 warning 合并提示 + 不跳转、不弹成功', async ({ page }) => {
+        const run = makeRun({ mode: 'report-only' })
+        await installRoutes(page, [run])
+
+        // 顶层 merged：复用终态 run 命中「该仓库已有进行中任务」的去重合并（既有 run 记录保持不变）
+        await page.route('**/api/repos/*/scan', async (route) => {
+            if (route.request().method() !== 'POST') {
+                await route.continue()
+                return
+            }
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    ...run,
+                    status: 'completed',
+                    merged: { code: 'SCAN_PENDING_MERGED', message: '该仓库已有进行中的扫描任务，本次触发已合并（既有 run 记录保持不变）' },
+                }),
+            })
+        })
+
+        await page.goto('/alerts')
+        await waitForHydration(page)
+        await page.locator('#view-mode').click()
+        await page.locator('.caomei-select__content .caomei-select__item').filter({ hasText: '原始列表' }).click()
+        const row = page.locator('.caomei-data-table__row').filter({ hasText: 'lodash' }).first()
+        await expect(row).toBeVisible()
+        await row.locator('button[aria-label="详情"]').click()
+
+        const sidebar = page.locator('.caomei-drawer__content')
+        const fixBtn = sidebar.locator('button[aria-label="立即修复此仓库"]')
+        await expect(fixBtn).toBeVisible()
+        await fixBtn.click()
+
+        // warning 合并提示（前端共享 i18n 文案，非服务端 message 直出）
+        await expect(sidebar.locator('.caomei-message--warning')).toContainText('本次触发已合并（未执行）', { timeout: 10000 })
+        // 不弹成功（本次触发未真正执行）
+        await expect(sidebar.locator('.caomei-message--success')).toHaveCount(0)
+        // 不跳转：仍在 /alerts
         await expect(page).toHaveURL(/\/alerts$/)
     })
 })

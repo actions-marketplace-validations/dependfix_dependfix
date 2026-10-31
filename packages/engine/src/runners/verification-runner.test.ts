@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // ---------------------------------------------------------------------------
 // Mock child_process.spawn
@@ -11,9 +11,11 @@ interface MockChildProcess extends EventEmitter {
     kill: ReturnType<typeof vi.fn>
 }
 
-const { mockSpawn, mockSpawnSync } = vi.hoisted(() => ({
+const { mockSpawn, mockSpawnSync, capturedAuditOptions } = vi.hoisted(() => ({
     mockSpawn: vi.fn(),
     mockSpawnSync: vi.fn(),
+    // 记录 runner → startNetworkAudit 的实参（用于锁定白名单组装接线）
+    capturedAuditOptions: [] as Array<{ allowedDomains?: string[], extraAllowedDomains?: string[] }>,
 }))
 
 vi.mock('node:child_process', () => ({
@@ -21,12 +23,35 @@ vi.mock('node:child_process', () => ({
     spawnSync: mockSpawnSync,
 }))
 
+// 部分 mock：记录实参后仍委托真实实现（保留真实拦截代理行为，既有用例不受影响）
+vi.mock('./network-audit', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('./network-audit')>()
+    return {
+        ...actual,
+        startNetworkAudit: async (options?: { allowedDomains?: string[], extraAllowedDomains?: string[] }) => {
+            capturedAuditOptions.push(options ?? {})
+            return actual.startNetworkAudit(options)
+        },
+    }
+})
+
+const { mockDiscoverRegistryHosts } = vi.hoisted(() => ({
+    mockDiscoverRegistryHosts: vi.fn(),
+}))
+
+// registry 动态发现被 mock：真实实现会按 workDir 执行 `pnpm config list`（依赖宿主机环境，不确定）
+vi.mock('./registry-discovery', () => ({
+    discoverRegistryHosts: mockDiscoverRegistryHosts,
+}))
+
 import {
+    DEFAULT_VERIFY_COMMANDS,
     formatVerificationError,
     runVerification,
     sanitizeOutput,
     summarizeVerificationOutput,
 } from './verification-runner'
+import { requestAbort, resetProcessControlState } from './process-control'
 import { extractHostname } from './network-audit'
 
 // ---------------------------------------------------------------------------
@@ -83,6 +108,44 @@ function successCp(stdout?: string, stderr?: string): MockChildProcess {
 function failedCp(exitCode = 1, stderr?: string): MockChildProcess {
     return createMockCp({ exitCode, stderr: stderr ?? 'command failed' })
 }
+
+// ---------------------------------------------------------------------------
+// 宿主代理环境隔离
+// ---------------------------------------------------------------------------
+
+/**
+ * 宿主代理环境隔离：本文件的代理断言均以「父环境无代理」为基线，故用例前快照清空宿主进程的代理 env、用例后逐键还原。
+ *
+ * **不要删除本隔离块**：dependfix 的验证子进程会被 `buildSpawnEnv` 注入审计代理，「工具验证自身」时断言
+ * `spawn env` 无代理的用例必然假红；开发者本机带 `NO_PROXY` 时同样误伤（缘由与处置见
+ * [dependency-fixer-records.md §12.9](../../../../docs/design/modules/dependency-fixer-records.md)）。
+ */
+const PROXY_ENV_KEYS = [
+    'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY',
+    'http_proxy', 'https_proxy', 'all_proxy',
+    'NO_PROXY', 'no_proxy',
+] as const
+
+let proxyEnvSnapshot: Record<string, string | undefined> = {}
+
+beforeEach(() => {
+    proxyEnvSnapshot = {}
+    for (const key of PROXY_ENV_KEYS) {
+        proxyEnvSnapshot[key] = process.env[key]
+        delete process.env[key]
+    }
+})
+
+afterEach(() => {
+    for (const key of PROXY_ENV_KEYS) {
+        const value = proxyEnvSnapshot[key]
+        if (value === undefined) {
+            delete process.env[key]
+        } else {
+            process.env[key] = value
+        }
+    }
+})
 
 // ---------------------------------------------------------------------------
 // sanitizeOutput
@@ -158,6 +221,73 @@ describe('runVerification', () => {
     beforeEach(() => {
         mockSpawn.mockReset()
         mockSpawnSync.mockReset()
+        mockDiscoverRegistryHosts.mockReset()
+        capturedAuditOptions.length = 0
+        // 运行级取消状态是模块级单例：本 describe 内含 abort 用例，逐用例复位避免跨用例污染
+        resetProcessControlState()
+        // 默认：未发现任何 registry（等价于预置清单行为）
+        mockDiscoverRegistryHosts.mockReturnValue({ hosts: [], source: 'none' })
+    })
+
+    // 运行级取消（平台执行超时 / 运维中止）：链的余下命令一律不 spawn，并以失败收尾说明原因
+    it('aborts before starting any command when cancellation was already requested', async () => {
+        requestAbort('execution timeout')
+
+        const result = await runVerification({ workDir: '/tmp/aborted', commands: ['first', 'second'] })
+
+        expect(result.success).toBe(false)
+        expect(result.failedCommand).toBe('first')
+        expect(result.failure).toContain('run aborted before "first"')
+        expect(result.failure).toContain('execution timeout')
+        expect(result.commandResults).toHaveLength(0)
+        expect(mockSpawn).not.toHaveBeenCalled()
+    })
+
+    it('stops starting further commands when cancellation arrives mid-chain', async () => {
+        // 第一条命令执行期间请求取消（模拟平台在命令运行中触发 abort）
+        mockSpawn.mockImplementation(() => {
+            requestAbort('mid-run cancel')
+            return successCp('ok')
+        })
+
+        const result = await runVerification({ workDir: '/tmp/mid-abort', commands: ['first', 'second'] })
+
+        expect(result.success).toBe(false)
+        expect(result.failedCommand).toBe('second')
+        expect(result.failure).toContain('run aborted before "second"')
+        // 已跑完的命令结果保留（不丢证据），后续命令不 spawn
+        expect(result.commandResults.map((r) => r.command)).toEqual(['first'])
+        expect(mockSpawn).toHaveBeenCalledTimes(1)
+    })
+
+    it('passes workDir to registry discovery and surfaces degraded-discovery warning', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => { /* 静音 */ })
+        mockDiscoverRegistryHosts.mockReturnValue({
+            hosts: ['mirror.internal.example.com'],
+            source: 'pnpm-config',
+            warning: '读取 pnpm 配置失败（ENOENT），回退环境变量与预置白名单',
+        })
+        mockSpawn.mockImplementation(() => createMockCp({ stdout: 'ok', exitCode: 0 }))
+
+        const result = await runVerification({ workDir: '/tmp/wired-repo', commands: ['pnpm install'] })
+
+        expect(result.success).toBe(true)
+        // 接线锁定：discovery 以 workDir 调用，发现域进入拦截代理白名单，降级 warning 进运行日志（fail-open 可见性）
+        expect(mockDiscoverRegistryHosts).toHaveBeenCalledWith('/tmp/wired-repo')
+        expect(capturedAuditOptions.at(-1)?.extraAllowedDomains).toEqual(['mirror.internal.example.com'])
+        expect(capturedAuditOptions.at(-1)?.allowedDomains).toBeUndefined()
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('ENOENT'))
+        warnSpy.mockRestore()
+    })
+
+    it('skips registry discovery when network audit is disabled', async () => {
+        mockSpawn.mockImplementation(() => createMockCp({ stdout: 'ok', exitCode: 0 }))
+
+        await runVerification({ workDir: '/tmp/no-audit', commands: ['pnpm install'], networkAuditDisabled: true })
+
+        // 审计关闭时不起无谓的配置读取子进程，也不启动拦截代理
+        expect(mockDiscoverRegistryHosts).not.toHaveBeenCalled()
+        expect(capturedAuditOptions).toHaveLength(0)
     })
 
     it('aborts command on timeout with timed out classification', async () => {
@@ -179,6 +309,58 @@ describe('runVerification', () => {
         expect(result.commandResults[0].exitCode).not.toBe(0)
         // 超时中止时进程树终止被触发
         expect(cp.kill).toHaveBeenCalled()
+    })
+
+    it('settles after exit when a descendant keeps the stdio pipes open', async () => {
+        // 只发 exit、不发 close：模拟测试 / 构建命令派生的孙进程仍持有管道。
+        // 旧实现只等 close，会一直挂到孙进程退出（可能远超单命令超时）。
+        mockSpawn.mockImplementation(() => {
+            const cp = new EventEmitter() as MockChildProcess
+            cp.stdout = new EventEmitter()
+            cp.stderr = new EventEmitter()
+            cp.kill = vi.fn()
+            setImmediate(() => {
+                cp.stdout.emit('data', Buffer.from('partial output'))
+                cp.emit('exit', 0)
+            })
+            return cp
+        })
+
+        const startedAt = Date.now()
+        const result = await runVerification({
+            workDir: '/tmp/test',
+            commands: ['cmd'],
+            networkAuditDisabled: true,
+        })
+
+        expect(result.success).toBe(true)
+        expect(result.commandResults[0].stdout).toContain('partial output')
+        // 宽限期 2s；无兜底时本用例会一直挂起直到测试超时
+        expect(Date.now() - startedAt).toBeLessThan(5_000)
+    })
+
+    it('marks terminationUnconfirmed when the child never exits after timeout', async () => {
+        // 直接子进程连 exit 都不发（模拟不可中断状态）：超时 + 宽限期后必须显式标记未确认退出，
+        // 不能把「放弃等待」当成「已终止」。
+        const cp = new EventEmitter() as MockChildProcess
+        cp.stdout = new EventEmitter()
+        cp.stderr = new EventEmitter()
+        cp.kill = vi.fn()
+        mockSpawn.mockImplementation(() => cp)
+
+        const startedAt = Date.now()
+        const result = await runVerification({
+            workDir: '/tmp/test',
+            commands: ['cmd'],
+            commandTimeoutMs: 30,
+            networkAuditDisabled: true,
+        })
+
+        expect(result.commandResults[0].timedOut).toBe(true)
+        expect(result.commandResults[0].terminationUnconfirmed).toBe(true)
+        expect(result.failure).toContain('timed out')
+        // 宽限期 2s；8s 阈值留出 CI 负载余量
+        expect(Date.now() - startedAt).toBeLessThan(8_000)
     })
 
     it('does not run subsequent commands after timeout', async () => {
@@ -227,7 +409,7 @@ describe('runVerification', () => {
             expect(spawnOptions.env?.HTTP_PROXY).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/)
             expect(spawnOptions.env?.NO_PROXY).toBe('')
             expect(spawnOptions.env?.no_proxy).toBe('')
-            // telemetry 默认禁用（治本 D2：Nuxt CLI 默认 telemetry 上报 → telemetry.nuxt.com:443
+            // telemetry 默认禁用（Nuxt CLI 默认 telemetry 上报 → telemetry.nuxt.com:443
             // 真实外联；verification 是离线构建验证，必须禁用）
             expect(spawnOptions.env?.NUXT_TELEMETRY_DISABLED).toBe('1')
             expect(spawnOptions.env?.NEXT_TELEMETRY_DISABLED).toBe('1')
@@ -315,6 +497,41 @@ describe('runVerification', () => {
         }
     })
 
+    it('skips proxy injection when only lowercase http_proxy is set', async () => {
+        // 小写形态与大写同等生效（`hasExistingProxy` 读 8 个键；curl / 部分 CLI 只认小写），
+        // 只设小写时同样不得注入审计代理，否则会覆盖用户既有代理
+        const originalProxy = process.env.http_proxy
+        const originalNuxtTelemetry = process.env.NUXT_TELEMETRY_DISABLED
+        process.env.http_proxy = 'http://corp-proxy.example:8080'
+        delete process.env.NUXT_TELEMETRY_DISABLED
+        try {
+            mockSpawn.mockImplementation(() => successCp('ok'))
+
+            const result = await runVerification({
+                workDir: '/tmp/test',
+                commands: ['echo ok'],
+            })
+
+            const spawnOptions = mockSpawn.mock.calls[0][1] as { env?: NodeJS.ProcessEnv }
+            expect(spawnOptions.env?.http_proxy).toBe('http://corp-proxy.example:8080')
+            expect(spawnOptions.env?.HTTP_PROXY).toBeUndefined()
+            // telemetry 仍注入
+            expect(spawnOptions.env?.NUXT_TELEMETRY_DISABLED).toBe('1')
+            expect(result.networkAudit).toBeDefined()
+        } finally {
+            if (originalProxy === undefined) {
+                delete process.env.http_proxy
+            } else {
+                process.env.http_proxy = originalProxy
+            }
+            if (originalNuxtTelemetry === undefined) {
+                delete process.env.NUXT_TELEMETRY_DISABLED
+            } else {
+                process.env.NUXT_TELEMETRY_DISABLED = originalNuxtTelemetry
+            }
+        }
+    })
+
     it('does not override NUXT_TELEMETRY_DISABLED when already set in parent env', async () => {
         // 用户显式开启 telemetry 时（如调试 telemetry 行为）不覆盖
         const original = process.env.NUXT_TELEMETRY_DISABLED
@@ -342,7 +559,7 @@ describe('runVerification', () => {
     })
 
     it('treats empty-string NUXT_TELEMETRY_DISABLED as unset and injects default', async () => {
-        // W1 边界锁定：`export NUXT_TELEMETRY_DISABLED=`（显式空字符串）等价于未设置，
+        // 边界锁定：`export NUXT_TELEMETRY_DISABLED=`（显式空字符串）等价于未设置，
         // buildSpawnEnv 按"未设置"处理并注入默认 '1'。避免语义模糊导致 subprocess
         // 误继承父进程"开启 telemetry"的状态
         const original = process.env.NUXT_TELEMETRY_DISABLED
@@ -367,7 +584,7 @@ describe('runVerification', () => {
     })
 
     it('still injects telemetry-disable env when network audit is disabled', async () => {
-        // W2 锁定：telemetry 注入与审计代理注入正交；`networkAuditDisabled: true` 时
+        // 锁定：telemetry 注入与审计代理注入正交；`networkAuditDisabled: true` 时
         // 审计代理被禁用（deny-by-default 不生效），但 telemetry 注入仍必须生效——
         // telemetry 是依赖工具自身行为，不应被 networkAuditDisabled 一并关闭
         const original = process.env.NUXT_TELEMETRY_DISABLED
@@ -466,11 +683,13 @@ describe('runVerification', () => {
         const result = await runVerification({ workDir: '/tmp/test' })
 
         expect(result.success).toBe(true)
-        expect(result.commandResults).toHaveLength(3)
-        // 默认命令: frozen-lockfile → lint → build
+        expect(result.commandResults).toHaveLength(5)
+        // 默认命令: frozen-lockfile → lint → build → typecheck → test
         expect(result.commandResults[0].command).toContain('--frozen-lockfile')
         expect(result.commandResults[1].command).toContain('lint')
         expect(result.commandResults[2].command).toContain('build')
+        expect(result.commandResults[3].command).toContain('typecheck')
+        expect(result.commandResults[4].command).toContain('test')
     })
 
     it('uses custom commands when provided', async () => {
@@ -713,5 +932,58 @@ describe('formatVerificationError', () => {
         })
 
         expect(result).toBe('timed out after 30000ms')
+    })
+})
+
+describe('runVerification complete-chain baseline mode', () => {
+    it('stopOnFailure=false executes later commands and keeps the first failure', async () => {
+        mockSpawn
+            .mockImplementationOnce(() => failedCp(1, 'ERR_PNPM_BROKEN_LOCKFILE'))
+            .mockImplementationOnce(() => failedCp(1, 'No tests found'))
+        mockDiscoverRegistryHosts.mockReturnValue({ hosts: [] })
+
+        const result = await runVerification({
+            workDir: '/tmp/complete-chain',
+            commands: ['pnpm install --frozen-lockfile', 'pnpm test'],
+            stopOnFailure: false,
+            networkAuditDisabled: true,
+        })
+
+        expect(result.success).toBe(false)
+        expect(result.commandResults).toHaveLength(2)
+        expect(result.commandResults[0]?.stderr).toContain('BROKEN_LOCKFILE')
+        expect(result.commandResults[1]?.stderr).toContain('No tests found')
+        expect(result.failedCommand).toBe('pnpm install --frozen-lockfile')
+        expect(result.failure).toContain('exited with code 1')
+    })
+
+    it('default mode still stops at the first failure', async () => {
+        mockSpawn.mockImplementationOnce(() => failedCp(1, 'install failed'))
+        mockDiscoverRegistryHosts.mockReturnValue({ hosts: [] })
+
+        const result = await runVerification({
+            workDir: '/tmp/stop-on-failure',
+            commands: ['pnpm install --frozen-lockfile', 'pnpm test'],
+            networkAuditDisabled: true,
+        })
+
+        expect(result.commandResults).toHaveLength(1)
+        expect(result.failedCommand).toBe('pnpm install --frozen-lockfile')
+    })
+})
+
+// ---------------------------------------------------------------------------
+// DEFAULT_VERIFY_COMMANDS（唯一事实源：app 层经此导入，消除副本漂移）
+// ---------------------------------------------------------------------------
+
+describe('DEFAULT_VERIFY_COMMANDS', () => {
+    it('含 typecheck / test 且顺序为 install → lint → build → typecheck → test', () => {
+        expect(DEFAULT_VERIFY_COMMANDS).toEqual([
+            'pnpm install --frozen-lockfile',
+            'pnpm lint',
+            'pnpm build',
+            'pnpm typecheck',
+            'pnpm test',
+        ])
     })
 })

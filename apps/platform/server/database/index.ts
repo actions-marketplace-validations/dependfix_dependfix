@@ -8,11 +8,26 @@ import mysql2 from 'mysql2'
 import pg from 'pg'
 import { SnakeCaseNamingStrategy } from './naming-strategy'
 import { resolveDatabaseType, type DatabaseType } from './type'
+import { isEmptySqliteDatabase } from './schema-guard'
+import { CreateInitialSchema1600000000000 } from './migrations/1600000000000-CreateInitialSchema'
 import { CreateAuditEventTable1700000000000 } from './migrations/1700000000000-CreateAuditEventTable'
 import { AddScanResultIdentifiers1750000000000 } from './migrations/1750000000000-AddScanResultIdentifiers'
 import { CreatePrCheckTable1800000000000 } from './migrations/1800000000000-CreatePrCheckTable'
 import { AddScheduleKind1800000000001 } from './migrations/1800000000001-AddScheduleKind'
 import { AddScanRunLogs1800000000002 } from './migrations/1800000000002-AddScanRunLogs'
+import { AddAiConfigFields1900000000000 } from './migrations/1900000000000-AddAiConfigFields'
+import { AddCredentialOwnerLogin2000000000000 } from './migrations/2000000000000-AddCredentialOwnerLogin'
+import { AddRepositoryVerifyCommands2100000000000 } from './migrations/2100000000000-AddRepositoryVerifyCommands'
+import { AddScanRunFailureColumns2200000000000 } from './migrations/2200000000000-AddScanRunFailureColumns'
+import { AddPrCheckBuildSignals2300000000000 } from './migrations/2300000000000-AddPrCheckBuildSignals'
+import { AddScanRunRetriedFromRunId2400000000000 } from './migrations/2400000000000-AddScanRunRetriedFromRunId'
+import { AddRepositoryPrCheckFocus2500000000000 } from './migrations/2500000000000-AddRepositoryPrCheckFocus'
+import { AddScanRunOutcomeColumns2600000000000 } from './migrations/2600000000000-AddScanRunOutcomeColumns'
+import { AddPlatformNotification2700000000000 } from './migrations/2700000000000-AddPlatformNotification'
+import { AddScanRunResourceColumns2800000000000 } from './migrations/2800000000000-AddScanRunResourceColumns'
+import { AddScanRunBuildColumns2900000000000 } from './migrations/2900000000000-AddScanRunBuildColumns'
+import { AddScanRunPrNumber2900000000001 } from './migrations/2900000000001-AddScanRunPrNumber'
+import { AddRepositoryPrFeedback2900000000002 } from './migrations/2900000000002-AddRepositoryPrFeedback'
 import { runStartupBackup } from './backup'
 import { Account } from '#server/entities/account'
 import { Session } from '#server/entities/session'
@@ -27,6 +42,8 @@ import { Schedule } from '#server/entities/schedule'
 import { BatchRun } from '#server/entities/batch-run'
 import { AuditEvent } from '#server/entities/audit-event'
 import { PRCheck } from '#server/entities/pr-check'
+import { NotificationPreference } from '#server/entities/notification-preference'
+import { NotificationLog } from '#server/entities/notification-log'
 
 /**
  * TypeORM DataSource 单例（多后端：SQLite 默认 / MySQL / PostgreSQL）。
@@ -72,13 +89,29 @@ export const createDataSourceOptions = (): DataSourceOptions => {
             BatchRun,
             AuditEvent,
             PRCheck,
+            NotificationPreference,
+            NotificationLog,
         ],
         migrations: [
+            CreateInitialSchema1600000000000,
             CreateAuditEventTable1700000000000,
             AddScanResultIdentifiers1750000000000,
             CreatePrCheckTable1800000000000,
             AddScheduleKind1800000000001,
             AddScanRunLogs1800000000002,
+            AddAiConfigFields1900000000000,
+            AddCredentialOwnerLogin2000000000000,
+            AddRepositoryVerifyCommands2100000000000,
+            AddScanRunFailureColumns2200000000000,
+            AddPrCheckBuildSignals2300000000000,
+            AddScanRunRetriedFromRunId2400000000000,
+            AddRepositoryPrCheckFocus2500000000000,
+            AddScanRunOutcomeColumns2600000000000,
+            AddPlatformNotification2700000000000,
+            AddScanRunResourceColumns2800000000000,
+            AddScanRunBuildColumns2900000000000,
+            AddScanRunPrNumber2900000000001,
+            AddRepositoryPrFeedback2900000000002,
         ],
         migrationsRun,
         synchronize,
@@ -169,9 +202,9 @@ export const getDataSource = (): DataSource => {
 let startupBackupRan = false
 
 /**
- * SQLite 启动期 PRAGMA 优化（M23.1 根因排查落地）：
+ * SQLite 启动期 PRAGMA 优化：
  * - `journal_mode = WAL`：rollback journal（默认 delete）→ WAL，让读不阻塞写 + 多个并发读不互锁
- *   （M22.7 ECONNRESET 根因候选 P0，详见 backlog.md §E2E global-setup 串行场景 ECONNRESET 根因段）；
+ *   （详见 backlog.md §E2E global-setup 串行场景 ECONNRESET 根因段）；
  * - `busy_timeout = 5000ms`：默认 0 立即返回 SQLITE_BUSY，5s 等待可吸收 better-auth session 写入
  *   与 fixtures DELETE `ensureDatabaseInitialized()` 走同一 singleton 的异步清理窗口竞争。
  *
@@ -188,6 +221,33 @@ const applySqlitePragmas = async (ds: DataSource): Promise<void> => {
         console.log(`[database] SQLite PRAGMA applied: journal_mode=${String(journalMode[0]?.journal_mode ?? 'unknown')}, busy_timeout=5000`)
     } catch (error) {
         console.error('[database] SQLite PRAGMA apply failed (non-fatal):', error)
+    }
+}
+
+/**
+ * 空库 + 未开启迁移的启动告警。
+ *
+ * 全新部署若忘记开启迁移（`DATABASE_MIGRATIONS_RUN` 非 true），`DataSource.initialize()` 不会建表，
+ * 首次业务请求才报 `no such table`（用户侧表现为 Server Error，排查成本高）。此处提前给出明确提示。
+ * 仅 SQLite + 未开启迁移时执行；fail-open，不影响启动。
+ */
+const warnIfSchemaMissing = async (ds: DataSource): Promise<void> => {
+    if (currentDatabaseType() !== 'sqlite') {
+        return
+    }
+    // 用 DataSource 生效值判定（含 createMigrateDataSource 强制 false 等场景），避免二次读 env 漂移
+    if (ds.options.migrationsRun) {
+        return
+    }
+    try {
+        if (await isEmptySqliteDatabase(ds)) {
+            console.error(
+                '[database] 数据库为空且未开启迁移：请设置 DATABASE_MIGRATIONS_RUN=true 或执行 pnpm db:init 初始化 schema',
+            )
+        }
+    } catch (error) {
+        // 告警查询失败不阻塞启动
+        console.warn('[database] 检查数据库 schema 状态失败（非致命）:', error)
     }
 }
 
@@ -214,6 +274,7 @@ export const ensureDatabaseInitialized = async (): Promise<DataSource> => {
             // PRAGMA 应用必须在 initialize 之后（连接已建立）
             if (ds.isInitialized) {
                 await applySqlitePragmas(ds)
+                await warnIfSchemaMissing(ds)
             }
         } catch (error) {
             console.error('[database] initialization failed:', error)

@@ -123,6 +123,56 @@ describe('DependfixApp versioned overrides (same-major coexistence)', () => {
         expect(voActions[0].toVersion).toContain('3.1.5')
         expect(nock.pendingMocks()).toEqual([])
     })
+
+    it('overrides 保护名单命中：多版本路径不写入 versioned override（记 OVERRIDE_PROTECTED + noOp）', async () => {
+        nock('https://api.github.com')
+            .get('/repos/foo/bar/dependabot/alerts')
+            .query({ state: 'open', per_page: '100' })
+            .reply(200, [{
+                number: 1,
+                state: 'open',
+                security_advisory: { ghsa_id: 'GHSA-f8p3-7c7w-h6x4', severity: 'high' },
+                security_vulnerability: {
+                    package: { ecosystem: 'npm', name: 'fast-uri' },
+                    severity: 'high',
+                    vulnerable_version_range: '< 3.1.5',
+                    first_patched_version: { identifier: '3.1.5' },
+                },
+                dependency: { package: { ecosystem: 'npm', name: 'fast-uri' }, manifest_path: 'pnpm-lock.yaml' },
+            }])
+
+        nock('https://api.github.com')
+            .get('/repos/foo/bar')
+            .reply(200, { default_branch: 'master' })
+
+        const config = resolveRuntimeConfig({
+            env: {
+                GITHUB_TOKEN: 'main-token-value',
+                DEPENDFIX_MODE: 'fix',
+                DEPENDFIX_REPOSITORIES: 'foo/bar',
+                DEPENDFIX_DRY_RUN: 'true',
+                DEPENDFIX_OVERRIDE_PROTECT: 'foo/bar:fast-uri',
+            },
+        })
+
+        const app = new DependfixApp({ config, workDir, reportOutputDir: join(workDir, 'reports') })
+        const { exitCode, result } = await app.run()
+
+        // 退出码 0：全部告警被保护跳过 → 无修复；但跳过类审计条目（OVERRIDE_PROTECTED）
+        // 不再计入 hasErrors（修正后），故全跳过也为 0
+        expect(exitCode).toBe(0)
+        // 不产生 versioned-override 动作
+        expect(result.actions.filter((a) => a.strategy === 'versioned-override' && a.target === 'fast-uri')).toHaveLength(0)
+        // 记录为 noOp 保护跳过动作（不计 fixed/failed）
+        const protectedActions = result.actions.filter((a) => a.strategy === 'override-protected' && a.target === 'fast-uri')
+        expect(protectedActions).toHaveLength(1)
+        expect(protectedActions[0].noOp).toBe(true)
+        // 报告记录判定依据（含命中模式）
+        const protectedErrors = result.errors.filter((e) => e.category === 'OVERRIDE_PROTECTED')
+        expect(protectedErrors).toHaveLength(1)
+        expect(protectedErrors[0].message).toContain('foo/bar')
+        expect(nock.pendingMocks()).toEqual([])
+    })
 })
 
 // ---------------------------------------------------------------------------
@@ -202,6 +252,16 @@ describe('DependfixApp dual token', () => {
 // 验证门禁集成测试：验证失败（lint 不过）→ 回滚 + 不创建 PR + exit 2
 // ---------------------------------------------------------------------------
 
+// 不可修复告警载荷（无 first_patched_version）：仅让仓库「有工作」以取得归因前提（口径见
+// docs/design/modules/dependency-fixer-records.md §12.9——零告警仓库按设计不产生归属型失败）。
+const unfixableAlertPayload = () => ([{
+    number: 1,
+    state: 'open',
+    security_advisory: { ghsa_id: 'GHSA-test-0000-0000', severity: 'high' },
+    security_vulnerability: { package: { ecosystem: 'npm', name: 'lodash' }, severity: 'high', vulnerable_version_range: '< 4.17.21' },
+    dependency: { package: { ecosystem: 'npm', name: 'lodash' }, manifest_path: 'package.json' },
+}])
+
 describe('DependfixApp verification gate', () => {
     let workDir: string
 
@@ -210,8 +270,20 @@ describe('DependfixApp verification gate', () => {
         execSync('git init -q', { cwd: workDir })
         execSync('git config user.name test', { cwd: workDir })
         execSync('git config user.email test@test', { cwd: workDir })
-        // 带会失败的 lint 脚本的仓库（验证命令使用自定义命令链，快速失败）
-        writeFileSync(join(workDir, 'package.json'), JSON.stringify({ scripts: { lint: 'exit 1' } }))
+        // 构造「基线绿 + 修复后红」的归因场景（既有失败基线判定）：
+        // lint 由计数器脚本承载——第 1 次调用（修复前基线采样）绿、第 2 次（修复后验证）红。
+        // 用独立 .cjs 文件而非 npm script 内嵌引号，避免不同 shell 下的转义差异。
+        writeFileSync(join(workDir, 'lint-check.cjs'), [
+            'const { existsSync, readFileSync, writeFileSync } = require(\'node:fs\')',
+            'const counter = \'lint-check-count\'',
+            'const count = existsSync(counter) ? Number(readFileSync(counter, \'utf8\')) : 0',
+            'writeFileSync(counter, String(count + 1))',
+            'process.exit(count >= 1 ? 1 : 0)',
+            '',
+        ].join('\n'))
+        writeFileSync(join(workDir, 'package.json'), JSON.stringify({
+            scripts: { lint: 'node lint-check.cjs' },
+        }))
         execSync('git add . && git commit -qm init', { cwd: workDir })
     })
 
@@ -221,10 +293,11 @@ describe('DependfixApp verification gate', () => {
     })
 
     it('rolls back and skips PR creation when verification fails (regression: bad PR #23)', async () => {
+        // 锁定「归属型验证失败必须阻断交付」：仓库须「有工作」才有归属前提（见 unfixableAlertPayload）
         nock('https://api.github.com')
             .get('/repos/foo/bar/dependabot/alerts')
             .query({ state: 'open', per_page: '100' })
-            .reply(200, [])
+            .reply(200, unfixableAlertPayload())
         nock('https://api.github.com')
             .get('/repos/foo/bar')
             .reply(200, { default_branch: 'master' })
@@ -241,7 +314,9 @@ describe('DependfixApp verification gate', () => {
             },
         })
 
-        const app = new DependfixApp({ config, workDir, reportOutputDir: join(workDir, 'reports') })
+        const app = new DependfixApp({
+            config, workDir, reportOutputDir: join(workDir, 'reports'), commands: ['pnpm lint'],
+        })
         const { exitCode, result } = await app.run()
 
         expect(exitCode).toBe(2)
@@ -249,6 +324,44 @@ describe('DependfixApp verification gate', () => {
         // 已跟踪文件已回滚（untracked 的 pnpm-lock.yaml / node_modules 是运行产物，保留为预期行为）
         expect(execSync('git status --porcelain --untracked-files=no', { cwd: workDir, encoding: 'utf-8' }).trim()).toBe('')
     }, 30_000) // 含真实 git init/回滚 + 验证子进程：Windows 并行负载下放宽超时
+
+    it('修复前即红的命令（既有失败）→ 记 PRE_EXISTING_FAILURE，不触发门禁回滚', async () => {
+        // 锁定「基线命中 → PRE_EXISTING_FAILURE」的端到端链路（仓库须「有工作」才会采样基线）
+        nock('https://api.github.com')
+            .get('/repos/foo/bar/dependabot/alerts')
+            .query({ state: 'open', per_page: '100' })
+            .reply(200, unfixableAlertPayload())
+        nock('https://api.github.com')
+            .get('/repos/foo/bar')
+            .reply(200, { default_branch: 'master' })
+        // 目标仓库 lint 长期为红：基线采样与修复后验证都会失败 → 归为既有失败，不归因本次改动
+        writeFileSync(join(workDir, 'package.json'), JSON.stringify({ scripts: { lint: 'exit 1' } }))
+        execSync('git add . && git commit -qm init', { cwd: workDir })
+
+        const config = resolveRuntimeConfig({
+            env: {
+                GITHUB_TOKEN: 'token',
+                DEPENDFIX_MODE: 'fix',
+                DEPENDFIX_REPOSITORIES: 'foo/bar',
+                DEPENDFIX_COMMIT: 'true',
+            },
+            cliOverrides: {
+                commands: ['pnpm lint'],
+            },
+        })
+
+        const app = new DependfixApp({
+            config, workDir, reportOutputDir: join(workDir, 'reports'), commands: ['pnpm lint'],
+        })
+        const { result } = await app.run()
+
+        // 既有失败单列；门禁未阻断（不记 VERIFICATION_FAILED、不回滚）
+        expect(result.errors.some((e) => e.category === 'PRE_EXISTING_FAILURE')).toBe(true)
+        expect(result.errors.some((e) => e.category === 'VERIFICATION_FAILED')).toBe(false)
+        // 两个口径分工：链路未全绿（passed=false）但没有本次引入的失败（blocking=false）
+        expect(result.repositories[0]?.verificationPassed).toBe(false)
+        expect(result.repositories[0]?.verificationBlocking).toBe(false)
+    }, 30_000)
 })
 
 // ---------------------------------------------------------------------------
@@ -483,6 +596,7 @@ describe('DependfixApp code-scanning parallel source', () => {
 
         expect(exitCode).toBe(0)
         expect(result.summary.alertsTruncated).toBe(1)
+        expect(result.summary.alertsTruncatedBySeverity).toEqual({ high: 1 })
         expect(result.alerts).toHaveLength(1)
         expect(nock.pendingMocks()).toEqual([])
     })

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { FixError, RunResult } from '@dependfix/core'
-import { resolveScanRunState } from './scan-run-state'
+import { resolveScanRunOutcome, resolveScanRunState } from './scan-run-state'
 
 const minimalResult = { runId: 'r1', errors: [] } as unknown as RunResult
 
@@ -135,8 +135,9 @@ describe('resolveScanRunState（状态机纯函数）', () => {
         })
 
         it('failed for each engine delivery category in whitelist', () => {
-            // 覆盖白名单全部 5 个 category（COMMIT_FAILED / PR_CREATION_FAILED / VERIFICATION_FAILED / ROLLBACK_FAILED / FATAL）
-            for (const category of ['COMMIT_FAILED', 'PR_CREATION_FAILED', 'VERIFICATION_FAILED', 'ROLLBACK_FAILED', 'FATAL'] as const) {
+            // 覆盖白名单全部 7 个 category（COMMIT_FAILED / UNEXPECTED_CHANGES / NO_CHANGES /
+            // PR_CREATION_FAILED / VERIFICATION_FAILED / ROLLBACK_FAILED / FATAL）
+            for (const category of ['COMMIT_FAILED', 'UNEXPECTED_CHANGES', 'NO_CHANGES', 'PR_CREATION_FAILED', 'VERIFICATION_FAILED', 'ROLLBACK_FAILED', 'FATAL'] as const) {
                 const result = resultWithErrors({ category, message: 'x' })
                 expect(resolveScanRunState('container', undefined, result).status).toBe('failed')
             }
@@ -194,5 +195,40 @@ describe('resolveScanRunState（状态机纯函数）', () => {
             const decision = resolveScanRunState('github-action', undefined, result, undefined, 1)
             expect(decision.status).toBe('completed')
         })
+    })
+})
+
+describe('resolveScanRunOutcome（结果可信度映射纯函数）', () => {
+    const withSummary = (environmentalFailures: unknown): RunResult => ({
+        summary: { environmentalFailures },
+    }) as unknown as RunResult
+
+    it('preserves exitCode 0 instead of folding it to null', () => {
+        expect(resolveScanRunOutcome(withSummary(0), 0)).toEqual({ exitCode: 0, environmentalFailureCount: 0 })
+    })
+
+    it('maps undefined exitCode to null', () => {
+        expect(resolveScanRunOutcome(withSummary(0), undefined)).toEqual({ exitCode: null, environmentalFailureCount: 0 })
+    })
+
+    it('persists environmental failure count when a result exists', () => {
+        expect(resolveScanRunOutcome(withSummary(3), 1)).toEqual({ exitCode: 1, environmentalFailureCount: 3 })
+    })
+
+    it('treats a result without the summary field as zero environmental failures', () => {
+        expect(resolveScanRunOutcome(withSummary(undefined), 0)).toEqual({ exitCode: 0, environmentalFailureCount: 0 })
+    })
+
+    it('does not persist executor sentinel exitCode=2 when no result was produced', () => {
+        expect(resolveScanRunOutcome(undefined, 2)).toEqual({ exitCode: null, environmentalFailureCount: null })
+    })
+
+    it('treats a result with a missing summary as result-missing (both columns null)', () => {
+        const malformed = { runId: 'r1' } as unknown as RunResult
+        expect(resolveScanRunOutcome(malformed, 2)).toEqual({ exitCode: null, environmentalFailureCount: null })
+    })
+
+    it('keeps the count null for failures without a result (execution timeout)', () => {
+        expect(resolveScanRunOutcome(undefined, undefined)).toEqual({ exitCode: null, environmentalFailureCount: null })
     })
 })

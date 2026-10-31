@@ -1,25 +1,103 @@
 # dependfix 平台容器镜像（控制面 + 容器内执行工具链）
-# 参考 momei Dockerfile 四阶段结构：nodejs → builder → minifier → runtime
-# - 基础镜像：caomeiyouren/alpine-nodejs（构建，含 node/pnpm/git）+ alpine-nodejs-minimize（运行时，最小化）
-# - 缩小阶段：只保留 .output（Nuxt 产物自带完整 node_modules）+ 容器内执行所需的 cli/core dist
-# - action.yml 不进容器：它由 GitHub Actions 消费（目标仓库 workflow uses: dependfix/dependfix），
-#   平台容器内执行走 DependfixApp 程序化接口（容器内执行器，任务归属见 docs/plan/todo.md §M6）
-# 基础镜像固定 digest（可复现构建，避免 :latest 上游漂移）；Node 24.18.1 / pnpm 11.18
-FROM caomeiyouren/alpine-nodejs@sha256:6bf6f219ac051adf9b9e66f0e0dbda561649f5828e61d7e205fb2bc09f78e095 AS nodejs
+# 参考 momei / caomei-auth Dockerfile 结构：nodejs → deps → builder → docker-minifier → runtime。
+# 基础镜像：官方 node:24.22.1-alpine（含 node）；pnpm 在 nodejs 阶段全局安装，runtime 继承。
+# 原自建 caomeiyouren/alpine-nodejs 系列依赖 Alpine 仓库的 `apk add nodejs`，安全补丁滞后，
+# 2026-10-22 起临时改用官方镜像止血，收敛计划见下方注释与 docs/plan/todo.md「Node 运行时安全基线升级」。
+#
+# 体积关键结论（2026-10-02 实证）：Nuxt/Nitro `.output` 自带完整运行时依赖
+# （`.output/server/node_modules` 由 Nitro trace 产出，含 better-sqlite3 等原生模块的 musl prebuild），
+# 且平台内执行走的 DependfixApp（`@dependfix/engine`）已被 Nitro 打包进 `.output/server/chunks`——
+# 故 runtime 只需 `.output`，不再复制根 node_modules / workspace dist（后者曾使镜像膨胀至 ~1.1GB）。
+# 容器内执行链路（git clone → pnpm install/audit → DependfixApp）仍完整可用：
+# git 走 apk、pnpm 由 nodejs 阶段全局安装继承、engine 由 `.output` 载入。
+# action.yml 不进容器：它由 GitHub Actions 消费（目标仓库 workflow uses: dependfix/dependfix），
+# 平台容器内执行走 DependfixApp 程序化接口，链路见 docs/design/governance/executor-sandbox.md。
+# 基础镜像固定 digest（可复现构建，避免 :latest 上游漂移）；digest 为 manifest list，覆盖 amd64 / arm64。
+# 走 Docker Hub（docker.io）而非 ECR Public：同一 digest 在 ECR Public 上间歇 429（10 月 23 日起 4 次，
+# 均落在推送前构建步骤），而 docker.yml 在构建前已登录 Docker Hub，认证拉取按账号配额计（未认证
+# 100 次/6h 按出口 IP，认证 Personal 200 次/6h）；两仓当前指向同一 manifest list（digest 一致，
+# 2026-10-24 实测）。发布镜像只在 CI 构建，故不留可切换服务端的构建参数；本地构建路径
+# （`docker-compose.build.yml` / `SMOKE_BUILD=1`）需可达 docker.io 或先配 registry mirror。
+# FROM 保持字面 image:tag@digest，便于工具解析（Dependabot docker 生态当前未接入，见 backlog 的
+# 运行面漏洞检测候选）；抬升基线时同时改 tag 与 digest。
+# 安全基线（2026-10-21 Node.js 安全公告）：运行时必须 >= 24.22.1（24.x 线）。
+# 暂用官方 node:24.22.1-alpine：自建 caomeiyouren/alpine-nodejs 走 `apk add nodejs`，而 Alpine
+# v3.24 与 edge 此刻仍停在 24.18.1（-r0 / -r5），重建自建镜像拿不到补丁。等 docker-builder
+# 改为官方 tarball 并发布 alpine3.24-node24.22 后再评估收敛（用户 2026-10-22 决定暂不迁移）；
+# 记录见 docs/plan/todo.md「追加临时待办（不占阶段条目编号）：Node 运行时安全基线升级」。
+FROM docker.io/library/node:24.22.1-alpine@sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53 AS nodejs
 
-FROM caomeiyouren/alpine-nodejs-minimize@sha256:8e71fdc605788175c649be9da5c27fccb1215f60199aded3827bab376c0060a2 AS runtime
+# pnpm 工具链：钉住当前运行时镜像实际携带的版本（11.18.0），切基底不改变目标仓库的安装语义。
+# 先移除官方镜像默认启用的 corepack shim：否则 `pnpm` 会按 packageManager 回源下载 11.17.0，
+# 与镜像内钉定的版本不一致，且构建期多一次网络依赖（切换前的基础镜像不含 corepack）。
+# --ignore-scripts：全局安装不执行包生命周期脚本，缩小构建期执行面。
+# 受限网络可用 `--build-arg NPM_REGISTRY=https://registry.npmmirror.com` 覆盖构建期 registry（默认官方）。
+ARG NPM_REGISTRY=
+RUN if [ -n "$NPM_REGISTRY" ]; then \
+    case "$NPM_REGISTRY" in \
+        https://*[!A-Za-z0-9.:/_-]*) echo "NPM_REGISTRY 含非法字符" >&2; exit 1 ;; \
+        https://*) ;; \
+        *) echo "NPM_REGISTRY 必须以 https:// 开头" >&2; exit 1 ;; \
+    esac; \
+    export npm_config_registry="$NPM_REGISTRY" pnpm_config_registry="$NPM_REGISTRY"; \
+fi \
+    && rm -f /usr/local/bin/pnpm /usr/local/bin/pnpx /usr/local/bin/yarn /usr/local/bin/yarnpkg /usr/local/bin/corepack \
+    && rm -rf /usr/local/lib/node_modules/corepack \
+    && npm i -g --ignore-scripts pnpm@11.18.0 \
+    && npm cache clean --force \
+    && pnpm -v
 
-# 阶段一：依赖安装（better-sqlite3 在 alpine 需源码编译，临时装工具链）
+# 官方镜像自带与运行时完全匹配的编译头（/usr/local/include/node）；显式指给 node-gyp，
+# 避免原生模块回退编译时回源 nodejs.org 下载 headers（受限网络下 ETIMEDOUT，构建与目标仓库安装都会中招）。
+ENV npm_config_nodedir=/usr/local
+
+# 运行时安全基线断言：低于已修复版本直接 fail build，防止基础镜像 digest 静默回退。
+COPY apps/platform/docker/check-node-version.mjs /usr/local/bin/dependfix-check-node-version.mjs
+RUN node /usr/local/bin/dependfix-check-node-version.mjs
+
+# 运行时基底：同一 Node 版本，去掉 npm / corepack / yarn 缩小体积与攻击面（pnpm 由上一阶段继承）。
+FROM nodejs AS runtime
+RUN rm -rf /usr/local/lib/node_modules/npm \
+        /usr/local/lib/node_modules/corepack \
+        /opt/yarn-v* \
+    && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
+        /usr/local/bin/yarn /usr/local/bin/yarnpkg \
+    && node /usr/local/bin/dependfix-check-node-version.mjs
+
+# 阶段一：依赖安装（better-sqlite3 在 alpine 需源码编译；工具链仅 deps 阶段临时安装，
+# runtime 阶段另行保留目标仓库原生模块回退所需的最小工具链）
 FROM nodejs AS deps
 WORKDIR /app
-RUN apk add --no-cache python3 make g++ && rm -rf /var/cache/apk/*
+# 官方镜像默认走 dl-cdn.alpinelinux.org；受限网络（如国内）可用 `--build-arg APK_MIRROR=https://mirrors.aliyun.com` 覆盖。
+# 该值只允许 https 且不含 sed 分隔符 / 引号 / 空白，避免构建参数被当作 shell 片段注入。
+ARG APK_MIRROR=
+RUN if [ -n "$APK_MIRROR" ]; then \
+        case "$APK_MIRROR" in \
+            https://*[!A-Za-z0-9.:/_-]*) echo "APK_MIRROR 含非法字符" >&2; exit 1 ;; \
+            https://*) ;; \
+            *) echo "APK_MIRROR 必须以 https:// 开头" >&2; exit 1 ;; \
+        esac; \
+        sed -i "s#https://dl-cdn.alpinelinux.org#$APK_MIRROR#" /etc/apk/repositories; \
+    fi \
+    && apk add --no-cache python3 make g++ && rm -rf /var/cache/apk/*
+# 受限网络可用 `--build-arg NPM_REGISTRY=https://registry.npmmirror.com` 覆盖构建期 registry（默认官方）。
+# 仅在本次 RUN 内 export，不写入镜像 ENV——运行期目标仓库安装仍按其自身 .npmrc / registry 配置。
+ARG NPM_REGISTRY=
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 COPY packages/core/package.json packages/core/package.json
 COPY packages/engine/package.json packages/engine/package.json
 COPY packages/cli/package.json packages/cli/package.json
 COPY packages/skills/package.json packages/skills/package.json
 COPY apps/platform/package.json apps/platform/package.json
-RUN pnpm install --frozen-lockfile --filter @dependfix/platform... --filter dependfix... --filter @dependfix/core... --filter @dependfix/skills...
+RUN if [ -n "$NPM_REGISTRY" ]; then \
+    case "$NPM_REGISTRY" in \
+        https://*[!A-Za-z0-9.:/_-]*) echo "NPM_REGISTRY 含非法字符" >&2; exit 1 ;; \
+        https://*) ;; \
+        *) echo "NPM_REGISTRY 必须以 https:// 开头" >&2; exit 1 ;; \
+    esac; \
+    export npm_config_registry="$NPM_REGISTRY" pnpm_config_registry="$NPM_REGISTRY"; \
+fi \
+    && pnpm install --frozen-lockfile --filter @dependfix/platform... --filter dependfix... --filter @dependfix/core... --filter @dependfix/skills...
 
 # 阶段二：构建（core → engine → cli → platform）
 FROM nodejs AS builder
@@ -36,44 +114,54 @@ RUN pnpm config set verify-deps-before-run=false \
     && pnpm --filter dependfix build \
     && pnpm --filter @dependfix/platform build
 
-# 阶段三：缩小（只保留运行时必需产物）
+# 阶段三：缩小（只保留运行时必需的 Nuxt 产物）
 FROM nodejs AS docker-minifier
 WORKDIR /app
-# .output 自带完整 node_modules（含已编译 better-sqlite3），无需复制 node_modules
+# .output 自带完整 node_modules（Nitro trace + 已编译 better-sqlite3），无需额外复制任何依赖树
 COPY --from=builder /app/apps/platform/.output ./.output
-# 容器内执行器：在容器内运行 DependfixApp 需要 cli/core/engine/skills 构建产物（含 package.json 供依赖解析）
-COPY --from=builder /app/packages/core/dist packages/core/dist
-COPY --from=builder /app/packages/core/package.json packages/core/package.json
-COPY --from=builder /app/packages/engine/dist packages/engine/dist
-COPY --from=builder /app/packages/engine/package.json packages/engine/package.json
-COPY --from=builder /app/packages/cli/dist packages/cli/dist
-COPY --from=builder /app/packages/cli/package.json packages/cli/package.json
-COPY --from=builder /app/packages/skills packages/skills
-# ── T801 容器内执行依赖：workspace node_modules（符号链接 + 根 .pnpm store）──
-# pnpm 布局：各包 node_modules 内依赖链接指向根 node_modules/.pnpm/<pkg>@<ver>/node_modules/...；
-# Docker COPY 保留符号链接，根 store 一并拷贝后链接在镜像内依然有效。
-# 注意：.dockerignore 仅约束 build context（COPY . .），不影响多阶段 COPY --from
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/packages/core/node_modules packages/core/node_modules
-COPY --from=builder /app/packages/engine/node_modules packages/engine/node_modules
-COPY --from=builder /app/packages/cli/node_modules packages/cli/node_modules
-# skills 零依赖，pnpm 不创建其 node_modules（链接直接指向包目录），无需拷贝
 
 # 阶段四：生产
 FROM runtime
 ENV NODE_ENV=production
-# ── T801 容器工具链（ContainerExecutor 依赖）：git（clone）+ pnpm（install/audit）──
-# unzip: B mode result fetch (ActionResultFetcher unzip artifact) needs it
+# 部署产物版本戳：构建期由 CI `--build-arg BUILD_COMMIT/BUILD_VERSION` 注入（commit / 版本），
+# 未注入时缺省 unknown（不阻断启动）；运行时经 NUXT_ 前缀覆盖 runtimeConfig.buildVersion/buildCommit，
+# 供 GET /api/health 与启动日志核对运行态产物。口径见 docs/standards/platform.md §10.7。
+ARG BUILD_COMMIT=unknown
+ARG BUILD_VERSION=unknown
+ENV NUXT_BUILD_COMMIT=${BUILD_COMMIT} \
+    NUXT_BUILD_VERSION=${BUILD_VERSION}
+# 首次启动自动执行 pending migration（镜像级默认，不依赖部署侧 compose 是否注入 env）：
+# 基线迁移 CreateInitialSchema 建全部业务表，迁移幂等；直接 docker run 或用旧版 compose 也能自建 schema。
+# 需完全手动控制时用 -e DATABASE_MIGRATIONS_RUN=false 覆盖（再用 docker/init-db.sh 初始化）。
+ENV DATABASE_MIGRATIONS_RUN=true
+# pnpm store 持久化由入口脚本派生（默认 $DATA_DIR/pnpm-store，可经 PNPM_CONFIG_STORE_DIR 覆盖），
+# 不在此固化 ENV：DATA_DIR 被覆盖时入口能跟着走，而固化值会与自定义数据目录脱节。
+# 口径见 docs/standards/platform.md §10.8 与 docs/guide/deployment.md「pnpm store 与依赖缓存」。
+# 容器工具链（ContainerExecutor 依赖）：git（clone）+ pnpm（install/audit）——
+# unzip：B mode result fetch（ActionResultFetcher unzip artifact）需要
 # git 随 alpine 滚动 index（与 unzip/su-exec 同惯例，实证版本 2.54.0）；可复现性以基础镜像 digest 为基线
-RUN apk add --no-cache unzip git && rm -rf /var/cache/apk/*
-# pnpm：从构建链镜像（docker-minifier，完整 nodejs 镜像）拷贝，版本 11.18.0 与构建链一致、
-# 零网络下载保证可复现构建；与 package.json packageManager 声明（pnpm@11.17.0）的 minor 差异
-# 由 toolchainPnpmVersion 验证链处理（backlog C2 已闭环）。pnpm 为自包含 npm 全局包结构。
-COPY --from=docker-minifier /usr/local/lib/node_modules/pnpm /usr/local/lib/node_modules/pnpm
-RUN ln -sf ../lib/node_modules/pnpm/bin/pnpm.mjs /usr/local/bin/pnpm
+#
+# python3 / make / g++：目标仓库的原生模块（better-sqlite3 / bcrypt / sharp 等）首选下载
+# prebuild 二进制；当预编译包下载失败或目标平台无对应 prebuild 时，install 脚本会回退
+# node-gyp 源码编译。缺少工具链时该回退以 `gyp ERR! find Python` 失败，整次安装被误判为
+# 「静默 exit 1」——stderr 为空、错误文本只写在 stdout。runtime 必须保留最小构建工具链，
+# 与 deps 阶段（平台自身的 better-sqlite3）保持同一口径。
+ARG APK_MIRROR=
+RUN if [ -n "$APK_MIRROR" ]; then \
+        case "$APK_MIRROR" in \
+            https://*[!A-Za-z0-9.:/_-]*) echo "APK_MIRROR 含非法字符" >&2; exit 1 ;; \
+            https://*) ;; \
+            *) echo "APK_MIRROR 必须以 https:// 开头" >&2; exit 1 ;; \
+        esac; \
+        sed -i "s#https://dl-cdn.alpinelinux.org#$APK_MIRROR#" /etc/apk/repositories; \
+    fi \
+    && apk add --no-cache unzip git python3 make g++ && rm -rf /var/cache/apk/*
+# pnpm：继承 nodejs 阶段的全局安装（`npm i -g --ignore-scripts pnpm@11.18.0`），无需再从 docker-minifier 拷贝。
+# 与 package.json packageManager 声明（pnpm@11.17.0）的 minor 差异由 toolchainPnpmVersion 验证链处理。
+# pnpm 为自包含 npm 全局包结构。
 WORKDIR /app
 COPY --from=docker-minifier /app /app
-# ── C38 非 root 降权（安全基线 §5.3 执行环境）：执行不可信代码的进程不得以 root 运行 ──
+# 非 root 降权（安全基线 docs/standards/security.md §5.3 执行环境）：执行不可信代码的进程不得以 root 运行
 # 运行用户创建（幂等，避免与基础镜像内置用户冲突）；su-exec 供 entrypoint 降权
 RUN set -eux; \
     if ! getent passwd dependfix > /dev/null 2>&1; then \

@@ -2,11 +2,11 @@
 
 > 本文档为 **apps/platform 管理平台集成 AI breaking change 研判能力**的专项设计先行稿。引擎层（`packages/engine/src/ai/`）的 AI 研判能力已在 T502 / M5 闭环（commit 3475e6e），CLI / MCP / GitHub Action 三条用户路径全部支持；本设计聚焦于 **apps/platform（Nuxt 管理平台）作为执行入口时，AI 研判的端到端联通**。
 >
-> **状态**：设计先行稿，未进入阶段实施面（挂载到 [backlog.md 短期/一次性候选任务](../../plan/backlog.md)）。
+> **状态**：✅ 已闭环（2026-09-10）。原挂载于 [backlog.md 短期/一次性候选任务](../../plan/backlog.md) 候选，M26 阶段进入实施并闭环（见 [M26](../../plan/archive/todo-archive-phases-m26.md) + [archive/todo-archive-phases-m26.md §M26.1](../../plan/archive/todo-archive-phases-m26.md#m261-p1--能力--ux-m252b-应用层10-commits--1130-行--standard-depth-audit)）。
 
 ## 1. 背景与目标
 
-dependfix 的核心价值之一是 **AI 研判 breaking change** —— 跨大版本升级时自动采集 Changelog + 多 provider 研判 + 结构化 patch + 安全门（详见 [architecture.md §AI 研判误判处理](./architecture.md)）。该能力对 **依赖升级决策** 是关键差异化（vs Renovate / Dependabot 仅 bump 版本号）。
+dependfix 的核心价值之一是 **AI 研判 breaking change** —— 跨大版本升级时自动采集 Changelog + 多 provider 研判 + 结构化 patch + 安全门（详见 [architecture.md §AI 研判误判处理](./architecture-platform.md)）。该能力对 **依赖升级决策** 是关键差异化（vs Renovate / Dependabot 仅 bump 版本号）。
 
 **当前痛点**：
 
@@ -222,9 +222,9 @@ aiTrigger!: 'failure' | 'major' | 'both'
 - `apps/platform/i18n/locales/zh-CN.json` + `en-US.json`：加 `ai.*` 命名空间
 - 包括 enable/disable/provider/model/trigger 标签 + 错误消息 + 用量展示
 
-**F. 安全治理（与 [architecture.md §AI 研判误判处理](./architecture.md) 对齐）**
+**F. 安全治理（与 [architecture.md §AI 研判误判处理](./architecture-platform.md) 对齐）**
 
-- AI 输出必须通过 lint/typecheck/build（沿用 engine 层现有 safety-gate）
+- AI 输出必须通过 install/lint/build/typecheck/test（沿用 engine 层现有 safety-gate）
 - AI 生成的 PR 不自动合并（与 `standards/index.md` 一致）
 - 置信度低于阈值仅输出建议不写 PR body
 - AI API Key 日志脱敏（复用 `packages/engine/src/ai/secrets.ts:maskSecrets`）
@@ -348,8 +348,8 @@ aiTrigger!: 'failure' | 'major' | 'both'
 
 ### 7.2 仓库 AI 配置（仓库详情页）
 
-- AI 研判开关（ToggleSwitch）
-- Trigger 选择（Select）：failure / major / both
+- AI 研判开关（Switch）
+- Trigger 选择：failure / major / both
 - 当 Organization 未配 Key 时显示警告："Organization 未配置 AI Key，启用前请先配置"
 
 ### 7.3 扫描对话框（repos.vue）
@@ -363,7 +363,7 @@ aiTrigger!: 'failure' | 'major' | 'both'
 
 - 在 run meta 区加 "AI 用量" section：
   - calls / inputTokens / outputTokens / totalTokens / estimatedCostUsd
-  - 表格展示（PrimeVue DataTable）
+  - 表格展示（caomei DataTable）
 - 当未启用 AI 时该 section 隐藏
 
 ### 7.5 alerts 视图
@@ -371,100 +371,8 @@ aiTrigger!: 'failure' | 'major' | 'both'
 - alerts 列表加 "AI 评估" 列（Tag，ai-evaluated / ai-skipped）
 - 点击行展开 AI 评估摘要（confidence / patch suggestion / breaking risks）
 
-## 8. 安全性与治理
+## 分片索引（迁出章节）
 
-### 8.1 AI API Key 加密
-
-- 复用现有 `ENCRYPTION_KEY`（平台级密钥，与 GitHub PAT 凭据同源）
-- AES-256-GCM 加密（与 `Credential.encryptedToken` 一致）
-- 仅在 `runScanInternal` 内存中解密，用后即弃
-- 日志 / 错误信息脱敏（`maskSecrets` 工具）
-
-### 8.2 AI 输出安全门
-
-沿用 [architecture.md §AI 研判误判处理](./architecture.md)：
-
-- AI 输出必须通过 `lint` / `typecheck` / `build`（现有 verification 阶段）
-- PR 不自动合并（与 [standards/index.md](../../standards/index.md) 一致）
-- 置信度低于阈值仅输出建议（safety-gate.ts 已实施）
-- limit patch 范围（防止大范围破坏性改动）
-
-### 8.3 审计
-
-- ScanRun 实体新增 `aiConfigSnapshot` 列（JSON），记录本次扫描实际使用的 AI 配置（脱敏 apiKey）
-- aiUsage 数据持久化（保留在 run-result.summary 中，便于 run-history 视图聚合）
-- 操作日志（AuditEvent）记录 PATCH / POST ai-config 端点的写操作
-
-### 8.4 凭据最小化
-
-- AI Key 仅传给 engine 层（不写入前端响应）
-- 日志 / 错误响应 maskSecrets
-- API 测试端点（`/api/e2e/fixtures`）不允许访问 ai-config
-
-## 9. 验收标准
-
-### 9.1 P0 落地验收
-
-- Organization 创建 + API Key 配置 + 加密落库 + 解密读取链路跑通
-- 单仓库 aiEnabled=true 时扫描触发 AI 研判（实际调用 deepseek API）
-- 单仓库 aiEnabled=false 时扫描不触发 AI 研判（即使 Organization 配置了 Key）
-- 运行时 override（aiEnabled / aiTrigger）按合并优先级生效
-- ScanRun.aiConfigSnapshot 字段记录实际配置
-- 三执行器（container / sandbox / github-action）一致透传 ai 字段
-- 4 个 API 端点通过 contract test
-- 数据库 migration（同步 + 增量）跑通
-
-### 9.2 P1 增强验收
-
-- Organization AI 配置 UI 完成（4 个表单字段 + Key 输入 + 测试连接）
-- 仓库 AI 配置 UI 完成（开关 + trigger）
-- 扫描对话框 AI override 面板完成
-- RunDetailDialog AI 用量展示完成
-- alerts 视图 AI 评估列完成
-- zh-CN + en-US i18n 完成（`ai.*` 命名空间）
-
-### 9.3 治理验收
-
-- AI Key 加密（参考 Credential 凭据治理 audit）
-- 审计日志（AuditEvent）记录
-- maskSecrets 在 logs / error 响应中验证
-- PR 不自动合并（依赖 verification 阶段保证）
-- 文档同步更新（architecture.md / standards/index.md）
-
-## 10. 上收触发条件（何时纳入 [todo.md](../../plan/todo.md) 当前阶段）
-
-任一条件触发时，从 backlog 上收到 todo.md §当前阶段：
-
-1. 用户实测反馈需要管理平台触发 AI 研判（典型场景：组织内多人协作希望统一管理 Key）
-2. 公开部署（docker 一键部署）后用户配置 AI 研判门槛太高（CLI 用户少，希望面板化）
-3. M7.2 平台能力深化阶段（M28+ 候选阶段）启动时
-4. 与 C66 告警视图增强联动（M28 阶段合并实施）
-5. 用户明确触发上收
-
-## 11. 关键决策回顾
-
-（待用户上收阶段时填充）
-
-- AI Key 挂载层级：Organization + 单仓库开关（vs Repository 级 vs 全局 platform.config vs Credential 复用）
-- 三执行器一致性：container / sandbox / github-action 同步补齐（vs 仅 container 先落地）
-- API Key 加密策略：与 Credential.encryptedToken 同源 AES-256-GCM（vs 单独加密层）
-- 合并优先级：API override > Repository 默认 > Organization 共享（vs Repository 完全 override）
-- ScanRun.aiConfigSnapshot 字段：记录实际使用配置便于审计（vs 不记录仅回写 logs）
-
-## 12. 关联文档
-
-- [architecture.md](./architecture.md) — §AI 研判误判处理（治理基线）
-- [sandbox-security-governance.md](./sandbox-security-governance.md) — §A 合法包被投毒 / §C 修复 PR 合入后投毒（AI 研判在供应链防护链路的角色）
-- [platform-auth-users.md](./platform-auth-users.md) — Organization 实体已落地（M7.1），AI 字段扩展直接基于此
-- [platform-scheduled-batch.md](./platform-scheduled-batch.md) — 定时扫描链路，AI 研判可在调度时统一应用
-- [standards/index.md](../../standards/index.md) —"AI 研判相关功能默认不自动合并，仅创建分支/PR 待人工审核"
-- [experience-archive.md](./experience-archive.md) — 经验沉淀（AI 研判相关条目将持续追加）
-- [backlog.md](../../plan/backlog.md) — 候选条目登记
-- [roadmap.md](../../plan/roadmap.md) — M7.2 平台能力深化阶段的远期候选
-
-## 13. 文档元数据
-
-- **设计先行稿创建时间**：2026-09-08
-- **触发**：用户调研"如何在 apps/platform 中补充 AI 研判"
-- **关联阶段**：未上收（仅挂 backlog）；候选阶段为 M28+（与 C66 / M7.2 联动）
-- **审计依据**：本文档作为 P0 落地的设计依据，未走 A 阶段 audit（与 design docs 治理惯例一致）
+| 分片 | 章节范围 | 主题 |
+|:--|:--|:--|
+| [platform-ai-integration-governance.md](./platform-ai-integration-governance.md) | §8 - §13 | 安全性与治理 / 验收标准 / 上收触发条件 / 关键决策回顾 / 关联文档 / 文档元数据 |

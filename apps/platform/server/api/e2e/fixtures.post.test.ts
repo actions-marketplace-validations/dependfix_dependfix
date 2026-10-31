@@ -2,6 +2,11 @@ import 'reflect-metadata'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { expectError, makeEvent, setupMemoryDatabase, teardownMemoryDatabase } from '../../../tests/api-helper'
 import fixturesPostHandler from './fixtures.post'
+import { ensureDatabaseInitialized } from '#server/database'
+import { PRCheck } from '#server/entities/pr-check'
+import { Repository } from '#server/entities/repository'
+import { ScanResult } from '#server/entities/scan-result'
+import { ScanRun } from '#server/entities/scan-run'
 
 /**
  * POST /api/e2e/fixtures 双门控（todo.md §M22.6 + docs/standards/platform.md §3.6）：
@@ -47,7 +52,255 @@ describe('POST /api/e2e/fixtures 双门控（todo.md §M22.6）', () => {
     it('E2E_TEST=true + e2eFixturesAllowed=true → 200（双门控放行）', async () => {
         vi.stubEnv('E2E_TEST', 'true')
         vi.stubGlobal('useRuntimeConfig', () => ({ encryptionKey: 'test-encryption-key-32-bytes!!', e2eFixturesAllowed: true }))
-        const result = await fixturesPostHandler(makeEvent('POST', '/api/e2e/fixtures', {})) as { repos: unknown[], scanRuns: unknown[], scanResults: unknown[] }
-        expect(result).toEqual({ repos: [], scanRuns: [], scanResults: [] })
+        const result = await fixturesPostHandler(makeEvent('POST', '/api/e2e/fixtures', {})) as { repos: unknown[], scanRuns: unknown[], scanResults: unknown[], prChecks: unknown[] }
+        expect(result).toEqual({ repos: [], scanRuns: [], scanResults: [], prChecks: [] })
+    })
+
+    /**
+     * repos[].tags：视觉回归基线需要确定性的标签列渲染（apps/platform/tests/visual/），
+     * 故 fixtures 端点支持可选标签。写入口径与 POST /api/repos 一致（同一 `repositoryTagsSchema`：
+     * trim + 去重 + 容量上限；JSON 字符串存储；缺省 / 空数组写 null）。
+     */
+    it('repos[].tags 落库为 JSON 字符串（trim + 去重），缺省 / 空数组写 null', async () => {
+        vi.stubEnv('E2E_TEST', 'true')
+        vi.stubGlobal('useRuntimeConfig', () => ({ encryptionKey: 'test-encryption-key-32-bytes!!', e2eFixturesAllowed: true }))
+        await fixturesPostHandler(makeEvent('POST', '/api/e2e/fixtures', {
+            repos: [
+                { owner: 'visual-fixture', name: 'with-tags', tags: [' frontend ', 'frontend', 'critical'] },
+                { owner: 'visual-fixture', name: 'without-tags' },
+                { owner: 'visual-fixture', name: 'empty-tags', tags: [] },
+            ],
+        }))
+
+        const ds = await ensureDatabaseInitialized()
+        const repoRepo = ds.getRepository(Repository)
+        const withTags = await repoRepo.findOneByOrFail({ owner: 'visual-fixture', name: 'with-tags' })
+        expect(withTags.tags).toBe(JSON.stringify(['frontend', 'critical']))
+        const withoutTags = await repoRepo.findOneByOrFail({ owner: 'visual-fixture', name: 'without-tags' })
+        expect(withoutTags.tags).toBeNull()
+        const emptyTags = await repoRepo.findOneByOrFail({ owner: 'visual-fixture', name: 'empty-tags' })
+        expect(emptyTags.tags).toBeNull()
+    })
+
+    /**
+     * prChecks：视觉回归 pr-checks 页行级基线依赖该写入路径。
+     * 幂等键 = 实体复合唯一索引 `(repositoryId, prNumber, headSha)`。
+     */
+    it('prChecks 落库，重复注入按复合唯一索引幂等复用', async () => {
+        vi.stubEnv('E2E_TEST', 'true')
+        vi.stubGlobal('useRuntimeConfig', () => ({ encryptionKey: 'test-encryption-key-32-bytes!!', e2eFixturesAllowed: true }))
+        const payload = {
+            repos: [{ owner: 'visual-fixture', name: 'pr-check-repo' }],
+            prChecks: [{
+                repositoryOwner: 'visual-fixture',
+                repositoryName: 'pr-check-repo',
+                prNumber: 101,
+                headSha: '1'.repeat(40),
+                authorLogin: 'dependfix[bot]',
+                conclusion: 'failure',
+                alertFiring: true,
+                lastPolledAt: '2026-08-28T02:00:00.000Z',
+            }],
+        }
+
+        const first = await fixturesPostHandler(makeEvent('POST', '/api/e2e/fixtures', payload)) as { prChecks: { created: boolean, id: string }[] }
+        expect(first.prChecks).toHaveLength(1)
+        expect(first.prChecks[0]!.created).toBe(true)
+
+        const second = await fixturesPostHandler(makeEvent('POST', '/api/e2e/fixtures', payload)) as { prChecks: { created: boolean, id: string }[] }
+        expect(second.prChecks[0]!.created).toBe(false)
+        expect(second.prChecks[0]!.id).toBe(first.prChecks[0]!.id)
+
+        const ds = await ensureDatabaseInitialized()
+        const rows = await ds.getRepository(PRCheck).find({ where: { prNumber: 101 } })
+        expect(rows).toHaveLength(1)
+        expect(rows[0]!.conclusion).toBe('failure')
+        expect(rows[0]!.alertFiring).toBe(true)
+        expect(rows[0]!.lastPolledAt.toISOString()).toBe('2026-08-28T02:00:00.000Z')
+    })
+
+    /**
+     * scanRuns[].failure*：运行失败筛选 e2e 基线需要确定性失败分类
+     * （与 ScanRun.failureCode / failureStage / failureKind 对齐；缺省写 null）。
+     */
+    it('scanRuns[].failure* 落库为分类三列，缺省写 null', async () => {
+        vi.stubEnv('E2E_TEST', 'true')
+        vi.stubGlobal('useRuntimeConfig', () => ({ encryptionKey: 'test-encryption-key-32-bytes!!', e2eFixturesAllowed: true }))
+        await fixturesPostHandler(makeEvent('POST', '/api/e2e/fixtures', {
+            repos: [{ owner: 'fixture-run', name: 'classified' }],
+            scanRuns: [
+                {
+                    repositoryOwner: 'fixture-run',
+                    repositoryName: 'classified',
+                    status: 'failed',
+                    failureCode: 'clone_timeout',
+                    failureStage: 'clone',
+                    failureKind: 'transient',
+                },
+                { repositoryOwner: 'fixture-run', repositoryName: 'classified', status: 'completed' },
+            ],
+        }))
+
+        const ds = await ensureDatabaseInitialized()
+        const repo = await ds.getRepository(Repository).findOneByOrFail({ owner: 'fixture-run', name: 'classified' })
+        const runs = await ds.getRepository(ScanRun).find({ where: { repositoryId: repo.id } })
+        const classified = runs.find((r) => r.status === 'failed')
+        expect(classified?.failureCode).toBe('clone_timeout')
+        expect(classified?.failureStage).toBe('clone')
+        expect(classified?.failureKind).toBe('transient')
+        const plain = runs.find((r) => r.status === 'completed')
+        expect(plain?.failureStage).toBeNull()
+        expect(plain?.failureKind).toBeNull()
+    })
+
+    /**
+     * scanRuns[].exitCode / environmentalFailureCount：0 是有效值（成功 / 有结果但无环境性失败），
+     * 缺省才写 null。防止 `?? null` 被误改成 `|| null` 后把 0 折成「结果缺失」。
+     */
+    it('scanRuns[].outcome columns preserve explicit 0 and default to null', async () => {
+        vi.stubEnv('E2E_TEST', 'true')
+        vi.stubGlobal('useRuntimeConfig', () => ({ encryptionKey: 'test-encryption-key-32-bytes!!', e2eFixturesAllowed: true }))
+        await fixturesPostHandler(makeEvent('POST', '/api/e2e/fixtures', {
+            repos: [{ owner: 'fixture-outcome', name: 'zero' }],
+            scanRuns: [
+                {
+                    repositoryOwner: 'fixture-outcome',
+                    repositoryName: 'zero',
+                    status: 'completed',
+                    summary: { alertsFound: 0, alertsFixed: 0, environmentalFailures: 0 },
+                    exitCode: 0,
+                    environmentalFailureCount: 0,
+                },
+                { repositoryOwner: 'fixture-outcome', repositoryName: 'zero', status: 'completed' },
+            ],
+        }))
+
+        const ds = await ensureDatabaseInitialized()
+        const repo = await ds.getRepository(Repository).findOneByOrFail({ owner: 'fixture-outcome', name: 'zero' })
+        const runs = await ds.getRepository(ScanRun).find({ where: { repositoryId: repo.id } })
+        const zero = runs.find((r) => r.summaryJson !== null)
+        const omitted = runs.find((r) => r.summaryJson === null)
+        expect(zero?.exitCode).toBe(0)
+        expect(zero?.environmentalFailureCount).toBe(0)
+        expect(omitted?.exitCode).toBeNull()
+        expect(omitted?.environmentalFailureCount).toBeNull()
+    })
+
+    it('scanRuns[].failureStage 非法值 → 400', async () => {
+        vi.stubEnv('E2E_TEST', 'true')
+        vi.stubGlobal('useRuntimeConfig', () => ({ encryptionKey: 'test-encryption-key-32-bytes!!', e2eFixturesAllowed: true }))
+        await expectError(fixturesPostHandler(makeEvent('POST', '/api/e2e/fixtures', {
+            repos: [{ owner: 'fixture-run', name: 'bad-stage' }],
+            scanRuns: [{
+                repositoryOwner: 'fixture-run',
+                repositoryName: 'bad-stage',
+                failureStage: 'not-a-stage',
+            }],
+        })), 400)
+    })
+
+    /**
+     * scanRuns[].id / createdAt / startedAt / finishedAt / error：视觉回归基线要求确定性取值
+     * （时间列与短 ID 文本会入基线），证据链口径见 docs/standards/testing.md §6.7。
+     */
+    it('scanRuns[] 的 id / 时间戳 / error 可显式钉死，缺省仍走默认值', async () => {
+        vi.stubEnv('E2E_TEST', 'true')
+        vi.stubGlobal('useRuntimeConfig', () => ({ encryptionKey: 'test-encryption-key-32-bytes!!', e2eFixturesAllowed: true }))
+        await fixturesPostHandler(makeEvent('POST', '/api/e2e/fixtures', {
+            repos: [{ owner: 'fixture-run', name: 'pinned' }],
+            scanRuns: [
+                {
+                    id: '19a2b3c4d5e6f001',
+                    repositoryOwner: 'fixture-run',
+                    repositoryName: 'pinned',
+                    status: 'failed',
+                    createdAt: '2026-08-23T05:00:00.000Z',
+                    startedAt: '2026-08-23T05:00:00.000Z',
+                    finishedAt: '2026-08-23T05:00:30.000Z',
+                    failureCode: 'ETIMEDOUT',
+                    failureStage: 'clone',
+                    failureKind: 'transient',
+                    error: { code: 'ETIMEDOUT', message: '拉取超时' },
+                },
+                {
+                    repositoryOwner: 'fixture-run',
+                    repositoryName: 'pinned',
+                    status: 'pending',
+                    startedAt: null,
+                },
+            ],
+        }))
+
+        const ds = await ensureDatabaseInitialized()
+        const pinned = await ds.getRepository(ScanRun).findOneByOrFail({ id: '19a2b3c4d5e6f001' })
+        expect(pinned.createdAt.toISOString()).toBe('2026-08-23T05:00:00.000Z')
+        expect(pinned.startedAt?.toISOString()).toBe('2026-08-23T05:00:00.000Z')
+        expect(pinned.finishedAt?.toISOString()).toBe('2026-08-23T05:00:30.000Z')
+        expect(pinned.errorJson).toBe(JSON.stringify({ code: 'ETIMEDOUT', message: '拉取超时' }))
+
+        // 缺省路径：未传 id / createdAt / finishedAt 的运行仍由端点与实体填默认值，
+        // 且 `startedAt: null` 显式置空（与「不传走状态默认值」区分）
+        const defaults = await ds.getRepository(ScanRun).find({ where: { status: 'pending' } })
+        expect(defaults).toHaveLength(1)
+        expect(defaults[0]!.id).not.toBe('')
+        expect(defaults[0]!.startedAt).toBeNull()
+        expect(defaults[0]!.finishedAt).toBeNull()
+    })
+
+    /**
+     * scanResults[].createdAt：alerts 页「原始列表」视图按 `createdAt DESC` 排序，视觉基线须逐像素可复现
+     * （同批次插入落在同一毫秒会形成排序并列 → 行序随数据库返回顺序漂移，见 tests/visual/helpers/fixtures.ts）。
+     */
+    it('scanResults[] 的 createdAt 可显式钉死，缺省走实体默认值', async () => {
+        vi.stubEnv('E2E_TEST', 'true')
+        vi.stubGlobal('useRuntimeConfig', () => ({ encryptionKey: 'test-encryption-key-32-bytes!!', e2eFixturesAllowed: true }))
+        await fixturesPostHandler(makeEvent('POST', '/api/e2e/fixtures', {
+            repos: [{ owner: 'fixture-result', name: 'pinned' }],
+            scanRuns: [{ repositoryOwner: 'fixture-result', repositoryName: 'pinned', status: 'completed' }],
+            scanResults: [
+                {
+                    scanRunIndex: 0,
+                    upstreamId: 'dependabot:pinned-001',
+                    source: 'dependabot',
+                    severity: 'high',
+                    packageName: 'pinned-pkg',
+                    createdAt: '2026-08-01T02:00:00.000Z',
+                },
+                {
+                    scanRunIndex: 0,
+                    upstreamId: 'dependabot:pinned-002',
+                    source: 'dependabot',
+                    severity: 'high',
+                    packageName: 'pinned-pkg',
+                },
+            ],
+        }))
+
+        const ds = await ensureDatabaseInitialized()
+        const resultRepo = ds.getRepository(ScanResult)
+        const pinned = await resultRepo.findOneByOrFail({ upstreamId: 'dependabot:pinned-001' })
+        expect(pinned.createdAt.toISOString()).toBe('2026-08-01T02:00:00.000Z')
+
+        // 缺省路径：未传 createdAt 的告警仍由实体 `@CreateDateColumn` 填插入时刻
+        const defaults = await resultRepo.findOneByOrFail({ upstreamId: 'dependabot:pinned-002' })
+        expect(defaults.createdAt).toBeInstanceOf(Date)
+        expect(defaults.createdAt.toISOString()).not.toBe('2026-08-01T02:00:00.000Z')
+        // 必须是「插入时刻」而非任何固定常量：60s 窗口足够宽以避免 CI 时钟抖动误报
+        expect(Date.now() - defaults.createdAt.getTime()).toBeLessThan(60_000)
+    })
+
+    it('prChecks 引用未在 repos 载荷中的仓库 → 400', async () => {
+        vi.stubEnv('E2E_TEST', 'true')
+        vi.stubGlobal('useRuntimeConfig', () => ({ encryptionKey: 'test-encryption-key-32-bytes!!', e2eFixturesAllowed: true }))
+        await expectError(fixturesPostHandler(makeEvent('POST', '/api/e2e/fixtures', {
+            prChecks: [{
+                repositoryOwner: 'visual-fixture',
+                repositoryName: 'missing-repo',
+                prNumber: 102,
+                headSha: '2'.repeat(40),
+                authorLogin: 'dependfix[bot]',
+                lastPolledAt: '2026-08-28T02:00:00.000Z',
+            }],
+        })), 400)
     })
 })

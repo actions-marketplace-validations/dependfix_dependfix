@@ -4,19 +4,43 @@ import { tmpdir } from 'node:os'
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import type { NormalizedSecurityAlert } from '@dependfix/core'
 
-// Mock execSync to avoid needing pnpm in test environment.
+// 两处替身，职责分离（2026-10-17 可中断化后）：
+// - `mockExecSync`（node:child_process）：仅覆盖残留的**同步**调用 `detectPnpmMajor`（`pnpm --version`）
+// - `mockRunTrackedCommand`（runners/process-control）：覆盖安装类调用
+//   （`pnpm install --no-frozen-lockfile`，已迁到受管异步执行，无需真实 pnpm）
 // Must use vi.hoisted because vi.mock is hoisted above imports.
-const { mockExecSync } = vi.hoisted(() => ({
+const { mockExecSync, mockRunTrackedCommand } = vi.hoisted(() => ({
     mockExecSync: vi.fn(),
+    mockRunTrackedCommand: vi.fn(),
 }))
 
 vi.mock('node:child_process', () => ({
     execSync: mockExecSync,
 }))
 
+vi.mock('../../runners/process-control', () => ({
+    runTrackedCommand: mockRunTrackedCommand,
+}))
+
+/** 受管命令成功结果（安装类调用缺省 mock）。 */
+function okInstallOutcome(): import('../../runners/process-control').TrackedCommandResult {
+    return {
+        started: true,
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        aborted: false,
+        errno: null,
+        stdout: '',
+        stderr: '',
+        durationMs: 0,
+    }
+}
+
 import { classifyInstallFailure, formatInstallFailure } from './overrides-io'
 import {
     applyVersionedOverrides,
+    applyVersionedOverridesBatch,
     extractPrefix,
     parseMajorVersion,
     compareSemver,
@@ -548,10 +572,12 @@ describe('applyVersionedOverrides', () => {
         writeFileSync(pkgPath, JSON.stringify({ name: 'test-project', version: '1.0.0' }, null, 2))
         writeFileSync(lockfilePath, 'lockfileVersion: \'9.0\'\n')
         mockExecSync.mockReset()
+        mockRunTrackedCommand.mockReset()
+        mockRunTrackedCommand.mockResolvedValue(okInstallOutcome())
     })
 
     it('writes versioned overrides to pnpm.overrides and runs pnpm install', async () => {
-        mockExecSync.mockReturnValue('Done')
+        mockRunTrackedCommand.mockResolvedValue(okInstallOutcome())
 
         const result = await applyVersionedOverrides({
             packageName: 'vite',
@@ -563,14 +589,13 @@ describe('applyVersionedOverrides', () => {
         expect(result.packageName).toBe('vite')
         const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'))
         expect((pkg.pnpm as Record<string, unknown>).overrides).toEqual({ 'vite@5.4.14': '^5.4.21' })
-        expect(mockExecSync).toHaveBeenCalledWith(
-            expect.stringContaining('pnpm install --no-frozen-lockfile'),
-            expect.objectContaining({ cwd: dir }),
+        expect(mockRunTrackedCommand).toHaveBeenCalledWith(
+            expect.objectContaining({ binary: 'pnpm', args: ['install', '--no-frozen-lockfile'], cwd: dir }),
         )
     })
 
     it('writes versioned overrides to pnpm-workspace.yaml when present', async () => {
-        mockExecSync.mockReturnValue('Done')
+        mockRunTrackedCommand.mockResolvedValue(okInstallOutcome())
         const workspaceYamlPath = join(dir, 'pnpm-workspace.yaml')
         writeFileSync(workspaceYamlPath, 'packages:\n  - "packages/*"\n')
 
@@ -591,10 +616,51 @@ describe('applyVersionedOverrides', () => {
         expect(yamlContent).toContain('packages/*')
     })
 
-    it('rolls back versioned overrides and lockfile when pnpm install fails', async () => {
-        mockExecSync.mockImplementation(() => {
-            throw new Error('ERESOLVE')
+    it('reuses existing equivalent override key instead of adding a duplicate (PR #298)', async () => {
+        mockRunTrackedCommand.mockResolvedValue(okInstallOutcome())
+        const workspaceYamlPath = join(dir, 'pnpm-workspace.yaml')
+        writeFileSync(workspaceYamlPath, [
+            'packages:',
+            '  - "packages/*"',
+            'overrides:',
+            '  brace-expansion@^1: ^1.1.16',
+            '',
+        ].join('\n'))
+
+        const result = await applyVersionedOverrides({
+            packageName: 'brace-expansion',
+            versionedOverrides: { 'brace-expansion@1': '^1.1.21' },
+            workDir: dir,
         })
+
+        expect(result.success).toBe(true)
+        const yamlContent = readFileSync(workspaceYamlPath, 'utf-8')
+        // 语义等价的 `@1` 复用已有 `@^1` 写法，不新增第二种
+        expect(yamlContent).toContain('brace-expansion@^1: ^1.1.21')
+        expect(yamlContent).not.toContain('brace-expansion@1:')
+    })
+
+    it('rolls back cleanly when a batch contains equivalent keys (dedup by normalized key)', async () => {
+        mockRunTrackedCommand.mockRejectedValue(new Error('install boom'))
+        const workspaceYamlPath = join(dir, 'pnpm-workspace.yaml')
+        writeFileSync(workspaceYamlPath, 'packages:\n  - "packages/*"\n')
+
+        const result = await applyVersionedOverrides({
+            packageName: 'brace-expansion',
+            versionedOverrides: {
+                'brace-expansion@1': '^1.1.21',
+                'brace-expansion@^1': '^1.1.22',
+            },
+            workDir: dir,
+        })
+
+        expect(result.success).toBe(false)
+        // 两个等价 key 归一化到同一写入 key，回滚后不残留
+        expect(readFileSync(workspaceYamlPath, 'utf-8')).not.toContain('brace-expansion')
+    })
+
+    it('rolls back versioned overrides and lockfile when pnpm install fails', async () => {
+        mockRunTrackedCommand.mockRejectedValue(new Error('ERESOLVE'))
         const lockContent = 'lockfileVersion: \'9.0\'\n'
         writeFileSync(lockfilePath, lockContent)
 
@@ -619,9 +685,7 @@ describe('applyVersionedOverrides', () => {
             version: '1.0.0',
             pnpm: { overrides: { 'existing-pkg': '^1.0.0' } },
         }, null, 2))
-        mockExecSync.mockImplementation(() => {
-            throw new Error('install boom')
-        })
+        mockRunTrackedCommand.mockRejectedValue(new Error('install boom'))
 
         const result = await applyVersionedOverrides({
             packageName: 'vite',
@@ -634,6 +698,71 @@ describe('applyVersionedOverrides', () => {
         const overrides = (pkg.pnpm as Record<string, unknown>).overrides as Record<string, string>
         expect(overrides['vite@5.4.14']).toBeUndefined()
         expect(overrides['existing-pkg']).toBe('^1.0.0')
+    })
+
+    it('writes path-level overrides (parent>child) and preserves top-level entries', async () => {
+        mockRunTrackedCommand.mockResolvedValue(okInstallOutcome())
+
+        const result = await applyVersionedOverrides({
+            packageName: 'vite',
+            versionedOverrides: {
+                vite: '^2.0.5',
+                '@vitejs/plugin-vue>vite': '^2.0.5',
+            },
+            workDir: dir,
+        })
+
+        expect(result.success).toBe(true)
+        const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'))
+        const overrides = (pkg.pnpm as Record<string, unknown>).overrides as Record<string, string>
+        expect(overrides['vite']).toBe('^2.0.5')
+        expect(overrides['@vitejs/plugin-vue>vite']).toBe('^2.0.5')
+    })
+
+    it('rolls back path-level overrides when pnpm install fails', async () => {
+        mockRunTrackedCommand.mockRejectedValue(new Error('ERESOLVE'))
+        const lockContent = 'lockfileVersion: \'9.0\'\n'
+        writeFileSync(lockfilePath, lockContent)
+
+        const result = await applyVersionedOverrides({
+            packageName: 'vite',
+            versionedOverrides: {
+                vite: '^2.0.5',
+                '@vitejs/plugin-vue>vite': '^2.0.5',
+            },
+            workDir: dir,
+        })
+
+        expect(result.success).toBe(false)
+        // 路径级 + 顶层均回滚
+        const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'))
+        expect((pkg.pnpm as Record<string, unknown> | undefined)?.overrides).toBeUndefined()
+        expect(readFileSync(lockfilePath, 'utf-8')).toBe(lockContent)
+    })
+
+    it('fails and rolls back when the lockfile still has a lower instance', async () => {
+        const lockContent = [
+            'lockfileVersion: \'9.0\'',
+            '',
+            '  vite@5.4.14:',
+            '    resolution: {integrity: sha512-xxx}',
+            '',
+        ].join('\n')
+        writeFileSync(lockfilePath, lockContent)
+
+        const result = await applyVersionedOverrides({
+            packageName: 'vite',
+            versionedOverrides: { 'vite@5': '^5.4.21' },
+            workDir: dir,
+        })
+
+        expect(result.success).toBe(false)
+        expect(result.error).toContain('versioned override did not take effect')
+        expect(result.error).toContain('5.4.14')
+        // 整体回滚：package.json 无残留 override，lockfile 恢复
+        const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'))
+        expect((pkg.pnpm as Record<string, unknown> | undefined)?.overrides).toBeUndefined()
+        expect(readFileSync(lockfilePath, 'utf-8')).toBe(lockContent)
     })
 
     it('returns failure when no overrides provided', async () => {
@@ -651,6 +780,168 @@ describe('applyVersionedOverrides', () => {
 // ===========================================================================
 // ensurePnpmOverrides
 // ===========================================================================
+
+describe('applyVersionedOverridesBatch', () => {
+    let dir: string
+    let pkgPath: string
+    let lockfilePath: string
+    let workspaceYamlPath: string
+
+    beforeEach(() => {
+        dir = mkdtempSync(join(tmpdir(), 'dependfix-test-vo-batch-'))
+        pkgPath = join(dir, 'package.json')
+        lockfilePath = join(dir, 'pnpm-lock.yaml')
+        workspaceYamlPath = join(dir, 'pnpm-workspace.yaml')
+        writeFileSync(pkgPath, JSON.stringify({ name: 'test-project', version: '1.0.0' }, null, 2))
+        writeFileSync(lockfilePath, 'lockfileVersion: \'9.0\'\n')
+        writeFileSync(workspaceYamlPath, 'packages:\n  - \'.\'\n')
+        mockRunTrackedCommand.mockReset()
+        mockRunTrackedCommand.mockResolvedValue(okInstallOutcome())
+    })
+
+    afterEach(() => {
+        rmSync(dir, { recursive: true, force: true })
+    })
+
+    it('writes all packages into one overrides block and installs once', async () => {
+        const result = await applyVersionedOverridesBatch({
+            workDir: dir,
+            plans: [
+                { packageName: 'brace-expansion', overrides: { 'brace-expansion@1': '^1.1.21', 'brace-expansion@2': '^2.1.7' } },
+                { packageName: 'js-yaml', overrides: { 'js-yaml@3': '^3.14.2', 'js-yaml@4': '^4.3.2' } },
+            ],
+        })
+
+        expect(result.success).toBe(true)
+        // 单次安装（合批的全部意义所在）
+        expect(mockRunTrackedCommand).toHaveBeenCalledTimes(1)
+        const yamlContent = readFileSync(workspaceYamlPath, 'utf-8')
+        expect(yamlContent).toContain('brace-expansion@1: ^1.1.21')
+        expect(yamlContent).toContain('brace-expansion@2: ^2.1.7')
+        expect(yamlContent).toContain('js-yaml@3: ^3.14.2')
+        expect(yamlContent).toContain('js-yaml@4: ^4.3.2')
+        // 既有 packages 段保留
+        expect(yamlContent).toContain('packages:')
+    })
+
+    it('rolls back every package (and lockfile) when the single install fails', async () => {
+        const originalPkg = readFileSync(pkgPath, 'utf-8')
+        const originalLock = readFileSync(lockfilePath, 'utf-8')
+        const originalWorkspace = [
+            'packages:',
+            '  - \'.\'',
+            'overrides:',
+            '  existing-pkg: ^1.0.0',
+            '',
+        ].join('\n')
+        writeFileSync(workspaceYamlPath, originalWorkspace)
+        mockRunTrackedCommand.mockRejectedValue(new Error('ERESOLVE batch'))
+
+        const result = await applyVersionedOverridesBatch({
+            workDir: dir,
+            plans: [
+                { packageName: 'brace-expansion', overrides: { 'brace-expansion@1': '^1.1.21' } },
+                { packageName: 'js-yaml', overrides: { 'js-yaml@4': '^4.3.2' } },
+            ],
+        })
+
+        expect(result.success).toBe(false)
+        expect(result.error).toContain('ERESOLVE batch')
+        // 两个包的新增条目均被回滚，既有条目保留，lockfile 复原
+        const yamlContent = readFileSync(workspaceYamlPath, 'utf-8')
+        expect(yamlContent).not.toContain('brace-expansion')
+        expect(yamlContent).not.toContain('js-yaml')
+        expect(yamlContent).toContain('existing-pkg')
+        expect(readFileSync(lockfilePath, 'utf-8')).toBe(originalLock)
+        expect(readFileSync(pkgPath, 'utf-8')).toBe(originalPkg)
+    })
+
+    it('keeps the legacy toVersion contract for single-package precheck failures (empty string)', async () => {
+        // 单包包装的早退失败（未写盘）→ toVersion 保持空串（报告 / PR 正文的 Target 列口径）
+        rmSync(pkgPath, { force: true })
+
+        const result = await applyVersionedOverrides({
+            packageName: 'vite',
+            versionedOverrides: { vite: '^2.0.5' },
+            workDir: dir,
+        })
+
+        expect(result.success).toBe(false)
+        expect(result.toVersion).toBe('')
+        expect(result.error).toContain('file not found')
+    })
+
+    it('keeps the legacy toVersion contract for single-package install failures (target string)', async () => {
+        mockRunTrackedCommand.mockRejectedValue(new Error('ERESOLVE'))
+
+        const result = await applyVersionedOverrides({
+            packageName: 'vite',
+            versionedOverrides: { vite: '^2.0.5' },
+            workDir: dir,
+        })
+
+        expect(result.success).toBe(false)
+        // 安装失败发生在写盘之后 → 目标版本串（与改动前的安装失败路径一致）
+        expect(result.toVersion).toBe('^2.0.5')
+    })
+
+    it('rejects an empty plan list without touching files', async () => {
+        const result = await applyVersionedOverridesBatch({ workDir: dir, plans: [] })
+
+        expect(result).toEqual({ success: false, error: 'no versioned overrides provided', failurePhase: 'precheck' })
+        expect(mockRunTrackedCommand).not.toHaveBeenCalled()
+    })
+
+    it('edits only the target keys in pnpm-workspace.yaml (comments / quote style / key order preserved)', async () => {
+        const original = [
+            '# workspace root',
+            'packages:',
+            '  - \'.\'',
+            '',
+            'overrides:',
+            '  # keep this comment',
+            '  \'existing-pkg\': \'^1.0.0\' # pinned',
+            '',
+            'catalog:',
+            '  react: ^18.3.1',
+            '',
+        ].join('\n')
+        writeFileSync(workspaceYamlPath, original)
+
+        const result = await applyVersionedOverridesBatch({
+            workDir: dir,
+            plans: [{ packageName: 'js-yaml', overrides: { 'js-yaml@4': '^4.3.2' } }],
+        })
+
+        expect(result.success).toBe(true)
+        expect(readFileSync(workspaceYamlPath, 'utf-8')).toBe([
+            '# workspace root',
+            'packages:',
+            '  - \'.\'',
+            '',
+            'overrides:',
+            '  # keep this comment',
+            '  \'existing-pkg\': \'^1.0.0\' # pinned',
+            '  js-yaml@4: ^4.3.2',
+            '',
+            'catalog:',
+            '  react: ^18.3.1',
+            '',
+        ].join('\n'))
+    })
+
+    it('keeps pnpm-workspace.yaml untouched when it cannot be parsed safely (duplicate keys)', async () => {
+        const broken = 'packages:\n  - .\noverrides:\n  vite: ^5\n  vite: ^6\n'
+        writeFileSync(workspaceYamlPath, broken)
+        const result = await applyVersionedOverridesBatch({
+            workDir: dir,
+            plans: [{ packageName: 'js-yaml', overrides: { 'js-yaml@4': '^4.3.2' } }],
+        })
+        expect(result).toMatchObject({ success: false, failurePhase: 'precheck' })
+        expect(readFileSync(workspaceYamlPath, 'utf-8')).toBe(broken)
+        expect(mockRunTrackedCommand).not.toHaveBeenCalled()
+    })
+})
 
 describe('ensurePnpmOverrides', () => {
     it('creates pnpm.overrides when pnpm field is missing', () => {

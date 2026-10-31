@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import nock from 'nock'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Logger } from '@dependfix/core'
 import { resolveRuntimeConfig } from '../config'
 import { DependfixApp } from './index'
 
@@ -23,10 +24,12 @@ beforeEach(() => {
 // 失败回滚；成员独占 / 间接依赖 / 多版本共存维持人工；默认关闭行为不变。
 // ---------------------------------------------------------------------------
 
-const { mockRunVerification, mockUpgradeDependency, mockTryLockfileRepair } = vi.hoisted(() => ({
+const { mockRunVerification, mockUpgradeDependency, mockTryLockfileRepair, mockRunTrackedCommand, mockFamilyResolver } = vi.hoisted(() => ({
     mockRunVerification: vi.fn(),
     mockUpgradeDependency: vi.fn(),
     mockTryLockfileRepair: vi.fn(),
+    mockRunTrackedCommand: vi.fn(),
+    mockFamilyResolver: { resolve: vi.fn(), describe: vi.fn() },
 }))
 
 vi.mock('../runners/verification-runner', async (importOriginal) => {
@@ -51,6 +54,24 @@ vi.mock('./helpers', async (importOriginal) => {
     return {
         ...actual,
         tryLockfileRepair: mockTryLockfileRepair,
+    }
+})
+
+// 家族锁步写入会真实调用 pnpm install —— 在本文件中统一替身为「改写 lockfile 的成功安装」
+vi.mock('../runners/process-control', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('../runners/process-control')>()
+    return {
+        ...actual,
+        runTrackedCommand: mockRunTrackedCommand,
+    }
+})
+
+// 家族成员版本解析走 registry（fetch）——注入替身，避免与 nock / Octokit 的全局 fetch 抢拦截
+vi.mock('../fixers/dependency/family-versions', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('../fixers/dependency/family-versions')>()
+    return {
+        ...actual,
+        getFamilyVersionResolver: () => mockFamilyResolver,
     }
 })
 
@@ -118,27 +139,25 @@ function mockUpgradeWritingManifest(
 }
 
 function verificationResult(success: boolean) {
+    /** 默认链 5 条命令（与 DEFAULT_VERIFY_COMMANDS 同序） */
+    const chain = [
+        'pnpm install --frozen-lockfile',
+        'pnpm lint',
+        'pnpm build',
+        'pnpm typecheck',
+        'pnpm test',
+    ]
     return {
         success,
-        commandResults: [{
-            command: 'pnpm install --frozen-lockfile',
+        // 与 runVerification「首个失败即停」语义一致：失败时结果集在首个失败命令处截断
+        // （全红形态会给读者「后续命令仍被执行」的错觉；断言只消费 success，形态仍须忠实）
+        commandResults: (success ? chain : chain.slice(0, 1)).map((command) => ({
+            command,
             exitCode: success ? 0 : 1,
             durationMs: 0,
             stdout: '',
-            stderr: success ? '' : 'mock install failure',
-        }, {
-            command: 'pnpm lint',
-            exitCode: success ? 0 : 1,
-            durationMs: 0,
-            stdout: '',
-            stderr: success ? '' : 'mock lint failure',
-        }, {
-            command: 'pnpm build',
-            exitCode: success ? 0 : 1,
-            durationMs: 0,
-            stdout: '',
-            stderr: success ? '' : 'mock build failure',
-        }],
+            stderr: success ? '' : 'mock verification failure',
+        })),
     }
 }
 
@@ -208,14 +227,38 @@ describe('DependfixApp cross-major upgrade (--allow-major-upgrade)', () => {
             durationMs: 0,
         })
         mockRunVerification.mockResolvedValue(verificationResult(true))
+        mockFamilyResolver.resolve.mockReset()
+        mockFamilyResolver.describe.mockReset()
+        mockRunTrackedCommand.mockReset()
+        mockRunTrackedCommand.mockResolvedValue({
+            started: true,
+            exitCode: 0,
+            signal: null,
+            timedOut: false,
+            aborted: false,
+            errno: null,
+            stdout: '',
+            stderr: '',
+            durationMs: 0,
+        })
     })
 
     afterEach(() => {
+        vi.unstubAllGlobals()
         nock.cleanAll()
         rmSync(workDir, { recursive: true, force: true })
     })
 
-    function runApp(overrides: { env?: Record<string, string>, cliOverrides?: NonNullable<Parameters<typeof resolveRuntimeConfig>[0]>['cliOverrides'] } = {}): Promise<Awaited<ReturnType<DependfixApp['run']>>> {
+    function makeLogger(): Logger & { warn: ReturnType<typeof vi.fn> } {
+        return {
+            info: vi.fn(),
+            warn: vi.fn(),
+            error: vi.fn(),
+            debug: vi.fn(),
+        } as never
+    }
+
+    function runApp(overrides: { env?: Record<string, string>, cliOverrides?: NonNullable<Parameters<typeof resolveRuntimeConfig>[0]>['cliOverrides'], logger?: Logger } = {}): Promise<Awaited<ReturnType<DependfixApp['run']>>> {
         const config = resolveRuntimeConfig({
             env: {
                 GITHUB_TOKEN: 'main-token-value',
@@ -225,7 +268,7 @@ describe('DependfixApp cross-major upgrade (--allow-major-upgrade)', () => {
             },
             cliOverrides: overrides.cliOverrides,
         })
-        const app = new DependfixApp({ config, workDir, reportOutputDir: join(workDir, 'reports') })
+        const app = new DependfixApp({ config, workDir, reportOutputDir: join(workDir, 'reports'), logger: overrides.logger })
         return app.run()
     }
 
@@ -243,17 +286,65 @@ describe('DependfixApp cross-major upgrade (--allow-major-upgrade)', () => {
 
         // 未开启：跨线告警不修复、不误标 fixed/converged → skipped
         expect(result.summary.alertsSkipped).toBe(1)
+        expect(result.summary.alertsSkippedByReason['cross-major']).toBe(1)
+        expect(Object.values(result.summary.alertsSkippedByReason).reduce((sum, value) => sum + value, 0)).toBe(1)
         expect(result.summary.alertsConverged).toBe(0)
         expect(result.summary.alertsFixed).toBe(0)
         const majorActions = result.actions.filter((a) => a.strategy === 'major-upgrade')
         expect(majorActions).toHaveLength(0)
+        // 逐条结果与计数同源：跨线跳过落 skipped（平台据此展示「已跳过」而非「待处理」）
+        expect(result.alertOutcomes).toEqual([
+            {
+                repository: 'foo/bar',
+                source: 'dependabot',
+                upstreamId: 'dependabot:1',
+                manifestPath: 'pnpm-lock.yaml',
+                status: 'skipped',
+                reason: 'cross-major',
+            },
+        ])
+    })
+
+    it('marks environmental install failures on the cross-major path and stops remaining chains', async () => {
+        writeFileSync(join(workDir, 'package.json'), JSON.stringify({
+            name: 'fixture',
+            version: '1.0.0',
+            scripts: { lint: 'exit 0', build: 'exit 0', typecheck: 'exit 0', test: 'exit 0' },
+            devDependencies: { vite: '^5.4.0' },
+        }, null, 2))
+        writeSingleVersionLockfile(workDir)
+        nockAlerts([makeViteAlert(1, '6.4.3')])
+        mockUpgradeDependency.mockResolvedValue({
+            packageName: 'vite',
+            fromVersion: '^5.4.0',
+            toVersion: '^6.4.3',
+            isMajor: true,
+            success: false,
+            error: 'pnpm install failed: signal SIGKILL',
+            environmental: true,
+        })
+
+        const logger = makeLogger()
+        const { exitCode, result } = await runApp({ cliOverrides: { allowMajorUpgrade: true }, logger })
+
+        // 不归因：出口码 0，环境性单列可见，失败计数为 0
+        expect(exitCode).toBe(0)
+        expect(result.summary.environmentalFailures).toBe(1)
+        expect(result.summary.alertsFailed).toBe(0)
+        expect(result.errors.some((error) => error.category === 'ENVIRONMENT_ERROR')).toBe(true)
+        const majorActions = result.actions.filter((a) => a.strategy === 'major-upgrade')
+        expect(majorActions).toHaveLength(1)
+        expect(majorActions[0]).toMatchObject({ success: false, environmentalFailure: true })
+        // 环境性失败后跳过成员 / 分组安装链（仅一次升级尝试）
+        expect(mockUpgradeDependency).toHaveBeenCalledTimes(1)
+        expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('dependency install chain stopped (environmental)'))
     })
 
     it('upgrades direct-dep single-version cross-major alerts with full verification when enabled', async () => {
         writeFileSync(join(workDir, 'package.json'), JSON.stringify({
             name: 'fixture',
             version: '1.0.0',
-            scripts: { lint: 'exit 0', build: 'exit 0' },
+            scripts: { lint: 'exit 0', build: 'exit 0', typecheck: 'exit 0', test: 'exit 0' },
             devDependencies: { vite: '^5.4.0' },
         }, null, 2))
         writeSingleVersionLockfile(workDir)
@@ -262,7 +353,7 @@ describe('DependfixApp cross-major upgrade (--allow-major-upgrade)', () => {
 
         const { result } = await runApp({ cliOverrides: { allowMajorUpgrade: true } })
 
-        // 跨线告警进入 2.0.2：真实升级 + 强制完整验证（install+lint+build）→ fixed
+        // 跨线告警进入 2.0.2：真实升级 + 强制完整验证（install+lint+build+typecheck+test）→ fixed
         expect(result.summary.alertsSkipped).toBe(0)
         expect(result.summary.alertsFixed).toBe(1)
         const majorActions = result.actions.filter((a) => a.strategy === 'major-upgrade')
@@ -273,14 +364,17 @@ describe('DependfixApp cross-major upgrade (--allow-major-upgrade)', () => {
             isMajor: true,
             success: true,
         })
-        // 完整验证链（3 条命令：install + lint + build），非 lint-only
+        // 完整验证链（5 条命令：install + lint + build + typecheck + test），非 lint-only
+        // （基线采样与修复后验证使用同一链，`find` 命中任一条即可断言链形态）
         const verificationCalls = mockRunVerification.mock.calls
-        const fullVerifyCall = verificationCalls.find(([params]) => params.commands.length === 3)
+        const fullVerifyCall = verificationCalls.find(([params]) => params.commands.length === 5)
         expect(fullVerifyCall).toBeDefined()
         expect(fullVerifyCall![0].commands).toEqual([
             'pnpm install --frozen-lockfile',
             'pnpm lint',
             'pnpm build',
+            'pnpm typecheck',
+            'pnpm test',
         ])
         // 声明已更新为 ^6.4.3
         const pkg = JSON.parse(readFileSync(join(workDir, 'package.json'), 'utf-8')) as { devDependencies: Record<string, string> }
@@ -291,13 +385,15 @@ describe('DependfixApp cross-major upgrade (--allow-major-upgrade)', () => {
         writeFileSync(join(workDir, 'package.json'), JSON.stringify({
             name: 'fixture',
             version: '1.0.0',
-            scripts: { lint: 'exit 0', build: 'exit 0' },
+            scripts: { lint: 'exit 0', build: 'exit 0', typecheck: 'exit 0', test: 'exit 0' },
             devDependencies: { vite: '^5.4.0' },
         }, null, 2))
         writeSingleVersionLockfile(workDir)
         nockAlerts([makeViteAlert(1, '6.4.3')])
         mockUpgradeWritingManifest('vite', '6.4.3')
-        mockRunVerification.mockResolvedValue(verificationResult(false))
+        mockRunVerification
+            .mockResolvedValueOnce(verificationResult(true)) // 修复前基线：安装成功（失败来自本次改动）
+            .mockResolvedValue(verificationResult(false)) // 修复后验证：失败
 
         const { result } = await runApp({ cliOverrides: { allowMajorUpgrade: true } })
 
@@ -310,6 +406,34 @@ describe('DependfixApp cross-major upgrade (--allow-major-upgrade)', () => {
         // 声明已回滚到 ^5.4.0
         const pkg = JSON.parse(readFileSync(join(workDir, 'package.json'), 'utf-8')) as { devDependencies: Record<string, string> }
         expect(pkg.devDependencies.vite).toBe('^5.4.0')
+    })
+
+    it('logs the install failure reason when the cross-major upgrade cannot be applied', async () => {
+        writeFileSync(join(workDir, 'package.json'), JSON.stringify({
+            name: 'fixture',
+            version: '1.0.0',
+            scripts: { lint: 'exit 0', build: 'exit 0', typecheck: 'exit 0', test: 'exit 0' },
+            devDependencies: { vite: '^5.4.0' },
+        }, null, 2))
+        writeSingleVersionLockfile(workDir)
+        nockAlerts([makeViteAlert(1, '6.4.3')])
+        mockUpgradeDependency.mockResolvedValue({
+            packageName: 'vite',
+            fromVersion: '^5.4.0',
+            toVersion: '^6.4.3',
+            isMajor: true,
+            success: false,
+            error: 'pnpm install failed: signal SIGKILL',
+        })
+
+        const logger = makeLogger()
+        const { result } = await runApp({ cliOverrides: { allowMajorUpgrade: true }, logger })
+
+        // 失败原因进执行日志（不只在随工作目录清理一并消失的 action 里）
+        expect(logger.warn).toHaveBeenCalledWith(
+            '[major-upgrade] vite: upgrade failed — pnpm install failed: signal SIGKILL',
+        )
+        expect(result.summary.alertsFailed).toBe(1)
     })
 
     it('keeps indirect-dependency cross-major alerts manual even when enabled', async () => {
@@ -376,7 +500,7 @@ describe('DependfixApp cross-major upgrade (--allow-major-upgrade)', () => {
         writeFileSync(join(workDir, 'package.json'), JSON.stringify({
             name: 'fixture',
             version: '1.0.0',
-            scripts: { lint: 'exit 0', build: 'exit 0' },
+            scripts: { lint: 'exit 0', build: 'exit 0', typecheck: 'exit 0', test: 'exit 0' },
             devDependencies: { vite: '^5.4.0' },
         }, null, 2))
         writeFileSync(join(workDir, 'pnpm-workspace.yaml'), 'packages:\n  - docs\n')
@@ -393,10 +517,10 @@ describe('DependfixApp cross-major upgrade (--allow-major-upgrade)', () => {
         const { result } = await runApp({ cliOverrides: { allowMajorUpgrade: true } })
 
         // 残留脆弱实例 → 回滚 + failed；跨线链路未执行完整验证
-        // （仅最终 repo 级 verifyProject 跑一次，2.0.2 未触发验证）
+        // （仅修复前基线采样 + 最终 repo 级 verifyProject 各一次，2.0.2 未触发验证）
         expect(result.summary.alertsFailed).toBe(1)
         expect(result.summary.alertsFixed).toBe(0)
-        expect(mockRunVerification).toHaveBeenCalledTimes(1)
+        expect(mockRunVerification).toHaveBeenCalledTimes(2)
         const majorActions = result.actions.filter((a) => a.strategy === 'major-upgrade')
         expect(majorActions).toHaveLength(1)
         expect(majorActions[0].success).toBe(false)
@@ -413,7 +537,7 @@ describe('DependfixApp cross-major upgrade (--allow-major-upgrade)', () => {
         writeFileSync(join(workDir, 'package.json'), JSON.stringify({
             name: 'fixture',
             version: '1.0.0',
-            scripts: { lint: 'exit 0', build: 'exit 0' },
+            scripts: { lint: 'exit 0', build: 'exit 0', typecheck: 'exit 0', test: 'exit 0' },
             devDependencies: { vite: '^5.4.0' },
         }, null, 2))
         writeSingleVersionLockfile(workDir)
@@ -437,7 +561,7 @@ describe('DependfixApp cross-major upgrade (--allow-major-upgrade)', () => {
         writeFileSync(join(workDir, 'package.json'), JSON.stringify({
             name: 'fixture',
             version: '1.0.0',
-            scripts: { lint: 'exit 0', build: 'exit 0' },
+            scripts: { lint: 'exit 0', build: 'exit 0', typecheck: 'exit 0', test: 'exit 0' },
             dependencies: { '@dependfix/core': '^1.0.0' },
         }, null, 2))
         writeFileSync(join(workDir, 'pnpm-workspace.yaml'), 'packages:\n  - docs\n')
@@ -461,7 +585,7 @@ describe('DependfixApp cross-major upgrade (--allow-major-upgrade)', () => {
         writeFileSync(join(workDir, 'package.json'), JSON.stringify({
             name: 'fixture',
             version: '1.0.0',
-            scripts: { lint: 'exit 0', build: 'exit 0' },
+            scripts: { lint: 'exit 0', build: 'exit 0', typecheck: 'exit 0', test: 'exit 0' },
             devDependencies: { vite: '^5.4.0' },
         }, null, 2))
         writeSingleVersionLockfile(workDir)
@@ -470,14 +594,92 @@ describe('DependfixApp cross-major upgrade (--allow-major-upgrade)', () => {
 
         const { result } = await runApp({ cliOverrides: { allowMajorUpgrade: true } })
 
-        // 跨线验证链（install+lint+build）作为 verification 动作写入报告（可审计）
+        // 跨线验证链（install+lint+build+typecheck+test）作为 verification 动作写入报告（可审计）
         const verifyActions = result.actions.filter((a) => a.type === 'verification')
         expect(verifyActions.length).toBeGreaterThanOrEqual(3)
         const majorVerifyCommands = verifyActions.map((a) => a.target)
         expect(majorVerifyCommands).toContain('pnpm install --frozen-lockfile')
         expect(majorVerifyCommands).toContain('pnpm lint')
         expect(majorVerifyCommands).toContain('pnpm build')
+        expect(majorVerifyCommands).toContain('pnpm typecheck')
         // 成功证据可审计：验证动作全部 success
         expect(verifyActions.every((a) => a.success)).toBe(true)
+    })
+
+    it('locks family members to the same major line on the cross-major path (vitest 3 -> 4)', async () => {
+        writeFileSync(join(workDir, 'package.json'), JSON.stringify({
+            name: 'fixture',
+            version: '1.0.0',
+            scripts: { lint: 'exit 0', build: 'exit 0', typecheck: 'exit 0', test: 'exit 0' },
+            devDependencies: { vitest: '^3.2.4', '@vitest/coverage-v8': '^3.2.4' },
+        }, null, 2))
+        writeFileSync(join(workDir, 'pnpm-lock.yaml'), [
+            'lockfileVersion: \'9.0\'',
+            '',
+            '  vitest@3.2.4:',
+            '    resolution: {integrity: sha512-a}',
+            '',
+            '  "@vitest/coverage-v8@3.2.4":',
+            '    resolution: {integrity: sha512-b}',
+            '',
+        ].join('\n'))
+        nockAlerts([{
+            number: 1,
+            state: 'open',
+            html_url: 'https://github.com/foo/bar/security/dependabot/1',
+            security_advisory: { ghsa_id: 'GHSA-family', severity: 'high', summary: 'vitest vuln' },
+            security_vulnerability: {
+                package: { ecosystem: 'npm', name: 'vitest' },
+                severity: 'high',
+                vulnerable_version_range: '< 4.0.1',
+                first_patched_version: { identifier: '4.0.1' },
+            },
+            dependency: { package: { ecosystem: 'npm', name: 'vitest' }, manifest_path: 'pnpm-lock.yaml' },
+        }])
+        // registry 解析：coverage-v8 取 4.x 最高稳定版
+        mockFamilyResolver.resolve.mockResolvedValue({
+            ok: true,
+            info: { version: '4.6.3', peerDependencies: {} },
+        })
+        // 安装替身：把 lockfile 更新为升级后的实例（跨线复核要求脆弱实例消失）
+        mockRunTrackedCommand.mockImplementation(async () => {
+            writeFileSync(join(workDir, 'pnpm-lock.yaml'), [
+                'lockfileVersion: \'9.0\'',
+                '',
+                '  vitest@4.0.1:',
+                '    resolution: {integrity: sha512-a}',
+                '',
+                '  "@vitest/coverage-v8@4.6.3":',
+                '    resolution: {integrity: sha512-b}',
+                '',
+            ].join('\n'))
+            return {
+                started: true,
+                exitCode: 0,
+                signal: null,
+                timedOut: false,
+                aborted: false,
+                errno: null,
+                stdout: '',
+                stderr: '',
+                durationMs: 0,
+            }
+        })
+
+        const { result } = await runApp({ cliOverrides: { allowMajorUpgrade: true } })
+
+        expect(result.summary.alertsFixed).toBe(1)
+        const action = result.actions.find((item) => item.target === 'vitest' && item.strategy === 'major-upgrade')
+        expect(action?.success).toBe(true)
+        expect(action?.family).toEqual({
+            id: 'vitest',
+            members: ['vitest', '@vitest/coverage-v8'],
+            skipped: ['@vitest/ui', '@vitest/browser'],
+        })
+        const pkg = JSON.parse(readFileSync(join(workDir, 'package.json'), 'utf-8')) as { devDependencies: Record<string, string> }
+        expect(pkg.devDependencies.vitest).toBe('^4.0.1')
+        expect(pkg.devDependencies['@vitest/coverage-v8']).toBe('^4.6.3')
+        // 单包升级路径未被调用（家族写入一次完成）
+        expect(mockUpgradeDependency).not.toHaveBeenCalled()
     })
 })

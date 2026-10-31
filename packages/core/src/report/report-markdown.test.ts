@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { EMPTY_RUN_RESULT, makeAction, makeAlert, makeError } from './report.test-helpers'
-import { generateJsonReport, generateMarkdownReport, type FixAction, type RepositoryResult } from './index'
+import {
+    generateJsonReport,
+    generateMarkdownReport,
+    type FixAction,
+    type PrCheckWatchReport,
+    type RepositoryResult,
+} from './index'
 
 describe('generateMarkdownReport', () => {
     it('renders header with runId and mode', () => {
@@ -27,6 +33,69 @@ describe('generateMarkdownReport', () => {
         expect(md).not.toContain('### local')
     })
 
+    it('renders Check Attribution section from prCheckWatch attempts', () => {
+        const prCheckWatch: PrCheckWatchReport = {
+            attempts: [
+                {
+                    pr: { number: 7, htmlUrl: 'https://github.com/foo/bar/pull/7' },
+                    state: 'failed',
+                    attribution: 'self_caused',
+                    closed: false,
+                    commented: true,
+                    polls: 2,
+                    durationMs: 1500,
+                    failedChecks: [
+                        { name: 'Test', url: 'https://ci.example/test', attribution: 'self_caused' },
+                        { name: 'Coverage | unit', attribution: 'self_caused' },
+                        { name: 'A`b', attribution: 'unknown' },
+                    ],
+                },
+                {
+                    pr: { number: 8, htmlUrl: 'https://github.com/foo/bar/pull/8' },
+                    state: 'timeout',
+                    closed: false,
+                    commented: true,
+                    polls: 3,
+                    durationMs: 900_000,
+                },
+            ],
+            runBudgetExhausted: true,
+        }
+        const md = generateMarkdownReport({ ...EMPTY_RUN_RESULT, prCheckWatch })
+
+        expect(md).toContain('## Check Attribution')
+        expect(md).toContain('归因计数：`self_caused` 2')
+        expect(md).toContain('| #7 | `failed` | `self_caused` |')
+        expect(md).toContain('`Test` (self_caused)')
+        // 作业名中的 `|` 必须转义、反引号必须替换，不能破坏表格 / 代码段
+        expect(md).toContain('`Coverage \\| unit` (self_caused)')
+        expect(md).toContain('`Ab` (unknown)')
+        expect(md).toContain('| #8 | `timeout` | — | — |')
+        expect(md).toContain('check 等待总预算已耗尽')
+    })
+
+    it('omits Check Attribution section when no watch attempts', () => {
+        expect(generateMarkdownReport(EMPTY_RUN_RESULT)).not.toContain('Check Attribution')
+    })
+
+    it('omits Check Attribution section when every attempt passed', () => {
+        const md = generateMarkdownReport({
+            ...EMPTY_RUN_RESULT,
+            prCheckWatch: {
+                attempts: [{
+                    pr: { number: 7, htmlUrl: 'https://github.com/foo/bar/pull/7' },
+                    state: 'passed',
+                    closed: false,
+                    commented: false,
+                    polls: 1,
+                    durationMs: 10,
+                }],
+                runBudgetExhausted: false,
+            },
+        })
+        expect(md).not.toContain('Check Attribution')
+    })
+
     it('renders alert source in header (github-dependabot default)', () => {
         const md = generateMarkdownReport(EMPTY_RUN_RESULT)
         expect(md).toContain('GitHub Dependabot API')
@@ -48,6 +117,79 @@ describe('generateMarkdownReport', () => {
         expect(md).toContain('Alerts found')
         expect(md).toContain('42')
         expect(md).toContain('10')
+    })
+
+    it('renders skipped/truncated breakdown and unfixed total', () => {
+        const result = {
+            ...EMPTY_RUN_RESULT,
+            summary: {
+                ...EMPTY_RUN_RESULT.summary,
+                alertsFound: 20,
+                alertsFixed: 0,
+                alertsUnfixed: 20,
+                alertsConverged: 0,
+                alertsSkipped: 4,
+                alertsSkippedByReason: { 'cross-major': 4 },
+                alertsTruncated: 6,
+                alertsTruncatedBySeverity: { critical: 2, high: 4 },
+            },
+        }
+        const md = generateMarkdownReport(result)
+
+        expect(md).toContain('## Skipped & Truncated')
+        expect(md).toContain('**Unfixed**: 20 / 20 evaluated alerts; 6 truncated before analysis (not evaluated).')
+        expect(md).toContain('| Truncated: Critical | 2 |')
+        expect(md).toContain('| Truncated: High | 4 |')
+        expect(md).toContain('| Skipped: Cross-major / manual review | 4 |')
+        expect(md).toContain('| Failed / other not fixed | 16 |')
+    })
+
+    it('renders repeated failure attempts with status labels', () => {
+        const result = {
+            ...EMPTY_RUN_RESULT,
+            attemptTracking: [
+                { repository: 'owner/repo', packageName: 'lodash', key: 'aaaaaaaaaaaaaaaa', attempt: 1, status: 'attempt' as const },
+                { repository: 'owner/repo', packageName: 'express', key: 'bbbbbbbbbbbbbbbb', attempt: 3, status: 'skipped' as const },
+                { repository: 'owner/repo', packageName: 'vite', key: 'cccccccccccccccc', attempt: 3, status: 'forced' as const },
+            ],
+        }
+        const md = generateMarkdownReport(result)
+
+        expect(md).toContain('## Repeated Failure Attempts')
+        expect(md).toContain('| owner/repo | `lodash` | `aaaaaaaaaaaaaaaa` | 1 | attempt |')
+        expect(md).toContain('| owner/repo | `express` | `bbbbbbbbbbbbbbbb` | 3 | skipped (attempt limit) |')
+        expect(md).toContain('| owner/repo | `vite` | `cccccccccccccccc` | 3 | forced (manual retry) |')
+    })
+
+    it('omits the attempts section when no records exist', () => {
+        expect(generateMarkdownReport(EMPTY_RUN_RESULT)).not.toContain('Repeated Failure Attempts')
+    })
+
+    it('json report carries attemptTracking verbatim', () => {
+        const records = [
+            { repository: 'owner/repo', packageName: 'lodash', key: 'aaaaaaaaaaaaaaaa', attempt: 3, status: 'skipped' as const },
+        ]
+        const json = JSON.parse(generateJsonReport({ ...EMPTY_RUN_RESULT, attemptTracking: records }))
+        expect(json.attemptTracking).toEqual(records)
+        // 旧结果（无该字段）序列化时不出现多余键
+        expect(JSON.parse(generateJsonReport(EMPTY_RUN_RESULT))).not.toHaveProperty('attemptTracking')
+    })
+
+    it('falls back to other for old summary without grouped fields', () => {
+        const result = {
+            ...EMPTY_RUN_RESULT,
+            summary: {
+                ...EMPTY_RUN_RESULT.summary,
+                alertsFound: 3,
+                alertsSkipped: 2,
+                alertsTruncated: 1,
+                alertsSkippedByReason: {},
+                alertsTruncatedBySeverity: {},
+            },
+        }
+        const md = generateMarkdownReport(result)
+        expect(md).toContain('| Skipped: Other / unclassified | 2 |')
+        expect(md).toContain('| Truncated: Other / unclassified | 1 |')
     })
 
     it('renders severity breakdown when alerts exist', () => {
@@ -510,6 +652,43 @@ describe('generateMarkdownReport', () => {
 
         expect(md).toContain('pnpm lint')
         expect(md).toContain('⚠️ exit code 1')
+        // 反向断言：非既有失败不得被标注为「既有失败」（保证「显式区分」两侧都锁住）
+        expect(md).not.toContain('既有失败（修复前即红，未归因本次改动）')
+    })
+
+    it('verification action 标记 preExisting（既有失败）→ 报告显式区分「本次引入」与「基线已存在」', () => {
+        const result = {
+            ...EMPTY_RUN_RESULT,
+            actions: [
+                makeAction({
+                    type: 'verification',
+                    target: 'pnpm test',
+                    success: false,
+                    error: 'exit code 1',
+                    preExisting: true,
+                    durationMs: 500,
+                }),
+            ],
+        }
+        const md = generateMarkdownReport(result)
+
+        expect(md).toContain('既有失败（修复前即红，未归因本次改动）')
+    })
+
+    it('verification action 逐条标注命令来源（source=default / repo-config / ci-mirror）', () => {
+        const result = {
+            ...EMPTY_RUN_RESULT,
+            actions: [
+                makeAction({ type: 'verification', target: 'pnpm lint', success: true, commandSource: 'default' }),
+                makeAction({ type: 'verification', target: 'pnpm test', success: true, commandSource: 'repo-config' }),
+                makeAction({ type: 'verification', target: 'pnpm run coverage', success: true, commandSource: 'ci-mirror' }),
+            ],
+        }
+        const md = generateMarkdownReport(result)
+
+        expect(md).toContain('source=default')
+        expect(md).toContain('source=repo-config')
+        expect(md).toContain('source=ci-mirror')
     })
 })
 
@@ -559,6 +738,61 @@ describe('generateMarkdownReport supply chain warnings', () => {
 
         expect(json.supplyChainWarnings).toHaveLength(1)
         expect(json.supplyChainWarnings?.[0]).toMatchObject({ packageName: 'esbuild', scriptTypes: ['postinstall'] })
+    })
+
+    it('renders Alerts Disabled section with repository/source/message when alertsDisabled present', () => {
+        const result = {
+            ...EMPTY_RUN_RESULT,
+            alertsDisabled: [
+                { repository: 'owner/repo', source: 'dependabot', message: 'Dependabot alerts are disabled for this repository.' },
+            ],
+        }
+        const md = generateMarkdownReport(result)
+        expect(md).toContain('## Alerts Disabled')
+        expect(md).toContain('owner/repo')
+        expect(md).toContain('dependabot')
+        expect(md).toContain('Dependabot alerts are disabled for this repository.')
+    })
+
+    it('renders code-scanning disabled record with source-agnostic enablement guidance', () => {
+        const result = {
+            ...EMPTY_RUN_RESULT,
+            alertsDisabled: [
+                {
+                    repository: 'owner/repo',
+                    source: 'code-scanning',
+                    message: 'Advanced Security must be enabled for this repository to use code scanning.',
+                },
+            ],
+        }
+        const md = generateMarkdownReport(result)
+        expect(md).toContain('## Alerts Disabled')
+        expect(md).toContain('code-scanning')
+        // 正向锁定指引句本身（不依赖 message 列，避免被 fixture 字符串「顺带命中」）
+        expect(md).toContain('开启方式：仓库 Settings → Code security 中启用对应功能')
+        // 反向：指引不得只写 Dependabot（否则 code-scanning 记录被误导）
+        expect(md).not.toContain('开启方式：仓库 Settings → Code security → Dependabot alerts。')
+    })
+
+    it('renders Alerts disabled count in summary table', () => {
+        const result = {
+            ...EMPTY_RUN_RESULT,
+            summary: { ...EMPTY_RUN_RESULT.summary, reposWithAlertsDisabled: 3 },
+        }
+        const md = generateMarkdownReport(result)
+        // 精确断言行内容（避免 toContain('3') 被日期字符污染恒真）
+        expect(md).toContain('| Alerts disabled (repos) | 3 |')
+    })
+
+    it('omits Alerts Disabled section when no alertsDisabled records', () => {
+        const md = generateMarkdownReport(EMPTY_RUN_RESULT)
+        expect(md).not.toContain('## Alerts Disabled')
+    })
+
+    it('omits Alerts Disabled section when alertsDisabled is empty array', () => {
+        const result = { ...EMPTY_RUN_RESULT, alertsDisabled: [] }
+        const md = generateMarkdownReport(result)
+        expect(md).not.toContain('## Alerts Disabled')
     })
 })
 
@@ -618,5 +852,120 @@ describe('generateMarkdownReport code quality findings', () => {
         const md = generateMarkdownReport(result)
         // header 组合展示
         expect(md).toContain('GitHub Dependabot + Code Scanning API + Code Quality API')
+    })
+})
+
+describe('generateMarkdownReport dependency paths', () => {
+    it('renders dependency paths section when alerts have dependencyPath', () => {
+        const result = {
+            ...EMPTY_RUN_RESULT,
+            repositories: [
+                { repository: 'owner/repo', defaultBranch: 'main', alertsCount: 1, fixable: 1, fixed: 0, failed: 0, lockfileRepaired: false, durationMs: 100 },
+            ],
+            alerts: [
+                makeAlert({
+                    packageName: 'vite',
+                    dependencyPath: ['docs>vitepress>@vitejs/plugin-vue>vite'],
+                }),
+            ],
+        }
+        const md = generateMarkdownReport(result)
+        expect(md).toContain('**Dependency paths:**')
+        expect(md).toContain('`vite`')
+        expect(md).toContain('docs>vitepress>@vitejs/plugin-vue>vite')
+    })
+
+    it('renders multiple dependency paths for one alert', () => {
+        const result = {
+            ...EMPTY_RUN_RESULT,
+            repositories: [
+                { repository: 'owner/repo', defaultBranch: 'main', alertsCount: 1, fixable: 1, fixed: 0, failed: 0, lockfileRepaired: false, durationMs: 100 },
+            ],
+            alerts: [
+                makeAlert({
+                    packageName: 'vite',
+                    dependencyPath: ['a>b>vite', 'c>vite'],
+                }),
+            ],
+        }
+        const md = generateMarkdownReport(result)
+        expect(md).toContain('a>b>vite')
+        expect(md).toContain('c>vite')
+    })
+
+    it('omits dependency paths section when no alerts have dependencyPath', () => {
+        const result = {
+            ...EMPTY_RUN_RESULT,
+            repositories: [
+                { repository: 'owner/repo', defaultBranch: 'main', alertsCount: 1, fixable: 1, fixed: 0, failed: 0, lockfileRepaired: false, durationMs: 100 },
+            ],
+            alerts: [makeAlert()],
+        }
+        const md = generateMarkdownReport(result)
+        expect(md).not.toContain('**Dependency paths:**')
+    })
+})
+
+describe('generateMarkdownReport family lockstep', () => {
+    it('renders the family lockstep section when a family action is present', () => {
+        const result = {
+            ...EMPTY_RUN_RESULT,
+            actions: [
+                makeAction({
+                    target: 'vitest',
+                    family: {
+                        id: 'vitest',
+                        members: ['vitest', '@vitest/coverage-v8'],
+                        skipped: ['@vitest/ui'],
+                    },
+                }),
+            ],
+        }
+        const md = generateMarkdownReport(result)
+
+        expect(md).toContain('## Family Lockstep')
+        expect(md).toContain('| `vitest` | `vitest`, `@vitest/coverage-v8` | `@vitest/ui` |')
+    })
+
+    it('renders the repository column for multi-repository runs', () => {
+        const result = {
+            ...EMPTY_RUN_RESULT,
+            actions: [
+                makeAction({
+                    target: 'vitest',
+                    family: { id: 'vitest', members: ['vitest'], skipped: [] },
+                }),
+                makeAction({
+                    repository: 'owner/other',
+                    target: 'jest',
+                    family: { id: 'jest', members: ['jest', '@types/jest'], skipped: [] },
+                }),
+            ],
+        }
+        const md = generateMarkdownReport(result)
+
+        expect(md).toContain('| Repository | Family | Members | Skipped |')
+        expect(md).toContain('| owner/other | `jest` | `jest`, `@types/jest` | — |')
+        expect(md).toContain('| owner/repo | `vitest` | `vitest` | — |')
+    })
+
+    it('renders an em dash when there are no skipped members', () => {
+        const result = {
+            ...EMPTY_RUN_RESULT,
+            actions: [
+                makeAction({
+                    target: 'vitest',
+                    family: { id: 'vitest', members: ['vitest', '@vitest/coverage-v8'], skipped: [] },
+                }),
+            ],
+        }
+        const md = generateMarkdownReport(result)
+
+        expect(md).toContain('| `vitest` | `vitest`, `@vitest/coverage-v8` | — |')
+    })
+
+    it('omits the section when no action carries family information', () => {
+        const md = generateMarkdownReport({ ...EMPTY_RUN_RESULT, actions: [makeAction({})] })
+        expect(md).not.toContain('## Family Lockstep')
     })
 })

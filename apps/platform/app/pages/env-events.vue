@@ -1,8 +1,13 @@
 <script setup lang="ts">
 // 环境/容器审计事件视图（env-events）
-// 数据源：GET /api/audit-events（sandbox 启动降级 / 运行时失败事件 + 通知状态）
+// 数据源：GET /api/audit-events（执行器/环境异常 + 配置留痕事件 + 通知状态）
 // 过滤维度：type / severity / notified / repositoryId
+// 类型下拉与共享 audit_event 全量类型（AUDIT_EVENT_TYPES）口径一致（含 PR 回环反馈两类）。
+// 新增 / 删除审计类型时必须同步：本列表 + server/entities/audit-event.ts 的 AUDIT_EVENT_TYPES
+// + e2e `env-events.e2e.test.ts` 的「全量类型口径」用例（否则 CI 的 E2E 会在下拉计数上失败）。
 import { computed } from 'vue'
+import { ChevronDown, ChevronUp, Funnel } from '@lucide/vue'
+import type { DataTableColumn, InputType } from 'caomei-ui'
 import { withEnvEventSeverityRank } from '~/utils/sort-helpers'
 
 definePageMeta({
@@ -10,6 +15,12 @@ definePageMeta({
 })
 
 const { t } = useI18n()
+
+/**
+ * caomei Input 的 `type` 联合仅含 text/password/email/search/tel/url，但内层原生 input 原样透传
+ * 该属性，datetime-local 在浏览器可用；此处收窄以在保留 CaomeiInput 样式的同时支持时间范围筛选。
+ */
+const dateTimeLocalType = 'datetime-local' as unknown as InputType
 
 interface EnvEventView {
     id: string
@@ -46,7 +57,12 @@ const typeOptions = computed(() => [
     { label: t('envEvents.typeAll'), value: 'all' },
     { label: t('envEvents.typeSandboxUnavailable'), value: 'sandbox_unavailable' },
     { label: t('envEvents.typeSandboxDegraded'), value: 'sandbox_degraded' },
-    { label: t('envEvents.typeDockerDaemonDown'), value: 'docker_daemon_down' },
+    { label: t('envEvents.typeContainerUnavailable'), value: 'container_unavailable' },
+    { label: t('envEvents.typeAiConfigUpdate'), value: 'ai_config_update' },
+    { label: t('envEvents.typeVerifyCommandsUpdate'), value: 'verify_commands_update' },
+    { label: t('envEvents.typeNotificationSettingsUpdate'), value: 'notification_settings_update' },
+    { label: t('envEvents.typePrFeedbackCommented'), value: 'pr_feedback_commented' },
+    { label: t('envEvents.typePrFeedbackClosed'), value: 'pr_feedback_closed' },
 ])
 
 const severityOptions = computed(() => [
@@ -63,18 +79,18 @@ const notifiedOptions = computed(() => [
     { label: t('envEvents.notifiedNo'), value: 'false' },
 ])
 
-const severityTagSeverity = (severity: string) => {
+const severityTagTone = (severity: string) => {
     switch (severity) {
         case 'critical':
             return 'danger'
         case 'error':
             return 'danger'
         case 'warn':
-            return 'warn'
+            return 'warning'
         case 'info':
-            return 'info'
+            return 'primary'
         default:
-            return 'secondary'
+            return 'neutral'
     }
 }
 
@@ -84,8 +100,18 @@ const typeLabel = (type: string) => {
             return t('envEvents.typeSandboxUnavailable')
         case 'sandbox_degraded':
             return t('envEvents.typeSandboxDegraded')
-        case 'docker_daemon_down':
-            return t('envEvents.typeDockerDaemonDown')
+        case 'container_unavailable':
+            return t('envEvents.typeContainerUnavailable')
+        case 'ai_config_update':
+            return t('envEvents.typeAiConfigUpdate')
+        case 'verify_commands_update':
+            return t('envEvents.typeVerifyCommandsUpdate')
+        case 'notification_settings_update':
+            return t('envEvents.typeNotificationSettingsUpdate')
+        case 'pr_feedback_commented':
+            return t('envEvents.typePrFeedbackCommented')
+        case 'pr_feedback_closed':
+            return t('envEvents.typePrFeedbackClosed')
         default:
             return type
     }
@@ -161,6 +187,24 @@ const extractMessagePreview = (json: string | null): string => {
     return degraded ?? (p.message as string | undefined) ?? ''
 }
 
+/**
+ * 列定义（caomei DataTable 用 `columns` 数组 + `#cell-{key}` 插槽替代迁移前的 `<Column>`）。
+ * - `key` 即排序字段（`field` 语义并入 `key`）：severity 列用 rank 字段 `_severityRank`，
+ *   message 列用派生的 `messageText`（均为 sortable 的排序键）
+ * - 原 `<Column field="_severityRank" :default-sort-order="-1">` 的 `default-sort-order` 删除：
+ *   实测迁移前组件库该 prop 只影响点击循环方向、不影响初始状态（初始为未排序 `aria-sort="none"`）；
+ *   caomei 默认三态循环 asc → desc → 移除，与迁移前组件库行为一致，故不设 `multiSortMeta` 初值
+ * - `removable-sort` 删除：caomei/TanStack 三态默认等价
+ */
+const columns = computed<DataTableColumn<EnvEventView>[]>(() => [
+    { key: 'type', header: t('envEvents.colType'), sortable: true },
+    { key: '_severityRank', header: t('envEvents.colSeverity'), sortable: true },
+    { key: 'repository', header: t('envEvents.colRepository'), sortable: true },
+    { key: 'messageText', header: t('envEvents.colMessage'), sortable: true },
+    { key: 'notified', header: t('envEvents.colNotified'), sortable: true },
+    { key: 'createdAt', header: t('envEvents.colTime'), sortable: true },
+])
+
 onMounted(fetchEvents)
 </script>
 
@@ -175,169 +219,131 @@ onMounted(fetchEvents)
             </div>
         </div>
 
-        <Card class="env-events__filters">
-            <template #content>
-                <div class="env-events__filter-row">
-                    <div class="env-events__filter-field">
-                        <label for="type">{{ t('envEvents.filterType') }}</label>
-                        <Select
-                            id="type"
-                            v-model="filters.type"
-                            :options="typeOptions"
-                            option-label="label"
-                            option-value="value"
-                            fluid
-                        />
-                    </div>
-                    <div class="env-events__filter-field">
-                        <label for="severity">{{ t('envEvents.filterSeverity') }}</label>
-                        <Select
-                            id="severity"
-                            v-model="filters.severity"
-                            :options="severityOptions"
-                            option-label="label"
-                            option-value="value"
-                            fluid
-                        />
-                    </div>
-                    <div class="env-events__filter-field">
-                        <label for="notified">{{ t('envEvents.filterNotified') }}</label>
-                        <Select
-                            id="notified"
-                            v-model="filters.notified"
-                            :options="notifiedOptions"
-                            option-label="label"
-                            option-value="value"
-                            fluid
-                        />
-                    </div>
-                    <div class="env-events__filter-field">
-                        <label for="from">{{ t('envEvents.filterFrom') }}</label>
-                        <InputText
-                            id="from"
-                            v-model="filters.from"
-                            type="datetime-local"
-                            fluid
-                        />
-                    </div>
-                    <div class="env-events__filter-field">
-                        <label for="to">{{ t('envEvents.filterTo') }}</label>
-                        <InputText
-                            id="to"
-                            v-model="filters.to"
-                            type="datetime-local"
-                            fluid
-                        />
-                    </div>
-                    <div class="env-events__filter-action">
-                        <Button
-                            :label="t('envEvents.filterApply')"
-                            icon="pi pi-filter"
-                            @click="fetchEvents"
-                        />
-                    </div>
+        <CaomeiCard class="env-events__filters">
+            <div class="env-events__filter-row">
+                <div class="env-events__filter-field">
+                    <label for="type">{{ t('envEvents.filterType') }}</label>
+                    <CaomeiSelect
+                        id="type"
+                        v-model="filters.type"
+                        :options="typeOptions"
+                        option-label="label"
+                        option-value="value"
+                    />
                 </div>
-            </template>
-        </Card>
+                <div class="env-events__filter-field">
+                    <label for="severity">{{ t('envEvents.filterSeverity') }}</label>
+                    <CaomeiSelect
+                        id="severity"
+                        v-model="filters.severity"
+                        :options="severityOptions"
+                        option-label="label"
+                        option-value="value"
+                    />
+                </div>
+                <div class="env-events__filter-field">
+                    <label for="notified">{{ t('envEvents.filterNotified') }}</label>
+                    <CaomeiSelect
+                        id="notified"
+                        v-model="filters.notified"
+                        :options="notifiedOptions"
+                        option-label="label"
+                        option-value="value"
+                    />
+                </div>
+                <div class="env-events__filter-field">
+                    <label for="from">{{ t('envEvents.filterFrom') }}</label>
+                    <CaomeiInput
+                        id="from"
+                        v-model="filters.from"
+                        :type="dateTimeLocalType"
+                    />
+                </div>
+                <div class="env-events__filter-field">
+                    <label for="to">{{ t('envEvents.filterTo') }}</label>
+                    <CaomeiInput
+                        id="to"
+                        v-model="filters.to"
+                        :type="dateTimeLocalType"
+                    />
+                </div>
+                <div class="env-events__filter-action">
+                    <CaomeiButton @click="fetchEvents">
+                        <template #icon>
+                            <CaomeiIcon :icon="Funnel" />
+                        </template>
+                        {{ t('envEvents.filterApply') }}
+                    </CaomeiButton>
+                </div>
+            </div>
+        </CaomeiCard>
 
-        <Message
+        <CaomeiMessage
             v-if="error"
-            severity="error"
+            tone="danger"
             :closable="false"
         >
             {{ error }}
-        </Message>
+        </CaomeiMessage>
 
-        <Card v-if="!loading" class="env-events__table">
-            <template #content>
-                <DataTable
-                    :value="events"
-                    striped-rows
-                    size="small"
-                    data-key="id"
-                    scrollable
-                    scroll-height="60vh"
-                    removable-sort
-                    :empty-message="t('envEvents.empty')"
+        <CaomeiCard v-if="!loading" class="env-events__table">
+            <!-- caomei 无 DataTable `scrollable` / `scroll-height`：用外层容器 + CSS 承接滚动 -->
+            <div class="env-events__table-scroll">
+                <CaomeiDataTable
+                    :data="events"
+                    :columns="columns"
+                    row-key="id"
+                    striped
+                    :empty-text="t('envEvents.empty')"
                 >
-                    <Column
-                        field="type"
-                        :header="t('envEvents.colType')"
-                        sortable
-                    >
-                        <template #body="{data}">
-                            <Tag :value="typeLabel(data.type)" severity="secondary" />
-                        </template>
-                    </Column>
-                    <Column
-                        field="_severityRank"
-                        :header="t('envEvents.colSeverity')"
-                        sortable
-                        :default-sort-order="-1"
-                    >
-                        <template #body="{data}">
-                            <Tag :value="data.severity" :severity="severityTagSeverity(data.severity)" />
-                        </template>
-                    </Column>
-                    <Column
-                        field="repository"
-                        :header="t('envEvents.colRepository')"
-                        sortable
-                    />
-                    <Column
-                        field="messageText"
-                        :header="t('envEvents.colMessage')"
-                        sortable
-                    >
-                        <template #body="{data}">
-                            <span v-if="!isExpanded(data.id)" class="env-events__message-preview">
-                                {{ (() => {
-                                    const p = parsePayload(data.payloadJson)
-                                    if (!p) return '—'
-                                    const m = (p.degradedReason as {message?: string} | undefined)?.message
-                                        ?? (p.message as string | undefined)
-                                    return m ?? '—'
-                                })() }}
-                            </span>
-                            <pre v-else class="env-events__message-full">{{ data.payloadJson ?? '—' }}</pre>
-                            <Button
-                                v-if="data.payloadJson"
-                                :label="isExpanded(data.id) ? t('envEvents.collapse') : t('envEvents.expand')"
-                                :icon="isExpanded(data.id) ? 'pi pi-chevron-up' : 'pi pi-chevron-down'"
-                                text
-                                size="small"
-                                class="env-events__expand-btn"
-                                @click="toggleExpanded(data.id)"
-                            />
-                        </template>
-                    </Column>
-                    <Column
-                        field="notified"
-                        :header="t('envEvents.colNotified')"
-                        sortable
-                    >
-                        <template #body="{data}">
-                            <Tag
-                                :value="data.notified ? t('envEvents.notifiedYes') : t('envEvents.notifiedNo')"
-                                :severity="data.notified ? 'success' : 'secondary'"
-                            />
-                            <small v-if="data.notifiedVia" class="env-events__notified-via text-muted">
-                                via {{ data.notifiedVia }}
-                            </small>
-                        </template>
-                    </Column>
-                    <Column
-                        field="createdAt"
-                        :header="t('envEvents.colTime')"
-                        sortable
-                    >
-                        <template #body="{data}">
-                            {{ formatTime(data.createdAt) }}
-                        </template>
-                    </Column>
-                </DataTable>
-            </template>
-        </Card>
+                    <template #cell-type="{row}">
+                        <CaomeiTag tone="neutral">
+                            {{ typeLabel(row.type) }}
+                        </CaomeiTag>
+                    </template>
+                    <template #cell-_severityRank="{row}">
+                        <CaomeiTag :tone="severityTagTone(row.severity)">
+                            {{ row.severity }}
+                        </CaomeiTag>
+                    </template>
+                    <template #cell-messageText="{row}">
+                        <span v-if="!isExpanded(row.id)" class="env-events__message-preview">
+                            {{ (() => {
+                                const p = parsePayload(row.payloadJson)
+                                if (!p) return '—'
+                                const m = (p.degradedReason as {message?: string} | undefined)?.message
+                                    ?? (p.message as string | undefined)
+                                return m ?? '—'
+                            })() }}
+                        </span>
+                        <pre v-else class="env-events__message-full">{{ row.payloadJson ?? '—' }}</pre>
+                        <CaomeiButton
+                            v-if="row.payloadJson"
+                            variant="ghost"
+                            size="sm"
+                            class="env-events__expand-btn"
+                            @click="toggleExpanded(row.id)"
+                        >
+                            <template #icon>
+                                <CaomeiIcon :icon="isExpanded(row.id) ? ChevronUp : ChevronDown" />
+                            </template>
+                            {{ isExpanded(row.id) ? t('envEvents.collapse') : t('envEvents.expand') }}
+                        </CaomeiButton>
+                    </template>
+                    <template #cell-notified="{row}">
+                        <CaomeiTag :tone="row.notified ? 'success' : 'neutral'">
+                            {{ row.notified ? t('envEvents.notifiedYes') : t('envEvents.notifiedNo') }}
+                        </CaomeiTag>
+                        <small v-if="row.notifiedVia" class="env-events__notified-via text-muted">
+                            via {{ row.notifiedVia }}
+                        </small>
+                    </template>
+                    <template #cell-createdAt="{row}">
+                        {{ formatTime(row.createdAt) }}
+                    </template>
+                </CaomeiDataTable>
+            </div>
+        </CaomeiCard>
         <p v-else class="text-muted">
             {{ t('common.empty.loading') }}
         </p>
@@ -363,6 +369,12 @@ onMounted(fetchEvents)
         margin-bottom: $space-4;
     }
 
+    // caomei 无 DataTable `scrollable`：外层容器承接 60vh 纵向滚动（表头非吸顶，见交付说明遗留差异）
+    &__table-scroll {
+        max-height: 60vh;
+        overflow: auto;
+    }
+
     &__filter-row {
         display: flex;
         align-items: flex-end;
@@ -371,9 +383,8 @@ onMounted(fetchEvents)
     }
 
     &__filter-field {
-        display: flex;
-        flex-direction: column;
-        gap: $space-1;
+        @include field-stack;
+
         min-width: 160px;
     }
 

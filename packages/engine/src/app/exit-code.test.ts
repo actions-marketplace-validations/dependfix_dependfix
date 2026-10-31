@@ -169,4 +169,301 @@ describe('computeExitCode', () => {
         }))
         expect(exitCode).toBe(1)
     })
+
+    // "跳过类"审计条目不影响 exit code
+    it('returns 0 when only OVERRIDE_PROTECTED skipped audits exist', () => {
+        const exitCode = computeExitCode(makeCtx({
+            allErrors: [{
+                repository: 'foo/bar',
+                stage: 'fix',
+                category: 'OVERRIDE_PROTECTED',
+                message: 'package lodash@4.17.21 is protected from override',
+            } as never],
+            repoResults: [{ alertsCount: 1, fixed: 0, verificationPassed: true } as never],
+        }))
+        expect(exitCode).toBe(0)
+    })
+
+    it('returns 0 when only SCRIPT_NOT_FOUND skipped audits exist', () => {
+        const exitCode = computeExitCode(makeCtx({
+            allErrors: [{
+                repository: 'foo/bar',
+                stage: 'verify',
+                category: 'SCRIPT_NOT_FOUND',
+                message: 'pnpm test script not found',
+            } as never],
+            repoResults: [{ alertsCount: 0, fixed: 0, verificationPassed: true } as never],
+        }))
+        expect(exitCode).toBe(0)
+    })
+
+    it('returns 0 when multiple skipped audit categories coexist', () => {
+        const exitCode = computeExitCode(makeCtx({
+            allErrors: [
+                { repository: 'foo/bar', stage: 'fix', category: 'OVERRIDE_PROTECTED', message: 'protected' } as never,
+                { repository: 'foo/baz', stage: 'verify', category: 'SCRIPT_NOT_FOUND', message: 'no test script' } as never,
+            ],
+            repoResults: [
+                { alertsCount: 1, fixed: 0, verificationPassed: true } as never,
+                { alertsCount: 0, fixed: 0, verificationPassed: true } as never,
+            ],
+        }))
+        expect(exitCode).toBe(0)
+    })
+
+    // 跳过类 + 真实失败 → 非 0
+    it('returns 1 when skipped audit + real failure coexist', () => {
+        const exitCode = computeExitCode(makeCtx({
+            allErrors: [
+                { repository: 'foo/bar', stage: 'fix', category: 'OVERRIDE_PROTECTED', message: 'protected' } as never,
+                { repository: 'foo/bad', stage: 'fix', category: 'PROCESS_FAILED', message: 'real failure' } as never,
+            ],
+            repoResults: [
+                { alertsCount: 1, fixed: 0, verificationPassed: true } as never,
+                { alertsCount: 0, fixed: 0 } as never,
+            ],
+        }))
+        expect(exitCode).toBe(1)
+    })
+
+    it('returns 1 when skipped audit + failed action coexist', () => {
+        const exitCode = computeExitCode(makeCtx({
+            allActions: [{ success: false } as never],
+            allErrors: [{ repository: 'foo/bar', stage: 'verify', category: 'SCRIPT_NOT_FOUND', message: 'no test' } as never],
+            repoResults: [{ alertsCount: 0, fixed: 0, verificationPassed: true } as never],
+        }))
+        expect(exitCode).toBe(1)
+    })
+
+    it('returns 2 when skipped audit + all repos fail', () => {
+        const exitCode = computeExitCode(makeCtx({
+            allErrors: [
+                { repository: 'foo/bar', stage: 'fix', category: 'OVERRIDE_PROTECTED', message: 'protected' } as never,
+                { repository: 'foo/bad', stage: 'fetch', category: 'FETCH_FAILED', message: '403' } as never,
+            ],
+            repoResults: [
+                { alertsCount: 0, fixed: 0 } as never,
+                { alertsCount: 0, fixed: 0 } as never,
+            ],
+        }))
+        expect(exitCode).toBe(2)
+    })
+
+    // 回归：既有基线失败（PRE_EXISTING_FAILURE）不归因本次运行，不得影响 exit code
+    // （2026-10-08 定时扫描「全部失败」根因：仅既有失败的仓库被判 exit 2 → 平台 engine_exit_2 误标 failed）
+    it('returns 0 when only PRE_EXISTING_FAILURE audits exist (既有失败不归因本次运行)', () => {
+        const exitCode = computeExitCode(makeCtx({
+            allErrors: [{
+                repository: 'CaoMeiYouRen/rss-impact-server',
+                target: 'pnpm install --frozen-lockfile',
+                stage: 'verify',
+                category: 'PRE_EXISTING_FAILURE',
+                message: 'Pre-existing failure (already failing before this run; not caused by this change): pnpm install --frozen-lockfile',
+            } as never],
+            repoResults: [{
+                alertsCount: 0,
+                fixed: 0,
+                verificationPassed: false,
+                verificationBlocking: false,
+            } as never],
+        }))
+        expect(exitCode).toBe(0)
+    })
+
+    it('does not count ROLLBACK_GRANULARITY_DEGRADED as a failure (audit-only)', () => {
+        const exitCode = computeExitCode(makeCtx({
+            allErrors: [{
+                repository: 'foo/bar',
+                stage: 'verify',
+                category: 'ROLLBACK_GRANULARITY_DEGRADED',
+                message: 'Unit-level rollback degraded to repository-level rollback: no unit checkpoint available',
+            } as never],
+            repoResults: [{
+                alertsCount: 1,
+                fixed: 1,
+                verificationPassed: true,
+                verificationBlocking: false,
+            } as never],
+        }))
+        expect(exitCode).toBe(0)
+    })
+
+    // 回归：既有失败仓库仍计为「成功仓库」→ 与真实失败仓库并存时返回 1（而非 2）
+    // 判定用归因口径 verificationBlocking，而非原始口径 verificationPassed
+    it('counts a pre-existing-only verification failure as repo success (exit 1, not 2)', () => {
+        const exitCode = computeExitCode(makeCtx({
+            config: { mode: 'fix-and-pr' } as AppContext['config'],
+            allErrors: [{
+                repository: 'foo/bar',
+                stage: 'fix',
+                category: 'PROCESS_FAILED',
+                message: 'fetch dependabot alerts for foo/bar: Resource not accessible by integration',
+            } as never],
+            repoResults: [{
+                alertsCount: 5,
+                fixed: 0,
+                verificationPassed: false,
+                verificationBlocking: false,
+            } as never],
+        }))
+        expect(exitCode).toBe(1)
+    })
+
+    // 反例防护：本次改动引入的验证失败（verificationBlocking=true）仍判该仓库失败（exit 2，不因修复而放宽）
+    it('still returns 2 when the verification failure is attributed (verificationBlocking=true)', () => {
+        const exitCode = computeExitCode(makeCtx({
+            config: { mode: 'fix-and-pr' } as AppContext['config'],
+            allErrors: [{
+                repository: 'foo/bar',
+                stage: 'verify',
+                category: 'VERIFICATION_FAILED',
+                message: 'Verification failed for foo/bar; commit skipped',
+            } as never],
+            allActions: [{
+                type: 'verification',
+                repository: 'foo/bar',
+                target: 'pnpm test',
+                success: false,
+                error: 'exit code 1',
+            } as never],
+            repoResults: [{
+                alertsCount: 5,
+                fixed: 0,
+                verificationPassed: false,
+                verificationBlocking: true,
+            } as never],
+        }))
+        expect(exitCode).toBe(2)
+    })
+
+    // 回归：既有失败、且失败动作全部为既有失败验证 → 无真实失败 → 返回 0
+    // （无告警/修复产出时，失败验证 action 也不得把运行判为失败）
+    it('returns 0 when the only failed actions are pre-existing verification failures', () => {
+        const exitCode = computeExitCode(makeCtx({
+            config: { mode: 'fix-and-pr' } as AppContext['config'],
+            allErrors: [{
+                repository: 'CaoMeiYouRen/rss-impact-server',
+                target: 'pnpm install --frozen-lockfile',
+                stage: 'verify',
+                category: 'PRE_EXISTING_FAILURE',
+                message: 'Pre-existing failure (already failing before this run; not caused by this change): pnpm install --frozen-lockfile',
+            } as never],
+            allActions: [{
+                type: 'verification',
+                repository: 'CaoMeiYouRen/rss-impact-server',
+                target: 'pnpm install --frozen-lockfile',
+                success: false,
+                preExisting: true,
+                error: 'exit code 1',
+            } as never],
+            repoResults: [{
+                alertsCount: 0,
+                fixed: 0,
+                verificationPassed: false,
+                verificationBlocking: false,
+            } as never],
+        }))
+        expect(exitCode).toBe(0)
+    })
+
+    // 回归：环境性安装失败（无 stderr 诊断）不归因本次运行
+    // 复现链：lockfile-repair action 失败（environmentalFailure）+ 零告警 + 既有基线失败 →
+    // 旧口径 hasFailures 命中 → 无仓库成功 → exit 2 → 平台 engine_exit_2 误标 failed。
+    // 注：修复后零告警仓库不再执行 lockfile repair，故该输入在生产不可达；本用例锁定的是
+    // computeExitCode 的**非归因谓词**本身（防御性锁定，防谓词被回退）
+    it('returns 0 when the only failure is an environmental install failure (零告警 + 既有基线)', () => {
+        const exitCode = computeExitCode(makeCtx({
+            config: { mode: 'fix' } as AppContext['config'],
+            allErrors: [{
+                repository: 'CaoMeiYouRen/rss-impact-server',
+                target: 'pnpm-lock.yaml',
+                stage: 'repair',
+                category: 'ENVIRONMENT_ERROR',
+                message: 'environmental install failure (exit code 1): no stderr diagnostics',
+            } as never],
+            allActions: [{
+                type: 'lockfile-repair',
+                repository: 'CaoMeiYouRen/rss-impact-server',
+                target: 'pnpm-lock.yaml',
+                success: false,
+                environmentalFailure: true,
+                error: 'environmental install failure',
+            } as never],
+            repoResults: [{
+                alertsCount: 0,
+                fixed: 0,
+                verificationPassed: false,
+                verificationBlocking: false,
+            } as never],
+        }))
+        expect(exitCode).toBe(0)
+    })
+
+    // 升级链的环境性失败动作（常规分组 / 拆组逐包 / 跨线 / 成员）与 lockfile-repair 同族：
+    // 不归因本次运行 → 零修复且全部环境性时 exit 0
+    it('returns 0 when the only upgrade failures are environmental', () => {
+        const exitCode = computeExitCode(makeCtx({
+            config: { mode: 'fix' } as AppContext['config'],
+            allErrors: [{
+                repository: 'foo/bar',
+                target: 'lodash',
+                stage: 'fix',
+                category: 'ENVIRONMENT_ERROR',
+                message: 'install failed (environmental): pnpm install failed: timed out',
+            } as never],
+            allActions: [{
+                type: 'dependency-upgrade',
+                repository: 'foo/bar',
+                target: 'lodash',
+                success: false,
+                environmentalFailure: true,
+            } as never],
+            repoResults: [{ alertsCount: 1, fixed: 0 } as never],
+        }))
+        expect(exitCode).toBe(0)
+    })
+
+    // 反例防护：环境性失败标记不掩盖真实失败——与真实失败动作并存时仍非零
+    it('still counts real failures alongside an environmental failure', () => {
+        const exitCode = computeExitCode(makeCtx({
+            config: { mode: 'fix' } as AppContext['config'],
+            allActions: [
+                {
+                    type: 'lockfile-repair',
+                    repository: 'foo/bar',
+                    target: 'pnpm-lock.yaml',
+                    success: false,
+                    environmentalFailure: true,
+                } as never,
+                {
+                    type: 'dependency-upgrade',
+                    repository: 'foo/bar',
+                    target: 'lodash',
+                    success: false,
+                } as never,
+            ],
+            repoResults: [{ alertsCount: 3, fixed: 1, verificationPassed: true } as never],
+        }))
+        expect(exitCode).toBe(1)
+    })
+
+    // 不变量锁定：零告警仓库的 verificationPassed 是「处理成功」信号（多仓运行出口码判定依赖它）
+    // ——若零告警仓库的验证被跳过（verificationPassed undefined），「健康零告警仓库 + 真实失败仓库」
+    // 会从 exit 1 退化为 exit 2（engine_exit_2 误归因）
+    it('counts a healthy zero-alert repo as success (multi-repo exit 1, not 2)', () => {
+        const exitCode = computeExitCode(makeCtx({
+            config: { mode: 'fix' } as AppContext['config'],
+            allErrors: [{
+                repository: 'foo/bad',
+                stage: 'fetch',
+                category: 'FETCH_FAILED',
+                message: '403',
+            } as never],
+            repoResults: [
+                { alertsCount: 0, fixed: 0, verificationPassed: true, verificationBlocking: false } as never,
+                { alertsCount: 0, fixed: 0 } as never,
+            ],
+        }))
+        expect(exitCode).toBe(1)
+    })
 })

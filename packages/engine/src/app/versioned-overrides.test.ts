@@ -131,6 +131,140 @@ describe('buildVersionedOverrides', () => {
         expect(overrides).toEqual({ 'fast-uri': '^3.1.5' })
     })
 
+    it('generates path-level override (parent>child) from dependencyPath', () => {
+        // 单 major 场景：lockfile vite@2.0.0，推荐 2.0.5 → 顶层 key = vite
+        writeFileSync(lockfilePath, 'lockfileVersion: \'9.0\'\n\n  vite@2.0.0:\n    resolution: {integrity: sha512-x}')
+        const alerts = [
+            alert('vite', '2.0.5', { dependencyPath: ['docs>vitepress>@vitejs/plugin-vue>vite'] }),
+        ]
+        const result = buildVersionedOverrides(lockfilePath, alerts, {})
+        // 顶层兜底 + 路径级补丁：顶层 key 覆盖整条线，路径级 key 精确覆盖
+        expect(result['vite']).toBe('^2.0.5')
+        expect(result['@vitejs/plugin-vue>vite']).toBe('^2.0.5')
+    })
+
+    it('generates multiple path-level overrides from multiple dependencyPath entries', () => {
+        writeFileSync(lockfilePath, 'lockfileVersion: \'9.0\'\n\n  vite@2.0.0:\n    resolution: {integrity: sha512-x}')
+        const alerts = [
+            alert('vite', '2.0.5', {
+                dependencyPath: [
+                    'docs>vitepress>@vitejs/plugin-vue>vite',
+                    'docs>vitepress>vite',
+                ],
+            }),
+        ]
+        const result = buildVersionedOverrides(lockfilePath, alerts, {})
+        expect(result['@vitejs/plugin-vue>vite']).toBe('^2.0.5')
+        expect(result['vitepress>vite']).toBe('^2.0.5')
+    })
+
+    it('takes max across multiple alerts sharing same pathKey (order-independent)', () => {
+        writeFileSync(lockfilePath, 'lockfileVersion: \'9.0\'\n\n  vite@2.0.0:\n    resolution: {integrity: sha512-x}')
+        // 两个告警共享同一 pathKey `b>vite`，推荐版本不同 → 取 max
+        const alerts = [
+            alert('vite', '1.0.0', { dependencyPath: ['a>b>vite'] }),
+            alert('vite', '2.0.5', { dependencyPath: ['a>b>vite'] }),
+        ]
+        const result = buildVersionedOverrides(lockfilePath, alerts, {})
+        expect(result['b>vite']).toBe('^2.0.5')
+    })
+
+    it('takes max across multiple alerts sharing same pathKey (reverse order)', () => {
+        writeFileSync(lockfilePath, 'lockfileVersion: \'9.0\'\n\n  vite@2.0.0:\n    resolution: {integrity: sha512-x}')
+        // 反向顺序：先高后低 → 仍取 max
+        const alerts = [
+            alert('vite', '2.0.5', { dependencyPath: ['a>b>vite'] }),
+            alert('vite', '1.0.0', { dependencyPath: ['a>b>vite'] }),
+        ]
+        const result = buildVersionedOverrides(lockfilePath, alerts, {})
+        expect(result['b>vite']).toBe('^2.0.5')
+    })
+
+    it('takes max between existing path-level override and recommended', () => {
+        writeFileSync(lockfilePath, 'lockfileVersion: \'9.0\'\n\n  vite@2.0.0:\n    resolution: {integrity: sha512-x}')
+        const alerts = [
+            alert('vite', '2.0.5', { dependencyPath: ['a>b>vite'] }),
+        ]
+        const existing = { 'b>vite': '^1.0.0' }
+        const result = buildVersionedOverrides(lockfilePath, alerts, existing)
+        // 推荐 2.0.5 > 已有 1.0.0 → 覆盖
+        expect(result['b>vite']).toBe('^2.0.5')
+    })
+
+    it('keeps existing path-level override when it is higher than recommended', () => {
+        writeFileSync(lockfilePath, 'lockfileVersion: \'9.0\'\n\n  vite@2.0.0:\n    resolution: {integrity: sha512-x}')
+        const alerts = [
+            alert('vite', '1.0.0', { dependencyPath: ['a>b>vite'] }),
+        ]
+        const existing = { 'b>vite': '^2.0.0' }
+        const result = buildVersionedOverrides(lockfilePath, alerts, existing)
+        // 已有 2.0.0 >= 推荐 1.0.0 → 不写入
+        expect(result['b>vite']).toBeUndefined()
+    })
+
+    it('generates both top-level and path-level overrides (orthogonal)', () => {
+        writeFileSync(lockfilePath, 'lockfileVersion: \'9.0\'\n\n  vite@2.0.0:\n    resolution: {integrity: sha512-x}')
+        const alerts = [
+            alert('vite', '2.0.5', { dependencyPath: ['a>b>vite'] }),
+        ]
+        const existing = { vite: '^1.0.0' }
+        const result = buildVersionedOverrides(lockfilePath, alerts, existing)
+        // 顶层兜底：已有 1.0.0 < 推荐 2.0.5 → 覆盖
+        expect(result['vite']).toBe('^2.0.5')
+        // 路径级补丁：正交生成
+        expect(result['b>vite']).toBe('^2.0.5')
+    })
+
+    it('keeps top-level override when existing is higher, still generates path-level', () => {
+        writeFileSync(lockfilePath, 'lockfileVersion: \'9.0\'\n\n  vite@2.0.0:\n    resolution: {integrity: sha512-x}')
+        const alerts = [
+            alert('vite', '2.0.5', { dependencyPath: ['a>b>vite'] }),
+        ]
+        const existing = { vite: '^3.0.0' }
+        const result = buildVersionedOverrides(lockfilePath, alerts, existing)
+        // 顶层已有 3.0.0 >= 推荐 2.0.5 → 不覆盖
+        expect(result['vite']).toBeUndefined()
+        // 路径级仍生成（正交）
+        expect(result['b>vite']).toBe('^2.0.5')
+    })
+
+    it('locks current behavior: path-level key is major-agnostic (multi-major scenario)', () => {
+        // 多 major 共存：vite@5 + vite@8；告警分别针对不同 major 线
+        writeFileSync(lockfilePath, [
+            'lockfileVersion: \'9.0\'',
+            '',
+            '  vite@5.4.14:',
+            '    resolution: {integrity: sha512-old}',
+            '',
+            '  vite@8.2.0:',
+            '    resolution: {integrity: sha512-new}',
+        ].join('\n'))
+        const alerts = [
+            alert('vite', '5.4.21', { dependencyPath: ['a>b>vite'] }),
+            alert('vite', '8.2.1', { dependencyPath: ['a>b>vite'] }),
+        ]
+        const result = buildVersionedOverrides(lockfilePath, alerts, {})
+        // 当前行为：路径级 key 无 major 限定，取 max（8.2.1 > 5.4.21）→ 8.2.1
+        // 已知限制：可能把低 major 线目标抬到高 major 线版本（跨线强制风险）
+        expect(result['b>vite']).toBe('^8.2.1')
+        // 顶层版本化 key 仍按 major 分线保护
+        expect(result['vite@5']).toBe('^5.4.21')
+        expect(result['vite@8']).toBe('^8.2.1')
+    })
+
+    it('skips path-level override when dependencyPath has fewer than 2 segments', () => {
+        writeFileSync(lockfilePath, 'lockfileVersion: \'9.0\'\n\n  vite@2.0.0:\n    resolution: {integrity: sha512-x}')
+        const alerts = [
+            alert('vite', '2.0.5', { dependencyPath: ['vite'] }),
+        ]
+        const result = buildVersionedOverrides(lockfilePath, alerts, {})
+        // 单段路径无法形成 parent>child → 不生成路径级 key（顶层 key vite 仍存在）
+        expect(result['vite']).toBe('^2.0.5')
+        // 无任何 parent>child 格式的 key
+        const pathKeys = Object.keys(result).filter((k) => k.includes('>'))
+        expect(pathKeys).toHaveLength(0)
+    })
+
     it('merges existing plain override to max for single-major package', () => {
         writeFastUriLockfile()
         const overrides = buildVersionedOverrides(
@@ -180,5 +314,81 @@ describe('buildVersionedOverrides', () => {
 
     it('returns empty when no alerts provided', () => {
         expect(buildVersionedOverrides(lockfilePath, [])).toEqual({})
+    })
+
+    // -----------------------------------------------------------------------
+    // 已有 override key 写法归一化（nuxt-latest-template#298 复盘）
+    // 已有 `brace-expansion@^1` 时不得再新增语义等价的 `brace-expansion@1`
+    // -----------------------------------------------------------------------
+    it('reuses existing caret-major key instead of adding bare-major duplicate (PR #298)', () => {
+        writeFileSync(lockfilePath, [
+            'lockfileVersion: \'9.0\'',
+            '',
+            '  brace-expansion@1.1.12:',
+            '    resolution: {integrity: sha512-a}',
+            '',
+            '  brace-expansion@2.0.3:',
+            '    resolution: {integrity: sha512-b}',
+            '',
+            '  brace-expansion@5.0.1:',
+            '    resolution: {integrity: sha512-c}',
+            '',
+        ].join('\n'))
+        const existing = {
+            'brace-expansion@^1': '^1.1.16',
+            'brace-expansion@^5': '^5.0.8',
+        }
+        const result = buildVersionedOverrides(lockfilePath, [
+            alert('brace-expansion', '1.1.21'),
+            alert('brace-expansion', '2.1.7'),
+            alert('brace-expansion', '5.0.12'),
+        ], existing)
+
+        // 语义等价的 `@^1` / `@1` 只保留一种写法：沿用已有 `@^1`，不新增 `@1`
+        expect(result).toEqual({
+            'brace-expansion@^1': '^1.1.21',
+            'brace-expansion@2': '^2.1.7',
+            'brace-expansion@^5': '^5.0.12',
+        })
+        expect(result['brace-expansion@1']).toBeUndefined()
+        expect(result['brace-expansion@5']).toBeUndefined()
+    })
+
+    it('keeps existing caret-major override untouched when already >= target', () => {
+        writeFileSync(lockfilePath, [
+            'lockfileVersion: \'9.0\'',
+            '',
+            '  brace-expansion@1.1.12:',
+            '    resolution: {integrity: sha512-a}',
+            '',
+            '  brace-expansion@2.0.3:',
+            '    resolution: {integrity: sha512-b}',
+            '',
+        ].join('\n'))
+        const result = buildVersionedOverrides(lockfilePath, [
+            alert('brace-expansion', '1.1.21'),
+        ], { 'brace-expansion@^1': '^1.1.21' })
+
+        expect(result['brace-expansion@^1']).toBeUndefined()
+        expect(result['brace-expansion@1']).toBeUndefined()
+    })
+
+    it('reuses existing bare-major key when writing versioned override', () => {
+        writeFileSync(lockfilePath, [
+            'lockfileVersion: \'9.0\'',
+            '',
+            '  brace-expansion@1.1.12:',
+            '    resolution: {integrity: sha512-a}',
+            '',
+            '  brace-expansion@2.0.3:',
+            '    resolution: {integrity: sha512-b}',
+            '',
+        ].join('\n'))
+        const result = buildVersionedOverrides(lockfilePath, [
+            alert('brace-expansion', '1.1.21'),
+        ], { 'brace-expansion@1': '^1.1.16' })
+
+        expect(result).toEqual({ 'brace-expansion@1': '^1.1.21' })
+        expect(result['brace-expansion@^1']).toBeUndefined()
     })
 })

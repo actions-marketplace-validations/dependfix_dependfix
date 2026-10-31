@@ -5,6 +5,7 @@
 //
 // 依赖方向：runner → pipeline → cli/index（纯解析），无循环。
 
+import { createRequire } from 'node:module'
 import { defineCommand, renderUsage, runCommand, runMain, showUsage } from 'citty'
 import { toAppError } from '@dependfix/core'
 import type { RuntimeConfig } from '@dependfix/engine'
@@ -45,10 +46,30 @@ async function runApp(rawArgs: string[]): Promise<number> {
 // Unknown command。因此 skills 子命令由 run 首部编程路由（runCommand），
 // 主流程 positional 命令面不受影响。
 
+/**
+ * 解析 CLI 版本：发布产物（dist/index.mjs）读 `../package.json`，源码运行
+ * （src/cli/runner.ts）读 `../../package.json`；只接受包名匹配的 JSON，避免误读。
+ * 不允许硬编码版本——否则 release 后 `--version` 会与 npm 包版本脱节。
+ */
+function resolveCliVersion(): string {
+    const require = createRequire(import.meta.url)
+    for (const specifier of ['../package.json', '../../package.json']) {
+        try {
+            const pkg = require(specifier) as { name?: string, version?: string }
+            if (pkg?.name === 'dependfix' && pkg.version) {
+                return pkg.version
+            }
+        } catch {
+            // 继续尝试下一个相对路径（源码 / 产物两种布局）
+        }
+    }
+    return '0.0.0-unknown'
+}
+
 export const dependfixCommand = defineCommand({
     meta: {
         name: 'dependfix',
-        version: '0.1.0',
+        version: resolveCliVersion(),
         description: '自动化处理 Dependabot / Code Scanning 安全告警的修复工具',
     },
     args: argsDef,

@@ -78,8 +78,8 @@ describe('detectServerLocale', () => {
         expect(callWith('GET', '/api/test', { 'accept-language': '' })).toBe('zh-CN')
     })
 
-    // S2 回归（M18.x 治理批次）：URL query ?locale= 优先级最高，与 apps/platform/i18n/localeDetector.ts:15 tryQueryLocale 对齐
-    it('S2 回归：URL query ?locale=en 优先于 cookie 与 Accept-Language', () => {
+    // locale 优先级回归：URL query ?locale= 优先级最高，与 apps/platform/i18n/localeDetector.ts:15 tryQueryLocale 对齐
+    it('locale 优先级回归：URL query ?locale=en 优先于 cookie 与 Accept-Language', () => {
         // 故意制造冲突：query=en vs cookie=fr-FR + Accept-Language: zh-CN → query 胜
         const locale = detectServerLocale(makeEvent('GET', '/api/test?locale=en', undefined, {
             cookie: 'i18n_locale=fr-FR',
@@ -88,42 +88,42 @@ describe('detectServerLocale', () => {
         expect(locale).toBe('en')
     })
 
-    it('S2 回归：URL query ?locale=zh-CN 命中', () => {
+    it('locale 优先级回归：URL query ?locale=zh-CN 命中', () => {
         const locale = detectServerLocale(makeEvent('GET', '/api/repos?locale=zh-CN', undefined, {}))
         expect(locale).toBe('zh-CN')
     })
 
-    it('S2 回归：URL query ?locale=fr-FR(非受支持值) → 降级到下一优先级', () => {
+    it('locale 优先级回归：URL query ?locale=fr-FR(非受支持值) → 降级到下一优先级', () => {
         const locale = detectServerLocale(makeEvent('GET', '/api/test?locale=fr-FR', undefined, {
             'accept-language': 'en-US,en;q=0.9',
         }))
         expect(locale).toBe('en')
     })
 
-    // W2 大小写兼容：BCP 47 language tag 规范本身大小写不敏感（@nuxtjs/i18n tryQueryLocale
+    // 大小写兼容：BCP 47 language tag 规范本身大小写不敏感（@nuxtjs/i18n tryQueryLocale
     // 内部归一化），helper 之前直接 === 'en' / 'zh-CN' 字面量比较 → ?locale=EN 不接受；
     // 本批次加 toLowerCase() 兼容 ?locale=EN / ?locale=en-US / cookie i18n_locale=EN
-    it('W2 大小写兼容：URL query ?locale=EN 大写 → en', () => {
+    it('大小写兼容：URL query ?locale=EN 大写 → en', () => {
         const locale = detectServerLocale(makeEvent('GET', '/api/test?locale=EN', undefined, {}))
         expect(locale).toBe('en')
     })
 
-    it('W2 大小写兼容：URL query ?locale=en-US 复合 locale → en', () => {
+    it('大小写兼容：URL query ?locale=en-US 复合 locale → en', () => {
         const locale = detectServerLocale(makeEvent('GET', '/api/test?locale=en-US', undefined, {}))
         expect(locale).toBe('en')
     })
 
-    it('W2 大小写兼容：URL query ?locale=ZH-CN 全大写 → zh-CN', () => {
+    it('大小写兼容：URL query ?locale=ZH-CN 全大写 → zh-CN', () => {
         const locale = detectServerLocale(makeEvent('GET', '/api/test?locale=ZH-CN', undefined, {}))
         expect(locale).toBe('zh-CN')
     })
 
-    it('W2 大小写兼容：URL query ?locale=zh → zh-CN', () => {
+    it('大小写兼容：URL query ?locale=zh → zh-CN', () => {
         const locale = detectServerLocale(makeEvent('GET', '/api/test?locale=zh', undefined, {}))
         expect(locale).toBe('zh-CN')
     })
 
-    it('W2 大小写兼容：cookie i18n_locale=EN 大写 → en', () => {
+    it('大小写兼容：cookie i18n_locale=EN 大写 → en', () => {
         const locale = detectServerLocale(makeEvent('GET', '/api/test', undefined, {
             cookie: 'i18n_locale=EN',
         }))
@@ -132,42 +132,60 @@ describe('detectServerLocale', () => {
 })
 
 describe('createLocalizedError', () => {
-    const codeSet: readonly ServerErrorCode[] = [
-        'UNAUTHORIZED',
-        'FORBIDDEN',
-        'RESOURCE_NOT_IN_ORG',
-        'REPO_NOT_FOUND',
-        'REPO_DUPLICATE',
-        'REPO_ID_MISSING',
-        'REPO_VALIDATION_FAILED',
-        'SCAN_RUN_NOT_FOUND',
-        'RUN_ID_MISSING',
-        'RUNS_VALIDATION_FAILED',
-        'REUSE_RUN_NOT_IN_REPO',
-        'REUSE_RUN_RUNNING',
-        'SCAN_PENDING_MERGED',
-        'SCAN_ALREADY_COMPLETED',
-        'CREDENTIAL_NOT_FOUND',
-        'CREDENTIAL_ID_MISSING',
-        'CREDENTIAL_VALIDATION_FAILED',
-        'SCHEDULE_NOT_FOUND',
-        'SCHEDULE_ID_MISSING',
-        'SCHEDULE_VALIDATION_FAILED',
-        'PR_CHECK_NOT_FOUND',
-        'PR_CHECK_ID_MISSING',
-        'PR_CHECK_ACK_VALIDATION_FAILED',
-        'BATCH_RUN_ID_MISSING',
-        'BATCH_RUN_NOT_FOUND',
-        'REPOS_BATCH_VALIDATION_FAILED',
-        'REPOS_BATCH_SCAN_VALIDATION_FAILED',
-        'REPOS_BATCH_SCAN_NO_REPO',
-        'IMPORTABLE_CREDENTIAL_ID_MISSING',
-        'IMPORTABLE_AFFILIATION_INVALID',
-        'GITHUB_API_AUTH_FAILED',
-        'GITHUB_API_FETCH_FAILED',
-        'METHOD_NOT_ALLOWED',
-        'UNKNOWN',
-    ]
+    // 用 Record<ServerErrorCode, true> 的 satisfies 强制穷举：新增错误码而漏登记时 TS 报错（消除 union 与测试清单漂移）
+    const codeSet = Object.keys({
+        UNAUTHORIZED: true,
+        FORBIDDEN: true,
+        RESOURCE_NOT_IN_ORG: true,
+        REPO_NOT_FOUND: true,
+        REPO_DUPLICATE: true,
+        REPO_ID_MISSING: true,
+        REPO_VALIDATION_FAILED: true,
+        SCAN_RUN_NOT_FOUND: true,
+        RUN_ID_MISSING: true,
+        RUN_LOGS_NOT_FOUND: true,
+        RUN_LOGS_EXPORT_TOO_LARGE: true,
+        RUNS_VALIDATION_FAILED: true,
+        SCAN_HISTORY_VALIDATION_FAILED: true,
+        REUSE_RUN_NOT_IN_REPO: true,
+        REUSE_RUN_RUNNING: true,
+        SCAN_PENDING_MERGED: true,
+        SCAN_ALREADY_COMPLETED: true,
+        RUN_RETRY_NOT_ALLOWED: true,
+        RUN_RETRY_SOURCE_RUNNING: true,
+        RUN_RETRY_PARAMS_INVALID: true,
+        CREDENTIAL_NOT_FOUND: true,
+        CREDENTIAL_ID_MISSING: true,
+        CREDENTIAL_VALIDATION_FAILED: true,
+        SCHEDULE_NOT_FOUND: true,
+        SCHEDULE_ID_MISSING: true,
+        SCHEDULE_VALIDATION_FAILED: true,
+        PR_CHECK_NOT_FOUND: true,
+        PR_CHECK_ID_MISSING: true,
+        PR_CHECK_ACK_VALIDATION_FAILED: true,
+        BATCH_RUN_ID_MISSING: true,
+        BATCH_RUN_NOT_FOUND: true,
+        REPOS_BATCH_VALIDATION_FAILED: true,
+        REPOS_BATCH_SCAN_VALIDATION_FAILED: true,
+        REPOS_BATCH_SCAN_NO_REPO: true,
+        IMPORTABLE_CREDENTIAL_ID_MISSING: true,
+        IMPORTABLE_AFFILIATION_INVALID: true,
+        GITHUB_API_AUTH_FAILED: true,
+        GITHUB_API_FETCH_FAILED: true,
+        METHOD_NOT_ALLOWED: true,
+        ORG_ID_MISSING: true,
+        ORG_NOT_FOUND: true,
+        AI_CONFIG_VALIDATION_FAILED: true,
+        AI_KEY_REQUIRED: true,
+        NOTIFICATION_VIEWER_FORBIDDEN: true,
+        NOTIFICATION_PREFERENCE_VALIDATION_FAILED: true,
+        NOTIFICATION_PREFERENCE_EMPTY: true,
+        NOTIFICATION_CATEGORY_DISABLED: true,
+        NOTIFICATION_QUERY_INVALID: true,
+        NOTIFICATION_SETTINGS_VALIDATION_FAILED: true,
+        NOTIFICATION_TEST_FAILED: true,
+        UNKNOWN: true,
+    } satisfies Record<ServerErrorCode, true>) as ServerErrorCode[]
 
     afterAll(() => {
         teardownMemoryDatabase()

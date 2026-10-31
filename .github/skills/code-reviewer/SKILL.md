@@ -38,7 +38,7 @@ metadata:
 ### 步骤 2：判定改动类型与最低验证要求 ⚠️ 必做
 
 - 先确定变更类型，再映射到最低验证层级（参见 [AI 协作规范 §2.2 验证分级矩阵](../../../docs/standards/ai-collaboration.md)）。
-- 代码改动默认至少包含 `lint` 和 `typecheck`；文档改动补链接和路径检查。
+- 代码改动默认至少包含 `lint:check` 和 `typecheck`；涉及 CSS / SCSS / Vue 样式时补 `lint:css:check`；文档改动补链接和路径检查。
 - 测试不是所有场景都一刀切全量执行，按风险选择定向/全量/coverage/E2E。
 - 若实际证据低于最低层级，直接判定为 `Reject`。
 
@@ -51,7 +51,7 @@ metadata:
 - **证据优先采信**：任务方提供的已查证事实（实验证据、测试结果、源码行号引用）直接采用，翻源码仅限需要最终实锤且无外部参考的场景。
 - **收敛策略（不依赖时间感知）**：审计方无真实时间感知，不检查时间、不因时间收敛——审查输出固定为"audit-depth 审查范围内可交付的结论 + 未覆盖边界"，宁可给 `Reject`（附待补证据清单）也不无限深挖；是否超时由调用方事后实测判定，不回溯要求补动作（见 [AI 协作规范 §1.3 真实用时实测](../../../docs/standards/ai-collaboration.md)）。
 - **复审只审修复点**：第 2+ 轮 review 只复查上轮问题编号对应的修复点 diff 与受影响断言，不得重读全量 diff；输出中声明"本轮仅复审基线：问题编号列表"。
-- **并发分区**：当任务方按模块分区发起多个 review 任务时，各分区独立出结论；主审汇总时合并去重、取最严结论。
+- **并发分区**：当任务方按模块分区发起多个 review 任务时，各分区独立出结论；主审汇总时合并去重、取最严结论。**evidence 文件必须分区独立**（如 `-parA` / `-parB` 后缀）：多分区写同一 `artifacts/review-gate/<date>-<scope>.md` 时后写者会覆盖前写者的小节（M34.6 实证）。
 - **用时反馈（调用方事后实测）**：LLM 无真实时间感知，自报用时不可信——"实际用时 / 是否超时间盒"由调用方按 [AI 协作规范 §1.3 真实用时实测](../../../docs/standards/ai-collaboration.md) 用宿主系统时钟事后实测回填（发起审计时记录启动时间戳，返回后计算 elapsed），审计方不自报时长、审计过程中不检查时间；实测超时仅作分级校准数据，不回溯要求补动作。
 
 ### 步骤 3：收集并延续审查证据
@@ -64,6 +64,7 @@ metadata:
 - 使用 references/ 中的四份 checklist 逐项覆盖：正确性、安全、架构（SOLID）、可维护性、测试充分性。
 - **规范一致性必查**：新增/修改的注释与测试名不得含开发流程编号标记（`T405`、`P1-1` 等，例外仅真实常量与带文档路径的导航指针）——检查项在 [code-quality-checklist.md](./references/code-quality-checklist.md) 的 Standards Compliance 小节，规范原文见 [开发规范 §3](../../../docs/standards/development.md)。此检查适用于所有审计深度（含 `quick`，一行 grep 即可）。
 - **治理定义必查（含 `quick`）**：改动涉及 `docs/standards/*.md`、`.github/skills/*/SKILL.md`、`.github/agents/*.agent.md` 时，按 [code-quality-checklist.md](./references/code-quality-checklist.md) Standards Compliance 小节执行：**规范单点声明**（不得与权威文档重复抄写完整条款/阈值/教训，应一行链接引用）与**规范执行分层**（新增严格约束须声明并挂接 review 检查点；宽松指引留在执行层）。此检查适用于所有审计深度：治理定义改动多为 `deep` 全量执行，`quick` 仅限措辞级改动，至少完成新增 diff 文本与权威文档的比对目检（重复条款无固定形态可 grep，只能读 diff 比对）。
+- **严格约束实现面必查**：改动对应 `docs/standards/*.md` 已发布严格约束（必须 / 阈值 / 禁令）的实现面时，按 [code-quality-checklist.md 规范条款 review 检查点矩阵](./references/code-quality-checklist.md#规范条款-review-检查点矩阵严格约束逐条挂接) 逐条核验「review 检查动作」（触发条件见矩阵「触发改动」列）。新增严格约束时必须在矩阵登记一行或在 agent / checklist 挂接独立检查点，否则按「规范执行分层」退回补挂。
 - **供应链信任边界必查**：改动引入新依赖、MCP server、外部 skill/agent，或依赖 AI 推荐的包时，按 [security.md §5.2](../../../docs/standards/security.md) 检查来源验证、钉版本锁文件与先验来源（检查点见 [code-quality-checklist.md](./references/code-quality-checklist.md) 供应链信任边界小节；AI 代码特化安全项见 [security-checklist.md](./references/security-checklist.md) AI 生成代码节）。
 - 优先寻找会阻塞放行的问题，而不是按文件顺序复述 diff。
 - 重点检查：遗漏 mock、异常吞掉、权限边界缺失、证据链不闭环、超出当前 Todo 范围的静默扩写。

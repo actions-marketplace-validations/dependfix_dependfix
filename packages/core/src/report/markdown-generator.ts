@@ -2,6 +2,8 @@ import type { AlertClass } from '../alerts'
 import {
     type RunResult,
     type FixAction,
+    type RepeatedAttemptStatus,
+    type DeliverySkipCarrier,
     aggregateSeverity,
     groupByRepository,
     formatDuration,
@@ -11,6 +13,10 @@ import {
 } from './types'
 import { collectCodeScanningSuggestions } from './suggestions'
 import { collectCodeQualityFindings } from './code-quality-suggestions'
+import { groupCheckAttributions } from './check-attribution'
+import { describeCiAlignment } from './ci-alignment'
+import { collectFamilySummaries } from './family'
+import { countUnfixedAlerts, formatSeverity, formatSkipReason, skippedBreakdown, truncatedBreakdown } from './summary-counters'
 
 /**
  * 生成 Markdown 格式报告字符串。
@@ -18,16 +24,23 @@ import { collectCodeQualityFindings } from './code-quality-suggestions'
  * 模板固定节（3/3.5 为条件渲染）：
  * 1. Header（runId / 时间 / 模式）
  * 2. Summary 表
+ * 2.5 Skipped & Truncated（有跳过 / 截断 / 失败残差时渲染）
+ * 2.6 Repeated Failure Attempts（有同告警尝试记录时渲染）
  * 3. AI Usage（仅 AI 实际调用时渲染）
  * 3.5. Supply Chain Warnings（有警示时才渲染）
  * 4. Alerts by Severity 表
  * 5. Repositories 明细
+ * 5.4. Family Lockstep（有家族锁步记录时才渲染）
  * 5.5. Code Scanning Suggestions（有建议时才渲染）
+ * 5.6. Code Quality Findings（有 findings 时才渲染）
+ * 5.7. Verification Alignment（有验证链口径记录时才渲染）
+ * 3.6. Alerts Disabled（有未启用记录时才渲染）
  * 6. Fix Actions 表
  * 7. Errors 节（有错误时才渲染）
  */
 export function generateMarkdownReport(result: RunResult): string {
     const { runId, startedAt, finishedAt, config, summary, repositories, alerts, actions, errors } = result
+    const unfixed = countUnfixedAlerts(summary)
 
     const sections: string[] = []
 
@@ -54,14 +67,87 @@ export function generateMarkdownReport(result: RunResult): string {
         `| Fixable | ${summary.alertsFixable} |`,
         `| Fixed | ${summary.alertsFixed} |`,
         `| Failed | ${summary.alertsFailed} |`,
+        `| Unfixed | ${unfixed} |`,
         `| Skipped | ${summary.alertsSkipped} |`,
         `| Converged (already >= target) | ${summary.alertsConverged} |`,
         `| Truncated (max alerts/repo) | ${summary.alertsTruncated} |`,
+        `| Alerts disabled (repos) | ${summary.reposWithAlertsDisabled} |`,
         `| Lockfile repairs | ${summary.lockfileRepairs} |`,
         `| Verifications passed | ${summary.verificationsPassed} |`,
         `| Verifications failed | ${summary.verificationsFailed} |`,
         '',
     )
+
+    // ---- 2.5 Skipped & Truncated（有分组信息或失败残差时才渲染，避免空区块）----
+    const skippedRows = skippedBreakdown(summary)
+    const truncatedRows = truncatedBreakdown(summary)
+    const skippedTotal = skippedRows.reduce((sum, row) => sum + row.count, 0)
+    const failedResidual = Math.max(0, unfixed - skippedTotal)
+    if (skippedRows.length > 0 || truncatedRows.length > 0 || failedResidual > 0) {
+        sections.push(
+            '## Skipped & Truncated',
+            '',
+            `> **Unfixed**: ${unfixed} / ${summary.alertsFound} evaluated alerts; ${summary.alertsTruncated} truncated before analysis (not evaluated).`,
+            '',
+            '| Category | Count |',
+            '|----------|-------|',
+        )
+        for (const row of truncatedRows) {
+            sections.push(`| Truncated: ${formatSeverity(row.key)} | ${row.count} |`)
+        }
+        for (const row of skippedRows) {
+            sections.push(`| Skipped: ${formatSkipReason(row.key)} | ${row.count} |`)
+        }
+        if (failedResidual > 0) {
+            sections.push(`| Failed / other not fixed | ${failedResidual} |`)
+        }
+        sections.push('')
+    }
+
+    // ---- 2.6 Repeated Failure Attempts（同告警尝试记录；仅记录存在时渲染）----
+    const attemptRecords = result.attemptTracking ?? []
+    if (attemptRecords.length > 0) {
+        sections.push(
+            '## Repeated Failure Attempts',
+            '',
+            '> 尝试序号 = 同键（source / package / target version / plan strategy）已关闭 PR 数 + 1；',
+            '> 第 3 次起跳过并计入 `Skipped: Repeated failure`，`--retry-failed` 可强制再试（标注「人工强制」）。',
+            '',
+            '| Repository | Package | Attempt Key | Attempt | Status |',
+            '|------------|---------|-------------|---------|--------|',
+        )
+        for (const record of attemptRecords) {
+            sections.push(
+                `| ${escapeMd(record.repository)} | \`${escapeMd(record.packageName)}\` | \`${escapeMd(record.key)}\` | ${record.attempt} | ${attemptStatusLabel(record.status)} |`,
+            )
+        }
+        sections.push('')
+    }
+
+    // ---- 2.7 Delivery Skipped（基线红的交付降级；有记录时渲染）----
+    const deliverySkips = result.deliverySkips ?? []
+    if (deliverySkips.length > 0) {
+        sections.push(
+            '## Delivery Skipped',
+            '',
+            '> 修复后安装验证仍为**既有失败**（本次改动前即为红）→ 修复未被交付；',
+            '> exit code 不受影响（`PRE_EXISTING_FAILURE` 在跳过类白名单内）。',
+            '',
+            '| Repository | Failing command | Carrier |',
+            '|------------|-----------------|---------|',
+        )
+        for (const record of deliverySkips) {
+            const carrier = describeDeliveryCarrier(record.carrier)
+            const repos = record.repositories.length > 0
+                ? record.repositories.map((repo) => `\`${escapeMd(repo)}\``).join('<br>')
+                : '—'
+            const commands = record.failingCommands.length > 0
+                ? record.failingCommands.map((command) => `\`${escapeMd(command)}\``).join('<br>')
+                : '—'
+            sections.push(`| ${repos} | ${commands} | ${carrier} |`)
+        }
+        sections.push('')
+    }
 
     // ---- 3. AI Usage（仅 --ai 实际调用时渲染；run 级聚合）----
     if (result.aiUsage && result.aiUsage.calls > 0) {
@@ -91,6 +177,23 @@ export function generateMarkdownReport(result: RunResult): string {
             sections.push(
                 `| \`${escapeMd(w.packageName)}\` | \`${escapeMd(w.version)}\` | ${w.scriptTypes.map((t) => `\`${escapeMd(t)}\``).join(', ')} | ${escapeMd(w.repository)} |`,
             )
+        }
+        sections.push('')
+    }
+
+    // ---- 3.6 Alerts Disabled（方案 A：未启用 ≠ 失败，单列展示）----
+    if (result.alertsDisabled && result.alertsDisabled.length > 0) {
+        sections.push(
+            '## Alerts Disabled',
+            '',
+            '> 以下仓库**未启用**对应 alerts 功能（预期状态，非获取失败；不影响退出码）。',
+            '> 开启方式：仓库 Settings → Code security 中启用对应功能（Dependabot alerts / GitHub Advanced Security 下的 Code Scanning、Code Quality）。',
+            '',
+            '| Repository | Source | Message |',
+            '|------------|--------|---------|',
+        )
+        for (const d of result.alertsDisabled) {
+            sections.push(`| ${escapeMd(d.repository)} | ${escapeMd(d.source)} | ${escapeMd(d.message)} |`)
         }
         sections.push('')
     }
@@ -175,11 +278,44 @@ export function generateMarkdownReport(result: RunResult): string {
                     const alertClass = alertClassLabel(alert.alertClass)
                     sections.push(`| \`${alert.packageName}\` | ${escapeMd(ruleOrAdvisory)} | ${alertClass} | ${alert.severity.toUpperCase()} | ${fromVer} | ${toVer} | ${major} | ${icon} |`)
                 }
+                // 依赖链展示（pnpm-audit 源有 dependencyPath 时）
+                const alertsPaths = repo.alerts.filter((a) => a.dependencyPath && a.dependencyPath.length > 0)
+                if (alertsPaths.length > 0) {
+                    sections.push('', '**Dependency paths:**', '')
+                    for (const a of alertsPaths) {
+                        for (const p of a.dependencyPath ?? []) {
+                            sections.push(`- \`${escapeMd(a.packageName)}\`: \`${escapeMd(p)}\``)
+                        }
+                    }
+                }
                 sections.push('')
             } else {
                 sections.push('_No alerts for this repository._', '')
             }
         }
+    }
+
+    // ---- 5.4 Family Lockstep（家族锁步摘要：命中家族 / 成员 / 跳过成员）----
+    const familySummaries = collectFamilySummaries(actions)
+    if (familySummaries.length > 0) {
+        const multiRepo = new Set(familySummaries.map((familySummary) => familySummary.repository)).size > 1
+        const headers = multiRepo
+            ? ['Repository', 'Family', 'Members', 'Skipped']
+            : ['Family', 'Members', 'Skipped']
+        sections.push('## Family Lockstep', '')
+        sections.push(`| ${headers.join(' | ')} |`)
+        sections.push(`|${headers.map(() => '---').join('|')}|`)
+        for (const familySummary of familySummaries) {
+            const members = familySummary.members.map((member) => `\`${escapeMd(member)}\``).join(', ')
+            const skipped = familySummary.skipped.length > 0
+                ? familySummary.skipped.map((member) => `\`${escapeMd(member)}\``).join(', ')
+                : '—'
+            const cells = multiRepo
+                ? [escapeMd(familySummary.repository), `\`${escapeMd(familySummary.family)}\``, members, skipped]
+                : [`\`${escapeMd(familySummary.family)}\``, members, skipped]
+            sections.push(`| ${cells.join(' | ')} |`)
+        }
+        sections.push('')
     }
 
     // ---- 5.5 Code Scanning Suggestions（无法自动修复的问题不静默丢失）----
@@ -216,6 +352,66 @@ export function generateMarkdownReport(result: RunResult): string {
             sections.push(
                 `| ${escapeMd(f.repository)} | \`${escapeMd(f.ruleId)}\` | \`${escapeMd(f.location)}\` | ${f.severity.toUpperCase()} | ${escapeMd(f.summary)} | ${escapeMd(f.suggestion)} |`,
             )
+        }
+        sections.push('')
+    }
+
+    // ---- 5.7 Verification Alignment（验证链与目标仓库 CI 口径；仅执行过验证链时渲染）----
+    if (result.ciAlignment && result.ciAlignment.length > 0) {
+        sections.push(
+            '## Verification Alignment',
+            '',
+            '> 本次验证链与目标仓库默认分支 CI 的**可识别命令类别**比对（只比对命令口径，不预测 CI 结果）。',
+            '',
+            '| Repository | Status | Commands | Notes |',
+            '|------------|--------|----------|-------|',
+        )
+        for (const record of result.ciAlignment) {
+            const description = describeCiAlignment(record)
+            const commands = record.commands.length > 0
+                ? record.commands.map((c) => `\`${escapeMd(c)}\``).join('<br>')
+                : '—'
+            const notes = [description.headline, ...description.notes].join('<br>')
+            sections.push(
+                `| ${escapeMd(record.repository)} | ${description.statusLabel} | ${commands} | ${escapeMd(notes)} |`,
+            )
+        }
+        sections.push('')
+    }
+
+    // ---- 5.8 Check Attribution（PR check 回环归因；全部通过时不渲染，避免空表噪音）----
+    const watchAttempts = result.prCheckWatch?.attempts ?? []
+    const failedChecks = watchAttempts.flatMap((attempt) => attempt.failedChecks ?? [])
+    const hasNonPassedAttempt = watchAttempts.some((attempt) => attempt.state !== 'passed')
+    if (failedChecks.length > 0 || hasNonPassedAttempt) {
+        const groups = groupCheckAttributions(failedChecks)
+        const counts = groups
+            .map((group) => `\`${group.attribution}\` ${group.items.length}`)
+            .join(' · ')
+        sections.push(
+            '## Check Attribution',
+            '',
+            '> PR check 回环的失败项按同一归因纯函数分组：归因只解释失败来源，**不豁免** mergify 的 `check-success` 门禁；仅 `self_caused` 可能在显式 `--close-failed-pr` 下关闭 PR。',
+            '',
+        )
+        if (counts) {
+            sections.push(`归因计数：${counts}`, '')
+        }
+        sections.push(
+            '| PR | State | Attribution | Failed Jobs |',
+            '|----|-------|-------------|-------------|',
+        )
+        for (const attempt of watchAttempts) {
+            const jobs = attempt.failedChecks && attempt.failedChecks.length > 0
+                ? attempt.failedChecks
+                    .map((check) => `\`${escapeCodeName(check.name)}\` (${check.attribution})`)
+                    .join('<br>')
+                : '—'
+            const attribution = attempt.attribution ? `\`${attempt.attribution}\`` : '—'
+            sections.push(`| #${attempt.pr.number} | \`${attempt.state}\` | ${attribution} | ${jobs} |`)
+        }
+        if (result.prCheckWatch?.runBudgetExhausted) {
+            sections.push('', '> 本次运行的 check 等待总预算已耗尽：其余 PR 未等待，交给后续运行 / 平台 PR Check。')
         }
         sections.push('')
     }
@@ -293,6 +489,16 @@ function alertClassLabel(alertClass: AlertClass | undefined): string {
     }
 }
 
+/** 同告警尝试处置标签（报告专用措辞；PR 正文只写 HTML 注释，不渲染状态标签）。 */
+function attemptStatusLabel(status: RepeatedAttemptStatus): string {
+    switch (status) {
+        case 'attempt': return 'attempt'
+        case 'forced': return 'forced (manual retry)'
+        case 'skipped': return 'skipped (attempt limit)'
+        default: return String(status)
+    }
+}
+
 function actionDetails(action: FixAction, error?: string): string {
     const base = ((): string => {
         switch (action.type) {
@@ -303,8 +509,18 @@ function actionDetails(action: FixAction, error?: string): string {
                 return action.strategy
                     ? `${action.strategy}: ${action.diff ?? ''}`
                     : action.diff ?? '—'
-            case 'verification':
-                return '—'
+            case 'verification': {
+                // 既有失败（修复前即红）不归因本次改动，必须在报告层可与「本次引入的失败」区分；
+                // source 逐条标注命令来源（默认链 / 仓库自定义链 / CI 镜像脚本）
+                const parts: string[] = []
+                if (action.preExisting) {
+                    parts.push('既有失败（修复前即红，未归因本次改动）')
+                }
+                if (action.commandSource) {
+                    parts.push(`source=${action.commandSource}`)
+                }
+                return parts.length > 0 ? parts.join('；') : '—'
+            }
             case 'branch-cleanup':
                 return action.diff ?? '—'
             case 'code-scanning-fix':
@@ -321,4 +537,25 @@ function actionDetails(action: FixAction, error?: string): string {
 /** 转义 Markdown 表格中的 `\` 与 `|`（先转义反斜杠避免已有转义双重处理）与换行（错误消息常含多行，折叠为空格） */
 function escapeMd(text: string): string {
     return text.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ')
+}
+
+/**
+ * 交付降级载体的人类可读描述（报告表格用）。
+ *
+ * `mode === 'draft'` 且没有 `draftPr` 表示本次**没有新建**草稿 PR（同指纹既有 PR / 无改动 / 创建失败），
+ * 不能写成「本 PR」——PR 正文里的「本 PR」语义由 `buildDraftDeliveryNotice` 单独表达。
+ */
+function describeDeliveryCarrier(carrier: DeliverySkipCarrier): string {
+    if (carrier.issue) {
+        return `issue #${carrier.issue.number} (${carrier.issue.created ? 'created' : 'already exists'})`
+    }
+    if (carrier.draftPr) {
+        return `draft PR #${carrier.draftPr.number}`
+    }
+    return carrier.mode === 'draft' ? 'draft (no new PR)' : 'report only (skip)'
+}
+
+/** 行内代码片段转义：在 `escapeMd` 基础上剥离反引号（名称来自目标仓库，反引号会提前闭合代码段）。 */
+function escapeCodeName(text: string): string {
+    return escapeMd(text).replace(/`/g, '')
 }

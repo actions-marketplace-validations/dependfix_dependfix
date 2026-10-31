@@ -9,6 +9,7 @@
             "envEvents": "Env Events",
             "prChecks": "PR Checks",
             "schedules": "Schedules",
+            "notifications": "Notifications",
             "batchRuns": "Batch Runs",
             "credentials": "Credentials",
             "users": "Users",
@@ -45,6 +46,7 @@
         "errors": {
             "unknown": "Unknown error"
         },
+        "scanTriggerMerged": "This repository already has a scan in progress; this trigger was merged and did not run. Check the scan history for progress.",
         "yes": "Yes",
         "no": "No",
         "fixStatus": {
@@ -92,9 +94,18 @@
         "title": "Repositories",
         "subtitle": "Manage scan target repositories and execution settings",
         "empty": "No repositories yet, click Add repository in the top right",
+        "emptyFiltered": "No repositories match the current search / filters",
+        "filterSearch": "Search",
+        "filterSearchPlaceholder": "owner / name / tag / credential",
+        "filterAll": "All",
+        "filterNotLinked": "Not linked",
+        "filterReset": "Reset filters",
         "import": "Import",
         "batchScan": "Batch scan",
         "batchScanTitle": "Select multiple repositories to trigger a batch scan",
+        "selectionSummary": "{selected} selected, {total} filtered",
+        "selectAllFiltered": "Select all ({count})",
+        "clearSelection": "Clear selection",
         "addRepo": "Add repository",
         "openRunPage": "Open run page",
         "colOwner": "Owner",
@@ -108,6 +119,8 @@
         "notLinked": "Not linked",
         "platformContainer": "Platform container",
         "sandboxContainer": "Isolated Sandbox Container",
+        "sandboxContainerUnavailable": "Isolated Sandbox Container (temporarily unavailable)",
+        "sandboxMigratedNotice": "This repository used the isolated sandbox container, which is temporarily unavailable. Saving will switch it to the platform container.",
         "githubAction": "GitHub Action",
         "privateRepo": "Private",
         "publicRepo": "Public",
@@ -127,6 +140,22 @@
         "fieldExecutor": "Executor",
         "fieldWorkflowFile": "Action workflow file",
         "fieldWorkflowFileHint": "Workflow path inside the target repository (required for GitHub Action executor)",
+        "fieldVerifyCommands": "Custom verification commands",
+        "fieldVerifyCommandsPlaceholder": "One per line, e.g.:\npnpm install --frozen-lockfile\npnpm lint\npnpm test",
+        "fieldVerifyCommandsHint": "Leave empty to use the engine default chain (install / lint / build / typecheck / test); custom commands run as-is (script existence is not checked). Only admin / org_admin can edit, and changes are recorded as audit events",
+        "fieldPrCheckFocus": "PR Check focus set",
+        "fieldPrCheckFocusProviders": "Focused providers (comma separated)",
+        "fieldPrCheckFocusProvidersPlaceholder": "e.g. github-actions, vercel",
+        "fieldPrCheckFocusNames": "Focused check names (comma separated)",
+        "fieldPrCheckFocusNamesPlaceholder": "e.g. Test, Preview",
+        "fieldPrCheckFocusKinds": "Focused source kinds",
+        "fieldPrCheckFocusKindsPlaceholder": "Leave empty for all source kinds",
+        "fieldPrCheckFocusHint": "Only signals matching the focus set take part in PR Check alerts; unmatched signals are still collected and shown in the expanded row. Values within a field are OR-ed, fields are AND-ed, an empty field means no restriction; all three empty = disabled (alert on everything).",
+        "focusKind": {
+            "check": "Check",
+            "status": "Status",
+            "deployment": "Deployment"
+        },
         "fieldNote": "Note",
         "fieldTags": "Tags",
         "fieldTagsPlaceholder": "Type a tag and press Enter (e.g. frontend / critical), used for schedule tag selection",
@@ -157,6 +186,9 @@
         "importFilterVisibilityAll": "All visibilities",
         "importFilterVisibilityPublic": "Public only",
         "importFilterVisibilityPrivate": "Private only",
+        "importFilterArchived": "Archived/Disabled",
+        "importFilterArchivedExclude": "Exclude",
+        "importFilterArchivedInclude": "Include archived",
         "importFilterSearch": "Search",
         "importFilterSearchPlaceholder": "Search repository name or description",
         "importPaginationPageInfo": "Page {current} of {page}",
@@ -167,7 +199,6 @@
         "importFreshRefreshed": "Forced refresh",
         "scanStatusQueryFailed": "Failed to query scan status, check the scan history",
         "scanCompleted": "Scan completed, see results in the scan history",
-        "scanDuplicate": "This repository already has a scan in progress",
         "scanFailed": "Scan failed: {message}",
         "scanDispatched": "GitHub Action scan triggered (progress available in scan history)",
         "scanDispatchedWithUrl": "GitHub Action scan triggered, click the link below to view the run",
@@ -203,6 +234,7 @@
         "empty": "No schedules yet, click Create in the top right",
         "newPlan": "Create",
         "colName": "Name",
+        "colKind": "Type",
         "colCron": "cron expression",
         "colStrategy": "Repository strategy",
         "colMode": "Mode",
@@ -221,6 +253,14 @@
         "dialogCreateTitle": "Create schedule",
         "fieldName": "Name *",
         "fieldNamePlaceholder": "e.g. Weekly Monday scan",
+        "fieldKind": "Plan type",
+        "fieldKindHint": "Scheduled batch scan, or dependabot PR check status monitoring (the latter requires ACTION_STATUS_MONITOR_ENABLED on the server)",
+        "kind": {
+            "scan": "Scheduled scan",
+            "prCheck": "PR Check monitor"
+        },
+        "prCheckHint": "PR Check monitoring polls dependabot PR check status on cron and raises alerts; scan mode / severity threshold do not apply.",
+        "monitorDisabledBanner": "A PR Check schedule exists but the monitor switch is off (ACTION_STATUS_MONITOR_ENABLED=false), so triggers will be skipped. Set ACTION_STATUS_MONITOR_ENABLED=true on the server and restart the process.",
         "fieldCron": "cron expression *",
         "fieldCronHint": "5 fields (min hour day month weekday) or 6 fields (with seconds), e.g. 0 2 * * 1 = every Monday 02:00; keep interval at least 1 hour",
         "cronPreviewTitle": "Next triggers (current timezone, next 3)",
@@ -254,6 +294,7 @@
             "created": "Schedule created",
             "deleted": "Schedule deleted",
             "triggered": "Batch scan triggered ({count} repositories), progress available on the batch runs page",
+            "prCheckTriggered": "PR Check monitoring triggered ({processed} updated, {errors} errors)",
             "disabled": "Schedule disabled",
             "enabled": "Schedule enabled"
         },
@@ -265,6 +306,10 @@
             "operationFailed": "Operation failed: {message}",
             "tagRequired": "Tag strategy requires a tag",
             "reposRequired": "Manual selection requires at least one repository"
+        },
+        "warnings": {
+            "prCheckSkipped": "PR Check monitor switch is off (ACTION_STATUS_MONITOR_ENABLED=false); this trigger was skipped.",
+            "unknownTriggerResult": "Trigger returned an unrecognized result type; refresh the page or contact an administrator."
         }
     },
     "index": {
@@ -363,6 +408,36 @@
         "languageCard": "Language preference",
         "languageLabel": "Language",
         "languageHint": "Changing the language saves your preference and persists across refreshes",
+        "scanPreferencesCard": "Scan preferences",
+        "scanDefaultMode": "Default scan mode",
+        "scanDefaultSeverity": "Default severity",
+        "scanDefaultAuto": "Not set (follow last choice)",
+        "scanPreferencesReset": "Reset scan preferences",
+        "scanPreferencesHint": "Priority: explicit default > last choice > system fallback (report-only / high). Preferences are stored on this device; reset restores the system fallback.",
+        "scanPreferencesEffective": "Currently in effect: {mode} ({modeSource}) · {severity} ({severitySource})",
+        "scanPreferenceSourceDefault": "explicit default",
+        "scanPreferenceSourceLast": "last choice",
+        "scanPreferenceSourceFallback": "system fallback",
+        "notifications": {
+            "card": "Notification preferences",
+            "hint": "Email notifications. Platform incidents and Critical alerts are always sent and cannot be disabled. Categories disabled by the organization cannot be enabled personally.",
+            "platformIncident": "Platform incidents",
+            "platformIncidentHint": "Executor / environment incidents are always sent to administrators and cannot be disabled.",
+            "securityCritical": "Critical alerts",
+            "mandatoryHint": "Required; cannot be disabled.",
+            "securityHigh": "High alerts",
+            "runFailure": "Run failures",
+            "runCompleted": "Completion summaries",
+            "weeklyDigest": "Weekly digest",
+            "viewer": "Your role cannot receive business notifications",
+            "orgDisabled": "Disabled by the organization",
+            "channelUnavailable": "SMTP is not configured; notifications will not be delivered yet.",
+            "weeklyDigestHint": "Requires both organization and personal switches on; sent every Monday at 09:00 by default (server time, configurable at deployment) with the active unfixed alerts snapshot.",
+            "deploymentDisabled": "Notifications are disabled at deployment level (DEPENDFIX_NOTIFICATION_ENABLED=false).",
+            "saved": "Notification preferences saved",
+            "loadFailed": "Failed to load notification preferences: {message}",
+            "saveFailed": "Failed to save notification preferences: {message}"
+        },
         "unlink": "Unlink",
         "credentialProvider": "Email & password",
         "errors": {
@@ -377,11 +452,66 @@
             "profileUpdated": "Profile updated",
             "passwordChanged": "Password changed, sessions on other devices have been invalidated",
             "emailChanged": "Email changed",
-            "unlinked": "Unlinked {provider}"
+            "unlinked": "Unlinked {provider}",
+            "scanPreferencesReset": "Scan preferences reset"
         },
         "confirm": {
             "unlinkAccount": "Unlink the {provider} account?"
         }
+    },
+    "notifications": {
+        "title": "Notifications & Email",
+        "subtitle": "Configure organization-level notification policy, recipients and delivery logs.",
+        "test": "Send test email",
+        "categoriesCard": "Event categories",
+        "deliveryCard": "Delivery policy",
+        "category": {
+            "platform_incident": "Platform incidents",
+            "security_critical": "Critical alerts",
+            "security_high": "High alerts",
+            "run_failure": "Run failures",
+            "run_completed": "Completion summaries",
+            "weekly_digest": "Weekly digest"
+        },
+        "platformIncidentNote": "Platform incidents are mandatory and always sent to administrators; they cannot be disabled.",
+        "criticalNote": "Critical alerts are mandatory and always sent; they cannot be disabled.",
+        "severity": "Severity threshold",
+        "severityHigh": "{critical} + {high}",
+        "severityCritical": "{critical} only",
+        "cooldownHours": "Cooldown window (hours)",
+        "maxPerHour": "Max per hour",
+        "extraRecipients": "Extra admin recipients",
+        "extraRecipientsHint": "Comma or newline separated, up to 20.",
+        "save": "Save settings",
+        "saved": "Notification settings saved",
+        "testDelivered": "Test email delivered",
+        "testNoop": "SMTP is not configured; the test email was not delivered",
+        "testFailed": "Test email failed: {message}",
+        "weeklyDigestHint": "Sent every Monday at 09:00 by default (server time, configurable at deployment) with the active unfixed alerts snapshot; both organization and personal switches must be on.",
+        "deploymentDisabled": "Notifications are disabled at deployment level (DEPENDFIX_NOTIFICATION_ENABLED=false).",
+        "logsCard": "Recent deliveries",
+        "logsHint": "Latest 20 entries; status and recipients only, no email body.",
+        "refresh": "Refresh",
+        "emptyLogs": "No delivery records",
+        "colTime": "Time",
+        "colCategory": "Category",
+        "colScope": "Scope",
+        "colStatus": "Status",
+        "colRecipients": "Recipients",
+        "colError": "Error",
+        "status": {
+            "sending": "Sending",
+            "sent": "Sent",
+            "noop": "Not configured / skipped",
+            "failed": "Failed",
+            "skipped_duplicate": "Duplicate skipped",
+            "skipped_cooldown": "Cooldown skipped",
+            "skipped_throttled": "Throttled",
+            "skipped_no_recipient": "No recipient"
+        },
+        "loadFailed": "Failed to load notification settings: {message}",
+        "saveFailed": "Failed to save notification settings: {message}",
+        "channelUnavailable": "SMTP is not configured; notifications will not be delivered yet."
     },
     "users": {
         "title": "User management",
@@ -488,11 +618,18 @@
         "colPrNumber": "PR",
         "colAuthor": "Author",
         "colConclusion": "Conclusion",
-        "colLastPolledAt": "Last polled",
+        "colLastPolledAt": "Last collected",
         "colStatus": "Alert",
         "colLink": "Link",
         "colActions": "Actions",
         "repositoryUnknown": "Unknown repository",
+        "poll": {
+            "action": "Check now",
+            "success": "Updated {processed} PR statuses ({errors} errors)",
+            "disabled": "PR Check monitoring is disabled (ACTION_STATUS_MONITOR_ENABLED=false); skipped",
+            "truncated": "Candidate repositories ({candidateCount}) exceed the per-run limit; only the first batch was checked (the rest were not checked).",
+            "failed": "Check failed: {message}"
+        },
         "ack": {
             "action": "Ack and close alert",
             "success": "PR #{prNumber} acknowledged",
@@ -506,12 +643,42 @@
         },
         "errors": {
             "loadFailed": "Failed to load: {message}"
+        },
+        "colLastPolledAtHint": "Updated only when this PR is actually collected and persisted; terminal PRs with an unchanged HEAD are skipped within a quiet window — a stale timestamp does not mean polling is broken",
+        "signalsTitle": "Build / deploy signals",
+        "signalsAggregate": "Aggregate",
+        "signalsFailureSources": "Failing sources",
+        "signalsNone": "No signal data (row collected before this field existed)",
+        "signalsEmpty": "No build / deploy signals for this HEAD",
+        "signalsDetailLink": "Details",
+        "signalsLogLink": "Logs",
+        "signalsKind": {
+            "check": "Check",
+            "status": "Status",
+            "deployment": "Deployment"
+        },
+        "signalsState": {
+            "pending": "Pending",
+            "success": "Success",
+            "failure": "Failure",
+            "error": "Error",
+            "neutral": "Neutral",
+            "skipped": "Skipped"
+        },
+        "focusConfigured": "Focus set active",
+        "signalIgnored": "Not focused",
+        "signalAttribution": {
+            "selfCaused": "Caused by this change",
+            "preExisting": "Pre-existing failure",
+            "externalNoise": "External noise",
+            "cancelled": "Cancelled / skipped",
+            "unknown": "Undetermined"
         }
     },
     "envEvents": {
         "title": "Env Events",
-        "subtitle": "Sandbox / docker / runtime environment alerts (with notification status)",
-        "empty": "No env events (auto-recorded on sandbox startup degradation or runtime failure)",
+        "subtitle": "Executor / environment faults and config-change audit (with notification status)",
+        "empty": "No env events (auto-recorded on executor faults, environment changes, or config updates)",
         "filterType": "Event Type",
         "filterSeverity": "Severity",
         "filterNotified": "Notification",
@@ -535,7 +702,12 @@
         "severityCritical": "Critical",
         "typeSandboxUnavailable": "Sandbox unavailable",
         "typeSandboxDegraded": "Sandbox degraded",
-        "typeDockerDaemonDown": "Docker daemon down",
+        "typeContainerUnavailable": "Container executor unavailable",
+        "typeAiConfigUpdate": "AI config updated",
+        "typeVerifyCommandsUpdate": "Verify commands updated",
+        "typeNotificationSettingsUpdate": "Notification settings updated",
+        "typePrFeedbackCommented": "PR feedback comment posted",
+        "typePrFeedbackClosed": "PR auto-closed by feedback loop",
         "expand": "Expand",
         "collapse": "Collapse",
         "errors": {
@@ -600,6 +772,9 @@
         "subtitle": "Cross-repository scan summary from schedules / manual batch scans (expand for aggregate stats and per-repo results)",
         "refresh": "Refresh",
         "empty": "No batch runs yet, select repositories and trigger a batch scan or configure a schedule",
+        "emptyFiltered": "No batch runs match the current filters",
+        "filterAll": "All",
+        "filterReset": "Reset filters",
         "colSource": "Source",
         "colCreatedAt": "Triggered",
         "colParams": "Params",
@@ -655,6 +830,63 @@
         "statusDispatched": "Dispatched",
         "statusRunning": "Running",
         "statusDegraded": "Degraded",
+        "exitCode": "Exit code",
+        "buildVersion": "Build",
+        "buildVersionHint": "Version / commit of the platform deployment artifact that accepted this run (injected at image build time); container / sandbox runs execute there, while GitHub Action runs execute on the target repository runner. \"Unknown\" means it was not injected or the run predates this column",
+        "buildUnknown": "Unknown",
+        "environmentalFailures": "{count} environmental failures",
+        "environmentalFailuresLabel": "Environmental failures",
+        "environmentalFailuresHint": "Environmental failures (killed by signal / timeout / silent non-zero exit) are not attributed to this run; shown for visibility",
+        "deliverySkipped": "{count} repo(s) delivery skipped",
+        "deliverySkippedLabel": "Delivery skipped",
+        "deliverySkippedHint": "Install verification is still failing (pre-existing) after the fix, so the fix was not delivered (changes rolled back). Carriers (issue / draft PR) are only created by the engine fix-and-pr path via DEPENDFIX_ON_BASELINE_RED. Exit code is unaffected",
+        "deliverySkipIssues": "{count} issue(s) opened",
+        "deliverySkipDraftPrs": "{count} draft PR(s)",
+        "memoryLimit": "Memory limit",
+        "peakMemory": "Peak memory",
+        "resourceUnavailable": "Unavailable",
+        "peakMemoryHint": "Peak sampled cgroup memory.current during the run (includes page cache)",
+        "oomKilled": "OOM killed",
+        "oomKilledHint": "Yes when the cgroup oom_kill counter increased during the run; null means unavailable",
+        "unfixedAlerts": "{count} unfixed",
+        "unfixedAlertsLabel": "Unfixed alerts",
+        "unfixedAlertsHint": "Alerts not fixed in this run (failed / skipped / not auto-fixable); not attributed as a regression from this run",
+        "resultMissing": "Result missing",
+        "resultMissingHint": "This run produced no result (e.g. execution timeout); no alert count is shown to avoid misreading it as zero alerts",
+        "breakdown": {
+            "headline": "Unfixed {unfixed} / {total}",
+            "headlineHint": "Total includes truncated alerts; unfixed excludes truncated; skipped alerts are included in unfixed",
+            "listHint": "See run details for the truncated / skipped breakdown",
+            "truncatedShort": "{count} truncated",
+            "truncatedNotEvaluated": "{count} truncated (not evaluated)",
+            "skippedShort": "{count} skipped",
+            "truncatedBySeverity": "Truncated by severity",
+            "skippedByReason": "Skipped by reason",
+            "other": "Other / unclassified",
+            "reason": {
+                "subdirectoryManifest": "Sub-directory / root direct manifest",
+                "crossMajor": "Cross-major / manual review",
+                "notFixable": "Not auto-fixable",
+                "overrideProtected": "Protected by policy",
+                "repeatedFailure": "Repeated failure (attempt limit)"
+            }
+        },
+        "failureStage": {
+            "source": "Alert fetch",
+            "clone": "Clone",
+            "install": "Install",
+            "fix": "Fix",
+            "verify": "Verification",
+            "deliver": "Delivery",
+            "runtime": "Runtime",
+            "cleanup": "Cleanup",
+            "unknown": "Unknown stage"
+        },
+        "failureKind": {
+            "transient": "Retryable",
+            "deterministic": "Needs review",
+            "unknown": "Unclear"
+        },
         "actionViewActionRun": "View Action run",
         "actionViewDetail": "View details",
         "backToList": "Back to list",
@@ -672,10 +904,23 @@
         "paginatorInfo": "Showing {first} to {last} of {total}",
         "logsTitle": "Execution Logs",
         "logsCopy": "Copy Logs",
+        "logsDownload": "Download logs",
         "logsEmpty": "No execution logs",
+        "retry": {
+            "action": "Retry",
+            "confirmTitle": "Retry this run?",
+            "confirmBody": "The scan will be re-queued with the original parameters ({mode} / {threshold}), consuming scan queue and container resources; the source run record is preserved.",
+            "success": "Re-queued as run {runId}",
+            "failed": "Retry failed: {message}",
+            "source": "Retried from",
+            "hint": "This is a retryable (transient) failure such as a network or timeout issue",
+            "failureDetail": "Failure attribution",
+            "failureCodeLabel": "Failure code"
+        },
         "errors": {
             "loadFailed": "Failed to load: {message}",
-            "detailLoadFailed": "Failed to load details: {message}"
+            "detailLoadFailed": "Failed to load details: {message}",
+            "logsDownloadFailed": "Failed to download logs: {message}"
         }
     },
     "scans": {
@@ -700,14 +945,27 @@
             "colLastRun": "Last run",
             "colLastStatus": "Last status",
             "colActions": "Actions",
-            "actionFilterThis": "Filter this repository"
+            "actionFilterThis": "Filter this repository",
+            "filterStatus": "Last status",
+            "windowHint": "Aggregation window: last {included} runs (limit {limit}); earlier runs are excluded"
         },
         "runList": {
             "title": "All runs",
             "empty": "No scan runs in this scope",
+            "filterStatus": "Status",
+            "filterFailureStage": "Failure stage",
+            "filterFailureKind": "Suggested action",
+            "filterAll": "All",
+            "clearFilters": "Clear filters",
+            "failureStageSummary": "Failure stage distribution:",
+            "exportLogs": "Export current page",
+            "exportMenuLabel": "Export scope",
+            "exportAllLogs": "Export all filtered logs ({total} total)",
+            "exportAllLogsOverLimit": "Export all filtered logs ({total} total; over the {limit}-run limit)",
             "errors": {
                 "loadFailed": "Failed to load: {message}",
-                "summaryFailed": "Failed to load summary: {message}"
+                "summaryFailed": "Failed to load summary: {message}",
+                "exportFailed": "Failed to export logs: {message}"
             }
         },
         "errors": {
@@ -751,7 +1009,19 @@
             "zh-CN": "缺少运行 id",
             "en": "Run id is required"
         },
+        "RUN_LOGS_NOT_FOUND": {
+            "zh-CN": "没有可导出的执行日志",
+            "en": "No exportable execution logs"
+        },
+        "RUN_LOGS_EXPORT_TOO_LARGE": {
+            "zh-CN": "导出内容超出上限，请缩小筛选范围或减少单次导出的运行数",
+            "en": "Export exceeds the limit; narrow the filters or reduce the number of runs per export"
+        },
         "RUNS_VALIDATION_FAILED": {
+            "zh-CN": "查询参数校验失败",
+            "en": "Invalid query parameters"
+        },
+        "SCAN_HISTORY_VALIDATION_FAILED": {
             "zh-CN": "查询参数校验失败",
             "en": "Invalid query parameters"
         },
@@ -770,6 +1040,18 @@
         "SCAN_ALREADY_COMPLETED": {
             "zh-CN": "扫描已完成，请在扫描历史中查看",
             "en": "Scan already completed, please check scan history"
+        },
+        "RUN_RETRY_NOT_ALLOWED": {
+            "zh-CN": "该运行不属于可重试的暂时性失败（仅「可重试」类失败支持重试）",
+            "en": "This run is not a retryable transient failure (only transient failures can be retried)"
+        },
+        "RUN_RETRY_SOURCE_RUNNING": {
+            "zh-CN": "该运行尚未结束，无法作为重试来源",
+            "en": "This run has not finished yet and cannot be used as a retry source"
+        },
+        "RUN_RETRY_PARAMS_INVALID": {
+            "zh-CN": "该运行记录的参数无法用于重试（模式 / 阈值 / 执行器取值异常）",
+            "en": "The stored parameters of this run cannot be reused for a retry (invalid mode / threshold / executor)"
         },
         "CREDENTIAL_NOT_FOUND": {
             "zh-CN": "凭据不存在",
@@ -862,6 +1144,34 @@
         "AI_KEY_REQUIRED": {
             "zh-CN": "Organization 未配置 AI API Key，请先在设置中添加",
             "en": "Organization has no AI API Key configured. Please add one in settings"
+        },
+        "NOTIFICATION_VIEWER_FORBIDDEN": {
+            "zh-CN": "当前角色无接收业务通知的权限",
+            "en": "Your role cannot receive business notifications"
+        },
+        "NOTIFICATION_PREFERENCE_VALIDATION_FAILED": {
+            "zh-CN": "通知偏好参数无效",
+            "en": "Invalid notification preference payload"
+        },
+        "NOTIFICATION_PREFERENCE_EMPTY": {
+            "zh-CN": "至少需要修改一个通知偏好",
+            "en": "At least one notification preference is required"
+        },
+        "NOTIFICATION_CATEGORY_DISABLED": {
+            "zh-CN": "该通知类别已被组织关闭",
+            "en": "This notification category is disabled by the organization"
+        },
+        "NOTIFICATION_QUERY_INVALID": {
+            "zh-CN": "通知记录查询参数无效",
+            "en": "Invalid notification log query"
+        },
+        "NOTIFICATION_SETTINGS_VALIDATION_FAILED": {
+            "zh-CN": "通知设置参数无效",
+            "en": "Invalid notification settings"
+        },
+        "NOTIFICATION_TEST_FAILED": {
+            "zh-CN": "测试邮件发送失败",
+            "en": "Test email failed"
         },
         "UNKNOWN": {
             "zh-CN": "未知错误",

@@ -45,7 +45,8 @@ jobs:
       # CI 中 pnpm i 不构建 workspace 包，必须先构建 core+engine+cli 否则 lint/typecheck 类型解析失败
       # （顺序与 Dockerfile 的 core → engine → cli → platform 一致）
       - run: pnpm --filter @dependfix/core build && pnpm --filter @dependfix/engine build && pnpm --filter dependfix build
-      - run: pnpm run lint
+      - run: pnpm run lint:check
+      - run: pnpm run lint:css:check
       - run: pnpm run lint:md:check
       - run: pnpm run typecheck
       - run: pnpm run test
@@ -63,6 +64,8 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      - name: Get short commit hash
+        run: echo "TAG=sha-${GITHUB_SHA::7}" >>${GITHUB_ENV}
       # ── §T1310 platform version 提取 ───────────────────────
       # release.yml 主动触发时（workflow_dispatch inputs.platform_version 非空），
       # 直接把入参当作 platform_version 输出；push:master 触发时入参为空，输出空，
@@ -130,6 +133,33 @@ jobs:
             type=sha,format=short,prefix=sha-,enable=true
             type=raw,value=platform-${{ steps.platform-version.outputs.platform_version }},enable=${{ steps.platform-version.outputs.platform_version != '' }}
           flavor: latest=false
+      # ── 镜像可用性冒烟（推送前门禁）─────────────────────────────
+      # 先构建单架构（amd64）本地镜像并加载到 runner，跑 apps/platform/docker/smoke-test.sh：
+      # 验证「不依赖部署侧 compose 注入 env」时首次启动自动建表（HTTP 200 + 13 业务表 + 无 no such table）。
+      # 冒烟失败则后续 push 步骤不执行（同 job 顺序），避免发布不可用镜像。
+      # 基础镜像从 Docker Hub 拉取（Dockerfile FROM 的字面引用）：本 job 的 `Login to Docker Hub`
+      # 必须保持在三个构建步骤之前——移除或前移该步骤会让拉取退回匿名通道（100 次/6h 按出口 IP，
+      # 共享 runner 上易 429）。口径详见 Dockerfile 顶部注释。
+      - name: Build local image for smoke test (amd64)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: apps/platform/Dockerfile
+          push: false
+          load: true
+          tags: dependfix-smoke:ci
+          platforms: linux/amd64
+          # 固定哨兵 build-arg：让冒烟能端到端校验「ARG → ENV → runtimeConfig → /api/health」注入链路
+          build-args: |
+            BUILD_COMMIT=smoke-commit
+            BUILD_VERSION=smoke-version
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Smoke test built image
+        env:
+          SMOKE_EXPECT_VERSION: smoke-version
+          SMOKE_EXPECT_COMMIT: smoke-commit
+        run: SMOKE_IMAGE=dependfix-smoke:ci sh apps/platform/docker/smoke-test.sh
       # 镜像分两批推送：Docker Hub / GHCR 保留 provenance attestation（build-push-action@v7
       # 默认 --attest type=provenance,mode=max）；阿里云 ACR 个人版不支持 OCI attestation
       # artifact（推送 application/vnd.oci.empty.v1+json 被拒：unknown manifest class），
@@ -144,6 +174,9 @@ jobs:
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}
           platforms: linux/amd64,linux/arm64
+          build-args: |
+            BUILD_COMMIT=${{ github.sha }}
+            BUILD_VERSION=${{ steps.platform-version.outputs.platform_version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - name: Build and push Docker images (Alibaba Cloud ACR)
@@ -155,6 +188,9 @@ jobs:
           tags: ${{ steps.metadata-acr.outputs.tags }}
           labels: ${{ steps.metadata-acr.outputs.labels }}
           platforms: linux/amd64,linux/arm64
+          build-args: |
+            BUILD_COMMIT=${{ github.sha }}
+            BUILD_VERSION=${{ steps.platform-version.outputs.platform_version }}
           provenance: false
           sbom: false
           cache-from: type=gha
@@ -166,3 +202,6 @@ jobs:
           pass: ${{ secrets.DOCKER_PASSWORD }}
           slug: caomeiyouren/dependfix
           description: "dependfix 平台 - 自动化处理 Dependabot / Code Scanning 安全告警"
+      - name: Deploy to Jenkins
+        if: ${{ github.repository == 'dependfix/dependfix' }}
+        run: curl -X GET -L --user ${{ secrets.JENKINS_TOKEN }} "${{ secrets.JENKINS_URL }}/job/dependfix/buildWithParameters?token=${{ secrets.JENKINS_JOB_TOKEN }}&DOCKER_IMAGE=caomeiyouren/dependfix:${{ env.TAG }}"

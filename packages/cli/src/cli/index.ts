@@ -12,6 +12,7 @@ import {
     RUNTIME_MODES,
     SEVERITY_THRESHOLDS,
     ALERT_SOURCES,
+    parseOverrideProtectEntries,
 } from '@dependfix/engine'
 // ---------------------------------------------------------------------------
 // Public interfaces
@@ -58,6 +59,10 @@ export const argsDef = {
     'repo-exclude': {
         type: 'string' as const,
         description: '仓库黑名单 glob（逗号分隔多个或多次传入；显式列表与发现结果均受约束，与 include 冲突时胜出）',
+    },
+    'override-protect': {
+        type: 'string' as const,
+        description: 'overrides 保护名单（防历史被人工移除的破坏性 override 复发），格式 "repo-glob:pkg1,pkg2;repo-glob2:pkg3"',
     },
     'repo-topics-exclude': {
         type: 'string' as const,
@@ -117,8 +122,12 @@ export const argsDef = {
     },
     'allow-major-upgrade': {
         type: 'boolean' as const,
-        description: '跨线告警（推荐版本跨大版本，当前线内无修复版本）显式授权自动升级：仅根 package.json 直接依赖（workspace 成员独占声明维持人工）且 lockfile 单版本的告警自动跨线升级，升级后复核脆弱实例、强制完整验证（install+lint+build），失败自动回滚；间接依赖 / 多版本共存跨线告警维持人工处理。仅 CLI 可用，Action 不支持',
+        description: '跨线告警（推荐版本跨大版本，当前线内无修复版本）显式授权自动升级：仅根 package.json 直接依赖（workspace 成员独占声明维持人工）且 lockfile 单版本的告警自动跨线升级，升级后复核脆弱实例、强制完整验证（install+lint+build+typecheck+test），失败自动回滚；间接依赖 / 多版本共存跨线告警维持人工处理。仅 CLI 可用，Action 不支持',
         negativeDescription: '不自动升级跨线告警（默认，维持人工处理）',
+    },
+    'rollback-granularity': {
+        type: 'string' as const,
+        description: '验证失败回滚粒度：unit（默认，回退最近一个已通过 probe 的变更单元并重验一次）/ repo（保持整仓 git reset --hard）',
     },
     'max-alerts-per-repository': {
         type: 'string' as const,
@@ -159,7 +168,27 @@ export const argsDef = {
     },
     commands: {
         type: 'string' as const,
-        description: '自定义验证命令（逗号分隔），覆盖默认的 install/lint/build',
+        description: '自定义验证命令（逗号分隔），整链替换默认的 install/lint/build/typecheck/test（不做合并；默认链扩展不会自动跟随，默认链内的条目须显式保留）',
+    },
+    'mirror-ci-scripts': {
+        type: 'boolean' as const,
+        description: '把目标仓库 CI 独有的 pnpm/npm/yarn 脚本追加到验证链（默认关闭；最多 3 条、首失败即停；docker / gh / 任意 shell 只披露不执行；与 --commands 不叠加）',
+        negativeDescription: '不镜像 CI 独有脚本（默认）',
+    },
+    'retry-failed': {
+        type: 'boolean' as const,
+        description: '忽略同告警尝试上限并强制再试（仅 fix-and-pr；第 3 次起默认跳过并在报告标注「人工强制」）',
+        negativeDescription: '遵守同告警尝试上限（默认）',
+    },
+    'wait-pr-checks': {
+        type: 'boolean' as const,
+        description: '创建 PR 后等待 check 终态（仅 fix-and-pr；失败时默认评论失败摘要，受 per-PR / per-run 双预算约束，不改变 exit code）',
+        negativeDescription: '不等待 PR check（默认）',
+    },
+    'close-failed-pr': {
+        type: 'boolean' as const,
+        description: 'check 失败且归因 self_caused 时关闭 PR 并删除分支（需同时开启 --wait-pr-checks；unknown / external_noise / pre_existing 只评论）',
+        negativeDescription: '不关闭失败 PR（默认）',
     },
     verbose: {
         type: 'boolean' as const,
@@ -389,6 +418,15 @@ function parsedArgsToCliOverrides(parsed: ParsedArgs<typeof argsDef>): CliConfig
         overrides.allowMajorUpgrade = parsed['allow-major-upgrade']
     }
 
+    // rollback-granularity（unit / repo；config 校验兜底）
+    const rollbackGranularity = parsed['rollback-granularity']?.trim().toLowerCase()
+    if (rollbackGranularity) {
+        if (rollbackGranularity !== 'unit' && rollbackGranularity !== 'repo') {
+            throw new AppError('ARGUMENT_PARSE_ERROR', '--rollback-granularity must be one of: unit, repo')
+        }
+        overrides.rollbackGranularity = rollbackGranularity
+    }
+
     // max-alerts-per-repository
     const maxAlerts = parsed['max-alerts-per-repository']
     if (maxAlerts) {
@@ -436,10 +474,38 @@ function parsedArgsToCliOverrides(parsed: ParsedArgs<typeof argsDef>): CliConfig
         overrides.commands = parseCommandsFlag(commandsValue)
     }
 
+    // mirror-ci-scripts (three-state: true / false / undefined)
+    if (parsed['mirror-ci-scripts'] !== undefined) {
+        overrides.mirrorCiScripts = parsed['mirror-ci-scripts']
+    }
+
+    // retry-failed (three-state: true / false / undefined)
+    if (parsed['retry-failed'] !== undefined) {
+        overrides.retryFailed = parsed['retry-failed']
+    }
+
+    // wait-pr-checks / close-failed-pr (three-state)
+    if (parsed['wait-pr-checks'] !== undefined) {
+        overrides.waitPrChecks = parsed['wait-pr-checks']
+    }
+    if (parsed['close-failed-pr'] !== undefined) {
+        overrides.closeFailedPr = parsed['close-failed-pr']
+    }
+
     // upgrade-groups
     const upgradeGroups = parsed['upgrade-groups']
     if (upgradeGroups) {
         overrides.upgradeGroups = parseUpgradeGroupsFlag(upgradeGroups)
+    }
+
+    // override-protect（与 env DEPENDFIX_OVERRIDE_PROTECT 同格式；解析器与 config 同源）
+    const overrideProtect = parsed['override-protect']
+    if (overrideProtect) {
+        overrides.overrideProtect = parseOverrideProtectEntries(
+            overrideProtect,
+            (message) => new AppError('ARGUMENT_PARSE_ERROR', message),
+            '--override-protect',
+        )
     }
 
     // toolchain-pnpm-version
