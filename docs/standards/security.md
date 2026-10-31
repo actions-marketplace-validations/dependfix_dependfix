@@ -87,7 +87,7 @@
 当 advisory 声明了 patched 版本但**无法以兼容方式落地**时，overrides / `pnpm update` / `pnpm audit --fix` 均无法修复，`pnpm audit` 会持续失败并阻断周期性回归。满足以下任一情形即可按本节**显式豁免**，而非放宽或关闭门禁：
 
 1. patched 版本**尚未发布**（registry 上不存在可安装版本）；
-2. patched 版本已发布，但**只有跨大版本修复**且消费者上游仍依赖旧 API（升级会破坏运行 / 构建）——此时「复核条件」必须写明消费者就绪判据（如「eslint 链改用 minimatch ≥11」「override 升到 glob ≥14 并验证」）。
+2. patched 版本已发布，但**只有跨大版本修复**且消费者上游仍依赖旧 API（升级会破坏运行 / 构建）——此时「复核条件」必须写明消费者就绪判据（如「eslint 链改用 minimatch ≥11 后移除」）。
 
 > 两类豁免均只适用于 **moderate / low**。**high 不得**据此豁免：high 必须先尝试修复，确无可用修复版本时按 §5.9 台账以 `no-fix` / `hard-fix` 登记。
 

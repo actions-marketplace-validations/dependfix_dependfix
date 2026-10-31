@@ -30,7 +30,7 @@ jobs:
       #   被 `--ignore-registry-errors` 误判为通过；该 flag 只把 registry 故障降为 exit 0，
       #   不放宽漏洞判定（pnpm 11.17.0 实测：registry 不可达 + flag → exit 0；无 flag → exit 1；
       #   真实漏洞 + flag → exit 1）。
-      #   `pnpm-workspace.yaml` 的 `audit.ignore`（node-forge，无修复版本，见 security.md §5.7）
+      #   `pnpm-workspace.yaml` 的 `audit.ignore`（当前仅 minimatch，无兼容修复版本，见 security.md §5.7）
       #   仍生效；阻断判据为步骤 exit 0，ignored 条目不参与阻断——日志可能出现
       #   "N vulnerabilities found ... (N ignored)"，不再依赖 "No known vulnerabilities found" 字面串。
       #   口径与转正 run id 见 docs/standards/security.md §5.6。

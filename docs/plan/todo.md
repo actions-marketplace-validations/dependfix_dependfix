@@ -27,7 +27,7 @@
 > - `git log --since 2026-10-01`：无对应闭环提交（`7701cc1a` 为 0.6.0→0.7.0 升级，非 1.0.0-rc；`36601ce1` 只钉死告警 fixtures 的 `createdAt`，未解决 dialog-select 基线非确定性）。
 > - 文档 / 代码 anchor 逐项确认缺口仍在：两条指南的 en 镜像（`configuration` 缺「环境变量」整节，zh 该节 20 条 `export`，en 0 条；已复核 `retryFailed` / `waitPrChecks` / `closeFailedPr` / `onBaselineRed` 四键 en 侧 0 命中；`quick-start` zh 417 行 / 参数表 26 行 vs en 133 / 11）；en 设计镜像 4 篇 vs zh 67 篇；`--` 形态锚点 **306 处 / 54 文件**（`rg -o '\]\([^)]*#[^)]*--[^)]*\)' docs -g '*.md'` 实测；`check:docs` 的 `normAnchor` 剥离 `-` 故不报）；`pr-checks-light` 基线无归因行；`dialog-select-open-dark` 非确定性候选仍开放。
 > **容量评估（§1.1）**：F2 六项 + G5 按「文档平价 / 验证证据」聚类为 **4 原子**（在 5-6 项上限内）；另有 4 批追加临时待办（依赖升级 / lint 门禁 / 任务开局 CI 检查与 stylelint / 依赖 advisory 修复，均不占编号）。原子类型分布 📚 2 + 🧪 2（🛠️ / 🎨 缺口由追加批次承担——其性质为依赖升级 + 视觉基线，按 §3.1 不计入本批类型平衡）。**原子总量预估**：33-49 文件 / 1070-1820 行文本 / 10-12 commits；**追加批次预估**：caomei 批 15-25 文件（含 10-18 张视觉基线）/ 300-500 行文本 / 3-5 commits；2026-10-31 的 lint 门禁批（25 文件）与 CI 规则批（20 文件）按各自条目量级单列，不并入该预估；**阶段总量（含追加）**仅对 caomei 批得出 48-74 文件 / 1370-2320 行 / 13-17 commits，后两批另计。
-> **§3.1.1 容量再平衡记录**：插队 **4 批**（2026-10-30 依赖升级 / 2026-10-31 lint 门禁 / 2026-10-31 任务开局 CI 检查与 stylelint / 2026-10-31 依赖 advisory 修复，均为用户直接指示授权；阈值 1「累计插队批次 ≥3」已命中，四批量级见各自条目），**caomei 批**按阶段启动原子基线 **33-49 文件 / 1070-1820 行 / 10-12 commits** 计：占文件 **45.5%-51.0%**（上界触阈值 2）、行 27.5%-28.0%、commits 30.0%-41.7%（区间为同档配对）。**lint 门禁批 25 文件 / 8 commits、CI 规则批 20 文件 / 4 commits、依赖修复批 8 文件 / 3 commits**，按同一基线分别占 51%-76%、41%-61% 与 16%-24%（累计已远超 100%，阈值 1「累计插队批次 ≥3」同时命中）。处置：**四批均为用户明确指示 / 直接授权的插队**，再平衡移出 **0 项**（风险面为依赖、CI 与治理文档，未新增业务模块或数据面）；若后续追加批次超预估（>25 文件 / >500 行 / >5 commits）则重新评估。
+> **§3.1.1 容量再平衡记录**：插队 **4 批**（2026-10-30 依赖升级 / 2026-10-31 lint 门禁 / 2026-10-31 任务开局 CI 检查与 stylelint / 2026-10-31 依赖 advisory 修复，均为用户直接指示授权；阈值 1「累计插队批次 ≥3」已命中，四批量级见各自条目），**caomei 批**按阶段启动原子基线 **33-49 文件 / 1070-1820 行 / 10-12 commits** 计：占文件 **45.5%-51.0%**（上界触阈值 2）、行 27.5%-28.0%、commits 30.0%-41.7%（区间为同档配对）。**lint 门禁批 25 文件 / 8 commits、CI 规则批 20 文件 / 4 commits、依赖修复批 9 文件 / 4 commits**，按同一基线分别占 51%-76%、41%-61% 与 18%-27%（累计已远超 100%，阈值 1「累计插队批次 ≥3」同时命中）。处置：**四批均为用户明确指示 / 直接授权的插队**，再平衡移出 **0 项**（风险面为依赖、CI 与治理文档，未新增业务模块或数据面）；若后续追加批次超预估（>25 文件 / >500 行 / >5 commits）则重新评估。
 > **原子间依赖**：M52.1（锚点门禁先收紧）→ M52.2 / M52.3（新增链接必须用新形态）；M52.4 ← 追加批次（升级会重建 pr-checks 基线）。
 > **交付顺序**：追加批次（caomei-ui 升级）→ M52.1 → M52.2 → M52.3 → M52.4。
 
@@ -123,15 +123,15 @@
 
 - **目标**：修复 master `Test` 的 prod 审计阻断（新 advisory），并清理已可修复的历史豁免。
 - **来源**：任务开局 CI 检查命中 run `41160837415`（headSha `bf06f45c`）的 `pnpm audit (prod, moderate+, blocking)` 失败；属 [规划规范 §3.1](../standards/planning.md) 插队例外第 2 类（漏洞问题），用户 2026-10-31 指示「开始修复 test ci 问题」。
-- **范围**（8 文件）：`apps/platform/package.json`（`nuxt ^4.6.3`）；`pnpm-workspace.yaml`（`node-forge ^1.4.2`、`glob ^14.0.3` 两个 override；`audit.ignore` 仅保留 minimatch）；`pnpm-lock.yaml`；`.github/release-security-exemptions.json`；`docs/standards/security.md` §5.6/§5.7；`.github/skills/code-reviewer/references/code-quality-checklist.md`；`docs/plan/backlog.md`；本条登记。
+- **范围**（9 文件）：`apps/platform/package.json`（`nuxt ^4.6.3`）；`pnpm-workspace.yaml`（`node-forge ^1.4.2`、`glob ^14.0.3` 两个 override；`audit.ignore` 仅保留 minimatch）；`pnpm-lock.yaml`；`.github/release-security-exemptions.json`；`docs/standards/security.md` §5.6/§5.7；`.github/skills/code-reviewer/references/code-quality-checklist.md`；`docs/plan/backlog.md`；`.github/workflows/test.yml`（审计豁免注释）；本条登记。
 - **验收标准**：① `pnpm audit --prod --audit-level=moderate --ignore-registry-errors --registry=https://registry.npmjs.org` exit 0；② nuxt 4.6.3 / node-forge 1.4.2 / glob 14.0.3 单版本解析，无重复；③ 构建 / typecheck / lint / 单测 / e2e / 视觉全绿；④ `audit.ignore` 与 §5.7 表、发布豁免台账三者一致（node-forge / glob 移除、minimatch 登记理由与复核条件；moderate 不入 §5.9 台账）；⑤ `gates:docs` 16 项。
 - **依赖**：无。
 - **风险与缓解**：nuxt patch 带入 rollup 4.66 / nitropack 2.13.5 等传递升级 → 以构建 + 全量 e2e + 视觉复核；glob 只有 14.x 修复线，`overrides.glob` 升至 `^14.0.3`（14 仍导出 `glob` / `globSync` / `hasMagic`，仅 build-time 路径，已由 build / lint-md / e2e / 视觉验证）；minimatch 的消费者仍用 v3/v5/v10 API，保留豁免并写入 §5.7。
 - **不做什么**：不关闭或放宽审计门禁；不使用 `--ignore` / `--ignore-unfixable`；不对 minimatch 做跨大版本覆盖（eslint / readdir-glob / typescript-estree 仍依赖旧 API）；glob 的覆盖仅在 build / lint-md / e2e / 视觉验证通过后保留。
-- **容量评估（§3.1.1）**：8 文件 / 约 50 行文本 / 3 commits，按阶段基线计 16%-24%；四批累计命中阈值 1，处置=移出 0 项（用户直接指示，见阶段头）。
-- **交付物**：依赖与 override、锁文件、安全规范与台账、审查清单、backlog、本条登记（8 文件）。
+- **容量评估（§3.1.1）**：9 文件 / 约 50 行文本 / 4 commits，按阶段基线计 18%-27%；四批累计命中阈值 1，处置=移出 0 项（用户直接指示，见阶段头）。
+- **交付物**：依赖与 override、锁文件、安全规范与台账、审查清单、backlog、CI 注释、本条登记（9 文件）。
 - **证据**：audit exit 0（`1 low | 1 moderate (1 ignored)`，low 为 deepmerge）；nuxt 4.6.3 / node-forge 1.4.2 / glob 14.0.3；build / typecheck / lint:check / lint:css:check / 单测 2381 / e2e 210（2 flaky 重试）/ 视觉 20 / gates:docs 16。
-- **闭环（2026-10-31）**：`e2500acd`（依赖与 override）、`1b36b5fd`（安全口径与台账）、本提交（计划登记）。审计 R1 两分区 Reject（glob 豁免不成立 / §5.7 准入冲突）→ 全收口 → R2 A Pass / B Reject（批次记录与实现相反）→ 订正后 R3 quick Pass。
+- **闭环（2026-10-31）**：`e2500acd`（依赖与 override）、`1b36b5fd`（安全口径与台账）、本提交（计划登记与 CI 注释订正）。审计 R1 两分区 Reject（glob 豁免不成立 / §5.7 准入冲突）→ 全收口 → R2 A Pass / B Reject（批次记录与实现相反）→ 订正后 R3 quick Pass。
 
 ## 阶段收口要求
 
