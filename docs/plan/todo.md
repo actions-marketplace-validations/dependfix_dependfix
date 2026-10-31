@@ -95,18 +95,18 @@
 - **目标**：把 lint 从「带 `--fix` 的命令」升级为**可阻断的门禁**——提交态与 CI 都不允许自动修复掩盖 error；同时清零平台独立配置下的存量 error，并让根 / 平台两套规则集都被覆盖。
 - **来源**：caomei-ui 升级批次的审计衍生项——根 `lint` 与平台 `lint` 均只有 `--fix` 通道，自动修复会静默改工作区（曾导致「本地绿 / HEAD 红」），且根配置与平台独立配置规则集不同（平台侧存量 20 error / 15 warning）。用户 2026-10-31 明确指示「清理存量；添加门禁」。
 - **范围**：根与平台 `package.json` 脚本；`.github/workflows/{test,release,docker}.yml`；根 `eslint.config.js` 注释；平台 11 个存量违规文件；`docs/standards/{development,platform,git,i18n}.md` 与两个 skill 清单；`docs/plan/todo.md` 登记。
-- **验收标准**（可复现口径均标注测量方与命令）：① 新增 `pnpm run lint:check`（无 `--fix`）在根与平台均 0 error，且链式覆盖两套配置（测量：本地 `pnpm run lint:check`）；② 平台存量 20 error 清零（测量：`pnpm --filter @dependfix/platform exec eslint . --format json`）；③ Test / Release / Docker 三工作流改用门禁命令（测量：`rg 'pnpm run lint' .github/workflows`）；④ 负例可复现（临时注入 `Array<T>` → exit 1，跑后还原）；⑤ 门禁不修改工作区（跑前后 `git status --porcelain` 一致）；⑥ 平台告警预算显式登记（11 条 = 9 条有意保留的 `no-deprecated` + 2 条存量 `max-lines`；根预算 10），新增告警即失败；⑦ 标准口径（提交前检查 / 平台质量门禁 / git 规范 / skill 清单）同步。
+- **验收标准**（可复现口径均标注测量方与命令）：① 新增 `pnpm run lint:check`（无 `--fix`）在根与平台均 0 error，且链式覆盖两套配置（测量：本地 `pnpm run lint:check`）；② 平台存量 20 error 清零（测量：`pnpm --filter @dependfix/platform exec eslint . --format json`）；③ Test / Release / Docker 三工作流改用门禁命令（测量：`rg 'pnpm run lint' .github/workflows`）；④ 负例可复现（临时注入 `Array<T>` → exit 1，跑后还原）；⑤ 门禁不修改工作区（跑前后 `git status --porcelain` 一致）；⑥ 告警预算显式登记（根 3/10、平台 11/11），新增告警致超预算即失败；⑦ 标准口径（提交前检查 / 平台质量门禁 / git 规范 / skill 清单）同步。
 - **依赖**：无（与 caomei 批次仅共享 `repos.vue` 等文件的既有工具链）。
 - **风险与缓解**：平台告警预算按计数维护，清理后需手工下调 → 已在 `platform.md §9` 写明「只可随清理下调」；两套配置长期漂移 → 门禁同时跑两套，漂移会立刻显形；`security-auto-fix.yml` 的产品链保留 `--fix` 语义 → 已在注释中区分门禁与产品链。
-- **容量评估（§3.1.1）**：本批 5 commits / 20 文件 / 约 220 行文本，低于阈值 1（≥3 批）与文件阈值，不计入插队再平衡；与 caomei 批次合计仍为上界命中（用户 2026-10-30 已放行）。
+- **容量评估（§3.1.1）**：本批 7 commits / 25 文件 / 约 250 行文本（含收口提交），低于阈值 1（≥3 批）与文件阈值，不计入插队再平衡；与 caomei 批次合计仍为上界命中（用户 2026-10-30 已放行）。
 - **不做什么**：不删除 `hasLiveJob` 兼容期 API；不拆分 `alerts.vue` / `scans.vue`（存量 `max-lines` 归后续重构）；不改 AGENTS.md（受保护文件，其「lint 必须通过」口径由 `lint:check` 满足）。
-- **交付物**：`5a0da483`（存量清理 10 文件）、`86f704a0`（补齐 resource-usage）、`9cb95c1a`（门禁与 CI 6 文件）、`f12029fa`（标准口径 2 文件）、`505abf34`（规划登记）、本行所在提交（文档同步）。
+- **交付物**：`5a0da483`（存量清理 10 文件）、`86f704a0`（补齐 resource-usage）、`9cb95c1a`（门禁与 CI 6 文件）、`f12029fa`（标准口径 2 文件）、`505abf34`（规划登记）、`1de5ecc3`（跨规范口径同步 6 文件）、`c09d15f4`（条目要素与批量计数）、收口提交（发行/规划口径与计数）。
 - **证据**：`pnpm run lint:check` exit 0（根 3 warning / 平台 11 warning；测量方：本地，同命令）；负例注入后 exit 1；`pnpm typecheck` 7 包；platform 单测 181 文件 2381 passed（`pnpm --filter @dependfix/platform test`）；全量 e2e 210 passed（`pnpm test:e2e`；同日 caomei 批次为 211——差 1 为条件 skip 例，见 `scans.e2e.test.ts` 的 skip 分支）；视觉 20 passed（`pnpm test:visual`）；`gates:docs` 16 项。
-- **闭环（2026-10-31）**：审计 R1 两分区 **Reject**（A：`resource-usage.ts` 修复漏提交，HEAD 门禁红；B：条目缺目标/依赖/风险/交付物/容量与批量计数）→ 全收口（R2 复审结论待回填）。
+- **闭环（2026-10-31）**：审计 R1 两分区 **Reject**（A：`resource-usage.ts` 修复漏提交，HEAD 门禁红；B：条目缺目标/依赖/风险/交付物/容量与批量计数）→ 全收口 → R2 quick **Pass**（两分区；其 W1/W2/S2/S3 建议已在收口提交内落实）。
 
 ## 阶段收口要求
 
-- **质量门**：逐原子 `pnpm lint` + `pnpm typecheck` + 定向测试；跨包改动先 `pnpm -r build` 再 typecheck；阶段收口跑 platform 全量 + e2e + 视觉套件 + `test:coverage`。
+- **质量门**：逐原子 `pnpm run lint:check` + `pnpm typecheck` + 定向测试；跨包改动先 `pnpm -r build` 再 typecheck；阶段收口跑 platform 全量 + e2e + 视觉套件 + `test:coverage`。
 - **Review Gate**：每原子至少一轮 `Code Auditor`（`standard`，依赖升级 / 视觉基线改动升 `deep`），Reject 须闭环后复审。
 - **台账回填**：阶段完成后在 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md) §3.1 F2 标注闭环与证据、§3 G5 回填读数、§5 F2 批次表同步。
 - **归档**：按 [规划规范 §4](../standards/planning.md) 迁出为 `archive/todo-archive-phases-m52.md` + 索引行 + roadmap 状态同步；追加临时待办随阶段归档并在归档块内单列（沿用 M45 / M49 口径）。

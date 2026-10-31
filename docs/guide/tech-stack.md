@@ -39,7 +39,7 @@
 | @lucide/vue | 图标组件（经 `CaomeiIcon` 传入） |
 | @nuxtjs/i18n | 国际化 |
 
-> **Nuxt 4.6 起 tsconfig 拆分**：`.nuxt/tsconfig.json` 拆为 app / server / shared / node 多份，主文件 `exclude` 含 `../server/**/*`；手工 tsconfig 必须显式覆盖 `exclude`（保留 `node_modules` / `dist` / `.data` / `localeDetector`）并同步 eslint 注释，否则 server 深层文件退出 type-aware lint 而 `nuxt typecheck` 仍绿。验证跑 `pnpm lint`。
+> **Nuxt 4.6 起 tsconfig 拆分**：`.nuxt/tsconfig.json` 拆为 app / server / shared / node 多份，主文件 `exclude` 含 `../server/**/*`；手工 tsconfig 必须显式覆盖 `exclude`（保留 `node_modules` / `dist` / `.data` / `localeDetector`）并同步 eslint 注释，否则 server 深层文件退出 type-aware lint 而 `nuxt typecheck` 仍绿。验证跑 `pnpm run lint:check`。
 
 ### 认证
 

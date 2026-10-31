@@ -117,7 +117,7 @@ git fetch && git log HEAD..@{u}      # 期望无输出（无落后提交）
 
 ```bash
 # 1. 质量门全绿 + 发布前安全检查通过（告警门禁见「发布前安全检查」一节）
-pnpm lint
+pnpm run lint:check
 pnpm typecheck
 pnpm test
 pnpm build
