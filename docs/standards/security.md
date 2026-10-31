@@ -74,7 +74,7 @@
 - **阻断面（2026-10-27 起）**：`pnpm audit --prod --audit-level=moderate --ignore-registry-errors --registry=https://registry.npmjs.org`，**无 `|| true`**。
   - 显式 `--registry` 固定公共 audit endpoint：本地或 runner 默认 registry 可能是 npmmirror 等无 audit endpoint 的镜像；缺少该参数时 `--ignore-registry-errors` 会把「endpoint 不存在」当作 registry 故障并 exit 0，使门禁静默失效。
   - `--ignore-registry-errors` 只把 registry 故障降为 exit 0，不放宽漏洞判定（pnpm 11.17.0 实测：registry 不可达 + flag → exit 0；无 flag → exit 1；真实漏洞 + flag → exit 1）。
-  - `pnpm-workspace.yaml` 的 `audit.ignore`（当前 node-forge，无修复版本，见 [§5.7](#_5-7-无可用修复版本漏洞的审计豁免-audit-ignore-2026-10-05)）仍生效；ignored 条目不参与阻断。
+  - `pnpm-workspace.yaml` 的 `audit.ignore`（当前仅 minimatch，无兼容修复版本，见 [§5.7](#_5-7-无可用修复版本漏洞的审计豁免-audit-ignore-2026-10-05)）仍生效；ignored 条目不参与阻断。
 - **信号面（保留）**：`pnpm audit --audit-level=moderate --registry=https://registry.npmjs.org || true` 覆盖 prod + devDeps；失败仅作信号，不阻断 Test job。
 - **判据（2026-10-27 修订，替代字面串）**：阻断步骤结论为 `success`（命令 exit 0）**且日志含审计结果行**（`No known vulnerabilities found`；或 `N vulnerabilities found` 与 `Severity: ... (N ignored)` 两行同时出现）才计为 clean；仅 `fetch failed` + success 是 registry 故障放行，不计为证据（用于 3 次 push / 周回归 / G1 ④）。`audit.ignore` 命中的条目允许存在；不再要求 `No known vulnerabilities found` 字面串——`audit.ignore` 在册时该字面串不可达。出现未豁免的 moderate+ 漏洞时命令 exit 1。
 - **统计命令（第三方可复现，需 `gh` 已认证）**：仅统计翻转后的 run（前置 run 无该步骤，jq 空输出不可作证据）。`gh run list --workflow test.yml --branch master --event push --limit 3 --json databaseId` 取 3 个 run id；对每个 id 执行 `gh run view <id> --json jobs --jq '.jobs[] | select(.name=="Test") | .steps[] | select(.name=="pnpm audit (prod, moderate+, blocking)") | .conclusion'` 期望 `success`，并检查步骤日志含审计结果行（`No known vulnerabilities found`；或 `N vulnerabilities found` + `Severity: ... (N ignored)` 两行；仅 `fetch failed` + success 不计）。
@@ -84,22 +84,27 @@
 
 ### 5.7 无可用修复版本漏洞的审计豁免（audit.ignore，2026-10-05）
 
-当 advisory 声明的 patched 版本**尚未发布**（registry 上不存在可安装版本）时，overrides / `pnpm update` / `pnpm audit --fix` 均无法修复，`pnpm audit` 会持续失败并阻断周期性回归。此时按以下方式**显式豁免**，而非放宽或关闭门禁。
+当 advisory 声明了 patched 版本但**无法以兼容方式落地**时，overrides / `pnpm update` / `pnpm audit --fix` 均无法修复，`pnpm audit` 会持续失败并阻断周期性回归。满足以下任一情形即可按本节**显式豁免**，而非放宽或关闭门禁：
+
+1. patched 版本**尚未发布**（registry 上不存在可安装版本）；
+2. patched 版本已发布，但**只有跨大版本修复**且消费者上游仍依赖旧 API（升级会破坏运行 / 构建）——此时「复核条件」必须写明消费者就绪判据（如「eslint 链改用 minimatch ≥11」「override 升到 glob ≥14 并验证」）。
+
+> 两类豁免均只适用于 **moderate / low**。**high 不得**据此豁免：high 必须先尝试修复，确无可用修复版本时按 §5.9 台账以 `no-fix` / `hard-fix` 登记。
 
 - **配置位置**：`pnpm-workspace.yaml` 顶层 `audit.ignore`（GHSA 列表）；脚本命令见 [§5.6](#_5-6-依赖审计阻断语义-信号级-→-阻断的转正条件-2026-09-30-用户决策方案-c)（2026-10-27 起随 prod 阻断转正）。
 - **禁止用 `--ignore` / `--ignore-unfixable` 进脚本**：pnpm 的 `--ignore` 是「一次性配置写入器」——只把编号写回配置并直接 exit 0（不执行审计），写进 CI 或 npm script 会使审计步骤恒为 exit 0、门禁彻底失效；`--ignore-unfixable` 还依赖 advisory 的 patched 元数据，对「声明了 patched 版本但未发布」的条目判为可修复、实际不写入任何编号。
 - **保留阻断强度**：`audit.ignore` 仅过滤列表内编号，未列入的新漏洞仍使 `pnpm audit` exit 1。
-- **对 §5.6 阻断判据的影响（2026-10-27 起）**：`audit.ignore` 在册时日志通常为两行（`N vulnerabilities found` + `Severity: ... (N ignored)`），不再依赖 `No known vulnerabilities found` 字面串；§5.6 判据已修订为「阻断步骤 exit 0 **且日志含审计结果行**（ignored 不参与阻断）」。node-forge latest 为 1.4.0（无 >1.4.0 修复版本），豁免保留；上游发布修复版本后按上表移除并复跑。
+- **对 §5.6 阻断判据的影响（2026-10-27 起）**：`audit.ignore` 在册时日志通常为两行（`N vulnerabilities found` + `Severity: ... (N ignored)`），不再依赖 `No known vulnerabilities found` 字面串；§5.6 判据已修订为「阻断步骤 exit 0 **且日志含审计结果行**（ignored 不参与阻断）」。node-forge 已于 1.4.2 修复并移除豁免、glob 已通过 override 升到 14.0.3 修复（2026-10-31）；当前在册仅 minimatch，上游发布兼容修复版本后按上表移除并复跑。
 - **当前豁免清单与依据**（每条必须登记 GHSA + 依赖路径 + 复核条件，禁止只写编号）：
 
 | GHSA | 包 / 受影响范围 | 依赖路径 | 复核条件（满足即移除） |
 |:--|:--|:--|:--|
-| GHSA-86w9-cpqp-85rv | node-forge ≤ 1.4.0 | `apps/platform > nuxt > @nuxt/cli / nitropack > listhen > node-forge` | node-forge 发布 > 1.4.0 |
+| GHSA-g3hv-75wg-m249 | minimatch < 11.0.1 | `@nuxtjs/i18n > @intlify/unplugin-vue-i18n > eslint`（3.1.5）；`nuxt > nitropack > archiver > readdir-glob`（5.1.9）；`@typescript-eslint/typescript-estree`（10.2.4） | 消费者上游改用 minimatch ≥ 11.0.1（eslint / readdir-glob / typescript-estree 放弃 v3/v5/v10 API）；当前仅构建期工具链路径 |
 
-> 原 `GHSA-vfj7-8cjw-p6xm`（braces ≤ 3.0.3）条目因 advisory 于 2026-10-23 撤回而移除（复核记录见 [backlog.md](../plan/backlog.md)）。
+> 原 `GHSA-vfj7-8cjw-p6xm`（braces ≤ 3.0.3）因 advisory 于 2026-10-23 撤回而移除；原 `GHSA-86w9-cpqp-85rv`（node-forge ≤ 1.4.0）因上游 1.4.2 发布、原 `GHSA-3g3m-2fjr-6pw4`（glob ≥ 9.0.0、≤ 14.0.1）因 `overrides.glob` 升到 `^14.0.3` 验证通过，均于 2026-10-31 移除（复核记录见 [backlog.md](../plan/backlog.md)）。本表当前条目为 **moderate**，按 §5.9 不入发布豁免台账；若升级为 high 须按 `hard-fix` 登记。
 
 - **复核节奏**：条目同步登记于 [backlog.md 已知边界](../plan/backlog.md)（持续观察）；每周回归或依赖升级时复查上游是否已发布修复版本，发布后立即移除豁免并复跑 `pnpm audit`。advisory 被**撤回**或受影响范围不再匹配（`withdrawn_at` / range 变更）时，同样移除对应条目并记录依据——撤回表示该漏洞不再有效，不能以「无修复版本」为由继续挂账。
-- **审计必查项**：新增 `audit.ignore` 条目必须同时给出 GHSA + 依赖路径 + 复核条件；禁止把 `--ignore` / `--ignore-unfixable` 写入任何 CI workflow 或 npm script；上游发布修复版本后必须移除对应豁免条目，不得长期挂账。
+- **审计必查项**：新增 `audit.ignore` 条目必须同时给出 GHSA + 依赖路径 + 复核条件；禁止把 `--ignore` / `--ignore-unfixable` 写入任何 CI workflow 或 npm script；上游发布**兼容**修复版本后必须移除对应豁免条目，不得长期挂账。
 - **判据修订授权（2026-10-27）**：若 `audit.ignore` 使 clean 字面串不可达，可按本节同批修订 §5.6 判据并记录理由与证据时序；本仓库已于 2026-10-27 据此转正（原观察期计数挂起 → 翻转后连续 3 次 push run id 回填）。
 - **与发布门禁的关系（2026-10-29）**：本节 `audit.ignore` 只豁免 CI audit 阻断，**不构成发布豁免**——属 critical 的条目不得据此发布，属 high 的条目须同时登记 [§5.9 台账](#_5-9-发布前安全告警门禁-dependabot-alerts-code-scanning-2026-10-29-用户决策)（`.github/release-security-exemptions.json`）。
 
@@ -125,7 +130,7 @@
 
 - **Code Scanning 参照同一口径**：按 `security_severity_level` 判定（原值 `medium` → moderate）；缺失时按 `rule.severity` 映射——`error` → high、`warning` → moderate、`note` / `none` → low。
 - **dismiss 不能替代修复**：critical 告警一旦被 dismiss 即阻断发布（须修复后重新扫描；Dependabot 告警可重新打开后升级依赖消除，Code Scanning 可通过修正扫描规则消除误报）。high 被 dismiss 仅可按 `false-positive` 登记，且 Code Scanning 必须按实例 `location` 登记——同一 rule 的其他实例不会被连带放行。`auto_dismissed` 表示告警已自动关闭（不再适用），不参与阻断。
-- **豁免台账（high 的唯一登记落点，机器可读）**：[`.github/release-security-exemptions.json`](../../.github/release-security-exemptions.json)。每条必须具备 9 个字段——`source`（`dependabot` / `code-scanning`）、`id`（GHSA / rule id）、`severity`（仅 `high`；critical 与 moderate / low 不得登记）、`category`（`no-fix` / `hard-fix` 仅对 open 告警生效；`false-positive` 仅对 dismissed 告警生效，且 `reason` 须写明原 dismiss 原因）、`target`（包与受影响范围）、`path`（依赖路径）、`reason`（豁免依据）、`review`（复核条件：上游发版 / 截止版本）、`tracking`（追踪落点）。**Code Scanning 条目另需 `location`（实例文件路径），缺失即台账非法**。条目须同步 [backlog.md 已知边界](../plan/backlog.md)；当前在册条目见该 JSON（node-forge，无修复版本，与 §5.7 同源）。
+- **豁免台账（high 的唯一登记落点，机器可读）**：[`.github/release-security-exemptions.json`](../../.github/release-security-exemptions.json)。每条必须具备 9 个字段——`source`（`dependabot` / `code-scanning`）、`id`（GHSA / rule id）、`severity`（仅 `high`；critical 与 moderate / low 不得登记）、`category`（`no-fix` / `hard-fix` 仅对 open 告警生效；`false-positive` 仅对 dismissed 告警生效，且 `reason` 须写明原 dismiss 原因）、`target`（包与受影响范围）、`path`（依赖路径）、`reason`（豁免依据）、`review`（复核条件：上游发版 / 截止版本）、`tracking`（追踪落点）。**Code Scanning 条目另需 `location`（实例文件路径），缺失即台账非法**。条目须同步 [backlog.md 已知边界](../plan/backlog.md)；当前无在册条目（node-forge 已于 1.4.2 修复并移除，2026-10-31）。
 - **fail-closed**：token 缺失、API 401/403/404、请求超时（10s）与 429/5xx 重试耗尽（总尝试 3 次）、响应非数组、告警级别无法判定 → 一律判失败，不得视为「无告警」（404 通常表示该仓库未启用对应告警源）。**token 按来源分离**：Dependabot 用 `GH_PAT`（classic `security_events` 或 fine-grained `Dependabot alerts: read`；`GITHUB_TOKEN` 恒 403，见 [github-action-workflow.md §7](../design/governance/github-action-workflow.md)）；Code Scanning 在 Actions 中优先用 `GITHUB_TOKEN`（受 workflow `security-events: read` 控制），本地回退 `GH_PAT` / `GH_TOKEN`。
 - **检查命令**：`pnpm run check:release-security`（等价于 `node scripts/check-release-security-alerts.mjs`；仓库 slug 取 `GITHUB_REPOSITORY` 或 `--repo`，本地可用 `GH_PAT` / `GH_TOKEN` 提供 token）。stale 台账（无匹配 high 告警）输出 warning 但放行，复核时按 `review` 条件移除。
 - **记录落点**：CI 步骤日志（run id）为放行证据；豁免与复核依据落在台账 JSON + backlog 已知边界，不要求写入发布 commit body。
