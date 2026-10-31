@@ -8,7 +8,7 @@
 
 | 内容类型 | 位置 |
 |:--|:--|
-| 当前阶段任务 | **M52 文档平价与验证收口（1.0-F2 批次）** — 4 原子 + 2 批追加临时待办（2026-10-30 / 10-31 用户授权） |
+| 当前阶段任务 | **M52 文档平价与验证收口（1.0-F2 批次）** — 4 原子 + 3 批追加临时待办（2026-10-30 / 10-31 用户授权） |
 | 下一阶段（已授权，待规划） | **G 发布工程（M53）**（契约冻结 / 迁移指南 / 真实环境矩阵 / `@v1`；台账见 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md)） |
 | 已完成阶段归档 | [todo-archive.md](todo-archive.md)（阶段索引 + [archive/](archive/) 分片；M0-M51 全部已归档） |
 | 里程碑与阶段交付 | [roadmap.md](roadmap.md)（M0-M51 已归档；M52 进行中；G 待规划） |
@@ -20,14 +20,14 @@
 ## M52: 文档平价与验证收口（1.0-F2 批次，2026-10-30 规划）
 
 > **阶段目标**：把 1.0 的「文档与验证」欠账收口——双语指南与设计镜像可判、站内锚点真能跳转、视觉基线与覆盖率证据可复现。
-> **来源**：[release-1.0-readiness.md](../design/governance/release-1.0-readiness.md) §3.1 F2 六项（① en-US 配置指南漂移 ② quick-start en-US 裁剪漂移 ③ 设计镜像结构漂移 ④ 归档双连字符死锚 ⑤ pr-checks 归因标签渲染验证 ⑥ 视觉基线运行间非确定性）+ §3 G5 覆盖率复测；另有 **2 批追加临时待办**（用户授权，不占阶段条目编号，见文末）：2026-10-30 `caomei-ui` 升级到 `1.0.0-rc.1`；2026-10-31 lint 门禁 check 通道与平台存量清理。
+> **来源**：[release-1.0-readiness.md](../design/governance/release-1.0-readiness.md) §3.1 F2 六项（① en-US 配置指南漂移 ② quick-start en-US 裁剪漂移 ③ 设计镜像结构漂移 ④ 归档双连字符死锚 ⑤ pr-checks 归因标签渲染验证 ⑥ 视觉基线运行间非确定性）+ §3 G5 覆盖率复测；另有 **3 批追加临时待办**（用户授权，不占阶段条目编号，见文末）：2026-10-30 `caomei-ui` 升级到 `1.0.0-rc.1`；2026-10-31 lint 门禁 check 通道与平台存量清理；2026-10-31 任务开局 CI 回执检查与 stylelint 门禁。
 > **用户决策（2026-10-30）**：① `caomei-ui` 升级按 [规划规范 §3.1](../standards/planning.md)「追加临时待办（不占阶段条目编号）」处理——依赖升级不在插队例外清单内，用户授权只改变「可否进入当前阶段」，不改标记口径；② 设计镜像按「结构映射 + 索引补全」收口，**不重译 60+ 篇 zh 设计文档**（全量镜像已登记 backlog，1.0 后评估）。
 > **阶段启动交叉核验（§3.4，2026-10-30 执行角色实测）**：
 > - 归档表扫描（`rg` `todo-archive.md` + `archive/*.md`）：F2 六主题 0 命中（仅 `archive-log.md` / M45 分片的候选登记记录，非闭环记录）。
 > - `git log --since 2026-10-01`：无对应闭环提交（`7701cc1a` 为 0.6.0→0.7.0 升级，非 1.0.0-rc；`36601ce1` 只钉死告警 fixtures 的 `createdAt`，未解决 dialog-select 基线非确定性）。
 > - 文档 / 代码 anchor 逐项确认缺口仍在：两条指南的 en 镜像（`configuration` 缺「环境变量」整节，zh 该节 20 条 `export`，en 0 条；已复核 `retryFailed` / `waitPrChecks` / `closeFailedPr` / `onBaselineRed` 四键 en 侧 0 命中；`quick-start` zh 417 行 / 参数表 26 行 vs en 133 / 11）；en 设计镜像 4 篇 vs zh 67 篇；`--` 形态锚点 **306 处 / 54 文件**（`rg -o '\]\([^)]*#[^)]*--[^)]*\)' docs -g '*.md'` 实测；`check:docs` 的 `normAnchor` 剥离 `-` 故不报）；`pr-checks-light` 基线无归因行；`dialog-select-open-dark` 非确定性候选仍开放。
-> **容量评估（§1.1）**：F2 六项 + G5 按「文档平价 / 验证证据」聚类为 **4 原子**（在 5-6 项上限内）；另有 2 批追加临时待办（依赖升级 / lint 门禁，均不占编号）。原子类型分布 📚 2 + 🧪 2（🛠️ / 🎨 缺口由追加批次承担——其性质为依赖升级 + 视觉基线，按 §3.1 不计入本批类型平衡）。**原子总量预估**：33-49 文件 / 1070-1820 行文本 / 10-12 commits；**追加批次预估**：15-25 文件（含 10-18 张视觉基线）/ 300-500 行文本 / 3-5 commits（2026-10-31 第二批未纳入预估，见其条目容量说明）；**阶段总量（含追加）**：48-74 文件 / 1370-2320 行文本 / 13-17 commits（基线上界由逐原子相加得出，不另取整）。
-> **§3.1.1 容量再平衡记录**：插队 2 批（2026-10-30 依赖升级 / 2026-10-31 lint 门禁，均用户授权；第二批量级 < 阈值 1，见其条目），分母取阶段启动原子基线 **33-49 文件 / 1070-1820 行 / 10-12 commits**——插队占文件 **45.5%-51.0%**（上界触阈值 2）、行 27.5%-28.0%、commits 30.0%-41.7%（区间为同档配对；保守配对下文件最高约 76%）。处置：**用户 2026-10-30 明确放行不移出**（保留 M52.4，阈值 2 按上界命中记录；属用户裁定偏离，非 §3.1.1 暂缓通道）；再平衡移出 **0 项**；若执行期追加批次超预估（>25 文件 / >500 行 / >5 commits）则重新评估。
+> **容量评估（§1.1）**：F2 六项 + G5 按「文档平价 / 验证证据」聚类为 **4 原子**（在 5-6 项上限内）；另有 3 批追加临时待办（依赖升级 / lint 门禁 / 任务开局 CI 检查与 stylelint，均不占编号）。原子类型分布 📚 2 + 🧪 2（🛠️ / 🎨 缺口由追加批次承担——其性质为依赖升级 + 视觉基线，按 §3.1 不计入本批类型平衡）。**原子总量预估**：33-49 文件 / 1070-1820 行文本 / 10-12 commits；**追加批次预估**：caomei 批 15-25 文件（含 10-18 张视觉基线）/ 300-500 行文本 / 3-5 commits；2026-10-31 的 lint 门禁批（25 文件）与 CI 规则批（18 文件）按各自条目量级单列，不并入该预估；**阶段总量（含追加）**仅对 caomei 批得出 48-74 文件 / 1370-2320 行 / 13-17 commits，后两批另计。
+> **§3.1.1 容量再平衡记录**：插队 **3 批**（2026-10-30 依赖升级 / 2026-10-31 lint 门禁 / 2026-10-31 任务开局 CI 检查与 stylelint，均为用户直接指示授权；阈值 1「累计插队批次 ≥3」已命中，三批量级见各自条目），**caomei 批**按阶段启动原子基线 **33-49 文件 / 1070-1820 行 / 10-12 commits** 计：占文件 **45.5%-51.0%**（上界触阈值 2）、行 27.5%-28.0%、commits 30.0%-41.7%（区间为同档配对）。**lint 门禁批 25 文件 / 8 commits、CI 规则批 18 文件 / 待提交**，按同一基线分别占 51%-76% 与 37%-55%（累计已远超 100%，阈值 1「累计插队批次 ≥3」同时命中）。处置：**三批均为用户明确指示 / 直接授权的插队**，再平衡移出 **0 项**（风险面为依赖、CI 与治理文档，未新增业务模块或数据面）；若后续追加批次超预估（>25 文件 / >500 行 / >5 commits）则重新评估。
 > **原子间依赖**：M52.1（锚点门禁先收紧）→ M52.2 / M52.3（新增链接必须用新形态）；M52.4 ← 追加批次（升级会重建 pr-checks 基线）。
 > **交付顺序**：追加批次（caomei-ui 升级）→ M52.1 → M52.2 → M52.3 → M52.4。
 
@@ -104,9 +104,24 @@
 - **证据**：`pnpm run lint:check` exit 0（根 3 warning / 平台 11 warning；测量方：本地，同命令）；负例注入后 exit 1；`pnpm typecheck` 7 包；platform 单测 181 文件 2381 passed（`pnpm --filter @dependfix/platform test`）；全量 e2e 210 passed（`pnpm test:e2e`；同日 caomei 批次为 211——差 1 为条件 skip 例，见 `scans.e2e.test.ts` 的 skip 分支）；视觉 20 passed（`pnpm test:visual`）；`gates:docs` 16 项。
 - **闭环（2026-10-31）**：审计 R1 两分区 **Reject**（A：`resource-usage.ts` 修复漏提交，HEAD 门禁红；B：条目缺目标/依赖/风险/交付物/容量与批量计数）→ 全收口 → R2 quick **Pass**（两分区；其 W1/W2/S2/S3 建议已在收口提交内落实）。
 
+### 追加临时待办（2026-10-31 用户授权，不占阶段条目编号，P2 🧪）：任务开局 CI 回执检查与 stylelint 门禁
+
+- **目标**：把「新任务开局先看 CI」固化为硬规则，并补上 CI 缺失的 CSS/SCSS 门禁；同时按授权把 AGENTS 的 lint 口径对齐到 `lint:check`。
+- **来源**：用户 2026-10-31 三项指示——① 授权改动 AGENTS.md；② CI 增加 stylelint 检查；③ 新增「新任务 + 工作区干净 → 检查最近 Actions，最近推送引入的失败要修；严重时提醒用户裁决；进行中任务不检查」规则。
+- **范围**（20 文件）：`AGENTS.md`；`.github/agents/{full-stack-master,code-auditor}.agent.md`；`.github/skills/{code-reviewer,conventional-committer,quality-guardian}/SKILL.md`；根 `package.json`；`.github/workflows/{test,release,docker}.yml`；`scripts/regression/run-periodic-regression.mjs` 与其测试；`docs/standards/{development,platform,git,i18n,index}.md`；`docs/guide/release.md`；`docs/plan/{todo,backlog}.md` 登记。
+- **验收标准**：① AGENTS 的代码变更 / 提交前置 / 基线检查三处改用 `lint:check`，并新增「任务开局 CI 回执检查」小节（含 5 条判据）；② `pnpm run lint:css:check` 在根可执行且 exit 0，三个工作流各增一步；③ agent 开局协议把 CI 检查作为第 5 步，明确「进行中任务跳过」；④ 标准文档同步（development §9 / platform §9）；⑤ `gates:docs` 全绿（platform.md 不越 30,000 字符阻断线）。
+- **依赖**：lint 门禁批次（`5a0da483` 至 `bf06f45c`）已闭环。
+- **风险与缓解**：开局检查依赖 `gh` 网络，失败时只记录不阻断；「最近推送引入」判定需要人读日志 → 规则要求只处理与本仓改动相关的失败，避免把 Dependabot 分支噪音带进任务。
+- **容量评估（§3.1.1）**：本批 20 文件 / 约 120 行文本 / 1-2 commits，按阶段基线（33-49 文件）计占 41%-61%；与 caomei、lint 门禁两批合计命中阈值 1（3 批），处置=移出 0 项（用户直接指示，见阶段头）。
+- **不做什么**：不在任务中途重复检查；不把 stylelint 并入 `lint:check`（保持 ESLint 与样式检查分步、失败定位清晰）。
+- **交付物**：AGENTS / 2 个 agent / 3 个 skill / package.json / 3 工作流 / 回归脚本与测试 / 5 个 standards / release 指南 + 本条与 backlog 登记（共 20 文件）。
+- **证据**：`pnpm run lint:css:check` exit 0；`pnpm run lint:check` exit 0；`gates:docs` 16 项。
+- **闭环（2026-10-31）**：`5fd8220c`（AGENTS 规则）、`4a0c9fa8`（CI 与周期回归门禁）、`4b8729a9`（标准口径）、本提交（计划与 backlog 登记）；审计 R1（A Pass / B Reject：容量评估与计数缺失）→ 全收口 → R2 quick **Pass**（W1-W5 已收口；S1/S2 已处理，S3 单点声明取舍）。
+- **批外发现（不属本批）**：开局 CI 检查命中 run `41160837415`（headSha `bf06f45c`）的 `Test` 在 `pnpm audit (prod, moderate+, blocking)` 步骤失败（新增 advisory：`nuxt` / `@nuxt/vite-builder` / `@nuxt/nitro-server` <4.6.3、`node-forge` <1.4.1、`minimatch` <11.0.1、`glob` <14.0.2）；该失败与本批改动无关，已提请用户裁决是否立即修复。
+
 ## 阶段收口要求
 
-- **质量门**：逐原子 `pnpm run lint:check` + `pnpm typecheck` + 定向测试；跨包改动先 `pnpm -r build` 再 typecheck；阶段收口跑 platform 全量 + e2e + 视觉套件 + `test:coverage`。
+- **质量门**：逐原子 `pnpm run lint:check` + `pnpm run lint:css:check` + `pnpm typecheck` + 定向测试；跨包改动先 `pnpm -r build` 再 typecheck；阶段收口跑 platform 全量 + e2e + 视觉套件 + `test:coverage`。
 - **Review Gate**：每原子至少一轮 `Code Auditor`（`standard`，依赖升级 / 视觉基线改动升 `deep`），Reject 须闭环后复审。
 - **台账回填**：阶段完成后在 [release-1.0-readiness.md](../design/governance/release-1.0-readiness.md) §3.1 F2 标注闭环与证据、§3 G5 回填读数、§5 F2 批次表同步。
 - **归档**：按 [规划规范 §4](../standards/planning.md) 迁出为 `archive/todo-archive-phases-m52.md` + 索引行 + roadmap 状态同步；追加临时待办随阶段归档并在归档块内单列（沿用 M45 / M49 口径）。
