@@ -97,7 +97,7 @@ A 阶段 `code-auditor` 审计必须触发的场景：
 
 对于任何代码改动，以下规则都是强制要求：
 
-1. 在变更被视为完成之前，`lint` 必须通过。
+1. 在变更被视为完成之前，`pnpm run lint:check`（无 `--fix` 的 ESLint 门禁）必须通过；涉及 CSS / SCSS / Vue 样式（含 `.vue` 样式块）时 `pnpm run lint:css:check` 必须通过。本地自动修复用 `pnpm lint` / `pnpm --filter @dependfix/platform lint:css`。
 2. 在变更被视为完成之前，`typecheck` 必须通过。
 3. 当变更可能影响打包、入口点、导出、生成产物、依赖解析、运行时启动或发布行为时，必须运行 `build`。
 4. 当变更影响可执行逻辑、行为、契约、解析、过滤、工作流逻辑或任何现有测试路径时，必须运行 `test`。
@@ -105,7 +105,7 @@ A 阶段 `code-auditor` 审计必须触发的场景：
 
 ### 检查选择
 
-- `lint` 和 `typecheck` 是代码变更的基线检查，不应跳过。
+- `lint:check`、`lint:css:check` 和 `typecheck` 是代码变更的基线检查，不应跳过。
 - `build` 和 `test` 按改动影响按需执行，而不是每次编辑都盲目运行。
 - 如果相关检查没有运行，最终交付说明中必须明确解释原因。
 
@@ -119,6 +119,16 @@ A 阶段 `code-auditor` 审计必须触发的场景：
 4. 门禁由 `pnpm run check:release-security` 在 `release.yml` 的 `release:publish` 之前执行，token / 台账 / API 异常一律 fail-closed；Dependabot alerts 读取依赖仓库 secret `GH_PAT`（`GITHUB_TOKEN` 恒 403）。
 
 权威口径见 [安全规范 §5.9](docs/standards/security.md#_5-9-发布前安全告警门禁-dependabot-alerts-code-scanning-2026-10-29-用户决策)，执行步骤见 [发布指南](docs/guide/release.md#发布前安全检查-安全告警门禁)。
+
+### 任务开局 CI 回执检查（hard requirement）
+
+开始**新任务**且工作区干净（`git status --porcelain` 为空）时，先检查最近一次 GitHub Actions 结果，再进入规划或实现：
+
+1. 取本地 `HEAD` 与上游分支（`@{u}`）的 sha，再执行 `gh run list --branch <默认分支> --limit 20 --json databaseId,headSha,workflowName,event,conclusion`；只处理 `headSha` 命中这两个 sha 且 `conclusion=failure` 的 run，需要定位时用 `gh run view <run-id> --log-failed`。
+2. 只处理「失败由最近推送的代码引起」的情况：历史失败、Dependabot 分支、与本仓改动无关的失败不纳入本任务，并在 briefing 中标注「非本次推送」。
+3. 能直接修复的（断言 / 配置 / 基线 / 小范围依赖补丁）在本任务内修复并说明；若失败严重（主链路红、发布或安全门禁阻断、会影响当前 / 后续 todo 的交付），先向用户说明失败点、影响面与建议，由用户裁决是否立刻修复。
+4. 已处于**进行中的任务**时（`.session/current-task.yaml` 有 `in_progress` 项、上一轮 briefing 已声明本任务，或工作区非空）**不执行**该检查，专注当前任务；一次任务内也不重复检查；触发与跳过同时成立时以本条为准。`todo.md` 有未闭环原子属阶段常态，不作为跳过依据。
+5. `gh` 不可用 / 未认证 / 网络失败时，在 briefing 记录「CI 回执不可用 + 原因」后继续任务，不阻断，但**不得**视为 CI 通过。
 
 ## 新需求处理原则（hard requirement）
 
@@ -160,7 +170,7 @@ A 阶段 `code-auditor` 审计必须触发的场景：
 
 1. **必须使用 `conventional-committer` skill**：任何代码、文档、配置或脚本的提交都必须通过 `conventional-committer` skill 执行。禁止直接使用 `git commit -m "..."` 裸提交。
 2. **格式要求**：提交消息必须符合 Conventional Commits 规范（`type(scope): description`），且 `description` 统一使用**中文或用户使用的语言**。主题行最长 120 字符（commitlint 硬限制 140），消息格式细则见 [Git 规范 §3.1](docs/standards/git.md)。
-3. **质量前置**：提交前必须确认 A 阶段（`Code Auditor (代码审计员)`）已放行，且 `pnpm lint`、`pnpm typecheck` 和必要的定向测试均已通过。质量门禁未通过时不得提交。
+3. **质量前置**：提交前必须确认 A 阶段（`Code Auditor (代码审计员)`）已放行，且 `pnpm run lint:check`（涉及 CSS / SCSS / Vue 样式时另跑 `pnpm run lint:css:check`）、`pnpm typecheck` 和必要的定向测试均已通过。质量门禁未通过时不得提交。
 4. **原子粒度**：一个提交对应一个逻辑变更，关联且仅关联 `todo.md` 中的一个原子条目。
 5. **推送禁令**：`git commit` 后不得自动执行 `git push`，推送仅限用户明确要求时执行。提交完成后应告知用户"已提交到本地，等待推送确认"。
 6. **src/dist 不一致时 build 在先（monorepo 纪律）**：改动涉及 `packages/*/src/**`（被其他 workspace 包 import）时，**提交前必须先 `pnpm -r build`（或定向 `pnpm --filter <changed-pkg> build`）重建 dist**，否则下游包的 typecheck 会报 TS2339（缺新字段）。CI 自动 rebuild 掩盖本地 dev 过期，导致 `pnpm exec tsc --noEmit` 通过但 `pnpm run typecheck`（含 nuxt typecheck pipeline）失败。**验证协议**：commit 前实测 `pnpm run typecheck` exit 0（覆盖 root tsc + nuxt typecheck）；如失败，第一动作是 `pnpm -r build` 而非修改源码。教训见 [经验归档 §五十五（M23.3 C66-C standard depth audit W1）](docs/design/governance/experience-archive.md)。
