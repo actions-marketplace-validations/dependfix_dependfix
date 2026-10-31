@@ -27,6 +27,7 @@ metadata:
 ## 常见检查
 
 - pnpm run lint:check
+- pnpm run lint:css:check
 - pnpm run lint:md:check
 - pnpm test
 

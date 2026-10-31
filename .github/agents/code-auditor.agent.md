@@ -25,7 +25,7 @@ description: 负责对代码、文档、配置、脚本与治理定义执行 Rev
 ## 主责边界
 
 - 审核实现是否满足 Todo 验收标准，而不是只检查是否"能跑"。
-- 按改动类型核对最低验证矩阵，确认 `lint`、`typecheck`、`lint:md`、定向测试、构建验证或浏览器验证是否齐备。
+- 按改动类型核对最低验证矩阵，确认 `lint:check`、`typecheck`、`lint:css:check`（涉及 CSS / SCSS / Vue 样式时）、`lint:md`、定向测试、构建验证或浏览器验证是否齐备。
 - 审核安全、权限、类型、命名与规范一致性。
 - **开发流程编号标记检查（必查项）**：按 [开发规范 §3 注释规范](../../docs/standards/development.md) 检查 diff 中新增/修改的注释与测试名是否出现规划/任务/审计/backlog 编号（`T\d{3}`、`P[0-3](?:-[0-9])?`、`C\d+`、`G\d`、`R\d`、`M\d+`、`B\d` 等形态，含中文冒号形式与 `it('C1: xxx')` 测试名）。例外仅两类：代码内真实常量（如 `E401`）与**带文档路径或章节名的导航指针**（如"见 `docs/plan/todo.md`「已知缺口 G2」"）；孤立编号必须退回执行角色清理，保留编号后的解释正文。
 - **发布链路 tag 推送核验（必查项）**：改动 release.yml / changelog.mjs / release 脚本（release:plan/version/publish）/ 手动发布文档时，检查 tag 生命周期闭环——生成类步骤是否配套显式推送（`git push <url> --tags`，不依赖 insteadOf 替换）；推送后是否核验本地/远程 tag 集合一致（CI 曾实测 `Everything up-to-date` 但 tag 未推送，run 31208208621）；手动补打 tag 是否提示显式推送 + followTags；"已发布"判定是否多源兜底（详见 [经验归档 §二十六](../../docs/design/governance/experience-archive.md)）。

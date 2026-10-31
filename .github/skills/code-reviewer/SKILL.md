@@ -38,7 +38,7 @@ metadata:
 ### 步骤 2：判定改动类型与最低验证要求 ⚠️ 必做
 
 - 先确定变更类型，再映射到最低验证层级（参见 [AI 协作规范 §2.2 验证分级矩阵](../../../docs/standards/ai-collaboration.md)）。
-- 代码改动默认至少包含 `lint` 和 `typecheck`；文档改动补链接和路径检查。
+- 代码改动默认至少包含 `lint:check` 和 `typecheck`；涉及 CSS / SCSS / Vue 样式时补 `lint:css:check`；文档改动补链接和路径检查。
 - 测试不是所有场景都一刀切全量执行，按风险选择定向/全量/coverage/E2E。
 - 若实际证据低于最低层级，直接判定为 `Reject`。
 

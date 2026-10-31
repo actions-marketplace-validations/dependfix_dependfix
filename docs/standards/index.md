@@ -63,6 +63,6 @@
 
 参见 [AGENTS.md §必要检查](../../AGENTS.md#必要检查)：
 
-- `lint` 和 `typecheck` 是代码变更的基线检查
+- `lint:check`、`lint:css:check` 和 `typecheck` 是代码变更的基线检查
 - `build` 和 `test` 按改动影响按需执行
 - 所有改动在最终交付前须经过项目内 [code-reviewer](../../.github/skills/code-reviewer/SKILL.md) 审查
