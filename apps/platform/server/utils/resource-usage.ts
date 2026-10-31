@@ -246,7 +246,7 @@ export const startResourceMonitor = (options: ResourceMonitorOptions = {}): Reso
 }
 
 /** 从执行结果错误文本中识别 SIGKILL（辅助归因；不单独断言 OOM）。 */
-export const detectSigkill = (messages: Array<string | undefined | null>): boolean =>
+export const detectSigkill = (messages: (string | undefined | null)[]): boolean =>
     messages.some((message) => typeof message === 'string' && /sigkill/i.test(message))
 
 /** 供调用方兜底的空快照（B 模式 / 执行器未接入采集时）。 */
