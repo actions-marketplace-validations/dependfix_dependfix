@@ -46,6 +46,7 @@ jobs:
       # （顺序与 Dockerfile 的 core → engine → cli → platform 一致）
       - run: pnpm --filter @dependfix/core build && pnpm --filter @dependfix/engine build && pnpm --filter dependfix build
       - run: pnpm run lint:check
+      - run: pnpm run lint:css:check
       - run: pnpm run lint:md:check
       - run: pnpm run typecheck
       - run: pnpm run test

@@ -46,6 +46,7 @@
     "lint:i18n": "cross-env NODE_ENV=production ESLINT_I18N=true eslint apps/platform --quiet",
     "lint": "cross-env NODE_ENV=production eslint . --fix --max-warnings 10",
     "lint:check": "cross-env NODE_ENV=production eslint . --max-warnings 10 && pnpm --filter @dependfix/platform lint:check",
+    "lint:css:check": "pnpm --filter @dependfix/platform lint:css:check",
     "lint:md": "lint-md \"*.md\" \"docs/**/*.md\" \".github/**/*.md\" \"packages/**/*.md\" \"apps/**/*.md\" \"skills/**/*.md\" --fix",
     "lint:md:check": "lint-md \"*.md\" \"docs/**/*.md\" \".github/**/*.md\" \"packages/**/*.md\" \"apps/**/*.md\" \"skills/**/*.md\"",
     "build": "pnpm -r --filter \"./packages/*\" build",

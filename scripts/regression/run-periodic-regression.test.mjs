@@ -358,12 +358,12 @@ describe('buildRegressionWindowEntry', () => {
 })
 
 describe('PERIODIC_REGRESSION_PROFILES', () => {
-    it('weekly 步骤数 = 覆盖 / 审计 + 文档门禁集 + lint / typecheck / build', () => {
-        expect(PERIODIC_REGRESSION_PROFILES.weekly.steps.length).toBe(2 + DOC_GATES.length + 3)
+    it('weekly 步骤数 = 覆盖 / 审计 + 文档门禁集 + lint 门禁 / 样式门禁 / typecheck / build', () => {
+        expect(PERIODIC_REGRESSION_PROFILES.weekly.steps.length).toBe(2 + DOC_GATES.length + 4)
     })
 
     it('pre-release / phase-close 在 weekly 基础上追加 changelog 校验', () => {
-        const expected = 2 + DOC_GATES.length + 3 + 1
+        const expected = 2 + DOC_GATES.length + 4 + 1
         expect(PERIODIC_REGRESSION_PROFILES['pre-release'].steps.length).toBe(expected)
         expect(PERIODIC_REGRESSION_PROFILES['phase-close'].steps.length).toBe(expected)
     })
