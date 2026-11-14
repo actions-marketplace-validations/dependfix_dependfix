@@ -10,6 +10,7 @@ import { join } from 'node:path'
 import { describe, expect, it, beforeEach } from 'vitest'
 import {
     getAbortReason,
+    resolveTrackedCommandEnv,
     getAbortSnapshot,
     getLastTrackedCommand,
     isAbortRequested,
@@ -376,3 +377,29 @@ async function waitFor(predicate: () => boolean, timeoutMs = 5_000): Promise<voi
         await new Promise((resolve) => setTimeout(resolve, 10))
     }
 }
+
+describe('resolveTrackedCommandEnv', () => {
+    const proxyEnv = { HTTPS_PROXY: 'http://127.0.0.1:1', HTTP_PROXY: 'http://127.0.0.1:1' }
+
+    it('keeps the parent environment (PATH included) when injecting the audit proxy', () => {
+        const env = resolveTrackedCommandEnv(undefined, proxyEnv)
+        expect(env?.PATH).toBe(process.env.PATH)
+        expect(env?.HTTPS_PROXY).toBe('http://127.0.0.1:1')
+    })
+
+    it('keeps the caller-provided environment and adds the proxy on top', () => {
+        const env = resolveTrackedCommandEnv({ PATH: '/usr/bin', FOO: 'bar' }, proxyEnv)
+        expect(env).toMatchObject({ PATH: '/usr/bin', FOO: 'bar', HTTPS_PROXY: 'http://127.0.0.1:1' })
+    })
+
+    it('does not override a proxy the caller already set', () => {
+        const env = resolveTrackedCommandEnv({ HTTPS_PROXY: 'http://user-proxy:8080' }, proxyEnv)
+        expect(env?.HTTPS_PROXY).toBe('http://user-proxy:8080')
+    })
+
+    it('leaves the environment untouched when no proxy is active', () => {
+        expect(resolveTrackedCommandEnv(undefined, undefined)).toBeUndefined()
+        const explicit = { PATH: '/usr/bin' }
+        expect(resolveTrackedCommandEnv(explicit, undefined)).toBe(explicit)
+    })
+})
