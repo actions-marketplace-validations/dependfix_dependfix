@@ -26,6 +26,40 @@ import { spawn, spawnSync } from 'node:child_process'
 import { StringDecoder } from 'node:string_decoder'
 import { getEgressProxyEnv } from './egress-audit'
 
+
+/**
+ * 计算受管命令的环境变量：**保留基础环境**（父进程或调用方显式 env），再按需叠加审计代理。
+ *
+ * 早期实现把代理 env 直接当作完整 env（`{HTTP_PROXY...}`），子进程因此丢失 `PATH` / `HOME`
+ * 等基础变量：经 shell 包装的启动器（pnpm 自管理 shim 等）会以
+ * `sed: not found` / `node: not found` 失败，锁文件修复因此静默降级。
+ * 调用方显式带了代理时不覆盖（稳定性优先，与运行级审计口径一致）。
+ */
+export function resolveTrackedCommandEnv(
+    paramsEnv: NodeJS.ProcessEnv | undefined,
+    proxyEnv: NodeJS.ProcessEnv | undefined,
+): NodeJS.ProcessEnv | undefined {
+    if (!proxyEnv) {
+        return paramsEnv
+    }
+    const base = paramsEnv ?? process.env
+    const callerHasProxy = Boolean(
+        base.HTTP_PROXY || base.HTTPS_PROXY || base.ALL_PROXY
+        || base.http_proxy || base.https_proxy || base.all_proxy,
+    )
+    if (callerHasProxy) {
+        return { ...base }
+    }
+    const merged: NodeJS.ProcessEnv = { ...base, ...proxyEnv }
+    // 调用方自带的 NO_PROXY 优先：审计代理只补回环地址，不应抹掉用户已配置的直连域
+    for (const key of ['NO_PROXY', 'no_proxy'] as const) {
+        if (base[key] !== undefined) {
+            merged[key] = base[key]
+        }
+    }
+    return merged
+}
+
 /** 单流捕获上限（与 `execSync` 默认 `maxBuffer` 同量级）：超限后继续 drain 但不再累积。 */
 const MAX_STREAM_CAPTURE_BYTES = 1024 * 1024
 
@@ -237,7 +271,12 @@ export interface TrackedCommandParams {
     args: string[]
     cwd: string
     timeoutMs: number
-    /** 显式 env（缺省继承父进程环境——与既有 `execFileSync` 语义一致） */
+    /**
+     * 显式 env（缺省继承父进程环境——与既有 `execFileSync` 语义一致）。
+     *
+     * 传入即视为**完整环境**，不会自动并入父进程变量：只补个别变量时须自行展开 `process.env`，
+     * 否则子进程会丢失 `PATH` / `HOME` 等基础变量。
+     */
     env?: NodeJS.ProcessEnv
     /** 显式覆盖 shell 行为（缺省按平台：Windows 经 shell，其余平台直接 spawn） */
     shell?: boolean
@@ -276,10 +315,7 @@ export function runTrackedCommand(params: TrackedCommandParams): Promise<Tracked
 
     // 运行级外联审计：默认把代理注入所有受管命令（安装链 / 验证链 / 交付 git）。
     // 显式 env 里已带代理时不覆盖（调用方自知其网络路径）。
-    const egressProxyEnv = getEgressProxyEnv()
-    const mergedEnv = egressProxyEnv && params.env
-        ? { ...egressProxyEnv, ...params.env }
-        : (params.env ?? egressProxyEnv)
+    const mergedEnv = resolveTrackedCommandEnv(params.env, getEgressProxyEnv())
 
     return new Promise((resolve) => {
         const startedAt = Date.now()
