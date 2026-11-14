@@ -249,7 +249,7 @@
 ### 追加临时待办（不占阶段条目编号）：受管命令环境变量继承
 
 - **目标**：修复审计代理激活时受管命令只剩代理变量、丢失 `PATH`/`HOME`（pnpm 自管理 shim 报 `sed/node not found`、锁文件修复静默失败）。
-- **范围与验收**：`process-control.resolveTrackedCommandEnv`（基础环境 + 代理，调用方代理不覆盖、`NO_PROXY` 优先）+ 调用点用例；`build` / `typecheck` / `lint:check` / `gates:docs` 通过，交付 PR #（创建后回填）。
+- **范围与验收**：`process-control.resolveTrackedCommandEnv`（基础环境 + 代理，调用方代理不覆盖、`NO_PROXY` 优先）+ 调用点用例；`build` / `typecheck` / `lint:check` / `gates:docs` 通过，交付 PR #250。
 - **风险与依赖**：恢复父环境继承会让目标仓库脚本看到平台进程 env（M59.1 前既有面，硬化见 backlog）；第 5 批插队（累计），< 50%、剩余窗口可容纳 → 不触发再平衡。
 
 ## 上一阶段
