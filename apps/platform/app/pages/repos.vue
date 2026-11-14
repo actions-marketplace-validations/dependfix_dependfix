@@ -3,6 +3,7 @@
 import { Check, List, Pencil, Play, Plus, RotateCcwClock, Trash, Upload } from '@lucide/vue'
 import type { DataTableColumn } from 'caomei-ui'
 import type { RepoView } from '~/types/platform'
+import { useTablePagination } from '~/composables/use-table-pagination'
 import { DEFAULT_SCAN_MODE, DEFAULT_SCAN_SEVERITY } from '~/composables/use-scan-preferences'
 import { scanModeOptions, scanSeverityOptions } from '~/utils/scan-options'
 
@@ -28,7 +29,27 @@ const defaultBranch = (config.public.defaultBranch as string) || 'main'
 // 批量扫描 / 行选择：`selectedRows` 是独立集合，刷新后按 id 重映射（见 use-repo-selection）
 const selectedRows = ref<RepoView[]>([])
 
-const fetchData = async () => {
+/** 每页条数候选与默认值（caomei DataTable 内建分页） */
+const ROWS_PER_PAGE = 10
+const ROWS_PER_PAGE_OPTIONS = [10, 25, 50]
+
+/**
+ * 分页状态（受控）：编辑保存后保留当前页码与每页条数，新增 / 删除 / 批量导入回到第 1 页。
+ * 刷新期间抑制 `@tanstack` 自动回首页，详见 `use-table-pagination`。
+ */
+const {
+    page: currentPage,
+    rows: rowsPerPage,
+    onPageChange,
+    onRowsChange,
+    reset: resetToFirstPage,
+    withRefresh,
+} = useTablePagination({
+    totalRows: () => filteredRepos.value.length,
+    initialRows: ROWS_PER_PAGE,
+})
+
+const fetchData = () => withRefresh(async () => {
     loading.value = true
     error.value = ''
     try {
@@ -45,7 +66,7 @@ const fetchData = async () => {
     } finally {
         loading.value = false
     }
-}
+})
 
 onMounted(fetchData)
 
@@ -61,13 +82,12 @@ const openEdit = (repo: RepoView) => {
 
 /** 表单保存成功：刷新列表 + 按新增/编辑展示成功提示（表单状态由子组件负责重置） */
 const onRepoFormSaved = async () => {
-    success.value = editingRepo.value ? t('repos.success.updated') : t('repos.success.added')
+    const isCreate = !editingRepo.value
+    success.value = isCreate ? t('repos.success.added') : t('repos.success.updated')
+    if (isCreate) {
+        resetToFirstPage()
+    }
     await fetchData()
-}
-
-/** 表单保存失败：按页面既有错误展示口径包装（与 loadFailed / deleteFailed 同模式） */
-const onRepoFormFailed = (message: string) => {
-    error.value = t('repos.errors.saveFailed', { message })
 }
 
 const remove = async (repo: RepoView) => {
@@ -75,10 +95,17 @@ const remove = async (repo: RepoView) => {
     try {
         await $fetch(`/api/repos/${repo.id}`, { method: 'DELETE' })
         success.value = t('repos.success.deleted')
+        resetToFirstPage()
         await fetchData()
     } catch (e: any) {
         error.value = t('repos.errors.deleteFailed', { message: e?.data?.message ?? e?.message ?? t('common.errors.unknown') })
     }
+}
+
+/** 批量导入等同新增：回到第 1 页查看新导入结果 */
+const onReposImported = async () => {
+    resetToFirstPage()
+    await fetchData()
 }
 
 const repoDisplay = (repo: RepoView) => `${repo.owner}/${repo.name}`
@@ -301,15 +328,11 @@ const repoFilters = reactive({
     credentialId: 'all',
 })
 
-/** 每页条数（caomei DataTable 内建分页，`rows` 为初值）与候选 */
-const ROWS_PER_PAGE = 10
-const ROWS_PER_PAGE_OPTIONS = [10, 25, 50]
-
 const executorFilterOptions = computed(() => [
     { label: t('repos.filterAll'), value: 'all' },
     { label: t('repos.platformContainer'), value: 'container' },
     { label: t('repos.githubAction'), value: 'github-action' },
-    { label: t('repos.sandboxContainerUnavailable'), value: 'sandbox' },
+    { label: t('repos.sandboxContainer'), value: 'sandbox' },
 ])
 
 const packageManagerFilterOptions = computed(() => [
@@ -349,7 +372,8 @@ const resetRepoFilters = () => {
  * 因此被筛选隐藏的已选行会在下一次勾选时被静默移出（跨页选择不受影响）。
  * 「批量扫描」计数可能大于当前可见行数——筛选是视图态，不改变集合本身。
  *
- * 页码：`:data` 变化（搜索 / 筛选）时由 DataTable 内部（`@tanstack` autoResetPageIndex）回到第 1 页。
+ * 页码：`:data` 变化（搜索 / 筛选）时由 DataTable 内部（`@tanstack` autoResetPageIndex）回到第 1 页；
+ * 保存刷新走受控分页（`:page` + `:rows`），编辑保留当前页码与每页条数，新增 / 删除 / 批量导入回到第 1 页。
  *
  * 跨页全选：表头全选用上游 1.0.0 语义（当前页）；「全选全部筛选结果」由表格上方的选择栏承载，
  * 单次点击覆盖所有筛选结果（含跨页），并显示「已选 / 筛选总数」。
@@ -561,9 +585,12 @@ const columns = computed<DataTableColumn<RepoView>[]>(() => [
                 :selection="selectedRows"
                 striped
                 :paginator="true"
-                :rows="ROWS_PER_PAGE"
+                :rows="rowsPerPage"
                 :rows-per-page-options="ROWS_PER_PAGE_OPTIONS"
+                :page="currentPage"
                 :empty-text="reposEmptyText"
+                @update:page="onPageChange"
+                @update:rows="onRowsChange"
                 @update:selection="onSelectionChange"
             >
                 <template #cell-tags="{row}">
@@ -592,7 +619,7 @@ const columns = computed<DataTableColumn<RepoView>[]>(() => [
                     <span v-else class="text-muted">{{ t('repos.notLinked') }}</span>
                 </template>
                 <template #cell-executorKind="{row}">
-                    <CaomeiTag>{{ row.executorKind === 'github-action' ? t('repos.githubAction') : row.executorKind === 'sandbox' ? t('repos.sandboxContainerUnavailable') : t('repos.platformContainer') }}</CaomeiTag>
+                    <CaomeiTag>{{ row.executorKind === 'github-action' ? t('repos.githubAction') : row.executorKind === 'sandbox' ? t('repos.sandboxContainer') : t('repos.platformContainer') }}</CaomeiTag>
                 </template>
                 <template #cell-actions="{row}">
                     <CaomeiButton
@@ -656,13 +683,12 @@ const columns = computed<DataTableColumn<RepoView>[]>(() => [
             :credentials="credentials"
             :default-branch="defaultBranch"
             @saved="onRepoFormSaved"
-            @failed="onRepoFormFailed"
         />
 
         <import-repos-dialog
             v-model:visible="importDialogVisible"
             :credentials="credentials"
-            @imported="fetchData"
+            @imported="onReposImported"
         />
 
         <CaomeiDialog

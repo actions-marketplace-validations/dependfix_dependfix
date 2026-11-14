@@ -1,8 +1,9 @@
 import { execSync } from 'node:child_process'
 import { AppError, type BaselineRedDelivery, type SeverityThreshold, type AlertSourceKind } from '@dependfix/core'
-import { parseOverrideProtectEntries } from '../github/repo-policy'
 import { resolveRepoList } from '../github/repo-selector'
-import { readBaselineRedDelivery, validateRuntimeConfig } from './validation'
+import { normalizeDurationMs, readBaselineRedDelivery, validateRuntimeConfig } from './validation'
+import { normalizeOverrideProtect } from './override-protect'
+import { ENV_PREFIX } from './env-prefix'
 
 export const RUNTIME_MODES = ['report-only', 'fix', 'fix-and-pr', 'cleanup-branches'] as const
 export const SEVERITY_THRESHOLDS = ['critical', 'high', 'medium', 'all'] as const
@@ -28,7 +29,7 @@ export interface GitHubAppConfig {
  * 环境变量统一前缀（v0.2 起替代旧项目名遗留的 `AUTO_FIX_GITHUB_SECURITY_`）。
  * 所有环境变量读取必须经由 {@link readEnv}，禁止散落硬编码，防止改名漏网。
  */
-export const ENV_PREFIX = 'DEPENDFIX_'
+export { ENV_PREFIX } from './env-prefix'
 
 /**
  * 从统一前缀读取环境变量。
@@ -84,6 +85,8 @@ export interface RuntimeConfig {
     createPullRequest: boolean
     /** 修复完成后是否在本地当前分支直接提交（不推送、不创建 PR） */
     commit: boolean
+    /** fix 模式下提交后是否推当前分支（自包含执行用；仅配合 `commit`，容器路径由平台接管） */
+    push?: boolean
     /** fix-and-pr 模式下结束后是否列出已合并的 dependfix 分支到报告（不自动删除） */
     cleanupBranches: boolean
     /** fix-and-pr 模式下结束后是否自动删除已合并/已关闭的 dependfix 分支（非交互） */
@@ -217,7 +220,7 @@ export interface RuntimeConfig {
     toolchainPnpmVersion?: string
     /**
      * 发现规模上限（`--max-repos` / `DEPENDFIX_MAX_REPOS`）：最多保留的仓库数。
-     * 默认 100；设为 0 或负数表示不限制。大 org 场景下防止一次性全量发现。
+     * 默认 100；设为 0 表示不限制（负数会被拒绝）。大 org 场景下防止一次性全量发现。
      */
     maxRepos: number
     /**
@@ -284,6 +287,8 @@ export interface CliConfigOverrides {
     createPullRequest?: boolean
     /** 修复完成后是否在本地当前分支直接提交 */
     commit?: boolean
+    /** 提交后是否把当前分支推到远端（仅 fix 模式，配合 commit） */
+    push?: boolean
     /** fix-and-pr 模式下结束后是否列出已合并的 dependfix 分支到报告 */
     cleanupBranches?: boolean
     /** fix-and-pr 模式下结束后是否自动删除已合并/已关闭的 dependfix 分支（非交互） */
@@ -333,7 +338,7 @@ export interface CliConfigOverrides {
     toolchainPnpmVersion?: string
     /**
      * 发现规模上限（`--max-repos` / `DEPENDFIX_MAX_REPOS`）：最多保留的仓库数。
-     * 默认 100；设为 0 或负数表示不限制。大 org 场景下防止一次性全量发现。
+     * 默认 100；设为 0 表示不限制（负数会被拒绝）。大 org 场景下防止一次性全量发现。
      */
     maxRepos?: number
     /** AI 研判总开关（`--ai`） */
@@ -346,7 +351,7 @@ export interface CliConfigOverrides {
     aiBaseUrl?: string
     /** AI Anthropic 兼容端点（`--ai-api-url`，仅 provider=anthropic 生效） */
     aiApiUrl?: string
-    /** AI API Key（`--ai-api-key`；优先 DEPENDFIX_AI_API_KEY env） */
+    /** AI API Key（`--ai-api-key`；CLI 参数优先，DEPENDFIX_AI_API_KEY 环境变量兜底） */
     aiApiKey?: string
     /** AI 触发范围（`--ai-trigger`：failure / major / both） */
     aiTrigger?: AiTriggerKind
@@ -373,7 +378,7 @@ export interface ResolveRuntimeConfigOptions {
     workDir?: string
 }
 
-export const DEFAULT_RUNTIME_CONFIG: Omit<RuntimeConfig, 'githubToken' | 'repositories' | 'dryRun' | 'createPullRequest' | 'commit' | 'cleanupBranches' | 'cleanupBranchesAuto'> = {
+export const DEFAULT_RUNTIME_CONFIG: Omit<RuntimeConfig, 'githubToken' | 'repositories' | 'dryRun' | 'createPullRequest' | 'commit' | 'push' | 'cleanupBranches' | 'cleanupBranchesAuto'> = {
     mode: 'report-only',
     severityThreshold: 'high',
     alertSource: 'github-dependabot',
@@ -540,24 +545,6 @@ function normalizeUpgradeGroups(value: string | undefined): Record<string, strin
     return Object.keys(result).length > 0 ? result : undefined
 }
 
-/**
- * 解析 `DEPENDFIX_OVERRIDE_PROTECT`：`repo-glob:pkg1,pkg2;repo-glob2:pkg3`。
- *
- * 语法与 `normalizeUpgradeGroups` 一致（`;` 分隔条目 / `:` 分隔仓库 glob 与包列表 / `,` 分隔包名）；
- * 解析逻辑复用 `parseOverrideProtectEntries`（与 CLI 同源），非法条目 fail-fast。
- */
-function normalizeOverrideProtect(value: string | undefined): Record<string, string[]> | undefined {
-    if (value === undefined || value.trim() === '') {
-        return undefined
-    }
-    const parsed = parseOverrideProtectEntries(
-        value,
-        (message) => new AppError('CONFIG_VALIDATION_ERROR', message),
-        `${ENV_PREFIX}OVERRIDE_PROTECT`,
-    )
-    return Object.keys(parsed).length > 0 ? parsed : undefined
-}
-
 /** 原型链风险键名过滤 */
 function isSafeUpgradeGroupName(name: string): boolean {
     return name !== '__proto__' && name !== 'constructor' && name !== 'prototype'
@@ -626,6 +613,7 @@ export function readEnvConfig(env: NodeJS.ProcessEnv = process.env): CliConfigOv
         dryRun: normalizeBoolean(readEnv(env, 'DRY_RUN'), `${ENV_PREFIX}DRY_RUN`),
         createPullRequest: normalizeBoolean(readEnv(env, 'CREATE_PR'), `${ENV_PREFIX}CREATE_PR`),
         commit: normalizeBoolean(readEnv(env, 'COMMIT'), `${ENV_PREFIX}COMMIT`),
+        push: normalizeBoolean(readEnv(env, 'PUSH'), `${ENV_PREFIX}PUSH`),
         cleanupBranches: normalizeBoolean(readEnv(env, 'CLEANUP_BRANCHES'), `${ENV_PREFIX}CLEANUP_BRANCHES`),
         cleanupBranchesAuto: normalizeBoolean(readEnv(env, 'CLEANUP_BRANCHES_AUTO'), `${ENV_PREFIX}CLEANUP_BRANCHES_AUTO`),
         githubToken: readEnv(env, 'GITHUB_TOKEN')?.trim() || env.GITHUB_TOKEN?.trim() || undefined,
@@ -639,13 +627,13 @@ export function readEnvConfig(env: NodeJS.ProcessEnv = process.env): CliConfigOv
         onBaselineRed: readBaselineRedDelivery(readEnv(env, 'ON_BASELINE_RED'), `${ENV_PREFIX}ON_BASELINE_RED`),
         waitPrChecks: normalizeBoolean(readEnv(env, 'WAIT_PR_CHECKS'), `${ENV_PREFIX}WAIT_PR_CHECKS`),
         closeFailedPr: normalizeBoolean(readEnv(env, 'CLOSE_FAILED_PR'), `${ENV_PREFIX}CLOSE_FAILED_PR`),
-        prCheckTimeoutMs: normalizeInteger(readEnv(env, 'PR_CHECK_TIMEOUT_MS'), `${ENV_PREFIX}PR_CHECK_TIMEOUT_MS`),
-        prCheckRunBudgetMs: normalizeInteger(readEnv(env, 'PR_CHECK_RUN_BUDGET_MS'), `${ENV_PREFIX}PR_CHECK_RUN_BUDGET_MS`),
-        jobBudgetMs: normalizeInteger(readEnv(env, 'JOB_BUDGET_MS'), `${ENV_PREFIX}JOB_BUDGET_MS`),
+        prCheckTimeoutMs: normalizeDurationMs(readEnv(env, 'PR_CHECK_TIMEOUT_MS'), `${ENV_PREFIX}PR_CHECK_TIMEOUT_MS`),
+        prCheckRunBudgetMs: normalizeDurationMs(readEnv(env, 'PR_CHECK_RUN_BUDGET_MS'), `${ENV_PREFIX}PR_CHECK_RUN_BUDGET_MS`),
+        jobBudgetMs: normalizeDurationMs(readEnv(env, 'JOB_BUDGET_MS'), `${ENV_PREFIX}JOB_BUDGET_MS`),
         maxAlertsPerRepository: normalizeInteger(readEnv(env, 'MAX_ALERTS_PER_REPOSITORY'), `${ENV_PREFIX}MAX_ALERTS_PER_REPOSITORY`),
         maxConcurrency: normalizeInteger(readEnv(env, 'MAX_CONCURRENCY'), `${ENV_PREFIX}MAX_CONCURRENCY`),
         maxRetries: normalizeNonNegativeInteger(readEnv(env, 'MAX_RETRIES'), `${ENV_PREFIX}MAX_RETRIES`),
-        maxBackoffMs: normalizeInteger(readEnv(env, 'MAX_BACKOFF_MS'), `${ENV_PREFIX}MAX_BACKOFF_MS`),
+        maxBackoffMs: normalizeDurationMs(readEnv(env, 'MAX_BACKOFF_MS'), `${ENV_PREFIX}MAX_BACKOFF_MS`),
         maxRepos: normalizeNonNegativeInteger(readEnv(env, 'MAX_REPOS'), `${ENV_PREFIX}MAX_REPOS`),
         upgradeGroups: normalizeUpgradeGroups(readEnv(env, 'UPGRADE_GROUPS')),
         toolchainPnpmVersion: readEnv(env, 'TOOLCHAIN_PNPM_VERSION')?.trim() || undefined,
@@ -800,6 +788,7 @@ export function resolveRuntimeConfig(options: ResolveRuntimeConfigOptions = {}):
         dryRun: resolveDryRun(mode, cliOverrides, envConfig),
         createPullRequest: resolveCreatePullRequest(mode, cliOverrides, envConfig),
         commit: resolveCommit(cliOverrides, envConfig),
+        push: cliOverrides.push ?? envConfig.push ?? false,
         cleanupBranches: resolveCleanupBranches(cliOverrides, envConfig),
         cleanupBranchesAuto: resolveCleanupBranchesAuto(cliOverrides, envConfig),
         githubToken: cliOverrides.githubToken ?? envConfig.githubToken ?? '',

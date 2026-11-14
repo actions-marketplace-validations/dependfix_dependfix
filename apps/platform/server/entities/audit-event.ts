@@ -22,16 +22,23 @@ import { ScanRun } from './scan-run'
  * 触发源：
  * - sandbox_unavailable：sandbox.execute 抛 errno（B 场景运行时失败）
  * - sandbox_degraded：scan-orchestrator 产出的 degradedReason（A 场景 sandbox 启动降级）
+ * - sandbox_egress_blocked：fix 类出站策略偏离（审计关闭 / 白名单为空 / clone 基地址未命中白名单，
+ *   执行器执行前拒绝；属配置偏离而非运行事故）
+ * - delivery_branch_cleanup：沙箱交付失败后的远端分支副作用处置（删除成功 / 失败 / 跳过及原因）
  * - container_unavailable：container 路由前 `ContainerExecutor.isAvailable()` 返回 false
  *   （工作根不可写 / 磁盘满 / 只读 FS）——默认部署下的执行环境健康信号
  * - ai_config_update：Organization / Repository AI 研判配置更新（todo.md §M26.1 / [platform-ai-integration.md §8.3](../design/governance/platform-ai-integration-governance.md) 审计要求）
  * - verify_commands_update：Repository 自定义验证命令更新（todo.md §M32.1 / docs/standards/platform.md §3.8）——
  *   该字段等价于远程命令执行面，变更必须留痕
+ * - execution_limits_update：Repository 仓库级执行预算 / 超时配置更新（repo-execution-limits.md §8.2）——
+ *   变更影响运行预算与锁窗口，必须留痕
+ * - major_upgrade_policy_update：Repository 跨大版本升级授权变更（repo-execution-limits 同批决策）
  * - pr_feedback_commented / pr_feedback_closed：PR 回环对交付 PR 的评论与自动关闭
  *   （[pr-feedback-loop.md](../design/governance/pr-feedback-loop.md)）——不可逆 / 对外可见，必须留痕
  *
  * 通知策略（见 notification/policy.ts）：仅「执行器不可用 / 降级」类发通知；
- * 配置留痕类（ai_config_update / verify_commands_update）与 PR 回环类
+ * 配置留痕类（ai_config_update / verify_commands_update / execution_limits_update）、配置偏离类
+ * （sandbox_egress_blocked）、交付副作用处置（delivery_branch_cleanup）与 PR 回环类
  * （pr_feedback_commented / pr_feedback_closed）仅落库、不发通知。
  *
  * 类型扩展点：未来可加 `cgroup_limit_hit` / `runtime_swap` 等
@@ -40,9 +47,13 @@ import { ScanRun } from './scan-run'
 export type AuditEventType =
     | 'sandbox_unavailable'
     | 'sandbox_degraded'
+    | 'sandbox_egress_blocked'
+    | 'delivery_branch_cleanup'
     | 'container_unavailable'
     | 'ai_config_update'
     | 'verify_commands_update'
+    | 'execution_limits_update'
+    | 'major_upgrade_policy_update'
     | 'notification_settings_update'
     | 'pr_feedback_commented'
     | 'pr_feedback_closed'
@@ -51,9 +62,13 @@ export type AuditEventType =
 export const AUDIT_EVENT_TYPES: readonly AuditEventType[] = [
     'sandbox_unavailable',
     'sandbox_degraded',
+    'sandbox_egress_blocked',
+    'delivery_branch_cleanup',
     'container_unavailable',
     'ai_config_update',
     'verify_commands_update',
+    'execution_limits_update',
+    'major_upgrade_policy_update',
     'notification_settings_update',
     'pr_feedback_commented',
     'pr_feedback_closed',
@@ -114,6 +129,9 @@ export class AuditEvent extends BaseEntity {
      * 事件原始 payload（JSON 字符串）：
      * - sandbox_unavailable: `{ errno, code, adapter, message }`
      * - sandbox_degraded: `{ degradedReason: { code, message }, fallback: 'container' }`
+     * - sandbox_egress_blocked: `{ code, message, fallback: 'none', notificationSuppressed: true }`
+     *   （`notificationSuppressed` 只抑制本环境事件通知，运行终态的业务失败通知仍照常发送）
+     * - delivery_branch_cleanup: `{ branch, outcome: 'deleted' | 'failed' | 'skipped', reason? }`
      * - container_unavailable: `{ code, executor: 'container', message }`
      * - pr_feedback_commented / pr_feedback_closed: `{ prNumber, headSha, conclusion }`
      */

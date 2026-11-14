@@ -4,12 +4,12 @@
 
 1. CLI flags
 2. Environment variables (`DEPENDFIX_*` + `GITHUB_TOKEN`)
-3. Config file (`dependfix.config.json` / `dependfix.config.yaml`, planned M4+)
+3. Config file (`dependfix.config.json` / `dependfix.config.yaml`, **not available yet**)
 4. Defaults
 
 ## All configuration items
 
-> **Scope**: this section covers the **CLI** (`dependfix` command / GitHub Action). The **platform** (`apps/platform`) environment variables (database / auth / queue / executor sandbox / backup / notification, etc.) are listed in the [Platform configuration](#platform-configuration-appsplatform) section at the end.
+> **Scope**: this section covers the **CLI** (`dependfix` command / GitHub Action). The **platform** (`apps/platform`) environment variables (database / auth / queue / executor sandbox / backup / notification, etc.) are listed in the [Platform configuration](#platform-configuration-apps-platform) section at the end.
 
 | Option | Environment variable | Type | Default | Description |
 |:-------|:---------------------|:-----|:--------|:------------|
@@ -25,22 +25,33 @@
 | `dryRun` | `DEPENDFIX_DRY_RUN` | `boolean` | `false` | Dry-run mode, do not actually modify files |
 | `createPullRequest` | `DEPENDFIX_CREATE_PR` | `boolean` | `false` | Whether to create PR (auto-enabled in `fix-and-pr` mode) |
 | `commit` | `DEPENDFIX_COMMIT` | `boolean` | `false` | After fix, commit locally on current branch (`fix` mode only; mutually exclusive with `--dry-run` / `--create-pr`) |
+| `push` | `DEPENDFIX_PUSH` | `boolean` | `false` | After committing, push the current branch (fix mode only, together with `commit`; no PR). The container path leaves pushing to the platform — do **not** enable it for the platform container executor |
 | `cleanupBranches` | `DEPENDFIX_CLEANUP_BRANCHES` | `boolean` | `false` | (fix-and-pr mode) After run, list merged `dependfix/` branches in report cleanup list (no auto delete; deletion requires `cleanup-branches` mode interactive confirmation) |
 | `cleanupBranchesAuto` | `DEPENDFIX_CLEANUP_BRANCHES_AUTO` | `boolean` | `false` | (fix-and-pr mode) After run, auto-delete merged/closed `dependfix/` branches (non-interactive; never deletes branches with open PRs) |
 | `githubToken` | `DEPENDFIX_GITHUB_TOKEN` / `GITHUB_TOKEN` | `string` | — | GitHub auth token (optional under `pnpm-audit` source) |
 | `alertsToken` | `DEPENDFIX_ALERTS_TOKEN` | `string` | — | Dependabot alerts-specific token (optional, minimum-permission fine-grained PAT, only `Dependabot alerts: read`; falls back to `githubToken` if not set. `GITHUB_TOKEN` cannot read Dependabot alerts) |
-| `alertSource` | `DEPENDFIX_ALERTS_SOURCE` | `string` | `github-dependabot` | Alert data source: `github-dependabot` (GitHub Dependabot alerts API) / `pnpm-audit` (local no-token fallback, scans current workspace lockfile; repo resolution priority: explicit `--repo` → git remote → `local` fallback). `pnpm-audit` does not require token, does not support `fix-and-pr` mode or multiple `--repo`. See [pnpm audit fallback design](https://github.com/dependfix/dependfix/blob/master/docs/design/governance/architecture) |
-| `codeScanningEnabled` | `DEPENDFIX_CODE_SCANNING` | `boolean` | `false` | Also fetch Code Scanning alerts (**parallel to** Dependabot, not a fallback; default off, behavior matches M2). When enabled, Dependabot + Code Scanning are fetched in parallel without overwriting; Code Scanning alerts are not auto-fixable by default (A/B/C rule tier per rule). Requires token `security-events: read` (GITHUB_TOKEN default); not available with `pnpm-audit`. See [Code Scanning design](https://github.com/dependfix/dependfix/blob/master/docs/design/governance/architecture) |
+| `alertSource` | `DEPENDFIX_ALERTS_SOURCE` | `string` | `github-dependabot` | Alert data source: `github-dependabot` (GitHub Dependabot alerts API) / `pnpm-audit` (local no-token fallback, scans current workspace lockfile; repo resolution priority: explicit `--repo` → git remote → `local` fallback). `pnpm-audit` does not require token, does not support `fix-and-pr` mode or multiple `--repo`. See [pnpm audit fallback design](https://github.com/dependfix/dependfix/blob/master/docs/design/modules/pnpm-audit-fallback.md) |
+| `codeScanningEnabled` | `DEPENDFIX_CODE_SCANNING` | `boolean` | `false` | Also fetch Code Scanning alerts (**parallel to** Dependabot, not a fallback; default off, behavior matches M2). When enabled, Dependabot + Code Scanning are fetched in parallel without overwriting; Code Scanning alerts are not auto-fixable by default (A/B/C rule tier per rule). Requires token `security-events: read` (GITHUB_TOKEN default); not available with `pnpm-audit`. See [Code Scanning design](https://github.com/dependfix/dependfix/blob/master/docs/design/modules/data-model.md) |
 | `overrideProtect` | `DEPENDFIX_OVERRIDE_PROTECT` | `string` | — | Overrides protection list (**per-repository granularity**): `repo-glob:pkg1,pkg2;repo-glob2:pkg3`. On a hit, dependfix **does not write** the override for that package and records an `OVERRIDE_PROTECTED` audit entry (prevents recurrence of destructive overrides previously removed by hand; evidence: PR #1095). Repository glob semantics match `repo-include/exclude` (a single star does not cross the slash; use a two-segment wildcard for a global fallback). See [override-protect design](https://github.com/dependfix/dependfix/blob/master/docs/design/governance/override-protect-policy.md); the list may also be declared by the target repository in `.github/dependfix.yml` (**central config wins**: once set centrally, the repo declaration is ignored entirely to prevent bypass; see [fixer design §12.7](https://github.com/dependfix/dependfix/blob/master/docs/design/modules/dependency-fixer-records.md)) |
-| `allowMajorUpgrade` | **No env channel** (CLI `--allow-major-upgrade` only) | `boolean` | `false` | Explicitly authorize auto-upgrade for cross-line alerts (recommended version crosses major boundary, current line has no fix). Only direct dependencies in root package.json (workspace members keep manual) with single-version lockfile alerts are auto-upgraded across lines; post-upgrade re-verification eliminates brittle instances and forces full verification (install+lint+build+typecheck+test) with auto-rollback on failure. Indirect / multi-version alerts stay manual. **Deliberately not exposing `DEPENDFIX_ALLOW_MAJOR_UPGRADE` env** (combined with action.yml not exposing input → GitHub Action structural disable, prevents CI auto-cross-line surprise). See [Quick Start cross-major-upgrade section](../guide/quick-start.md) |
+| `allowMajorUpgrade` | **No env channel** (CLI `--allow-major-upgrade` only; platform new-repository default is `NUXT_PUBLIC_ALLOW_MAJOR_UPGRADE_DEFAULT` (runtime)) | `boolean` | `false` | Explicitly authorize auto-upgrade for cross-line alerts (recommended version crosses major boundary, current line has no fix). Only direct dependencies in root package.json (workspace members keep manual) with single-version lockfile alerts are auto-upgraded across lines; post-upgrade re-verification eliminates brittle instances and forces full verification (install+lint+build+typecheck+test) with auto-rollback on failure. Indirect / multi-version alerts stay manual. **Deliberately not exposing `DEPENDFIX_ALLOW_MAJOR_UPGRADE` env** (combined with action.yml not exposing input → GitHub Action structural disable, prevents CI auto-cross-line surprise). See [Quick Start cross-major-upgrade section](../guide/quick-start.md) |
 | `maxAlertsPerRepository` | `DEPENDFIX_MAX_ALERTS_PER_REPOSITORY` | `number` | `20` | Max alerts processed per repo |
 | `maxConcurrency` | `DEPENDFIX_MAX_CONCURRENCY` | `number` | `1` | Multi-repo concurrency window (1-16, default 1 conservative sequential). `>1` emits warning (may hit GitHub rate limit); **only `report-only` mode allows concurrency** — `fix` / `fix-and-pr` share single workDir, concurrent writes cause overwrite / rollback race / install contention, config check fail-fast rejects |
 | `maxRetries` | `DEPENDFIX_MAX_RETRIES` | `number` | `3` | GitHub API rate-limit retries (0-10; 0=off). For 429 / primary rate limit (403 + remaining=0) / secondary rate limit (403/429 signatures), exponential backoff (reset header priority, max 30s); permission 403 does not retry |
-| `upgradeGroups` | `DEPENDFIX_UPGRADE_GROUPS` | `Record<string, string[]>` | — | User-explicit dependency groups (overrides auto-grouping), format `name1:pkg1,pkg2;name2:pkg3` (semicolon between groups, colon between group name and packages, comma between packages). Default: auto-grouping — `dependabot.yml groups` → `@types` merge → scope/prefix heuristic → single-package. See [dependency grouping design](https://github.com/dependfix/dependfix/blob/master/docs/design/governance/architecture) |
+| `upgradeGroups` | `DEPENDFIX_UPGRADE_GROUPS` | `Record<string, string[]>` | — | User-explicit dependency groups (overrides auto-grouping), format `name1:pkg1,pkg2;name2:pkg3` (semicolon between groups, colon between group name and packages, comma between packages). Default: auto-grouping — `dependabot.yml groups` → `@types` merge → scope/prefix heuristic → single-package. See [dependency grouping design](https://github.com/dependfix/dependfix/blob/master/docs/design/modules/dependency-grouping.md) |
 | `verbose` | — | `boolean` | `false` | Verbose logging (CLI `--verbose` only) |
 | `commands` | — | `string[]` | — | Custom verification commands (CLI `--commands` only); **replaces the whole default chain** (no merging) |
 | `rollbackGranularity` | `DEPENDFIX_ROLLBACK_GRANULARITY` | `unit` / `repo` | `unit` | Verification failure rollback granularity: `unit` reverts the latest probe-verified change unit and re-verifies once (preserving earlier units); `repo` keeps repository-level `git reset --hard` as the escape hatch. CLI: `--rollback-granularity` |
+| `mirrorCiScripts` | `DEPENDFIX_MIRROR_CI_SCRIPTS` | `boolean` | `false` | Append the target repository's CI-only `pnpm` / `npm` / `yarn` scripts to the verification chain (CLI `--mirror-ci-scripts`; Action `mirror-ci-scripts`). When enabled they run **after** the default chain, at most 3 entries, stopping at the first failure; `docker build` / `gh` / arbitrary shell and non-single-form fragments (flags / env assignments / extra arguments; install-class commands count as covered) are recorded as `mirrorSkipped` and not executed; **only the command form and script existence are checked, the script body is not audited** (commands and `pre`/`post` hooks inside the script still run); shares the same timeout (`DEPENDFIX_VERIFY_TIMEOUT_MS`) and run-level cancel surface as the default chain, and is likewise part of the pre-fix baseline sampling (baseline already red → pre-existing failure, no rollback, exit code unchanged). An explicit `commands` replaces the whole chain and **does not stack** with mirror; the platform keeps it off by default. See [PR delivery closure design](https://github.com/dependfix/dependfix/blob/master/docs/design/governance/pr-delivery-closure.md) §5 |
+| `retryFailed` | `DEPENDFIX_RETRY_FAILED` | `boolean` | `false` | Ignore the per-alert attempt cap and force another try (CLI `--retry-failed`; Action `retry-failed`). `fix-and-pr` only: after the same alert / same target version / same fix strategy has been closed twice, from the 3rd attempt on dependfix **does not upgrade and does not open a PR**, recording `alertsSkippedByReason['repeated-failure']` (report shows `Skipped: Repeated failure`); when enabled it still runs and the report marks it `forced (manual retry)` in the `Repeated Failure Attempts` section. The counter lives in PR body HTML comments (closed, unmerged PRs only, last 50, read failures fail-open); when every alert is skipped the run behaves like a zero-alert repo (no pre-fix baseline sampling). See [PR delivery closure design](https://github.com/dependfix/dependfix/blob/master/docs/design/governance/pr-delivery-closure.md) §6 |
+| `onBaselineRed` | `DEPENDFIX_ON_BASELINE_RED` | `skip` / `issue` / `draft` | `skip` | Delivery downgrade when post-fix verification still hits pre-existing failures (baseline red). `skip` rolls back and leaves a trace (default, identical to the behavior before this option); `issue` opens an issue keyed by the "repo set + failing command set" fingerprint (one issue per fingerprint, never reopened after close; requires `issues: write`) while changes are still rolled back; `draft` does not roll back, commits as usual and opens a **draft** PR (body carries the pre-existing failure note, `--wait-pr-checks` does not wait). `fix-and-pr` only; the platform execution chain only records `summary.deliverySkipped` and shows "delivery skipped" in the run list / details. None of the three levels changes the exit code (`PRE_EXISTING_FAILURE` stays in the skip whitelist). See [PR delivery closure design](https://github.com/dependfix/dependfix/blob/master/docs/design/governance/pr-delivery-closure.md) §16 |
+| `waitPrChecks` | `DEPENDFIX_WAIT_PR_CHECKS` | `boolean` | `false` | Wait for the check terminal state after opening a PR (CLI `--wait-pr-checks`; Action `wait-pr-checks`). `fix-and-pr` only: on failure it comments the failing job names + URLs + an attempt marker by default; a PR with no check after the grace period (≥60 s and at least two rounds) becomes `no_ci_detected` and is **never judged green**; polling / commenting / closing failures are only recorded and never change the fix result or the exit code. See [PR delivery closure design](https://github.com/dependfix/dependfix/blob/master/docs/design/governance/pr-delivery-closure.md) §8 |
+| `closeFailedPr` | `DEPENDFIX_CLOSE_FAILED_PR` | `boolean` | `false` | Close the PR and delete the branch when checks fail and the aggregate attribution is `self_caused` (CLI `--close-failed-pr`; Action `close-failed-pr`). Requires `waitPrChecks` (config validation rejects enabling it alone); `unknown` / `external_noise` / `pre_existing` only comment without closing, mixed attribution is treated as `unknown` |
+| `prCheckTimeoutMs` | `DEPENDFIX_PR_CHECK_TIMEOUT_MS` | `number \| duration` | `900000` | Per-PR check wait cap (ms; 60000-1800000); also accepts `15m`. Timeouts are recorded as `checksTimedOut` and the PR is left for a later run / the platform |
+| `prCheckRunBudgetMs` | `DEPENDFIX_PR_CHECK_RUN_BUDGET_MS` | `number \| duration` | `1200000` | Run-level total wait budget (ms; 60000-1800000), also accepts `20m`; the effective wait is further capped by "remaining job budget × 70%" |
+| `jobBudgetMs` | `DEPENDFIX_JOB_BUDGET_MS` | `number \| duration` | unset | Job budget baseline (ms; 60000-7200000), also accepts `25m` / `1h`. When unset it only applies as 25 minutes while `GITHUB_ACTIONS=true` (aligned with `security-auto-fix.yml` `timeout-minutes`); local / platform runs never invent a job cap and derive from this value once it is set explicitly. Note `startedAt` counts from engine start and excludes Actions setup steps |
 | `history` | — (CLI `--history` only) | `string` | — | Query repo history run summary (read `dependfix-reports/index.json`, reverse chronological, repo-level count), **does not run scan**, no token/repo required; with run flags history takes precedence, others ignored |
+
+> **AI triage config is in place**: the Action side uses the `ai` / `ai-api-key` / `ai-provider` / `ai-model` / `ai-base-url` / `ai-api-url` / `ai-trigger` inputs; the platform injects `DEPENDFIX_AI_*` from the org-level AI config (see [Platform configuration (apps/platform)](#platform-configuration-apps-platform) below).
 
 ## GitHub auth token permission mapping
 
@@ -107,15 +118,134 @@
 | Audit | Limited | Per-token repository access list visible |
 | Suitable scenarios | Personal scripts, simple scenarios | Production deployment, org-grade automation |
 
+### Special cases
+
+- **Running inside GitHub Actions**: the default `secrets.GITHUB_TOKEN` carries Contents:Write + Pull requests:Write but **no Dependabot alerts:Read** (see [roadmap.md M2](https://github.com/dependfix/dependfix/blob/master/docs/plan/roadmap.md), or the [G2 disposition record](https://github.com/dependfix/dependfix/blob/master/docs/plan/archive/todo-archive-phases-m2-m55.md)). Two options:
+  1. Configure an extra `DEPENDFIX_ALERTS_TOKEN` with a Fine-grained PAT (Dependabot alerts:Read only, least privilege)
+  2. Switch to the `pnpm-audit` source (`DEPENDFIX_ALERTS_SOURCE=pnpm-audit`, which does not need a token to read alerts)
+- **SAML SSO orgs**: a classic PAT needs **Enable SSO** per organization on the GitHub website; a Fine-grained PAT needs an org admin to pre-authorize the repository scope. Private org repos are only returned within what the token can see — `--owner` discovery does not guarantee full private-repo coverage; authorize per repository.
+- **Cross-org scanning**: a Fine-grained PAT can only be authorized for repos inside one org. Multi-org options:
+  1. Multiple PATs (multiple CLI passes, one per org)
+  2. Migrate to a GitHub App (recommended: cross-org + fine-grained permissions + short-lived token rotation)
+- **git push auth details**: `git push` goes through an HTTPS credential (username = token owner, password = PAT) and **does not rely** on the Fine-grained PAT's specific scopes (Contents:Read+write is enough to authorize the HTTPS push). SSH keys take a different path (`git remote set-url origin git@github.com:...`).
+
+### Verifying token permissions
+
+Minimal verification scripts (confirm Dependabot alerts are readable):
+
+```bash
+# A Fine-grained PAT should be able to list alerts:
+curl -H "Authorization: Bearer $GITHUB_TOKEN" \
+  -H "Accept: application/vnd.github+json" \
+  "https://api.github.com/repos/{owner}/{repo}/dependabot/alerts?state=open"
+# Expected: 200 + a JSON array
+# Failure: 403 / "Resource not accessible by integration" → missing Dependabot alerts:Read, or the repo is outside the token scope
+```
+
+```bash
+# Code Scanning source verification (when enabled):
+curl -H "Authorization: Bearer $GITHUB_TOKEN" \
+  -H "Accept: application/vnd.github+json" \
+  "https://api.github.com/repos/{owner}/{repo}/code-scanning/alerts?state=open"
+# Expected: 200 + a JSON array
+```
+
+```bash
+# PR creation permission verification (when fix-and-pr is enabled):
+curl -X POST -H "Authorization: Bearer $GITHUB_TOKEN" \
+  -H "Accept: application/vnd.github+json" \
+  "https://api.github.com/repos/{owner}/{repo}/pulls" \
+  -d '{"title":"[verify] token scope check","head":"<some-branch>","base":"main","body":"verification only"}'
+# Expected: 201 (delete the PR afterwards); 422 / 403 → insufficient permission or repo not authorized
+```
+
+### Common issues
+
+| Symptom | Root cause | Fix |
+|:---|:---|:---|
+| `403 / Resource not accessible by integration` | Token lacks `Dependabot alerts: Read`, or the repo is outside the token scope | Recreate the PAT and confirm Dependabot alerts:Read + repository authorization |
+| `401 / Bad credentials` | Token expired / revoked / mistyped | Regenerate and check the `ghp_xxx` / `github_pat_xxx` prefix |
+| `git push` hangs at `Username for 'https://github.com':` | No HTTPS credential; dependfix uses `stdio: 'pipe'` (see [engine/src/runners/process-control.ts](../../../../packages/engine/src/runners/process-control.ts)) so stdin is unreachable → hangs forever | Set the `GITHUB_TOKEN` env var or configure a git credential helper (interactive input is not recommended) |
+| `pulls.create` returns `422 Validation Failed: head` | Token lacks Contents:Write, or the branch already exists | Upgrade to Contents:Read+write or use a different branch name |
+| `secondary rate limit` 403/429 | High-frequency API calls in a short window | Tune `DEPENDFIX_MAX_CONCURRENCY` (default 1, conservative sequential) + `DEPENDFIX_MAX_RETRIES` (default 3 exponential backoff) |
+
+### Related resources
+
+- [GitHub Docs · Managing personal access tokens](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)
+- [GitHub Docs · Dependabot alerts API](https://docs.github.com/en/rest/dependabot/alerts)
+- [GitHub Docs · Code Scanning API](https://docs.github.com/en/rest/code-scanning)
+- [quick-start.md](./quick-start.md) — full CLI command list + SAML SSO notes
+- [security.md §5.2 supply-chain trust boundary](https://github.com/dependfix/dependfix/blob/master/docs/standards/security.md) — AI-suggested packages / MCP / skill provenance verification + token trust levels
+
+### M4 list-policy precedence semantics (T403)
+
+| Source | include whitelist | exclude blacklist | topicsExclude |
+|:-----|:---|:---|:---|
+| Explicit `repositories` (`--repo` / `--repos-file`) | **Not affected** (explicit wins) | Constrained (dropped on a hit) | Not applicable (explicit list has no topics metadata) |
+| `--owner` discovery result | Constrained (must match one when include is non-empty) | Constrained (dropped on a hit) | Constrained (dropped when it carries any listed topic) |
+
+- Conflict rule: when include and exclude both match, **exclude wins** (the repo is dropped).
+- Filter timing: the policy is applied during discovery, **before** `dependabot.yml` probing — excluded repos never reach the contents API (probe request count stays bounded).
+- Glob syntax: `*` matches any run of non-`/` characters (does not cross the repo separator), `?` matches a single non-`/` character, everything else is literal; matching is against the full `owner/repo` (case-sensitive).
+
 ## Config file
 
-`dependfix.config.json` support is planned for **M4+** (work item C52). Before that, the recommended way to share configs across environments is:
+`dependfix.config.json` support is **not available yet** and has no scheduled milestone. Until it lands, the recommended way to share configs across environments is:
 
 1. Document env vars in deployment runbook (set per env)
 2. Use CI/CD secret management (e.g. GitHub Actions secrets + per-env variables)
 3. Use a script wrapper that injects env vars
 
-After M4 lands, you can use a JSON / YAML config file (merging order: defaults → file → env vars → CLI flags, with later sources overriding earlier).
+When config-file support lands, the merging order will be defaults → file → env vars → CLI flags, with later sources overriding earlier.
+
+## Environment variables
+
+```bash
+export GITHUB_TOKEN=ghp_xxx
+export DEPENDFIX_MODE=report-only
+export DEPENDFIX_SEVERITY_THRESHOLD=high
+export DEPENDFIX_REPOSITORIES=owner/repo-a,owner/repo-b
+export DEPENDFIX_DRY_RUN=true
+export DEPENDFIX_MAX_ALERTS_PER_REPOSITORY=20
+export DEPENDFIX_COMMIT=false
+export DEPENDFIX_PUSH=false
+export DEPENDFIX_CLEANUP_BRANCHES=false
+# M4 multi-repo governance (optional)
+# owner-level auto-discovery (merged with DEPENDFIX_REPOSITORIES and deduped, explicit wins)
+export DEPENDFIX_OWNER=owner-a,owner-b
+# Discovery-result topic whitelist (AND semantics) and blacklist (drop repos carrying any listed topic)
+export DEPENDFIX_REPO_TOPICS=node,pnpm
+export DEPENDFIX_REPO_TOPICS_EXCLUDE=deprecated,archived
+# Repository whitelist / blacklist globs (the whitelist affects discovery only; the blacklist also applies to the explicit list)
+export DEPENDFIX_REPO_INCLUDE=owner-a/*,owner-b/pkg-*
+export DEPENDFIX_REPO_EXCLUDE=owner-a/legacy-*
+# Concurrency and rate limiting (default 1 conservative sequential; >1 allowed in report-only only; backoff retries default 3)
+export DEPENDFIX_MAX_CONCURRENCY=4
+export DEPENDFIX_MAX_RETRIES=3
+# User-explicit dependency groups (optional; auto-grouping is used when unset)
+# Format: name1:pkg1,pkg2;name2:pkg3
+export DEPENDFIX_UPGRADE_GROUPS="eslint-stack:eslint,eslint-plugin-vue;nuxt-stack:@nuxt/eslint,nuxt"
+# Set this only when the GitHub token cannot read Dependabot alerts (e.g. GITHUB_TOKEN inside Actions);
+# use a minimum-permission fine-grained PAT (Dependabot alerts: read only)
+export DEPENDFIX_ALERTS_TOKEN=github_pat_xxx
+# Local no-token fallback: scan the current workspace lockfile with pnpm audit
+# (no GITHUB_TOKEN / no git remote required; repository shows the git remote or local)
+export DEPENDFIX_ALERTS_SOURCE=pnpm-audit
+# Verification chain: append target-repo CI-only package-manager scripts after the default chain (off by default; at most 3)
+export DEPENDFIX_MIRROR_CI_SCRIPTS=false
+# Same-alert attempt cap: skipped from the 3rd attempt by default; set true to force another try (fix-and-pr only)
+export DEPENDFIX_RETRY_FAILED=false
+# Delivery downgrade when the baseline is red (install still fails after fixes): skip (default) / issue / draft
+# export DEPENDFIX_ON_BASELINE_RED=skip
+# Per-verification-command timeout (default 10 minutes; shared by the default chain and mirrored CI scripts, and pnpm install inside the default chain is still timed by this value; the fixer install chain is unaffected)
+# Accepts plain milliseconds or units such as 10m / 90s
+# export DEPENDFIX_VERIFY_TIMEOUT_MS=10m
+```
+
+> The `GITHUB_TOKEN` environment variable is detected automatically and needs no prefix. `DEPENDFIX_GITHUB_TOKEN` takes precedence over `GITHUB_TOKEN`.
+
+> **Sandbox self-contained artifact**: `DEPENDFIX_SKILLS_DIR` points at the skills root containing `dependfix-remediator` (the image default is `/app/sandbox/skills`). It only overrides skill resolution for the sandbox bundle / environments without `node_modules`; a normal CLI install does not need it.
+
 ## Platform configuration (apps/platform)
 
 The management platform (`apps/platform`) is configured via env vars injected by compose from `apps/platform/.env`.
@@ -125,8 +255,8 @@ The management platform (`apps/platform`) is configured via env vars injected by
 - **Full deployment steps**: see [Docker deployment](./deployment.md).
 
 > ⚠️ **Injection model (important)**: the default `docker-compose.yml` has **no `env_file`** — it forwards only a whitelist of variables via `${...}` interpolation into the container (**compose name → container name**):
-> `PORT` · `PUID`/`PGID` · `AUTH_SECRET`→`NUXT_AUTH_SECRET` · `DATABASE_PATH` · `DATABASE_MIGRATIONS_RUN` · `NUXT_ENCRYPTION_KEY` · `REGISTRATION_DISABLED`→`NUXT_REGISTRATION_DISABLED` · `NUXT_PUBLIC_BETTER_AUTH_URL` · `NUXT_REDIS_URL` (hard-coded) · `QUEUE_ENABLED`/`QUEUE_JOB_RETRIES`/`QUEUE_BACKOFF_MS`→`NUXT_*` · `QUEUE_WORKER`→`DEPENDFIX_QUEUE_WORKER` · `IN_PROCESS_WORKER`→`NUXT_IN_PROCESS_WORKER` · `PNPM_CONFIG_STORE_DIR` · `LOG_DIR`/`LOG_LEVEL`/`LOGFILES` · `DEPENDFIX_IMAGE`/`DEPENDFIX_BUILD_IMAGE`.
-> Variables **outside** the whitelist below (email / OAuth / OIDC / `AUTH_MODE` / `DATABASE_TYPE|URL|SSL|SYNCHRONIZE` / `BACKUP_*` / `RUN_WORK_ROOT` / `SANDBOX_*` / `DEPENDFIX_AI_*` / `ACTION_STATUS_MONITOR_ENABLED` / notification, etc.) are **not injected by default** — add them to the compose `environment:` (Nuxt runtimeConfig vars need the `NUXT_` prefix) or via `docker run -e`.
+> `PORT` · `PUID`/`PGID` · `AUTH_SECRET`→`NUXT_AUTH_SECRET` · `DATABASE_PATH` · `DATABASE_MIGRATIONS_RUN` · `NUXT_ENCRYPTION_KEY` · `REGISTRATION_DISABLED`→`NUXT_REGISTRATION_DISABLED` · `NUXT_PUBLIC_BETTER_AUTH_URL` · `NUXT_REDIS_URL` (hard-coded) · `QUEUE_ENABLED`/`QUEUE_JOB_RETRIES`/`QUEUE_BACKOFF_MS`→`NUXT_*` · `QUEUE_WORKER`→`DEPENDFIX_QUEUE_WORKER` · `DEPENDFIX_QUEUE_WORKER_SLOW_RETRY_SECONDS` · `IN_PROCESS_WORKER`→`NUXT_IN_PROCESS_WORKER` · `STALE_CLEANUP_RUNNING_GRACE_MS`/`STALE_CLEANUP_PENDING_GRACE_MS` · `PNPM_CONFIG_STORE_DIR` · `LOG_DIR`/`LOG_LEVEL`/`LOGFILES` · `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`/`SMTP_FROM`→`NUXT_SMTP_*` · `SANDBOX_IMAGE`/`SANDBOX_IMAGE_REPO`/`SANDBOX_IMAGE_TAG`/`SANDBOX_IMAGE_PULL_TIMEOUT_MS`/`SANDBOX_CLONE_BASE_URL`/`DEPENDFIX_ALLOWED_DOMAINS` · `DEPENDFIX_IMAGE`/`DEPENDFIX_BUILD_IMAGE`.
+> Variables **outside** the whitelist below (OAuth / OIDC / `AUTH_MODE` / `DATABASE_TYPE|URL|SSL|SYNCHRONIZE` / `BACKUP_*` / `RUN_WORK_ROOT` / `SANDBOX_RUNTIME` / `DEPENDFIX_AI_*` / `ACTION_STATUS_MONITOR_ENABLED` / notification, etc.) are **not injected by default** — add them to the compose `environment:` (Nuxt runtimeConfig vars need the `NUXT_` prefix) or via `docker run -e`.
 >
 > ⚠️ **Nuxt runtime override prefix**: the platform is a Nuxt app; `runtimeConfig` runtime overrides **only honor the `NUXT_` prefix** — compose var `AUTH_SECRET` → container `NUXT_AUTH_SECRET`; `REGISTRATION_DISABLED` → `NUXT_REGISTRATION_DISABLED`. Build-time-baked env (e.g. `AUTH_MODE`) needs the `NUXT_` prefix at runtime, otherwise it silently falls back to the default. Server vars read directly via `process.env` (`DATABASE_*` / `CLONE_*` / `DEPENDFIX_*`, etc.) are injected under their original names.
 
@@ -140,6 +270,8 @@ The management platform (`apps/platform`) is configured via env vars injected by
 | `NUXT_PUBLIC_BETTER_AUTH_URL` | recommended (required for reverse proxy / HTTPS) | `http://localhost:3000` | Public URL; OAuth callbacks and better-auth `trustedOrigins` tightening depend on it (falls back to wildcard if unset) |
 | `NUXT_PUBLIC_BASE_URL` | — | empty | Legacy alias (read as a `trustedOrigins` fallback); use `NUXT_PUBLIC_BETTER_AUTH_URL` for new deployments |
 | `NUXT_PUBLIC_DEFAULT_BRANCH` / `DEFAULT_BRANCH` | — | `main` | Default branch for new repos (build-time injected) |
+| `NUXT_PUBLIC_ALLOW_MAJOR_UPGRADE_DEFAULT` | — | `false` | Default for the new-repository "Allow cross-major upgrades" switch (**runtime**; add it to the compose `environment:` yourself, since non-allowlisted variables are not forwarded). Affects new repositories only, existing ones keep their value; does not change the engine's explicit `--allow-major-upgrade` channel |
+| `ALLOW_MAJOR_UPGRADE_DEFAULT` | — | `false` | Same as above, **build time only** (injected while building the image; runtime settings have no effect) |
 | `MACHINE_ID` | — | PID % 1024 | Snowflake machine ID (0-1023); set explicitly for multi-instance |
 
 ### Database & backup
@@ -175,7 +307,12 @@ The management platform (`apps/platform`) is configured via env vars injected by
 
 | Variable | Required | Default | Description |
 |:---|:---:|:---|:---|
-| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` | — | empty / `587` | Configuring it enables email verification and password reset; otherwise skipped |
+| `SMTP_*` (compose interpolation) → container `NUXT_SMTP_*` | — | empty / `587` | Configuring it enables email verification and password reset; otherwise skipped. **Runtime overrides only honor `NUXT_SMTP_*`** (bare `SMTP_*` is evaluated at build time only); enablement is derived from a non-empty `smtpHost` at runtime, with no separate switch |
+
+> ⚠️ **Enable order (existing accounts)**: once email verification is on, existing accounts with `email_verified = false` get `EMAIL_NOT_VERIFIED` (403) at sign-in.
+> Before injecting `NUXT_SMTP_HOST`, do one of: ① ship self-service recovery (resend the verification email from the login page); ② have a DBA back up and update `user.email_verified` directly (no admin endpoint yet).
+> **Prerequisites**: the new image **and** the new `docker-compose.yml` (5 `NUXT_SMTP_*` forwards) must both be in place; swapping only the image while keeping the old compose leaves `SMTP_*` out of the container (symptoms unchanged).
+> **Rollback**: removing `NUXT_SMTP_HOST` returns to "verification not enforced" (derived value becomes false). Old images bake the switch to false at build time, so a rebuild is required before host derivation applies.
 
 ### Scan queue & Redis
 
@@ -183,28 +320,37 @@ The management platform (`apps/platform`) is configured via env vars injected by
 |:---|:---:|:---|:---|
 | `REDIS_URL` | — | `redis://127.0.0.1:6379` | BullMQ queue; async when Redis reachable + version ≥ 5.0 + a consumer exists, otherwise sync. The default compose hard-codes the container's `NUXT_REDIS_URL` to `redis://redis:6379` (built-in redis); this var applies only to custom orchestration / direct process |
 | `QUEUE_ENABLED` | — | `auto` | `auto` / `true` (force async) / `false` (force sync). In the compose whitelist (→ `NUXT_QUEUE_ENABLED`) |
-| `QUEUE_JOB_RETRIES` / `QUEUE_BACKOFF_MS` | — | empty | Job retries / backoff (ms); in the compose whitelist (→ `NUXT_*`) |
+| `QUEUE_JOB_RETRIES` / `QUEUE_BACKOFF_MS` | — | empty | Job retries / backoff (`5000` or `5s`); in the compose whitelist (→ `NUXT_*`) |
 | `QUEUE_WORKER` → `DEPENDFIX_QUEUE_WORKER` | — | compose `1` / entrypoint `0` | Independent worker process consuming the queue (removes BullMQ lock-renewal failures); `0` reverts to single-process. ⚠️ **compose-side name is `QUEUE_WORKER`** |
 | `DEPENDFIX_QUEUE_WORKER_SOCKET` | — | `/tmp/dependfix-queue-worker.sock` | Worker internal socket path (outside the whitelist; container name) |
 | `DEPENDFIX_QUEUE_WORKER_SLOW_RETRY_SECONDS` | — | `300` | Slow-retry interval (seconds, 1-3600; invalid / 0 falls back to 300) after the worker exceeds the consecutive fast-failure limit; restarts are never permanently abandoned. Forwarded by compose |
-| `DEPENDFIX_ROLE` | — | injected per process by the entrypoint (`worker` / `server`) | Process role: `worker` skips HTTP-only plugins (periodic cleanup / build stamp), avoiding duplicated DB queries and log noise; the entrypoint normalizes it to `server` in the single-process form (equivalent to unset: nothing is skipped); unset for direct processes. Outside the whitelist (container-internal); contract: [platform.md §10.6](../../../standards/platform.md#106-队列执行进程隔离独立-worker-进程) |
+| `DEPENDFIX_ROLE` | — | injected per process by the entrypoint (`worker` / `server`) | Process role: `worker` skips HTTP-only plugins (periodic cleanup / build stamp), avoiding duplicated DB queries and log noise; the entrypoint normalizes it to `server` in the single-process form (equivalent to unset: nothing is skipped); unset for direct processes. Outside the whitelist (container-internal); contract: [design §9](../../../design/governance/executor-process-isolation.md#_9-队列执行进程隔离-运行时形态) |
 | `IN_PROCESS_WORKER` → `NUXT_IN_PROCESS_WORKER` | — | `true` (compose) / `false` (direct process) | In-process worker (sole consumer in single-process deployments); the effective default follows compose forwarding |
-| `STALE_CLEANUP_INTERVAL_MS` | — | `300000` | Orphan task cleanup cadence (ms) |
-| `STALE_CLEANUP_RUNNING_GRACE_MS` | — | `300000` | Grace period (ms, > 0; invalid / 0 falls back to default) after a running run exceeds the execution timeout before it is marked `orphan_run`. Forwarded by compose |
-| `STALE_CLEANUP_PENDING_GRACE_MS` | — | `300000` | Minimum wait (ms, > 0; invalid / 0 falls back to default) before a pending run is considered orphaned when no consumer exists / the job belongs to a terminal run; the no-consumer branch additionally requires a job age ≥ 2× this value. Forwarded by compose |
+| `STALE_CLEANUP_INTERVAL_MS` | — | `300000` | Orphan task cleanup cadence (ms; also accepts `5m`) |
+| `STALE_CLEANUP_RUNNING_GRACE_MS` | — | `300000` | Grace period (ms, > 0; also accepts `5m`; invalid / 0 falls back to default) after a running run exceeds the execution timeout before it is marked `orphan_run`. Forwarded by compose |
+| `STALE_CLEANUP_PENDING_GRACE_MS` | — | `300000` | Minimum wait (ms, > 0; also accepts `5m`; invalid / 0 falls back to default) before a pending run is considered orphaned when no consumer exists / the job belongs to a terminal run; the no-consumer branch additionally requires a job age ≥ 2× this value. Forwarded by compose |
 
 ### Executor / sandbox / scan
 
 | Variable | Required | Default | Description |
 |:---|:---:|:---|:---|
 | `RUN_WORK_ROOT` | — | `data/runs` | Run working root (clone / execution artifacts) |
-| `EXECUTION_TIMEOUT_MS` | — | `1800000` (30 min) | Single-repo execution timeout; the container executor and queue Worker lock duration share one resolver (`resolveExecutionTimeoutMs()`). Out-of-range (< 1 min / > 24 h) or invalid falls back to default |
-| `DEPENDFIX_INSTALL_TIMEOUT_MS` | — | `300000` (5 min) | Install-class command timeout (dependency install and lockfile repair chain share one resolver); out-of-range (< 10 s / > 30 min) or invalid falls back to default. On timeout the engine cancels the run and terminates the child process tree |
-| `CLONE_TIMEOUT_MS` | — | `300000` | git clone timeout (ms) |
+| `EXECUTION_TIMEOUT_MS` | — | `1800000` (30 min) | **Global default** execution timeout (also accepts `30m` / `1h`); a repository may override it under "Execution budget (advanced)", and overrides are capped by `DEPENDFIX_MAX_EXECUTION_TIMEOUT_MS`. Out-of-range (< 1 min / > 24 h) or invalid falls back to default |
+| `DEPENDFIX_MAX_EXECUTION_TIMEOUT_MS` | — | `3600000` (60 min) | Execution **ceiling** (range 30 min–4 h, also accepts `1h` / `90m`; out-of-range falls back to default); queue Worker lock duration follows this value (`lockRenewTime` is half), env changes require a process restart |
+| `DEPENDFIX_INSTALL_TIMEOUT_MS` | — | `300000` (5 min) | Install-class command timeout (dependency install and lockfile repair chain share one resolver), also accepts `5m` / `90s`; out-of-range (< 10 s / > 30 min) or invalid falls back to default. On timeout the engine cancels the run and terminates the child process tree |
+| `DEPENDFIX_VERIFY_TIMEOUT_MS` | — | `600000` (10 min) | Timeout for a single verification command (also accepts `10m` / `90s`; must fall in 10 s-30 min, out-of-range / invalid values fall back to the default). Shared by the default chain and mirrored CI scripts; the `pnpm install` inside the default chain is still timed by this value. The fixer's install chain is unaffected |
+| `CLONE_TIMEOUT_MS` | — | `300000` | git clone timeout (ms; also accepts `5m`) |
 | `CLONE_MAX_RETRIES` | — | `3` | Max clone retries |
 | `PNPM_CONFIG_STORE_DIR` | — | `/app/data/pnpm-store` (derived by the entrypoint) | pnpm store shared by target-repository installs: inside the data volume by default, reused across runs / container recreations. The entrypoint probes writability **as the run identity** (covering read-only mounts); when unusable (read-only / insufficient permissions / not absolute) it warns and falls back to pnpm's default location under `$HOME` (cold install every run; never blocks). A custom path's parent must be traversable by `PUID`/`PGID`, and the store must sit on the same filesystem as `RUN_WORK_ROOT` for hard links. Clean up with `pnpm store prune` (see [pnpm store and dependency cache](./deployment.md#pnpm-store-and-dependency-cache)) |
 | `SANDBOX_RUNTIME` | — | `runc` | Sandbox OCI runtime |
-| `SANDBOX_IMAGE` | — | `dependfix-platform:latest` | Sandbox image |
+| `SANDBOX_IMAGE` | — | first candidate (platform registry, then Docker Hub / ghcr / ACR) | Full reference of the dedicated sandbox image (slim by default, ~320MB; must be pullable / present in the target rootless daemon). A repository-level `sandboxImage` takes precedence |
+| `SANDBOX_IMAGE_REPO` | — | follows the platform registry, then Docker Hub → ghcr → ACR | Image repository used when `SANDBOX_IMAGE` is unset (pins a single source; use `…/dependfix-sandbox-full` when native source builds are required). When unset it follows the platform registry, then falls back to Docker Hub / ghcr / ACR (ACR last to reduce its load) |
+| `SANDBOX_IMAGE_TAG` | — | platform build version; `latest` when unknown | Image tag used when `SANDBOX_IMAGE` is unset |
+| `SANDBOX_IMAGE_PULL_TIMEOUT_MS` | — | `300000` | Pull timeout per image during the three-source preflight (pull only when missing; failures fall through to the next source) |
+| `SANDBOX_CLONE_BASE_URL` | — | `https://github.com` | Clone base URL for sandbox fix (enterprise mirrors / self-hosted GitLab / Gitee, **must be https**); the credential header is only injected for `https://github.com`, other sources clone anonymously. **Its host must also be added to `DEPENDFIX_ALLOWED_DOMAINS`**, otherwise the run is marked `failed` (`sandbox_clone_host_not_allowed`) |
+| `DEPENDFIX_ALLOWED_DOMAINS` | — | empty (default allowlist only) | Extra outbound allowlist domains (comma-separated, `*.example.com` supported); the default required set is github.com / api.github.com / *.npmjs.org. Entries are bare hosts (no scheme or port; `*.example.com` matches subdomains). Add the new host whenever you change the clone source |
+| `DEPENDFIX_SANDBOX_ENTRY` | — | `/app/sandbox/bin.mjs` | Self-contained sandbox CLI entry (local debugging only) |
+| `DEPENDFIX_SANDBOX_SKILLS_DIR` | — | `/app/sandbox/skills` | Skills root copied with the bundle (debugging only) |
 | `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` | — | empty | Egress proxy (engine verification phase) |
 | `DEPENDFIX_SUPPRESS_LOCAL_EXECUTION_WARNING` | — | `false` | Suppress the "local non-container execution" security warning (local debugging only) |
 | `ACTION_STATUS_MONITOR_ENABLED` | — | `false` | Dependabot PR-check status monitor master switch; requires a PAT credential and PR activity |

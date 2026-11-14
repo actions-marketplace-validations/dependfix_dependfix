@@ -5,7 +5,7 @@ import { Repository } from '#server/entities/repository'
 import { ScanRun, SCAN_RUN_STATUSES } from '#server/entities/scan-run'
 import { RUN_FAILURE_KINDS, RUN_FAILURE_STAGES } from '#server/services/run-failure-classify'
 import { ScanResult } from '#server/entities/scan-result'
-import { PRCheck, PR_CHECK_CONCLUSIONS } from '#server/entities/pr-check'
+import { PRCheck, PR_CHECK_CONCLUSIONS, PR_CHECK_PR_STATES } from '#server/entities/pr-check'
 import { resolveOrganizationId } from '#server/utils/organization'
 import { summarizeFailureSources } from '#server/services/monitor/build-signals'
 import { repositoryTagsSchema } from '#server/schemas/repository'
@@ -52,7 +52,7 @@ const repoSchema = z.object({
     name: z.string().min(1).max(100),
     platform: z.enum(['github']).default('github'),
     /**
-     * 执行器类型（默认 container）。生产仓库 schema 已拒绝 sandbox（2026-10-27 入口临时关闭）；
+     * 执行器类型（默认 container）。sandbox 入口已恢复（仅 report-only 真实执行）；
      * 本字段仅供 e2e 注入**存量** sandbox 仓库，验证 UI 迁移提示与编排层强制降级路径。
      */
     executorKind: z.enum(['container', 'github-action', 'sandbox']).default('container'),
@@ -89,7 +89,7 @@ const scanRunSchema = z.object({
     }).optional(),
     mode: z.enum(['report-only', 'fix', 'fix-and-pr']).default('report-only'),
     severityThreshold: z.enum(['low', 'medium', 'high', 'critical']).default('high'),
-    // 生产仓库 schema 已拒绝 sandbox（2026-10-27 入口临时关闭）；本 fixture 保留 sandbox 以模拟存量仓库降级路径。
+    // sandbox 入口已恢复（仅 report-only 真实执行）；fixture 保留 sandbox 以覆盖降级矩阵回放。
     executorKind: z.enum(['container', 'github-action', 'sandbox']).default('container'),
     /** 复用 ScanRunStatus 实体枚举（单点声明；避免 schema 与 entity 不同步） */
     status: z.enum(SCAN_RUN_STATUSES).default('completed'),
@@ -107,6 +107,12 @@ const scanRunSchema = z.object({
         deliverySkipped: z.number().int().min(0).optional(),
         deliverySkipIssues: z.number().int().min(0).optional(),
         deliverySkipDraftPrs: z.number().int().min(0).optional(),
+        /** 验证跳过（预算不足 / 本次无写入）：受影响仓库数 + 按原因分组 */
+        verificationsSkipped: z.number().int().min(0).optional(),
+        verificationSkippedByReason: z.object({
+            budget: z.number().int().min(0).optional(),
+            'no-write': z.number().int().min(0).optional(),
+        }).optional(),
         /** 跳过总数与按原因分组（结果披露） */
         alertsSkipped: z.number().int().min(0).optional(),
         alertsSkippedByReason: z.object({
@@ -115,6 +121,7 @@ const scanRunSchema = z.object({
             'not-fixable': z.number().int().min(0).optional(),
             'override-protected': z.number().int().min(0).optional(),
             'repeated-failure': z.number().int().min(0).optional(),
+            'peer-only': z.number().int().min(0).optional(),
         }).optional(),
         /** 截断总数与按严重级别分组（结果披露） */
         alertsTruncated: z.number().int().min(0).optional(),
@@ -229,6 +236,8 @@ const prCheckSchema = z.object({
     authorLogin: z.string().min(1).max(100),
     /** check 结论；复用实体枚举单点声明（避免 schema 与 entity 不同步） */
     conclusion: z.enum(PR_CHECK_CONCLUSIONS).default('pending'),
+    /** PR 生命周期状态（缺省 unknown = 生命周期列上线前的存量行形态） */
+    prState: z.enum(PR_CHECK_PR_STATES).optional(),
     checkRunId: z.string().max(64).nullable().optional(),
     detailsUrl: z.string().max(500).nullable().optional(),
     errorMessage: z.string().nullable().optional(),
@@ -449,6 +458,9 @@ export default defineEventHandler(async (event) => {
                 targetUrl: signal.targetUrl ?? null,
                 logUrl: signal.logUrl ?? null,
                 summary: signal.summary ?? null,
+                /* 归因字段必须透传：schema 允许构造带归因的信号（供视觉基线覆盖标签渲染），
+                   早期写入映射漏了这一项，导致 fixture 里的 attribution 静默丢失、基线无标签 */
+                attribution: signal.attribution,
                 observedAt: new Date(),
             }))
             const failureSources = pc.failureSources
@@ -470,6 +482,7 @@ export default defineEventHandler(async (event) => {
                 acknowledgedAt: pc.acknowledgedAt ? new Date(pc.acknowledgedAt) : null,
                 acknowledgedByUserId: pc.acknowledgedByUserId ?? null,
                 lastPolledAt: new Date(pc.lastPolledAt),
+                prState: pc.prState,
             }))
             prCheckResults.push({ repositoryId: repo.id, id: saved.id, created: true })
         }

@@ -24,6 +24,8 @@ export interface RepoView {
     credentialName: string | null
     actionWorkflowFile: string | null
     executorKind: string
+    /** 仓库级沙箱镜像（null = 平台 SANDBOX_IMAGE / SANDBOX_IMAGE_REPO + TAG，默认三源候选） */
+    sandboxImage: string | null
     note: string | null
     tags: string[]
     /**
@@ -33,6 +35,16 @@ export interface RepoView {
     verifyCommands: string[]
     /** PR Check 告警关注集（null = 未配置 = 全量只报警不阻断；见设计稿 §9） */
     prCheckFocus: PRCheckFocusView | null
+    /** 仓库级执行上限（毫秒；null = 继承全局，见 repo-execution-limits.md） */
+    executionTimeoutMs: number | null
+    /** 仓库级验证命令超时（毫秒；null = 继承全局） */
+    verifyCommandTimeoutMs: number | null
+    /** 仓库级安装超时（毫秒；null = 继承全局） */
+    installTimeoutMs: number | null
+    /** 仓库级 clone 超时（毫秒；null = 继承全局） */
+    cloneTimeoutMs: number | null
+    /** 仓库级跨大版本升级授权（默认关闭；开启后仍走完整验证与失败回滚） */
+    allowMajorUpgrade: boolean
     /** AI 研判开关（todo.md §M26.1 + M25.2a 实体扩展；与 POST /api/repos/[id]/ai-config 联动） */
     aiEnabled: boolean
     /** AI 研判触发范围（failure / major / both） */

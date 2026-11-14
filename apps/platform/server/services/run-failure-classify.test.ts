@@ -37,6 +37,7 @@ const EXPECTED_MAPPINGS: Record<string, { stage: RunFailureStage, kind: RunFailu
     CREDENTIAL_ERROR: { stage: 'install', kind: 'deterministic' },
     RESOLVE_ERROR: { stage: 'install', kind: 'unknown' },
     MINIMUM_RELEASE_AGE: { stage: 'install', kind: 'deterministic' },
+    PRECONDITION_FAILED: { stage: 'install', kind: 'deterministic' },
     ENVIRONMENT_ERROR: { stage: 'install', kind: 'transient' },
     // fix
     PROCESS_FAILED: { stage: 'fix', kind: 'unknown' },
@@ -49,8 +50,13 @@ const EXPECTED_MAPPINGS: Record<string, { stage: RunFailureStage, kind: RunFailu
     BUDGET_EXHAUSTED: { stage: 'runtime', kind: 'transient' },
     SCRIPT_NOT_FOUND: { stage: 'verify', kind: 'deterministic' },
     network_violation: { stage: 'verify', kind: 'deterministic' },
+    NETWORK_VIOLATION: { stage: 'verify', kind: 'deterministic' },
+    sandbox_fix_requires_egress_policy: { stage: 'runtime', kind: 'deterministic' },
+    sandbox_clone_host_not_allowed: { stage: 'runtime', kind: 'deterministic' },
+    sandbox_image_unavailable: { stage: 'runtime', kind: 'deterministic' },
     // deliver
     COMMIT_FAILED: { stage: 'deliver', kind: 'deterministic' },
+    PUSH_FAILED: { stage: 'deliver', kind: 'deterministic' },
     UNEXPECTED_CHANGES: { stage: 'deliver', kind: 'deterministic' },
     NO_CHANGES: { stage: 'deliver', kind: 'deterministic' },
     push_failed: { stage: 'deliver', kind: 'unknown' },

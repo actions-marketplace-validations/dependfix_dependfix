@@ -4,10 +4,13 @@
 import {
     buildAlertOutcomes,
     isAlertFixedByActions,
+    summarizeSkippedByPackage,
     type RunReportConfig,
     type RunResult,
     type AiUsageAggregate,
     type SupplyChainWarning,
+    type VerificationsSkippedByReason,
+    type Logger,
 } from '@dependfix/core'
 import type { AiUsage } from '../ai/usage'
 import { isRepoVerificationBlocked } from '../runners/verification-gate'
@@ -94,6 +97,17 @@ export function computeSummary(
     summary.lockfileRepairs = lockfileRepairs
     summary.verificationsPassed = verificationsPassed
     summary.verificationsFailed = verificationsFailed
+    // 主动跳过验证（预算 / 0 写入）：按仓库计数 + 按原因分组；不交付、不回滚，供报告 / 平台披露
+    const skippedByReason: VerificationsSkippedByReason = {}
+    for (const result of repoResults) {
+        const reason = result.verificationSkipped
+        if (!reason) {
+            continue
+        }
+        skippedByReason[reason] = (skippedByReason[reason] ?? 0) + 1
+    }
+    summary.verificationsSkipped = Object.values(skippedByReason).reduce((sum, count) => sum + (count ?? 0), 0)
+    summary.verificationSkippedByReason = skippedByReason
     // 交付跳过（基线红）：按去重后的仓库集计数；载体计数按 run 级记录派生（幂等，可重复调用）
     const deliverySkips = ctx.deliverySkips ?? []
     summary.deliverySkipped = new Set(deliverySkips.flatMap((record) => record.repositories)).size
@@ -104,7 +118,7 @@ export function computeSummary(
 }
 
 export function buildRunResult(
-    ctx: Pick<AppContext, 'config' | 'runId' | 'startedAt' | 'finishedAt' | 'summary' | 'repoResults' | 'allAlerts' | 'allActions' | 'allErrors' | 'alertsDisabled' | 'ciAlignment' | 'attemptTracking' | 'prCheckWatch' | 'alertOutcomes' | 'deliverySkips'>,
+    ctx: Pick<AppContext, 'config' | 'runId' | 'startedAt' | 'finishedAt' | 'summary' | 'repoResults' | 'allAlerts' | 'allActions' | 'allErrors' | 'alertsDisabled' | 'ciAlignment' | 'attemptTracking' | 'prCheckWatch' | 'alertOutcomes' | 'deliverySkips' | 'delivery'>,
     aiUsage?: AiUsageAggregate, supplyChainWarnings?: SupplyChainWarning[],
 ): RunResult {
     const reportConfig: RunReportConfig = {
@@ -139,6 +153,7 @@ export function buildRunResult(
         alertOutcomes: alertOutcomes.length > 0 ? alertOutcomes : undefined,
         prCheckWatch: ctx.prCheckWatch && ctx.prCheckWatch.attempts.length > 0 ? ctx.prCheckWatch : undefined,
         deliverySkips: ctx.deliverySkips && ctx.deliverySkips.length > 0 ? ctx.deliverySkips : undefined,
+        delivery: ctx.delivery,
     }
 }
 
@@ -243,4 +258,49 @@ export function computeExitCode(
     }
 
     return 2
+}
+
+// ---------------------------------------------------------------------------
+// Run-level conclusion
+// ---------------------------------------------------------------------------
+
+/** 结论行里最多列出的包数（超出折叠为计数，避免单行日志过长）。 */
+const SKIPPED_PACKAGE_LOG_LIMIT = 8
+
+/**
+ * 运行级收官结论：把「被拦截的告警」按包收敛成一行，供日志输出。
+ *
+ * 只描述告警处置构成，不改变 `verificationSkipped='no-write'` 的语义（后者只说「未验证」）。
+ * 无 skipped 记录时返回 `undefined`（不输出空结论行）。
+ */
+export function formatSkippedByPackageSummary(
+    result: Pick<RunResult, 'alerts' | 'alertOutcomes'> & { summary?: RunResult['summary'] },
+): string | undefined {
+    const rows = summarizeSkippedByPackage(result.alerts, result.alertOutcomes)
+    if (rows.length === 0) {
+        // 链级跳过（例如基线安装失败后整条依赖链跳过）不会产生 skipped 结果：
+        // 用未修复计数兜底，避免运行级结论只剩「本次无写入」。
+        const unfixed = result.summary?.alertsUnfixed ?? 0
+        return unfixed > 0 ? `[summary] ${unfixed} alert(s) not fixed — no skipped outcome recorded` : undefined
+    }
+    const total = rows.reduce((sum, row) => sum + row.count, 0)
+    const shown = rows.slice(0, SKIPPED_PACKAGE_LOG_LIMIT).map((row) => {
+        const target = row.highestTarget ? `→${row.highestTarget}` : ''
+        const reasons = row.reasons.length > 0 ? ` (${row.reasons.join(', ')})` : ''
+        return `${row.repository}:${row.packageName}${target} ×${row.count}${reasons}`
+    })
+    const hidden = rows.length - shown.length
+    return `[summary] ${total} alert(s) blocked across ${rows.length} package group(s): `
+        + `${shown.join(' · ')}${hidden > 0 ? ` · +${hidden} more` : ''}`
+}
+
+/** 输出运行级收官结论：有被拦告警时先给出按包构成（「0 写入」只是未验证原因）。 */
+export function logSkippedByPackageSummary(
+    logger: Pick<Logger, 'info'>,
+    result: Pick<RunResult, 'alerts' | 'alertOutcomes'> & { summary?: RunResult['summary'] },
+): void {
+    const line = formatSkippedByPackageSummary(result)
+    if (line) {
+        logger.info(line)
+    }
 }

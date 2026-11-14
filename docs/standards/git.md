@@ -23,8 +23,8 @@
 2. **格式要求**：提交消息必须符合 Conventional Commits 规范，格式：`<type>(<scope>): <description>`，且 `description` 统一使用**中文或用户使用的语言**。
 3. **质量前置**：提交前必须确认 A 阶段（`Code Auditor (代码审计员)`）已放行，且 `pnpm run lint:check`（无 `--fix` 的门禁命令；涉及 CSS / SCSS / Vue 样式时另跑 `pnpm run lint:css:check`）、`pnpm typecheck` 和必要的定向测试均已通过。质量门禁未通过时不得提交。
 4. **原子粒度**：一个提交对应一个逻辑变更，关联且仅关联 `todo.md` 中的一个原子条目。
-5. **分批提交（长任务强制）**：单次提交规模建议与拆分规则见 [规划规范 §1.1 任务粒度约束](./planning.md#11-硬性约束)；按"可独立验证"的顺序分批次提交，每批独立过 Review Gate；锁文件（pnpm-lock.yaml）等随其所属批次提交。
-6. **推送禁令**：`git commit` 后不得自动执行 `git push`，推送仅限用户明确要求时执行。提交完成后应告知用户"已提交到本地，等待推送确认"。
+5. **分批提交（长任务强制）**：单次提交规模建议与拆分规则见 [规划规范 §1.1 任务粒度约束](./planning.md#_1-1-硬性约束)；按"可独立验证"的顺序分批次提交，每批独立过 Review Gate；锁文件（pnpm-lock.yaml）等随其所属批次提交。
+6. **推送禁令**：`git commit` 后不得自动执行 `git push`，推送仅限用户明确要求时执行。提交完成后应告知用户"已提交到本地，等待推送确认"。授权窗口见 [GitHub 协作规范 §4](github-collaboration.md#_4-推送授权)。
 
 ### 3.1 提交消息格式
 
@@ -32,7 +32,7 @@
 
 **提交策略（先评估后提交）**：
 
-1. 先评估改动规模，决定单次提交还是分批提交（分批规则见 [规划规范 §1.1 任务粒度约束](./planning.md#11-硬性约束)）。
+1. 先评估改动规模，决定单次提交还是分批提交（分批规则见 [规划规范 §1.1 任务粒度约束](./planning.md#_1-1-硬性约束)）。
 2. 再判断类型：**默认单类型提交**；多类型提交仅用于改动互相关联较大、不宜拆分的情况。
 3. 最后选择最合适的类型生成提交消息。
 
@@ -86,7 +86,7 @@
   2. `git add <file>` + `git commit`（commit 1）
   3. 再 edit 加回第二个逻辑 + `git add <file>` + `git commit`（commit 2）
 - 实现阶段提前识别"单文件跨 type"会节省后续 reset/re-edit 成本。
-- 替代方案：将不同 type 改动拆分到不同文件（新增组件 / helper），从源头避免单文件跨 type。
+- 替代方案：将不同 type 改动拆分到不同文件（新增组件 / helper），从源头避免单文件跨 type；**拆分前确认每个提交可独立编译**：存在跨提交依赖（类型 / 参数先被后续编排消费、或正文说明依赖新模块）时必须合批——「每提交可独立编译」优先于「文件数不超过阈值」；拆出不可编译的中间提交，审计会按提交级回归处理。 文件已顶格 `max-lines` 时要落行为变更，先把纯搬迁 / 日志辅助拆成独立提交（搬迁提交声明唯一差异），再落行为。
 
 ### 3.3 阶段任务分批提交避免单次大 diff 成本失控
 
@@ -102,12 +102,12 @@
 - 当 commit 误把跨子批次改动纳入（如 commit 1 含 commit 2 应有的 i18n key）时，可 `git reset --soft HEAD~1` 回滚到 commit 前状态、重新分两次提交——比 `git commit --amend` 更彻底地保持原子粒度。
 - **仅在 commit 未推送（ahead of remote）时适用**；已推送的 commit 必须靠后续 commit 修复或 revert，不能 reset（会与其他开发者历史冲突）。
 - stage 前先 `git diff --staged` 确认本次 commit 内容边界——避免误把跨子批次改动纳入同一 commit。
-- 与 [§3.2 单文件跨 type 改动需提前规划 commit 拆分](#32-单文件跨-type-改动需提前规划-commit-拆分) 配套——§3.2 处理 staged diff 误纳（`git restore --staged`），§3.4 处理已 commit 但未推送的误纳（`git reset --soft`）；详见 [归档 §二十四](../design/governance/experience-archive.md)。
+- 与 [§3.2 单文件跨 type 改动需提前规划 commit 拆分](#_3-2-单文件跨-type-改动需提前规划-commit-拆分) 配套——§3.2 处理 staged diff 误纳（`git restore --staged`），§3.4 处理已 commit 但未推送的误纳（`git reset --soft`）；详见 [归档 §二十四](../design/governance/experience-archive.md)。
 
 ### 3.5 lint auto-fix 接受策略（不要回滚，独立 chore commit 接受）
 
 - ESLint `--fix` 自动修改（如 `@typescript-eslint/array-type` 规则偏好 `T[]` 写法替换 `Array<T>`、`@typescript-eslint/consistent-type-imports` 加 `type` 关键字等）是合规修改——两种写法 TypeScript 等价，规则要求即合规。**应该接受 + 独立 `chore` commit**——不要回滚。
-- 详见 [归档 §四十二](../design/governance/experience-archive-§41-§48-archive-batch.md#四十二coverage-阈值对-refactor-顺序敏感纯-rename-commit-可触发无关覆盖债务清算2026-08-27ci-run-33068271005-修复)
+- 详见 [归档 §四十二](../design/governance/experience-archive-§41-§48-archive-batch.md#四十二、coverage-阈值对-refactor-顺序敏感-纯-rename-commit-可触发无关覆盖债务清算-2026-08-27-ci-run-33068271005-修复)
 - 修正：lint auto-fix 是合规修改，**不要回滚**。如不希望与 docs 提交混杂，应在 commit 前 `git restore --staged <file>` 排除；如已 uncommitted，作为 standalone chore commit 独立接受。
 - 实操：在每次 commit 前过一遍 lint（门禁用 `pnpm run lint:check`，本地自动修复用 `pnpm lint`；另 `pnpm run lint:md` / `pnpm typecheck`）确认 0 error；如发现 working tree 有未提交 lint auto-fix 改动，按本节策略处理（接受并独立 commit）。
 
@@ -152,9 +152,9 @@ commit message 应聚焦于"当次提交的改动"+"可供事后复查的信息"
 修复一个功能点时，**支撑文件必须与修复点同 commit 入库**——类型扩展 / 字段透传 / i18n key / 测试 mock 等任一项留在工作区未暂存，都会造成"提交态不自洽"（类型谎言 / i18n 裸 key / 测试断链），工作区看似正常但提交后运行时半失效。
 
 - **执行与审计口径**：`git commit` / `git commit --amend` 前先 `git status` 逐项确认关联文件已暂存（不只修复点文件）；Review Gate 以「提交态自洽」而非「工作区自洽」为准。
-- **反例**：M29.7 修复 commit 只含 4 文件（纯函数 + 组件 + 测试 + e2e 注释），`disabled` 透传 + i18n key 未暂存 → A 阶段审计 RG-B3 Reject。
+- **反例**：M29.7 修复 commit 只含 4 文件（纯函数 + 组件 + 测试 + e2e 注释），`disabled` 透传 + i18n key 未暂存 → A 阶段审计 RG-B3 Reject（详见 [归档 §六十五](../design/governance/experience-archive-§49-§69-recent-investigation.md#六十五、m30-归档批次经验沉淀)）
 - **锁文件随安装连带升级**：为新增依赖跑 `pnpm install` 会把其它包 range 内的依赖一并升到最新（`--frozen-lockfile` 拦不住）。提交前 `git diff -U0 pnpm-lock.yaml` 逐 hunk 核验，只保留目标依赖的 importer / packages / snapshots 条目，其余还原后再跑 `--frozen-lockfile` 验证。
-- 详见 [归档 §六十五](../design/governance/experience-archive-§49-§69-recent-investigation.md#六十五m30-归档批次经验沉淀)
+- **门禁类改动必须在干净 HEAD 上复跑**：`lint:check` / `gates:docs` / typecheck 等门禁的改动提交后，先 `git status` 清空再跑一次——工作区跑绿只能证明「fix 通道刚修好」，不能证明提交态入口通过（`--fix` 修掉但未写回索引会出现「本地绿、HEAD 红」）。
 
 ### 3.7.1 lint-staged 的 `git add` 任务会连带暂存工作区其它已改文件
 
@@ -173,28 +173,13 @@ commit message 应聚焦于"当次提交的改动"+"可供事后复查的信息"
 
 **边界**：本禁令只针对**工作区内容**的还原；`git restore --staged <file>`（仅把路径移出索引，不改工作区内容，用于 §3.2 / §3.4 / §3.7.1 的 staged diff 治理）不受约束。
 
-### 3.8 git 隔离语义：签名 + hooks，commit / push 双向隔离，不提供 opt-in（M29.2 + M32.4 + M43.5）
+### 3.8 git 隔离语义：签名 + hooks，commit / push 双向隔离，不提供 opt-in
 
-dependfix 的 commit / push 必须**不受宿主签名配置污染、也不受被修复仓库本地钩子约束**，否则行为不可复现（`-c` 是 git 全局选项、`--no-verify` 是子命令选项，**位置不可互换**）：
-
-| 隔离类 | 触发 / 钩子 | 污染表现 | 隔离参数 |
-|:--|:--|:--|:--|
-| 签名（commit） | 宿主 / repo `commit.gpgsign=true` | commit 带宿主个人签名（身份与被修复仓库 author 不一致）；宿主无可用 key / `gpg.program` 时直接 `fatal: failed to write commit object` | `-c commit.gpgsign=false` |
-| 签名（push） | 宿主 `push.gpgSign=true` | `git push` 自动带 `--signed`；服务端 `receive-pack` 不支持时 `the receiving end does not support --signed push` | `-c push.gpgSign=false` |
-| hooks（commit） | 目标仓库 `pre-commit` / `commit-msg` / `prepare-commit-msg` | husky / lint-staged 钩子依赖 `npx` 与目标仓库完整 `node_modules`，隔离环境下不可用 → 钩子非 0 退出（如 `npx: not found`，exit 127）→ `COMMIT_FAILED` → 修复回滚 | `--no-verify`（置于 `commit` 子命令**之后**） |
-| hooks（push） | 目标仓库 `pre-push` | 推送修复分支时 hook 非 0 退出 → `push_failed` → 交付链中断（当前生产日志无该实例，属**预防性收口**） | `--no-verify`（置于 `push` 子命令**之后**；亦适用于 `push --delete`） |
-
-**单一事实源 / 覆盖面**：`packages/engine/src/github/git-signing.ts` 导出 4 个常量——`GIT_COMMIT_SIGNING_ISOLATION_ARGS` / `GIT_COMMIT_HOOKS_ISOLATION_ARGS` / `GIT_PUSH_SIGNING_ISOLATION_ARGS` / `GIT_PUSH_HOOKS_ISOLATION_ARGS`（engine 与平台侧共用，禁止散落字面量）。**作用对象 = 被修复仓库**（自动 commit / push 修复分支与建 PR）：commit 侧 `stageAndCommit`；push 侧全部 4 处——`pr-creator.pushBranch` / `platform-delivery.pushFixBranchWithCredential` / `container-executor.pushFixBranch` + `cleanupRemoteBranch`（含 `--delete`）。**不适用**于作用对象为 **dependfix 自有仓库**的发布脚本（`release.yml` 调用的 `release:auto-version` / `release:push-tags`，仅在 CI 执行）——它们应沿用运行环境的签名与钩子配置。`--no-verify` 不跳过 `post-commit`（提交后运行、不能改变结果）；选型它而非空 `core.hooksPath` 目录——跨平台无需构造/保证目录存在，且对 husky 的 `core.hooksPath` 重定向等效。
-
-**只关开关、不屏蔽环境**：以 `-c <key>=false` 形式仅作用于该次调用——`-c` 优先级高于 repo local / worktree / host global / system 配置（git 配置键**大小写不敏感**，故表中 `commit.gpgsign` 与 `push.gpgSign` 的写法差异无功能影响，按代码实际取值列出），且不写回任何配置文件。刻意**不**注入 `GIT_CONFIG_GLOBAL` / `GIT_CONFIG_NOSYSTEM`——那会连带屏蔽宿主代理（`http.proxy`）等运行环境配置。**策略：不提供签名 / hooks opt-in**（无 CLI flag / env / action input / 平台配置）——签名会把 dependfix 绑定到调用方密钥环境（需额外设计密钥来源、失败语义、四层暴露面），而「目标仓库强制要求签名 commit」属罕见场景；目标仓库钩子面向本地开发流程，隔离执行环境下本就不可用。
-
-- **重开条件**（任一出现时重新评估）：① 用户明确要求对特定目标仓库产出签名 commit；② 目标仓库分支保护规则强制 `Require signed commits` 且无法通过 PAT / App 权限例外；③ 平台需要以可验证身份签名（合规审计要求）。重开时须统一密钥来源 / 失败语义 / 四层暴露面，且本表隔离参数默认值保持「关闭」。
-- **不做的边界**：不改宿主 `~/.gitconfig`；不关闭用户手工 git 操作的签名 / 钩子；不回溯已产生的 commit / push；不做目标仓库保护规则预检。
-
-**取证口径（可复现）**：反例对照必须能击破断言——`packages/engine/src/github/git-signing.test.ts` 在同一次执行内先证「宿主 `push.gpgSign=true` 时裸 `git push` 必失败（`does not support --signed push`）」，再证「`pushBranch` 成功」；push 侧 hooks 同理（先证裸 push 被植入的 `pre-push`（`exit 1`）拦截，再证 `pushBranch` 成功且 hook 标记文件不存在），避免"环境恰好不触发"导致的恒真断言。
+- **硬约束**：作用对象为被修复仓库的 `git commit` / `git push`（含 `push --delete`）必须复用 `git-signing.ts` 的 4 个隔离常量（`GIT_COMMIT_*` / `GIT_PUSH_*` 的 SIGNING / HOOKS），`--no-verify` 置于对应子命令之后；不得提供签名 / hooks opt-in。
+- **细节与边界**：隔离参数表、作用对象 4 处 push + commit 侧、`-c` 不写回配置、重开条件、不做边界与取证口径见 [ai-delivery-protocols.md §5](../design/governance/ai-delivery-protocols.md#_5-git-隔离语义与参数)。
 
 ## 4. AI 行为准则
 
-- **禁止擅自推送**: commit 后不得自动执行 `git push`，推送仅限用户明确指令。
+- **禁止擅自推送**: commit 后不得自动执行 `git push`，推送仅限用户明确指令；授权窗口（含定时任务等场景）见 [GitHub 协作规范 §4](github-collaboration.md#_4-推送授权)。
 - **工作区检查**: 每次改动前先 `git status` 确认工作区干净。
 - **远程同步**: 开始前拉取远程更新（`git fetch` + `git pull --rebase`）。

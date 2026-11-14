@@ -118,6 +118,17 @@ export class Repository extends BaseEntity {
     sandboxLimits!: string | null
 
     /**
+     * 仓库级沙箱镜像引用（可选；示例 `ghcr.io/owner/dependfix:latest`）。
+     *
+     * 缺省 → 平台 `SANDBOX_IMAGE` → `SANDBOX_IMAGE_REPO` + `SANDBOX_IMAGE_TAG`
+     * （默认按平台 registry → Docker Hub → ghcr → ACR 逐源预检，tag 取平台构建版本）。
+     * 外置 rootless daemon 通常没有本地构建的镜像，需显式配置仓库级值或平台 env；
+     * 语法校验见 `utils/docker-image.ts`（执行期仍以 docker 拉取结果为准）。
+     */
+    @Column({ type: 'varchar', length: 255, nullable: true })
+    sandboxImage!: string | null
+
+    /**
      * 仓库级自定义验证命令（JSON 数组字符串，如 `'["pnpm install --frozen-lockfile","pnpm test"]'`）；
      * 覆盖引擎默认验证链（`DEFAULT_VERIFY_COMMANDS`），空数组存 null。
      *
@@ -143,6 +154,40 @@ export class Repository extends BaseEntity {
      */
     @Column({ type: 'text', nullable: true })
     prCheckFocus!: string | null
+
+    // ---------------------------------------------------------------------
+    // 仓库级执行预算与超时（2026-11-08；`null` = 继承全局）
+    //
+    // 口径见 [repo-execution-limits.md](../../../../docs/design/governance/repo-execution-limits.md) §4.1：
+    // 库内一律毫秒（与引擎常量同源），前端输入 / 展示一律分钟。
+    // 解析优先级与边界在 `server/utils/execution-limits.ts`（单一事实源）。
+    // ---------------------------------------------------------------------
+
+    /** 单仓执行上限（覆盖 `EXECUTION_TIMEOUT_MS`；另受平台封顶约束） */
+    @Column({ type: 'integer', nullable: true, name: 'execution_timeout_ms' })
+    executionTimeoutMs!: number | null
+
+    /** 单条验证命令超时（覆盖 `DEPENDFIX_VERIFY_TIMEOUT_MS`） */
+    @Column({ type: 'integer', nullable: true, name: 'verify_command_timeout_ms' })
+    verifyCommandTimeoutMs!: number | null
+
+    /** 安装类命令超时（覆盖 `DEPENDFIX_INSTALL_TIMEOUT_MS`） */
+    @Column({ type: 'integer', nullable: true, name: 'install_timeout_ms' })
+    installTimeoutMs!: number | null
+
+    /** clone 超时（覆盖 `CLONE_TIMEOUT_MS`） */
+    @Column({ type: 'integer', nullable: true, name: 'clone_timeout_ms' })
+    cloneTimeoutMs!: number | null
+
+    /**
+     * 仓库级跨大版本升级授权（默认关闭）。
+     *
+     * 关闭：跨 major 告警记 `cross-major` 跳过（人工处理）；开启：满足准入条件（根 manifest 直接依赖 +
+     * lockfile 单版本）的告警进入升级链，仍走完整验证与失败自动回滚。间接依赖 / 多版本共存维持人工。
+     * 仅平台显式配置面（CLI 走 `--allow-major-upgrade`，Action 与 env 均无隐式通道）。
+     */
+    @Column({ type: 'boolean', default: false })
+    allowMajorUpgrade!: boolean
 
     /**
      * PR 回环反馈配置（JSON 文本；`null` = 全默认）。

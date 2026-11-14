@@ -57,7 +57,7 @@ export interface ScanRunFixture {
         /** 跳过总数与按原因分组（结果披露） */
         alertsSkipped?: number
         alertsSkippedByReason?: Partial<Record<
-            'subdirectory-manifest' | 'cross-major' | 'not-fixable' | 'override-protected' | 'repeated-failure',
+            'subdirectory-manifest' | 'cross-major' | 'not-fixable' | 'override-protected' | 'repeated-failure' | 'peer-only',
             number
         >>
         /** 截断总数与按严重级别分组（结果披露） */
@@ -134,6 +134,8 @@ export interface PRCheckSignalFixture {
     targetUrl?: string | null
     logUrl?: string | null
     summary?: string | null
+    /** 失败归因（供视觉基线构造带归因标签的信号；缺省不写该字段） */
+    attribution?: 'self_caused' | 'pre_existing' | 'external_noise' | 'cancelled' | 'unknown'
 }
 
 /** 失败源条目（写入 `failure_sources_json`；缺省时按 `signals` 派生） */
@@ -151,6 +153,8 @@ export interface PRCheckFixture {
     headSha: string
     authorLogin: string
     conclusion?: 'success' | 'failure' | 'neutral' | 'cancelled' | 'timed_out' | 'action_required' | 'stale' | 'pending' | 'skipped'
+    /** PR 生命周期状态（缺省 = 生命周期列上线前的存量行 unknown） */
+    prState?: 'open' | 'closed' | 'merged' | 'unknown'
     checkRunId?: string | null
     detailsUrl?: string | null
     errorMessage?: string | null

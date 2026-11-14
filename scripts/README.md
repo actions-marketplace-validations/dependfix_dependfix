@@ -15,28 +15,36 @@
 | `pnpm release:plan` | `create-release-plan.mjs` | 从 git log 推导各包版本提升级别（feat→minor / fix→patch / BREAKING→0.x minor），生成 `release-plan.md` 供人工 review/修正 |
 | `pnpm release:version` | `release-version.mjs` | 消费 `release-plan.md`：依赖传导闭包计算 + 写回各包版本号 + 删除计划文件。`--dry-run` 预览 / `--force` 跳过工作区干净检查 |
 | `pnpm changelog` | `changelog.mjs` | 生成/更新根级与包级 CHANGELOG.md（conventional-changelog-cmyr-config，增量追加） |
-| `pnpm verify:changelog` | `verify-changelog.mjs` | 发布前校验各份 CHANGELOG（根级 + 包级）已包含当前版本段（缺失即非零退出，禁止发布） |
-| `pnpm release:publish` | `release-publish.mjs` | 按 `publishOrder` 发布"本地版本未在 npm registry"的包（`pnpm publish`，OIDC 直通）+ 创建 `<pkg>@<version>` annotated tag + `v<锚版本>` 聚合 tag + 写 `release-publish-result.json`。`--dry-run` 预览；`--otp <6-8 位>` 透传本地 2FA；发布 registry 固定官方（`--registry` 可覆盖）；HEAD 锚点校验防误发布 |
+| `pnpm verify:changelog` | `verify-changelog.mjs` | 发布前校验各份 CHANGELOG（根级 + 包级）已包含当前版本段（缺失即非零退出，禁止发布）；`--fresh` 按当前 git 历史在内存重算该段条目并与磁盘比对（已打 tag 的段不参与；浅克隆 / 无 tag warning 放行；不写盘） |
+| `pnpm release:publish` | `release-publish.mjs` | 按 `publishOrder` 发布"本地版本未在 npm registry"的包（`pnpm publish`，OIDC 直通）+ 创建 `<pkg>@<version>` annotated tag + `v<锚版本>` 聚合 tag + 写 `release-publish-result.json`。发布前自动执行安全告警门禁（与 `release.yml` 同源，`--skip-security=<理由>` 显式绕过并留痕；`--dry-run` 与无实际发布动作的轮次不执行）；`--dry-run` 预览；`--otp <6-8 位>` 透传本地 2FA；发布 registry 固定官方（`--registry` 可覆盖）；HEAD 锚点校验防误发布 |
 | `pnpm release:push-tags` | `push-release-tags.mjs` | 发布 tag 推送 + 核验（CI）：显式 token URL push → 本地/远程集合对比，缺失即报错（教训见 [经验归档 §二十六](../docs/design/governance/experience-archive.md)） |
-| `pnpm release:github` | `create-github-release.mjs` | 创建本轮聚合 GitHub Release（消费 `release-publish-result.json`：版本矩阵 + 根 CHANGELOG 段，core-only 取锚包包级段；0.x 标 prerelease；幂等 + 失败 warn 不阻断）。`--dry-run` 预览 notes |
+| `pnpm release:github` | `create-github-release.mjs` | 创建本轮聚合 GitHub Release（消费 `release-publish-result.json`：版本矩阵 + 根 CHANGELOG 段，core-only 取锚包包级段；alpha / beta / rc 标 prerelease（0.x 正式版不标，与 npm `latest` 一致）；幂等 + 失败 warn 不阻断）。`--dry-run` 预览 notes |
+| `pnpm release:preflight` | `release/preflight.mjs` | 发布前预演：全部 npm 发布包 `pnpm pack` → 临时工程用本地 tarball 安装（`pnpm-workspace.yaml` overrides，pnpm 11 不读 package.json 的 `pnpm` 字段）→ 断言 `dependfix --version` == 包版本；同时校验 tarball 内无 `workspace:` 协议、`bin`/`main`/`exports` 入口齐全、预演前后工作区不变。`--no-install` 仅做离线 tarball 校验；已接入 `release.yml`（build 之后） |
 | `pnpm tag:released` | `tag-released-versions.mjs` | 为"npm 已发布但本地无 tag"的版本补打锚点 tag（手动发布辅助）。`--dry-run` / `--at <commit>` |
+| — | `release/scan-image-tags.mjs` | 历史镜像 tag 巡检：近 `--window` 个 `@dependfix/platform@*` 发布 tag 读 registry manifest，输出 `verified`（双架构）/ `unverified`（缺凭证 / 缺镜像 / 网络失败 / 单架构，附原因）；fail-open、只读 manifest，不拉取不运行；`--json` 机读 |
 
 ### 文档与链接
 
 | pnpm 命令 | 脚本 | 用途 |
 |---|---|---|
-| `pnpm check:docs` | `check-docs.mjs` | 校验仓库内 .md 文件规范（七类规则：links：路径存在、锚点 slug、拒绝绝对路径/目录越界；vue-interp：docs/ 行内代码不触发 VitePress 编译失败；link-text：链接文本 §N ↔ 目标锚点编号；link-syntax：畸形链接；emphasis：`**` 未配对；site-links：站点静态绝对链接；archive-anchors：归档文档锚点子集）；`--only=<links\|vue-interp\|link-text\|link-syntax\|emphasis\|site-links\|archive-anchors>` 单跑（覆盖面与边界见 [文档规范 §2](../docs/standards/documentation.md#2-markdown-约定)） |
+| `pnpm check:docs` | `check-docs.mjs` | 校验仓库内 .md 文件规范（八类规则：links：路径存在、锚点 slug、拒绝绝对路径/目录越界；vue-interp：docs/ 行内代码不触发 VitePress 编译失败；link-text：链接文本 §N ↔ 目标锚点编号；link-syntax：畸形链接；emphasis：`**` 未配对；site-links：站点静态绝对链接；archive-anchors：归档文档锚点子集；anchor-id：站内锚点必须是 VitePress 产物 id）；`--only=<links\|vue-interp\|link-text\|link-syntax\|emphasis\|site-links\|archive-anchors\|anchor-id>` 单跑（覆盖面与边界见 [文档规范 §2](../docs/standards/documentation.md#_2-markdown-约定)） |
+| `pnpm docs:check:anchors` | `docs/verify-anchor-dist.mjs` | 以 `docs:build` 产物 HTML 的 `id` 为权威复核：① 全部站内锚点命中产物 id；② 每页推算的标题 id 序列与产物逐个比对（slug 口径自校验，warning 不阻断）；源页缺产物或未构建时非零退出；已接入 `gates:docs`（紧跟 `docs:build`） |
+| — | `docs/migrate-anchors.mjs` | 站内锚点机械迁移为 VitePress 产物 id：默认 dry-run（逐文件计数 + 歧义 / 未命中清单），`--write` 落盘、`--json` 机读；以 `docs/vitepress-slug.mjs` 的 slug 为唯一权威（口径见 [文档规范](../docs/standards/documentation.md)） |
+| `pnpm docs:check:guides` | `docs/check-guide-parity.mjs` | 中英指南平价：`configuration` / `quick-start` 的 env 变量、CLI 参数、Action 输入键位与 H2/H3 骨架（en ⊇ zh），文案措辞不在面内 |
+| `pnpm docs:check:mirror` | `docs/check-design-mirror.mjs` | en 设计镜像结构映射：zh 分片 / en 镜像 / `mirror-manifest.md` 三方一致，且每页 H2 映射与两侧真实标题逐条对应 |
+| `pnpm check:real-env` | `docs/check-real-env-evidence.mjs` | G3 真实环境证据的模板生成与字段校验：`--init` 生成 `artifacts/real-env/<path>.md`（gitignored），默认校验 frontmatter 必填字段 / 状态语义（`pending` 不算通过）/ 证据文件是否真实存在；`--require=G3.1,G3.8` 或 `--require-all` 作发布前门禁。不接入 `gates:docs`（证据在 gitignored 目录）。口径见 [真实环境矩阵指南](../docs/guide/real-env-matrix.md) |
+| `pnpm check:contract-freeze` | `docs/check-contract-freeze.mjs` | 1.0 契约冻结机检：`argsDef` / `action.yml` / `RuntimeConfig` / `DEPENDFIX_*` / `RunResult`·`RepositoryResult` / 实体元数据抽取的键位与 [契约冻结清单](../docs/guide/contract-freeze.md) 比对（集合语义；标题改名 / 抽取为空 fail-closed），并校验 zh·en quick-start 参数表 == `argsDef` |
 | `pnpm docs:check:i18n` | `docs/check-i18n-duplicates.mjs` | 检查 docs 翻译页是否同时存在于旧目录（`docs/<locale>/`）与 `docs/i18n/<locale>/`（回流即报错；详见 [i18n 规范](../docs/standards/i18n.md)） |
 | `pnpm check:experience-landing` | `check-experience-landing.mjs` | 校验归档条目落点非空（编号子条目逐条校验；无编号子条目的 `##` 整体校验；占位符与自指落点判空）；**已接入 CI Test job（命中即阻断）** |
-| `pnpm check:doc-size` | `check-doc-size.mjs` | 按 [文档规范 §3](../docs/standards/documentation.md#3-文档行数阈值) 的阈值表计量文档行数（单一事实源，脚本不硬编码）；超强制分片阈值阻断，warning 带仅报告；**已接入 CI Test job** |
-| `pnpm gates:docs` | `run-doc-gates.mjs` | 文档与治理门禁总入口（`DOC_GATES` 单点声明）：顺序执行 i18n / markdown / 链接 / 编号 / 规范 / 机制一致性 / docs 构建等 16 项；`release.yml` 与 weekly / pre-release / phase-close 回归 profile 共用（与 `test.yml` 同集合）；任一失败非零退出 |
-| `pnpm check:doc-governance` | `check-doc-governance.mjs` | 文档治理结构与密度机检：字符/规则条数预算（[文档治理执行规范 §4.2](../docs/design/governance/doc-governance.md#42-字符与密度预算)）+ 归档索引不变量 + freshness warning；**已接入 CI Test job（阻断项命中即失败）** |
+| `pnpm check:doc-size` | `check-doc-size.mjs` | 按 [文档规范 §3](../docs/standards/documentation.md#_3-文档行数阈值) 的阈值表计量文档行数（单一事实源，脚本不硬编码）；超强制分片阈值阻断，warning 带仅报告；**已接入 CI Test job** |
+| `pnpm gates:docs` | `run-doc-gates.mjs` | 文档与治理门禁总入口（`DOC_GATES` 单点声明）：顺序执行 i18n / markdown / 链接 / 指南平价 / 镜像映射 / 契约冻结 / 编号 / 规范 / 机制一致性 / docs 构建 / 锚点产出实证等 20 项；`release.yml` 与 weekly / pre-release / phase-close 回归 profile 共用（与 `test.yml` 同集合）；任一失败非零退出 |
+| `pnpm check:doc-governance` | `check-doc-governance.mjs` | 文档治理结构与密度机检：字符/规则条数预算（[文档治理执行规范 §4.2](../docs/design/governance/doc-governance.md#_4-2-字符与密度预算)）+ 归档索引不变量 + freshness warning；**已接入 CI Test job（阻断项命中即失败）** |
 
 ### 代码注释治理
 
 | pnpm 命令 | 脚本 | 用途 |
 |---|---|---|
-| `pnpm check:orphan-ids` | `check-orphan-ids.mjs` | 检测非 `docs/` 源码 / 配置 / 脚本注释中的孤立规划编号（无文档指针即违规；覆盖子任务字母后缀 `M43.2a`；判定口径与已知边界见脚本头注释 + [开发规范 §3](../docs/standards/development.md#3-注释规范)）；`--json` 机读；**已接入 CI Test job（命中即阻断）** |
+| `pnpm check:orphan-ids` | `check-orphan-ids.mjs` | 检测非 `docs/` 源码 / 配置 / 脚本注释中的孤立规划编号（无文档指针即违规；覆盖子任务字母后缀 `M43.2a`；判定口径与已知边界见脚本头注释 + [开发规范 §3](../docs/standards/development.md#_3-注释规范)）；`--json` 机读；**已接入 CI Test job（命中即阻断）** |
 
 ### 仓库自洽门禁
 
@@ -64,6 +72,12 @@
 | `pnpm distill:wisdom` | `distill-wisdom.mjs` | Session Wisdom 蒸馏分析：读取 `.session/wisdom.md` 输出结构化报告与迁移建议；`--check` 供 hook 检查条目数是否超阈值（详见 [Session Wisdom 蒸馏机制](../docs/design/governance/session-wisdom-distillation.md)） |
 | `pnpm sync:skills` | `sync-skills.mjs` | 产品 skill 权威源镜像同步（`packages/skills/dependfix-remediator/` → `skills/dependfix-remediator/`，供 npx skills 生态发现；详见 [skill 分发设计](../docs/design/governance/skill-distribution.md)） |
 
+### 产品指标（G8）
+
+| pnpm 命令 | 脚本 | 用途 |
+|---|---|---|
+| `pnpm metrics:pr-health` | `metrics/pr-health.mjs` | G8 产品指标采集：窗口内 PR 的 CI 绿率 / 人工介入率 / 误关率，输出 Markdown + JSON。`--source=api`（需 `GITHUB_TOKEN` / `GH_PAT`）或 `--source=file --input=<snapshot.json>`（`--out-dir` 会落同名 `.snapshot.json` 供回灌复算）；口径（分子 / 分母 / 窗口）与 [1.0 就绪度台账 §2.1 G8](../docs/design/governance/release-1.0-readiness.md) 同源，夹具 `metrics/__fixtures__/pr-health.sample.json` 锁定三指标确定值。窗口内 0 个 PR 默认失败（`--allow-empty` 放行）；需 token + 网络，**不纳入 `gates:docs`** |
+
 ### 配置单点
 
 | 文件 | 用途 |
@@ -88,3 +102,4 @@
 - 发布链路脚本必须复用 `packages.config.mjs` 单点配置，禁止硬编码包列表；
 - 涉及 git / registry 副作用操作的脚本提供 `--dry-run` 预览；
 - 新增脚本后同步更新本 README 命令速查表。
+- 采集 / 统计类脚本**缺凭据时直接失败**，不得输出 0 值读数（避免把「没取到数」误读成「指标为零」）。

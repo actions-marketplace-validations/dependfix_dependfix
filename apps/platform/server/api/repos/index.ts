@@ -1,3 +1,4 @@
+import { formatDurationMs } from '@dependfix/core'
 import type { H3Event } from 'h3'
 import { parseSandboxLimits, parseTags, parseVerifyCommands, Repository } from '#server/entities/repository'
 import { ensureDatabaseInitialized } from '#server/database'
@@ -6,7 +7,10 @@ import { requireAuth, requireRole } from '#server/utils/guard'
 import { createLocalizedError } from '#server/utils/localized-error'
 import { resolveOrganizationId } from '#server/utils/organization'
 import { normalizePRCheckFocus, parsePRCheckFocus } from '#server/utils/pr-check-focus'
-import { recordVerifyCommandsAudit } from '#server/services/repository-audit'
+import { recordExecutionLimitsAudit, recordMajorUpgradePolicyAudit, recordVerifyCommandsAudit } from '#server/services/repository-audit'
+import { resolveExecutionCeilingMs } from '#server/utils/execution-limits'
+import { resolveAllowMajorUpgradeDefault } from '#server/utils/allow-major-upgrade'
+import { normalizeDockerImage } from '#server/utils/docker-image'
 
 const toView = (r: Repository) => ({
     id: r.id,
@@ -22,8 +26,14 @@ const toView = (r: Repository) => ({
     note: r.note,
     tags: parseTags(r.tags),
     sandboxLimits: parseSandboxLimits(r.sandboxLimits),
+    sandboxImage: r.sandboxImage,
     verifyCommands: parseVerifyCommands(r.verifyCommands),
     prCheckFocus: parsePRCheckFocus(r.prCheckFocus),
+    executionTimeoutMs: r.executionTimeoutMs,
+    verifyCommandTimeoutMs: r.verifyCommandTimeoutMs,
+    installTimeoutMs: r.installTimeoutMs,
+    cloneTimeoutMs: r.cloneTimeoutMs,
+    allowMajorUpgrade: r.allowMajorUpgrade,
     aiEnabled: r.aiEnabled,
     aiTrigger: r.aiTrigger,
     lastScanAt: r.lastScanAt,
@@ -61,6 +71,23 @@ const createRepository = async (event: H3Event) => {
             statusCode: 400,
             code: 'REPO_VALIDATION_FAILED',
             data: { issues: parsed.error.issues },
+        })
+    }
+
+    // 封顶校验（AC2）：仓库值不得超过平台封顶，超限 400 且不落库
+    const ceilingMs = resolveExecutionCeilingMs(process.env)
+    const requestedExecutionTimeoutMs = parsed.data.executionTimeoutMs
+    if (requestedExecutionTimeoutMs !== null && requestedExecutionTimeoutMs !== undefined
+        && requestedExecutionTimeoutMs > ceilingMs) {
+        throw createLocalizedError(event, {
+            statusCode: 400,
+            code: 'REPO_VALIDATION_FAILED',
+            data: {
+                issues: [{
+                    path: ['executionTimeoutMs'],
+                    message: `执行上限不能超过平台封顶 ${formatDurationMs(ceilingMs)}`,
+                }],
+            },
         })
     }
 
@@ -104,6 +131,10 @@ const createRepository = async (event: H3Event) => {
     // prCheckFocus 对象 → JSON 字符串列（三维全空归一为 null = 未配置；规范化负责 trim / 去重 / 小写）
     const prCheckFocusValue = normalizePRCheckFocus(parsed.data.prCheckFocus)
 
+    // 新建仓库默认值：平台部署可通过 ALLOW_MAJOR_UPGRADE_DEFAULT / NUXT_PUBLIC_ALLOW_MAJOR_UPGRADE_DEFAULT
+    // 统一开启；请求体显式值优先（表单编辑既有仓库时始终显式提交当前开关状态）
+    const allowMajorUpgradeDefault = resolveAllowMajorUpgradeDefault(event)
+
     const entity = repo.create({
         organizationId,
         owner: parsed.data.owner,
@@ -117,8 +148,14 @@ const createRepository = async (event: H3Event) => {
         note: parsed.data.note ?? null,
         tags,
         sandboxLimits,
+        sandboxImage: normalizeDockerImage(parsed.data.sandboxImage),
         verifyCommands: verifyCommandsValue,
         prCheckFocus: prCheckFocusValue ? JSON.stringify(prCheckFocusValue) : null,
+        executionTimeoutMs: parsed.data.executionTimeoutMs ?? null,
+        verifyCommandTimeoutMs: parsed.data.verifyCommandTimeoutMs ?? null,
+        installTimeoutMs: parsed.data.installTimeoutMs ?? null,
+        cloneTimeoutMs: parsed.data.cloneTimeoutMs ?? null,
+        allowMajorUpgrade: parsed.data.allowMajorUpgrade ?? allowMajorUpgradeDefault,
     })
     const saved = await repo.save(entity)
 
@@ -138,6 +175,34 @@ const createRepository = async (event: H3Event) => {
         where: { id: saved.id },
         relations: { credential: true },
     })
+    // 跨大版本授权审计：创建时开启才登记（默认关闭不产生噪声）
+    if (saved.allowMajorUpgrade) {
+        await recordMajorUpgradePolicyAudit(ds, {
+            repositoryId: saved.id,
+            owner: saved.owner,
+            name: saved.name,
+            previous: false,
+            next: true,
+        })
+    }
+
+    // 执行预算配置审计：创建时非全空才登记（避免默认继承产生噪声）
+    const createdLimits = {
+        executionTimeoutMs: saved.executionTimeoutMs,
+        verifyCommandTimeoutMs: saved.verifyCommandTimeoutMs,
+        installTimeoutMs: saved.installTimeoutMs,
+        cloneTimeoutMs: saved.cloneTimeoutMs,
+    }
+    if (Object.values(createdLimits).some((value) => value !== null)) {
+        await recordExecutionLimitsAudit(ds, {
+            repositoryId: saved.id,
+            owner: saved.owner,
+            name: saved.name,
+            previous: { executionTimeoutMs: null, verifyCommandTimeoutMs: null, installTimeoutMs: null, cloneTimeoutMs: null },
+            next: createdLimits,
+        })
+    }
+
     return withRelation ? toView(withRelation) : toView(saved)
 }
 

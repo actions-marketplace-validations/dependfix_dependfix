@@ -5,7 +5,6 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { execFileSync, execSync } from 'node:child_process'
 import {
-    toErrorMessage,
     type AlertsDisabledRecord,
     type CiAlignmentRecord,
     type FixAction,
@@ -18,6 +17,7 @@ import {
     type RunSummary,
     type AlertFixOutcome,
     type DeliverySkipRecord,
+    type RunDelivery,
 } from '@dependfix/core'
 import { stageAndCommit } from '../github/pr-creator'
 import { collectDeclaredPaths } from '../github/commit-scope'
@@ -29,7 +29,6 @@ import {
     readLockfileVersions,
     normalizeOverrideKey,
 } from '../fixers/dependency'
-import { repairLockfile, type LockfileRepairResult } from '../fixers/pnpm'
 import { applyCodeScanningFix, restoreSourceFile, snapshotSourceFile } from '../fixers/code-scanning'
 import { inferRepoFromGitRemote, type RuntimeConfig } from '../config'
 
@@ -131,6 +130,13 @@ export interface AppContext {
     workDir: string
     logger: Logger
     customCommands?: string[]
+    /** 仓库级验证命令超时（毫秒；缺省走 env / 内置默认） */
+    verifyCommandTimeoutMs?: number
+    /**
+     * 交付结果（仅 fix / fix-and-pr 模式由引擎写入；report-only 缺省）。
+     * 进程内完成 push / PR 时由引擎维护，平台据此映射 runUrl / PR 与失败清理。
+     */
+    delivery?: RunDelivery
     runId: string
     allAlerts: NormalizedSecurityAlert[]
     allActions: FixAction[]
@@ -322,6 +328,41 @@ export function buildVersionedOverrides(
             overrides[resolveWriteKey(pathKey)] = `^${target}`
         }
     }
+
+    // 父级限定键遮蔽（2026-11-01 cmyr-skills-agents undici 实证）：已有的 `parent>pkg` 规则
+    // 优先于通用 / 版本化键，通用键升级后 pnpm 不重新解析 → 实例不变。这里把「同包且仍低于
+    // 本次目标」的父级键一并提升（保持原 key 写法，只改值），不新增条目、不删既有条目。
+    // 目标必须与键自身的版本线一致：有 selector 用 selector 的 major；无 selector 用当前值的
+    // major。对应线没有本次目标时跳过——不做未授权的跨 major 改写（由校验失败消息披露遮蔽键）。
+    if (Object.keys(overrides).length > 0) {
+        for (const [key, value] of Object.entries(existingOverrides)) {
+            if (!key.includes('>')) {
+                continue
+            }
+            const segments = key.trim().split('>')
+            const lastSegment = segments[segments.length - 1].trim()
+            const atIndex = lastSegment.startsWith('@') ? lastSegment.indexOf('@', 1) : lastSegment.indexOf('@')
+            const keyPackage = atIndex > 0 ? lastSegment.slice(0, atIndex) : lastSegment
+            if (keyPackage !== packageName) {
+                continue
+            }
+            const selectorMajor = atIndex > 0
+                ? /^[^\d]*(\d+)/.exec(lastSegment.slice(atIndex + 1))?.[1]
+                : undefined
+            const current = value.replace(/^\s*[\^~>=<]*\s*/, '')
+            const lineMajor = selectorMajor ?? /^(\d+)/.exec(current)?.[1]
+            if (lineMajor === undefined) {
+                continue
+            }
+            const target = targetByMajor.get(lineMajor)
+            if (!target) {
+                continue
+            }
+            if (compareSemver(current, target) < 0) {
+                overrides[key] = `^${target}`
+            }
+        }
+    }
     return overrides
 }
 
@@ -489,93 +530,7 @@ export async function runCodeScanningFixes(
  */
 const DEFAULT_CS_BATCH_SIZE = 10
 
-/** 尝试修复 pnpm-lock.yaml（dry-run 仅记录）。 */
-export async function tryLockfileRepair(
-    ctx: Pick<AppContext, 'config' | 'logger' | 'workDir' | 'allErrors'>,
-    repo: string,
-): Promise<FixAction> {
-    const { config, logger, workDir, allErrors } = ctx
-    const startMs = Date.now()
-
-    if (config.dryRun) {
-        logger.info(`[dry-run] Would attempt lockfile repair for ${repo}`)
-        return {
-            type: 'lockfile-repair',
-            repository: repo,
-            target: 'pnpm-lock.yaml',
-            success: true,
-            durationMs: 0,
-        }
-    }
-
-    try {
-        const result: LockfileRepairResult = await repairLockfile({
-            workDir,
-            // 未配置 toolchainPnpmVersion 时省略（缺省从 packageManager 解析）
-            ...(config.toolchainPnpmVersion ? { toolchain: { pnpmVersion: config.toolchainPnpmVersion } } : {}),
-        })
-
-        // 「已合规」与「修复生效」必须区分：旧文案对两者都输出 repaired，
-        // 用户读成「修好了但没提交」（口径见 docs/design/modules/dependency-fixer-records.md §12.15）。
-        const noChange = result.success && result.changed === false
-        let logMessage: string
-        if (!result.success) {
-            logMessage = `Lockfile repair failed for ${repo}: ${result.failureDetail ?? 'unknown'}`
-        } else if (noChange) {
-            logMessage = `Lockfile already compliant for ${repo} — no repair needed`
-        } else if (result.changed === true) {
-            logMessage = `Lockfile repair applied for ${repo} (strategy: ${result.strategy ?? 'N/A'})`
-        } else {
-            // changed 缺省（类型可选）：不把「可能改动」说成「已修复」
-            logMessage = `Lockfile repair completed for ${repo} (change status unknown)`
-        }
-        logger.info(logMessage)
-
-        // 格式漂移检测：lockfileVersion 变化时 diff 摘要附加标注（wisdom: pnpm v11 迁移教训）
-        let diffSummary = result.diff?.summary
-        if (result.lockfileVersionChanged && diffSummary) {
-            diffSummary = `${diffSummary} (lockfileVersion changed)`
-        }
-
-        // 环境性安装失败（诊断步无 stderr 诊断）：无法归因目标仓库——记非归因审计条目
-        // （`ENVIRONMENT_ERROR` 进 SKIPPED_AUDIT_CATEGORIES），并在 action 上标记，
-        // 使 computeExitCode 不计入失败动作（与既有失败基线同族口径）。
-        const environmentalFailure = !result.success && result.environmental === true
-        if (environmentalFailure) {
-            allErrors.push({
-                repository: repo,
-                target: 'pnpm-lock.yaml',
-                stage: 'repair',
-                category: 'ENVIRONMENT_ERROR',
-                message: result.failureDetail ?? 'environmental install failure',
-            })
-        }
-
-        return {
-            type: 'lockfile-repair',
-            repository: repo,
-            target: 'pnpm-lock.yaml',
-            success: result.success,
-            error: result.success ? undefined : (result.failureDetail ?? 'Lockfile repair failed'),
-            strategy: result.strategy,
-            durationMs: Date.now() - startMs,
-            diff: diffSummary,
-            ...(noChange ? { noOp: true } : {}),
-            ...(environmentalFailure ? { environmentalFailure: true } : {}),
-        }
-    } catch (error: unknown) {
-        const message = toErrorMessage(error)
-        logger.error(`Lockfile repair error for ${repo}: ${message}`)
-        return {
-            type: 'lockfile-repair',
-            repository: repo,
-            target: 'pnpm-lock.yaml',
-            success: false,
-            error: message,
-            durationMs: Date.now() - startMs,
-        }
-    }
-}
+export { tryLockfileRepair } from './lockfile-repair-action'
 
 
 // ---------------------------------------------------------------------------

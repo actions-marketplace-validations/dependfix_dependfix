@@ -12,6 +12,9 @@
 services:
   platform:
     image: ${DEPENDFIX_BUILD_IMAGE:-caomeiyouren/dependfix:local}
+    environment:
+      # 仅平台自身镜像；沙箱默认使用独立发布镜像（SANDBOX_IMAGE* 可覆盖）
+      DEPENDFIX_IMAGE: ${DEPENDFIX_BUILD_IMAGE:-caomeiyouren/dependfix:local}
     build:
       context: ../..
       dockerfile: apps/platform/Dockerfile

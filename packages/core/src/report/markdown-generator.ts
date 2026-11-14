@@ -4,12 +4,15 @@ import {
     type FixAction,
     type RepeatedAttemptStatus,
     type DeliverySkipCarrier,
+    type SkipReason,
     aggregateSeverity,
     groupByRepository,
     formatDuration,
+    SKIP_REASONS,
     actionTypeLabel,
     isAlertFixedByActions,
     statusIcon,
+    formatVerificationSkipReason,
 } from './types'
 import { collectCodeScanningSuggestions } from './suggestions'
 import { collectCodeQualityFindings } from './code-quality-suggestions'
@@ -17,6 +20,8 @@ import { groupCheckAttributions } from './check-attribution'
 import { describeCiAlignment } from './ci-alignment'
 import { collectFamilySummaries } from './family'
 import { countUnfixedAlerts, formatSeverity, formatSkipReason, skippedBreakdown, truncatedBreakdown } from './summary-counters'
+import { summarizeSkippedByPackage } from './skipped-packages'
+import { redactNetworkTarget } from './network-audit-target'
 
 /**
  * 生成 Markdown 格式报告字符串。
@@ -75,6 +80,7 @@ export function generateMarkdownReport(result: RunResult): string {
         `| Lockfile repairs | ${summary.lockfileRepairs} |`,
         `| Verifications passed | ${summary.verificationsPassed} |`,
         `| Verifications failed | ${summary.verificationsFailed} |`,
+        `| Verifications skipped | ${summary.verificationsSkipped} |`,
         '',
     )
 
@@ -100,6 +106,56 @@ export function generateMarkdownReport(result: RunResult): string {
         }
         if (failedResidual > 0) {
             sections.push(`| Failed / other not fixed | ${failedResidual} |`)
+        }
+        sections.push('')
+    }
+
+    // ---- 2.5.1 Skipped by Package（同一包多条告警收敛为一行；有汇总时渲染）----
+    // 运行级结论的「无写入」只说明未验证，不解释告警被拦的构成；
+    // 此处按包给出条数与原因，避免 12 条同包告警在报告里看起来像 12 个包。
+    const skippedPackages = summarizeSkippedByPackage(alerts, result.alertOutcomes)
+    if (skippedPackages.length > 0) {
+        sections.push(
+            '## Skipped by Package',
+            '',
+            '> 同一包的多条告警合并为一行；`Highest target` 为该包被告警要求升级到的最高版本。',
+            '',
+            '| Repository | Package | Alerts | Highest target | Reasons |',
+            '|------------|---------|--------|----------------|---------|',
+        )
+        for (const row of skippedPackages) {
+            // 未知原因原样输出（不渲染 undefined）
+            const reasons = row.reasons.length > 0
+                ? row.reasons.map((reason) => (SKIP_REASONS as readonly string[]).includes(reason)
+                    ? formatSkipReason(reason as SkipReason)
+                    : reason).join(', ')
+                : '—'
+            sections.push(
+                `| ${escapeMd(row.repository)} | \`${escapeMd(row.packageName)}\` | ${row.count} `
+                + `| ${row.highestTarget ? `\`${escapeMd(row.highestTarget)}\`` : '—'} | ${reasons} |`,
+            )
+        }
+        sections.push('')
+    }
+
+    // ---- 2.5.2 Network Violations（deny-by-default 拦截的非白名单外联）----
+    const networkViolations = result.networkViolations ?? []
+    if (networkViolations.length > 0) {
+        sections.push(
+            '## Network Violations',
+            '',
+            '> 非白名单外联已被本地审计代理拦截（502）；运行不得因此判定为「验证通过」。',
+            '',
+            '| Source | Method | Target |',
+            '|--------|--------|--------|',
+        )
+        for (const violation of networkViolations.slice(0, 50)) {
+            sections.push(
+                `| ${escapeMd(violation.source)} | ${escapeMd(violation.method)} | \`${escapeMd(redactNetworkTarget(violation.target))}\` |`,
+            )
+        }
+        if (networkViolations.length > 50) {
+            sections.push('', `> 其余 ${networkViolations.length - 50} 条见 JSON 报告。`)
         }
         sections.push('')
     }
@@ -145,6 +201,26 @@ export function generateMarkdownReport(result: RunResult): string {
                 ? record.failingCommands.map((command) => `\`${escapeMd(command)}\``).join('<br>')
                 : '—'
             sections.push(`| ${repos} | ${commands} | ${carrier} |`)
+        }
+        sections.push('')
+    }
+
+    // ---- 2.8 Verification Skipped（预算 / 0 写入；不计失败、不回滚）----
+    const verificationSkipped = repositories.filter((repo) => repo.verificationSkipped !== undefined)
+    if (verificationSkipped.length > 0) {
+        sections.push(
+            '## Verification Skipped',
+            '',
+            '> 验证未执行（运行预算不足 / 本次无写入）：不得视为验证通过，也不计入失败；'
+            + '预算跳过阻断交付，本次无写入则无交付内容。',
+            '',
+            '| Repository | Reason |',
+            '|------------|--------|',
+        )
+        for (const repo of verificationSkipped) {
+            sections.push(
+                `| \`${escapeMd(repo.repository)}\` | ${formatVerificationSkipReason(repo.verificationSkipped!)} |`,
+            )
         }
         sections.push('')
     }
@@ -259,8 +335,8 @@ export function generateMarkdownReport(result: RunResult): string {
                     let icon: string
                     if (fixed && action) {
                         icon = '✅ Fixed'
-                        fromVer = action.fromVersion ?? '—'
-                        toVer = action.toVersion ?? '—'
+                        fromVer = action.fromVersion || '—'
+                        toVer = action.toVersion || '—'
                         if (action.isMajor === undefined) {
                             major = '—'
                         } else {
@@ -268,8 +344,8 @@ export function generateMarkdownReport(result: RunResult): string {
                         }
                     } else if (failedAction) {
                         icon = '❌ Failed'
-                        fromVer = failedAction.fromVersion ?? '—'
-                        toVer = failedAction.toVersion ?? '—'
+                        fromVer = failedAction.fromVersion || '—'
+                        toVer = failedAction.toVersion || '—'
                     } else {
                         icon = '⏭️ Skipped'
                         toVer = alert.recommendedVersion || '—'
@@ -504,7 +580,7 @@ function actionDetails(action: FixAction, error?: string): string {
         switch (action.type) {
             case 'dependency-upgrade':
                 // 成员级升级展示目标 manifest，根升级不受影响
-                return `${action.fromVersion ?? '?'} → ${action.toVersion ?? '?'}${action.filePath ? ` (${action.filePath})` : ''}`
+                return `${action.fromVersion || '—'} → ${action.toVersion || '—'}${action.filePath ? ` (${action.filePath})` : ''}`
             case 'lockfile-repair':
                 return action.strategy
                     ? `${action.strategy}: ${action.diff ?? ''}`

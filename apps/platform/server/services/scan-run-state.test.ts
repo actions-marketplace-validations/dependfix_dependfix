@@ -135,9 +135,9 @@ describe('resolveScanRunState（状态机纯函数）', () => {
         })
 
         it('failed for each engine delivery category in whitelist', () => {
-            // 覆盖白名单全部 7 个 category（COMMIT_FAILED / UNEXPECTED_CHANGES / NO_CHANGES /
-            // PR_CREATION_FAILED / VERIFICATION_FAILED / ROLLBACK_FAILED / FATAL）
-            for (const category of ['COMMIT_FAILED', 'UNEXPECTED_CHANGES', 'NO_CHANGES', 'PR_CREATION_FAILED', 'VERIFICATION_FAILED', 'ROLLBACK_FAILED', 'FATAL'] as const) {
+            // 覆盖白名单全部 8 个 category（COMMIT_FAILED / PUSH_FAILED / UNEXPECTED_CHANGES /
+            // NO_CHANGES / PR_CREATION_FAILED / VERIFICATION_FAILED / ROLLBACK_FAILED / FATAL）
+            for (const category of ['COMMIT_FAILED', 'PUSH_FAILED', 'UNEXPECTED_CHANGES', 'NO_CHANGES', 'PR_CREATION_FAILED', 'VERIFICATION_FAILED', 'ROLLBACK_FAILED', 'FATAL'] as const) {
                 const result = resultWithErrors({ category, message: 'x' })
                 expect(resolveScanRunState('container', undefined, result).status).toBe('failed')
             }
@@ -230,5 +230,29 @@ describe('resolveScanRunOutcome（结果可信度映射纯函数）', () => {
 
     it('keeps the count null for failures without a result (execution timeout)', () => {
         expect(resolveScanRunOutcome(undefined, undefined)).toEqual({ exitCode: null, environmentalFailureCount: null })
+    })
+})
+
+describe('resolveScanRunState — 外联违规', () => {
+    const baseResult = {
+        errors: [{ repository: '*', stage: 'verify', category: 'NETWORK_VIOLATION', message: 'blocked evil.example.com' }],
+        summary: { alertsFound: 1 },
+    } as never
+
+    it('marks a run with blocked egress as failed (not completed), even when exitCode is 1', () => {
+        const decision = resolveScanRunState('container', undefined, baseResult, undefined, 1)
+        expect(decision.status).toBe('failed')
+        expect(decision.errorJson).toEqual({ code: 'network_violation', message: 'blocked evil.example.com' })
+    })
+
+    it('also fails in github-action mode (artifact report carries the same error)', () => {
+        const decision = resolveScanRunState('github-action', undefined, baseResult, undefined, undefined)
+        expect(decision.status).toBe('failed')
+        expect(decision.errorJson).toMatchObject({ code: 'network_violation' })
+    })
+
+    it('keeps completed when there is no network violation', () => {
+        const decision = resolveScanRunState('container', undefined, { errors: [] } as never, undefined, 1)
+        expect(decision.status).toBe('completed')
     })
 })

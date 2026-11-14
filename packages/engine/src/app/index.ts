@@ -18,12 +18,14 @@ import {
     type RepeatedAttemptRecord,
     type PrCheckWatchReport,
     type DeliverySkipRecord,
+    type RunDelivery,
 } from '@dependfix/core'
 import { fromApp, type AuthProvider } from '../auth'
 import {
     createFixBranch,
     stageAndCommit,
     pushBranch,
+    readHeadCommit,
     createPullRequest,
     generatePRBody,
     computeFixFingerprint,
@@ -36,22 +38,22 @@ import {
     discoverRepositories,
     mergeRepositories,
     filterExplicitRepositories,
-    checkTokenPermissions,
     type RepoPolicy,
 } from '../github'
 import { runWithConcurrency } from '../multirepo/scheduler'
 import { writeArchive } from '../report/archiver'
 import type { RuntimeConfig } from '../config'
 import { enforceVerificationGate } from '../runners/verification-gate'
-import { requestAbort, resetProcessControlState } from '../runners/process-control'
+import { resetProcessControlState } from '../runners/process-control'
 import { collectSupplyChainWarnings } from '../supply-chain'
 import { loadRulesConfigFromEnv, resetActiveRulesConfig, setActiveRulesConfig } from '../code-scanning/rule-config'
 import type { CommandResult } from '../runners/verification-runner'
+import { setRunInstallTimeoutMs } from '../fixers/install-timeouts'
 import type { VerificationCheckpoint } from './verification-checkpoint'
 import { createConfiguredGitHubClient, createConfiguredGitHubClientOrNull } from './github-client'
 import { formatEngineBuildLine, resolveRunBuildInfo, type RunBuildInfo } from './build-info'
 import { fetchDefaultBranch } from './repo-alerts'
-import { abortAwareRepoTask, abortBlocksDelivery, logSkippedRepos, recordRunAbort } from './abort'
+import { abortAwareRepoTask, abortBlocksDelivery, abortRun, logSkippedRepos } from './abort'
 import { processRepoForReport } from './repo-report'
 import { processRepoFix, type AiUsageRef } from './repo-fix'
 import { applyRepoConfig } from './repo-config'
@@ -77,7 +79,11 @@ import { prepareDeliveryHygiene } from './git-exclude'
 import { runPrCheckWatch } from './pr-check-watch-run'
 import { handleBaselineRedDelivery, rollbackForSkippedDelivery } from './skipped-delivery'
 import { logPartialSourceFailureSummary } from './source-failure-summary'
+import { logSkippedByPackageSummary } from './result-assembly'
+import { attachRunEgressResult, beginRunEgressAudit, finishRunEgressAudit } from './run-egress'
 import { pullRequestCreationHint } from './token-hints'
+import { runStartupSecurityChecks as runStartupSecurityChecksImpl } from './startup-checks'
+import { deliveryBranchPushed, deliveryPrCreated, deliveryPrReused, recordFixModeDelivery } from './self-delivery'
 import { handleDuplicatePRs } from './duplicate-prs'
 
 // 仅 re-export 平台直接调用的辅助函数（PR 创建在平台 A 模式复用）
@@ -100,6 +106,10 @@ export interface DependfixAppOptions {
     verbose?: boolean
     /** 自定义验证命令（覆盖默认命令链） */
     commands?: string[]
+    /** 仓库级验证命令超时（毫秒；缺省走 env / 内置默认，见 execute-limits） */
+    verifyCommandTimeoutMs?: number
+    /** 仓库级安装类命令超时（毫秒；缺省走 env / 内置默认） */
+    installTimeoutMs?: number
     /**
      * 执行环境：`local`（CLI/MCP 等用户机器直接执行）| `container`（平台容器沙箱）。
      * 默认 `local`。容器内执行属于设计内隔离行为（非 root + 临时目录），
@@ -134,6 +144,8 @@ export class DependfixApp {
     private readonly logger: Logger
     private readonly verbose: boolean
     private readonly customCommands?: string[]
+    private readonly verifyCommandTimeoutMs?: number
+    private readonly installTimeoutMs?: number
     private readonly executionEnvironment: 'local' | 'container'
     private readonly runId: string
     /** GitHub App 认证提供者（用于 commit author 真实 bot 身份；仅 fix/fix-and-pr 模式生效） */
@@ -158,6 +170,8 @@ export class DependfixApp {
     private verificationBaseline: { value?: CommandResult[] } = {}
     /** 单元回滚 checkpoint（单元 probe 开始前记录，跨仓库传递）。 */
     private readonly verificationCheckpoints: VerificationCheckpoint[] = []
+    /** checkpoint 建立失败的去重键（run 级；同仓同因只记一条降级审计）。 */
+    private readonly checkpointFailures = new Set<string>()
     /** 验证链口径记录（run 级；`verifyProject` 写入，报告与 PR 正文消费） */
     private readonly ciAlignment: CiAlignmentRecord[] = []
     /** 最近关闭 PR 的尝试索引（run 级缓存；仅 fix-and-pr 模式参与判定） */
@@ -181,6 +195,8 @@ export class DependfixApp {
         this.reportOutputDir = options.reportOutputDir ?? './dependfix-reports'
         this.verbose = options.verbose ?? false
         this.customCommands = options.commands
+        this.verifyCommandTimeoutMs = options.verifyCommandTimeoutMs
+        this.installTimeoutMs = options.installTimeoutMs
         this.executionEnvironment = options.executionEnvironment ?? 'local'
         this.runId = `dependfix-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 
@@ -190,11 +206,10 @@ export class DependfixApp {
             minLevel: this.verbose ? 'debug' : 'info',
         })
 
-        // 目标仓库专属配置（`.github/dependfix.yml`）：workDir 即目标仓库检出（平台在 clone 之后才构造本 app），
-        // 读取后按「中央配置优先」合并（当前仅 overrideProtect）。需在 logger 之后（降级 / 生效告警走 logger），
-        // 且合并结果作为**唯一 config 来源**单次赋值（保持 readonly 不可变语义）；非法配置一律降级不中断运行。
+        // 目标仓库专属配置（`.github/dependfix.yml`）：按「中央配置优先」合并（当前仅 overrideProtect），
+        // 在 logger 之后读取、结果作为唯一 config 来源单次赋值；非法配置降级不中断。
         this.config = applyRepoConfig(options.config, this.workDir, this.logger)
-        // 构建版本回执：平台注入值（容器镜像构建期）优先，本地执行回退引擎包版本
+        // 构建版本回执：平台注入值优先，本地回退引擎包版本
         this.buildInfo = resolveRunBuildInfo(this.config)
 
         // GitHub App 认证提供者（用于 commit author 真实 bot 身份）
@@ -210,8 +225,7 @@ export class DependfixApp {
         // 均降级默认（向后兼容）。错误信息已由 loadRulesConfigFromEnv 写入 stderr，
         // 此处不重复（避免双写）。
         //
-        // 进程级状态生命周期：active config 是模块级单例，每次构造 DependfixApp 先 reset 再按需 set，
-        // 避免前一个 app 残留配置污染当前 run（同一进程多次 new DependfixApp 场景，如 cli 测试 / 多 batch 调度）。
+        // 进程级状态生命周期：active config 是模块级单例，每次构造先 reset 再按需 set（同进程多次构造场景）。
         resetActiveRulesConfig()
         const ruleConfig = loadRulesConfigFromEnv(process.env)
         if (ruleConfig) {
@@ -228,25 +242,20 @@ export class DependfixApp {
         resetProcessControlState()
     }
 
-    /**
-     * 请求中止本次运行（平台执行超时 / 运维中止的接入点；协作式、可重复调用）。
-     *
-     * 语义与留痕口径见 [app/abort.ts](./abort.ts) 的 `recordRunAbort`；核心三步：
-     * ① 立即终止在跑子进程树；② 不再启动新工作（仓库边界 / 验证链 / 安装命令三重短路）；
-     * ③ 放弃交付（半成品不落地）。不抛错、不中断调用栈。
-     */
+    /** 请求中止本次运行（协作式；留痕口径见 app/abort.ts）。 */
     abort(reason = 'abort requested'): void {
-        requestAbort(reason)
-        recordRunAbort(this.ctx, reason)
+        abortRun(this.ctx, reason)
     }
 
-    /** 供辅助方法使用的状态切片。 */
+    private deliveryRecord?: RunDelivery // getter 每次新建 ctx，故状态留在实例字段
+
     private get ctx(): AppContext {
         return {
             config: this.config,
             workDir: this.workDir,
             logger: this.logger,
             customCommands: this.customCommands,
+            verifyCommandTimeoutMs: this.verifyCommandTimeoutMs,
             runId: this.runId,
             allAlerts: this.allAlerts,
             allActions: this.allActions,
@@ -264,6 +273,7 @@ export class DependfixApp {
             prCheckWatch: this.prCheckWatchReport,
             alertOutcomes: this.alertOutcomes,
             deliverySkips: this.deliverySkips,
+            delivery: this.deliveryRecord,
             deadlineAt: this.config.deadlineAt,
             budgetSkips: this.budgetSkips,
         }
@@ -276,20 +286,22 @@ export class DependfixApp {
     /** 执行完整的编排流程，返回结构化结果和退出码。 */
     async run(): Promise<DependfixRunResult> {
         this.startedAt = new Date().toISOString()
+        // 仓库级安装超时：运行期上下文（安装类调用散布在无 ctx 的底层函数中）
+        setRunInstallTimeoutMs(this.installTimeoutMs)
         // 启动安全自检（best-effort，失败不阻断运行）
         await this.runStartupSecurityChecks()
-        // 记录运行前工作区状态（验证门禁回滚时保护用户已有未提交改动）。
-        // 显式前置 `isGitRepository`（纵深防御，不依赖 `hasGitChanges` 的内部守卫）：非仓库目录
-        // ⇒ 视为「无既有改动」；门禁在非仓库下另跳过回滚（无可回滚工作树），故两处语义自洽。
+        // 运行前工作区状态（验证门禁回滚时保护用户已有未提交改动；非仓库目录视为无既有改动）。
         this.preExistingDirty = isGitRepository(this.workDir) && hasGitChanges(this.workDir)
         // 提交卫生：安装产物不得进入交付提交。必须在安装 / 验证前落盘（只写 .git/info/exclude，幂等）
         prepareDeliveryHygiene(this.workDir, this.config, this.logger)
-        // 构建版本回执：先于业务日志输出，让「线上构建旧 / 代码路径未覆盖」可判读（口径见 app/build-info.ts）
+        // 构建版本回执：先于业务日志输出（口径见 app/build-info.ts）
         this.logger.info(formatEngineBuildLine(this.buildInfo))
         this.logger.info(`Starting dependfix run ${this.runId}`, {
             mode: this.config.mode,
             repositories: this.config.repositories,
         })
+
+        await beginRunEgressAudit(this.workDir)
 
         try {
             await this.executeMode()
@@ -305,12 +317,17 @@ export class DependfixApp {
         }
 
         this.finishedAt = new Date().toISOString()
+        const egress = await finishRunEgressAudit()
         computeSummary(this.ctx)
 
-        // 供应链信号收集（路径 A 投毒合入前确认依据）：本次升级包带脚本且被目标仓库批准
+        // 供应链信号（投毒合入前确认依据）：本次升级包带脚本且被目标仓库批准
         const supplyChainWarnings = collectSupplyChainWarnings(this.workDir, this.allActions)
 
         const runResult = buildRunResult(this.ctx, this.aiUsageRef.aggregate, supplyChainWarnings)
+        if (attachRunEgressResult(runResult, egress, this.allErrors)) {
+            this.logger.warn('[network-audit] non-allowlisted outbound targets were blocked in this run')
+        }
+        logSkippedByPackageSummary(this.logger, runResult)
         const exitCode = computeExitCode(this.ctx)
 
         // 生成并写入报告
@@ -341,14 +358,14 @@ export class DependfixApp {
                 `[ai] run 总计: ${u.calls} 次调用, ${u.inputTokens} in / ${u.outputTokens} out tokens${costText}`,
             )
         }
-        // 部分源拉取失败汇总（todo.md §M19.5 C8）：
-        // 仅当至少 1 个源成功 + 至少 1 个源失败时输出（避免与"全部源失败"语义重叠）。
-        // 注：此处 `verificationPassed === true` 是「该仓库产出了结果」的启发式（仅用于日志汇总门控），
-        // 不是失败判定——与 `computeExitCode` 的归因口径（`isRepoVerificationBlocked`）分工不同，刻意保留原始口径。
+        // 部分源拉取失败汇总：仅当至少 1 个源成功 + 1 个失败时输出；`verificationPassed === true` 在此
+        // 只是「该仓库产出了结果」的启发式（仅用于日志汇总门控），不是失败判定（归因口径见 `isRepoVerificationBlocked`）。
         const isAnyRepoSuccessful = this.repoResults.some((r) =>
             r.alertsCount > 0 || r.fixed > 0 || r.verificationPassed === true,
         )
         logPartialSourceFailureSummary(this.allErrors, this.logger, isAnyRepoSuccessful)
+        // 清除运行级覆盖，避免同进程后续运行（测试 / 批量复用）继承上一次的仓库配置
+        setRunInstallTimeoutMs(undefined)
         return { result: runResult, exitCode }
     }
 
@@ -364,29 +381,11 @@ export class DependfixApp {
      *   Code Scanning 开启但缺 security-events 权限时提示。
      */
     private async runStartupSecurityChecks(): Promise<void> {
-        const isLocalFix = this.executionEnvironment === 'local'
-            && !this.config.dryRun
-            && (this.config.mode === 'fix' || this.config.mode === 'fix-and-pr')
-        if (isLocalFix && process.env.DEPENDFIX_SUPPRESS_LOCAL_EXECUTION_WARNING !== '1') {
-            this.logger.warn(
-                '[local-exec] 本地模式将直接执行目标仓库的依赖安装/验证脚本（install/lint/build/typecheck/test 钩子，属不可信代码）'
-                + '——若仓库或依赖被恶意控制，脚本可读取本机环境变量（含 GITHUB_TOKEN）。'
-                + '建议：使用专用低权限 token，并在专用环境（容器/VM/CI runner）运行；'
-                + '已确认风险可设置 DEPENDFIX_SUPPRESS_LOCAL_EXECUTION_WARNING=1 抑制本提示'
-                + '（详见 quick-start 安全注意事项）。',
-            )
-        }
-
-        if (this.config.alertSource === 'github-dependabot' && this.config.githubToken) {
-            const result = await checkTokenPermissions(createConfiguredGitHubClient(this.config), {
-                codeScanningEnabled: this.config.codeScanningEnabled,
-            })
-            if (result.ok && result.warnings.length > 0) {
-                for (const warning of result.warnings) {
-                    this.logger.warn(`[token-scope] ${warning.message}`)
-                }
-            }
-        }
+        await runStartupSecurityChecksImpl({
+            config: this.config,
+            logger: this.logger,
+            executionEnvironment: this.executionEnvironment,
+        })
     }
 
     // -----------------------------------------------------------------------
@@ -440,6 +439,7 @@ export class DependfixApp {
                 return
             }
 
+            const headBeforeCommit = await readHeadCommit(this.workDir).catch(() => undefined)
             try {
                 await commitLocalChanges(this.ctx)
             } catch (error: unknown) {
@@ -454,6 +454,18 @@ export class DependfixApp {
                     message,
                 })
             }
+            const delivery = await recordFixModeDelivery({
+                commit: this.config.commit,
+                ...(this.config.push !== undefined ? { push: this.config.push } : {}),
+                workDir: this.workDir,
+                logger: this.logger,
+                allErrors: this.allErrors,
+                ...(headBeforeCommit ? { headBeforeCommit } : {}),
+                abortBlocked: () => abortBlocksDelivery(this.ctx, 'branch push'),
+            })
+            if (delivery) {
+                this.deliveryRecord = delivery
+            }
         }
     }
 
@@ -464,6 +476,7 @@ export class DependfixApp {
                 aiUsageRef: this.aiUsageRef,
                 verificationBaseline: this.verificationBaseline,
                 verificationCheckpoints: this.verificationCheckpoints,
+                checkpointFailures: this.checkpointFailures,
                 preExistingDirty: this.preExistingDirty,
             },
             client,
@@ -574,6 +587,8 @@ export class DependfixApp {
                     `Open PR #${plan.sameContentPR.number} already contains identical fixes — skipping PR creation`,
                 )
                 this.summary.prsSkippedByFingerprint += 1
+                // 同内容 PR 复用也算已交付：平台据此落 runUrl / PR 编号，不重复创建
+                this.deliveryRecord = deliveryPrReused(plan.sameContentPR)
                 this.allActions.push({
                     type: 'dependency-upgrade',
                     repository: firstRepo,
@@ -629,7 +644,10 @@ export class DependfixApp {
             }
 
             this.logger.info(`Pushing branch: ${branchName}`)
+            const commitSha = await readHeadCommit(this.workDir).catch(() => undefined)
             await pushBranch(branchName, this.workDir)
+            // 分支已推：先落 `pushed`（后续 PR 失败 / 取消时平台据 branch 清理，不推测命名）
+            this.deliveryRecord = deliveryBranchPushed(branchName, commitSha)
 
             // 6. Create PR (one PR covering all repos)
             const defaultBranch = await fetchDefaultBranch(client, owner, repo)
@@ -659,6 +677,7 @@ export class DependfixApp {
 
             this.logger.info(`PR created: ${pr.htmlUrl}`)
             this.summary.prsOpened += 1
+            this.deliveryRecord = deliveryPrCreated(branchName, commitSha, pr)
             if (this.baselineRedDraft) {
                 this.baselineRedDraft.carrier.draftPr = { number: pr.number, htmlUrl: pr.htmlUrl }
                 this.logger.warn(

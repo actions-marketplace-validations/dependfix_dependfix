@@ -97,7 +97,7 @@
 | `cleanup` | 分支 / PR 清理（best-effort） | `BRANCH_DELETE_FAILED`、`PR_CLOSE_FAILED`、`CLEANUP_*` |
 | `unknown` | 无法判定 | `engine_delivery_failed` 无细分、缺失信息 |
 
-> **实现期补充映射**（完整权威表见 `apps/platform/server/services/run-failure-classify.ts` 的 `FAILURE_CODE_MAP`，未命中的码一律归 `unknown`）：`workflow_not_configured` → `runtime` + `deterministic`；`enqueue_failed` / `orphan_run` → `runtime` + `transient`；`force_failed` / `SCAN_PENDING_MERGED` → `runtime` + `deterministic`；`supersede_failed` → `cleanup` + `unknown`；`engine_delivery_failed`（message 无法细分类别时）→ `unknown` + `deterministic`。
+> **实现期补充映射**（完整权威表见 `apps/platform/server/services/run-failure-classify.ts` 的 `FAILURE_CODE_MAP`，未命中的码一律归 `unknown`）：`workflow_not_configured` → `runtime` + `deterministic`；`enqueue_failed` / `orphan_run` → `runtime` + `transient`；`force_failed` / `SCAN_PENDING_MERGED` → `runtime` + `deterministic`；`supersede_failed` → `cleanup` + `unknown`；`engine_delivery_failed`（message 无法细分类别时）→ `unknown` + `deterministic`；`sandbox_image_unavailable` / `sandbox_fix_requires_egress_policy` / `sandbox_clone_host_not_allowed` → `runtime` + `deterministic`（沙箱配置 / 环境偏离）。
 
 ### 4.2 `failureKind`（处置建议）
 
@@ -110,7 +110,7 @@
 ### 4.3 映射要点
 
 - `VERIFICATION_FAILED` → `verify` + `deterministic`：升级后验证链失败（可能破坏性更新），需重点研判；**不提供一键重试**。
-- `UNEXPECTED_CHANGES` / `NO_CHANGES` → `deliver` + `deterministic`：交付提交集合不合法（存在未声明的已跟踪改动 / 只有生成物与未跟踪文件）→ 远程未落地，需人工清理工作区后重跑（口径见 [pr-delivery-closure.md §7](./pr-delivery-closure.md#7-m484-提交面白名单与-yaml-定点编辑)）。两者均进 `scan-run-state` 的引擎交付失败类别，不误判 `completed`。
+- `UNEXPECTED_CHANGES` / `NO_CHANGES` → `deliver` + `deterministic`：交付提交集合不合法（存在未声明的已跟踪改动 / 只有生成物与未跟踪文件）→ 远程未落地，需人工清理工作区后重跑（口径见 [pr-delivery-closure.md §7](./pr-delivery-closure.md#_7-m48-4-提交面白名单与-yaml-定点编辑)）。两者均进 `scan-run-state` 的引擎交付失败类别，不误判 `completed`。
 - `PRE_EXISTING_FAILURE` → `verify` + `deterministic`：修复前基线即红，非本次引入（已有 `FixAction.preExisting` 信号可复用）。
 - `network_violation` → `verify` + `deterministic`：执行期外联审计命中黑名单（验证链外联违规），需研判；不提供一键重试。
 - `engine_exit_2` → `runtime` + `deterministic`（进程级全仓库失败 / 全量回滚）。
@@ -194,8 +194,10 @@
 
 ### 5.8 跳过与截断披露
 
-- **数据模型**：`RunSummary.alertsUnfixed` 为告警级未修复数（逐条 `isAlertFixedByActions` 判定，converged 不计入；不能直接用 `alertsFixed` action 数做减法）。`RunSummary.alertsSkippedByReason` 按 `subdirectory-manifest` / `cross-major` / `not-fixable` / `override-protected` / `repeated-failure` 分组，满足 `sum(values) === alertsSkipped`；`RunSummary.alertsTruncatedBySeverity` 按 `critical` / `high` / `medium` / `low` / `unknown` 分组，满足 `sum(values) === alertsTruncated`。枚举唯一源为 `SKIP_REASONS` / `ALERT_SEVERITIES`；所有累加点经 `addSkipped` / `addTruncatedBySeverity`，禁止直接自增。
-- **累加点**：`repo-fix.ts` 的子目录 / 根直接依赖 lockfile 桶 → `subdirectory-manifest`；跨大版本人工 review（含收敛判定后的低实例残留）→ `cross-major`；常规链路不可自动修复 / 缺推荐版本 → `not-fixable`；`override-protect.ts` 命中保护名单 → `override-protected`；`app/repeated-failure.ts` 的尝试上限命中 → `repeated-failure`（判定在安装与验证之前，读取失败 fail-open，口径见 [pr-delivery-closure.md §6](./pr-delivery-closure.md#6-m483-同告警尝试指纹去重)）。`limitAlerts` 丢弃集合在 fix / report 两条抓取路径统一按 severity 累计。
+- **数据模型**：`RunSummary.alertsUnfixed` 为告警级未修复数（逐条 `isAlertFixedByActions` 判定，converged 不计入；不能直接用 `alertsFixed` action 数做减法）。`RunSummary.alertsSkippedByReason` 按 `subdirectory-manifest` / `cross-major` / `not-fixable` / `override-protected` / `repeated-failure` / `peer-only` 分组，满足 `sum(values) === alertsSkipped`；`RunSummary.alertsTruncatedBySeverity` 按 `critical` / `high` / `medium` / `low` / `unknown` 分组，满足 `sum(values) === alertsTruncated`。枚举唯一源为 `SKIP_REASONS` / `ALERT_SEVERITIES`；所有累加点经 `addSkipped` / `addTruncatedBySeverity`，禁止直接自增。
+
+- **`peer-only` 累加点（2026-11-08）**：版本化 overrides 与常规 override 路径在回读 lockfile 发现「剩余未达标实例全部为 peer 后缀形态」时记跳过（`addSkipped` + `recordSkippedAlerts`），不产出失败动作、不计入 `alertsFailed`；合批路径按包内全部告警展开（与逐包路径同口径）。
+- **累加点**：`repo-fix.ts` 的子目录 / 根直接依赖 lockfile 桶 → `subdirectory-manifest`；跨大版本人工 review（含收敛判定后的低实例残留）→ `cross-major`；常规链路不可自动修复 / 缺推荐版本 → `not-fixable`；`override-protect.ts` 命中保护名单 → `override-protected`；`app/repeated-failure.ts` 的尝试上限命中 → `repeated-failure`（判定在安装与验证之前，读取失败 fail-open，口径见 [pr-delivery-closure.md §6](./pr-delivery-closure.md#_6-m48-3-同告警尝试指纹去重)）。`limitAlerts` 丢弃集合在 fix / report 两条抓取路径统一按 severity 累计。
 - **展示口径**：UI 详情显示 `未修复 X / 总数 Y · 截断 Z（未评估）· 跳过 W`，其中 `Y = alertsFound + alertsTruncated`、`X` 取 `alertsUnfixed`；分组 chips 固定顺序。列表只显示紧凑总数。PR 正文与 Markdown 报告输出 `Not Fixed / Skipped` 表，含跳过原因、截断严重级别与 `Failed / other not fixed` 残差；`Unfixed` 的分子分母按「已评估告警」表述，截断明确标注未评估。
 - **旧数据降级**：缺分组字段时按 `total - sum(known)` 补 `other` 行，不抛错且总数不丢；分组和大于总数时不再补 `other`（分组优先，异常数据原样展示）。
 - **不做什么**：不改跳过策略 / 跨 major 判定 / `allowMajorUpgrade`；不改 PR 指纹与去重；截断告警不伪造逐条明细，只披露分组计数。
@@ -205,6 +207,7 @@
 - **基线完整链**：修复前基线采样不再首失败即停，`install → lint → build → typecheck → test` 各段独立记录；`pnpm test` 的 `No tests found` 与工具链缺失按「同命令基线失败」豁免，不归因本次改动。修复后验证仍首失败即停（交付链语义不变）。
 - **单元回滚**：默认 `rollbackGranularity=unit`。依赖修复单元开始前记录工作树 checkpoint，成功时保留为可回退基线；最终验证存在本次引入失败时，回退最近单元并重跑一次完整验证，通过则保留更早 probe 并交付。重验仍失败时记 `ROLLBACK_GRANULARITY_DEGRADED`（跳过类审计，不影响 exit code），再由门禁执行整仓回滚。
 - **逃生开关**：`--rollback-granularity=repo` / `DEPENDFIX_ROLLBACK_GRANULARITY=repo` 恢复整仓回滚；`preExistingDirty` 保护面不变。
+- **checkpoint 建立失败（2026-11-09）**：`git stash create` 失败不再仅 warn——分类走「诊断文本 + 结构化探测」双通道：索引锁 / 权限（含只读挂载） / 磁盘 → 记 `ROLLBACK_GRANULARITY_DEGRADED`（含 stderr 尾部 + `git status --porcelain` + `git rev-parse HEAD` 证据快照）并 `ABORTED` 中止运行（计入退出码）——abort 后不再启动新的修复单元 / 仓库，且不提交 / 不建 PR；**不自动回滚**——工作区保留已落盘改动（当前单元的写入可能已开始；平台清理运行目录，CLI / 本地运行需人工处理）；其余（含无诊断文本）→ 仅记降级审计后退回整仓回滚继续交付。结构化探测不可省略：索引锁 / 权限失败时 `git stash create` 实测静默退出 1（stdout / stderr 均空），只读文本判不出原因；新鲜索引锁（< 5s，可能为并发 git 短锁）先重试一次再判定。同一仓库**同一失败分类**只记一条降级审计（逐单元重试不刷屏；`unknown` 会把细节不同的失败合并），日志逐次留痕。非 git 工作区与「工作区干净」不属失败态：前者静默跳过 checkpoint，后者以 HEAD 为基线。
 - **映射**：`ROLLBACK_GRANULARITY_DEGRADED` → `verify` + `deterministic`（审计性降级，非失败动作；用于解释「为何回退粒度退回整仓」）。
 
 ### 5.10 执行资源与 OOM 归因（M46.4）
@@ -226,6 +229,23 @@
 - **消费面**：`GET /api/runs/[id]` 返回 `buildVersion` / `buildCommit`；运行详情弹窗（`run-detail-dialog.vue`）以「构建版本：`<version> · <短 commit>`」展示，`unknown` / null 统一显示「未知」+ tooltip 说明（诊断信息缺失不是错误态）。`/scans` 的详情（`repo-history-dialog.vue`）本批不渲染该字段（UI 面收敛，与 §5.5「重试入口只在运行详情弹窗」同族边界）；该视图的 `container` 执行 run 仍可从日志区 `[build]` 行读到同一事实——`github-action` 与存量 run 无该日志行，不承诺兜底。
 - **有意不动**：`GET /api/runs` 列表与 `scan-trigger.serializeScanRun` 的响应白名单不改（避免第二个事实源）；后续若在列表 / 触发响应展示，需同批扩展白名单并补等值断言。`sandbox` 执行器当前只回显最小 `RunResult`、不启动引擎，故无 `[build]` 行；其落库值仍是平台构建，启用真实引擎执行时需补 `buildVersion/buildCommit` 透传。
 - **不做什么**：不做部署回执（Jenkins webhook / 镜像推送对齐）；不回填历史 run；不把版本塞进 `summaryJson`（独立列，契约不变）；不改 exit code / 交付判定。
+
+### 5.12 平台写入 / 回填与部署版本戳接线
+
+**failure_* 三列的平台接线**：
+
+- `ScanRun.status='failed'` 语义过载，故落库三列支持筛选与汇总：`failure_code`（归一化原始码；`engine_delivery_failed` 从 message 回读细分，无法解析保留兜底码）/ `failure_stage`（source · clone · install · fix · verify · deliver · runtime · cleanup · unknown）/ `failure_kind`（transient / deterministic / unknown）。
+- **单一事实源**：`server/services/run-failure-classify.ts` 集中映射表 + `unknown` 兜底；前端 `app/utils/run-view.ts` 仅复制枚举词汇供筛选控件，标签经 i18n 渲染。
+- 参与分类的终态 = `failed` + 有错误码的 `dispatched`；成功态与 `degraded` 三列为 null；覆盖全部失败写路径（orchestrator · batch-executor · stale-cleanup · scan.post · force-fail）；`reuse=true` 复用既有 run 时三列随 `errorJson` / `summaryJson` 一并清空。
+- 存量行回填 `pnpm db:backfill:run-failure`（默认 dry-run，`--apply` + y/N，幂等）。**不建索引**：单组织 run 量级小（summary 窗口上限 500）。
+
+**部署产物版本戳**：
+
+- 链路为 CI `--build-arg BUILD_COMMIT/BUILD_VERSION` → Dockerfile `ARG` → `ENV NUXT_BUILD_COMMIT/NUXT_BUILD_VERSION` → Nuxt 以 `NUXT_` 前缀运行时覆盖 `runtimeConfig`（未注入缺省 `unknown`，不阻断启动）。
+- **暴露面**：`GET /api/health`（**公开只读，无鉴权**）返回 `{ version, commit, startedAt, schema }`（`schema` 为启动期漂移检测状态枚举，口径与字段边界见 [platform.md §3.3 / §10.7](../../standards/platform.md)），启动日志输出 `[build] version=… commit=… startedAt=…`；用途是消除「代码已修复但线上仍复现」的陈旧产物误判与「库未迁移」误判。
+- **CI 接线**：`docker.yml` 三个构建步骤均传 `--build-arg`；镜像冒烟额外断言 `/api/health` 200 + JSON 字段与启动版本戳行；env 命名用 `NUXT_BUILD_*`（对齐 Nuxt 运行时覆盖通道，避免 esbuild define 折叠，与 [platform.md §3.6](../../standards/platform.md#_3-数据库规范-多后端兼容-时区) 同源原则）。
+- **运行级回执**：同一值经 `server/utils/run-build-info.ts` 写入每次 run 的 `scan_run.build_version` / `build_commit` 并透传 `RuntimeConfig.buildVersion/buildCommit`；引擎日志 `[build] dependfix version=… commit=… source=host|engine-package` 的口径与边界见 §5.11。
+
 
 ## 6. 验收标准（草案 → 实现结果）
 
@@ -251,4 +271,4 @@
 - [executor-sandbox.md §7.8 降级状态机契约](./executor-sandbox-implementation.md)
 - [platform.md](../../standards/platform.md)
 - [M45.4](../../plan/todo-archive.md)（受约束重试入口落地条目）
-- [M37](../../plan/archive/todo-archive-phases-m37.md#m37-运行可观测性与体验记忆m371m376-全部已闭环--2026-10-08-归档)（M37.1 已闭环归档）
+- [M37](../../plan/archive/todo-archive-phases-m37.md#m37-运行可观测性与体验记忆-m37-1-m37-6-全部已闭环-2026-10-08-归档)（M37.1 已闭环归档）

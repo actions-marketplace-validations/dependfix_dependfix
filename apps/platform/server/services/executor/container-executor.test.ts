@@ -43,6 +43,8 @@ const platformDeliveryMock = vi.hoisted(() => ({
     planFixAndPrDelivery: vi.fn(),
     deliverFixAndPr: vi.fn(),
     createPlatformOctokit: vi.fn(),
+    // 双路径守卫：容器路径按真实语义放行（结果带 platform/none 或无 delivery 记录）
+    shouldPlatformDeliver: vi.fn(() => true),
 }))
 
 vi.mock('./platform-delivery', () => platformDeliveryMock)
@@ -77,6 +79,7 @@ import {
     ContainerExecutor,
     extractBranchName,
     pushFixBranch,
+    resolveCloneTimeoutMs,
 } from './container-executor'
 import type { ScanExecutorContext } from './types'
 
@@ -139,6 +142,7 @@ beforeEach(async () => {
     platformDeliveryMock.planFixAndPrDelivery.mockReset()
     platformDeliveryMock.deliverFixAndPr.mockReset()
     platformDeliveryMock.createPlatformOctokit.mockReset()
+    platformDeliveryMock.shouldPlatformDeliver.mockReset().mockReturnValue(true)
     dependfixAppMock.mockReset()
     engineMock.createFixBranch.mockReset()
 
@@ -332,6 +336,33 @@ describe('ContainerExecutor.execute - fix-and-pr mode', () => {
         expect(platformDeliveryMock.planFixAndPrDelivery).toHaveBeenCalledWith(fakeOctokit, 'owner-a', 'repo-b', runResult)
         expect(engineMock.createFixBranch).toHaveBeenCalledWith('dependfix/auto-fix-test', expect.any(String))
         expect(platformDeliveryMock.deliverFixAndPr).toHaveBeenCalled()
+    })
+
+    it('skips platform delivery when the engine already delivered in-process', async () => {
+        const runResult = makeRunResult({
+            delivery: {
+                deliveredBy: 'engine',
+                status: 'pr-created',
+                branch: 'dependfix/auto-fix-abcd1234',
+                prUrl: 'https://github.com/owner-a/repo-b/pull/7',
+                prNumber: 7,
+            },
+        })
+        dependfixAppMock.mockImplementation(function (this: { run: ReturnType<typeof vi.fn> }) {
+            this.run = vi.fn().mockResolvedValue(fakeDependfixRunResult(runResult, 0))
+        } as never)
+        platformDeliveryMock.shouldPlatformDeliver.mockReturnValue(false)
+
+        childProcessMock.execFile
+            .mockResolvedValueOnce({ stdout: '', stderr: 'Cloning into \'.\'...' })
+            .mockResolvedValueOnce({ stdout: 'aaa\n', stderr: '' })
+
+        const executor = new ContainerExecutor({ workRoot: tempRoot, timeoutMs: 10_000 })
+        const result = await executor.execute(makeCtx({ config: { ...baseConfig, mode: 'fix-and-pr' } }))
+
+        expect(result.exitCode).toBe(0)
+        expect(platformDeliveryMock.planFixAndPrDelivery).not.toHaveBeenCalled()
+        expect(platformDeliveryMock.deliverFixAndPr).not.toHaveBeenCalled()
     })
 
     it('returns pr_creation_failed + moves to pending + runUrl fallback when PR creation fails', async () => {
@@ -870,6 +901,21 @@ describe('sanitizeErrorMessage (legacy import compatibility)', () => {
     it('leaves clean messages unchanged', () => {
         const input = 'fatal: repository not found'
         expect(sanitizeErrorMessage(input)).toBe(input)
+    })
+})
+
+describe('resolveCloneTimeoutMs', () => {
+    it('支持纯数字毫秒与单位写法', () => {
+        expect(resolveCloneTimeoutMs('300000')).toBe(300_000)
+        expect(resolveCloneTimeoutMs('5m')).toBe(300_000)
+        expect(resolveCloneTimeoutMs('1h')).toBe(3_600_000)
+    })
+
+    it('非法 / 非正数回退默认值', () => {
+        expect(resolveCloneTimeoutMs(undefined)).toBe(300_000)
+        expect(resolveCloneTimeoutMs('bogus')).toBe(300_000)
+        expect(resolveCloneTimeoutMs('0')).toBe(300_000)
+        expect(resolveCloneTimeoutMs('-1')).toBe(300_000)
     })
 })
 

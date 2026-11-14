@@ -20,7 +20,7 @@ const AUTH_GLOBAL_KEY = '__dependfix_auth_instance__'
 
 const baseOptions = {
     authSecret: 'test-secret-not-default',
-    smtpEnabled: false,
+    smtpHost: '',
     registrationDisabled: false,
     authMode: 'public' as const,
     allowedEmailDomains: [],
@@ -96,12 +96,30 @@ describe('getAuthInstance', () => {
         }
     })
 
-    it('runs with smtp enabled flag (verification flows configured)', async () => {
+    it('derives requireEmailVerification / sendOnSignUp from smtpHost at runtime', async () => {
         const auth = await getAuthInstance({
             ...baseOptions,
-            smtpEnabled: true,
+            smtpHost: 'smtp.example.com',
         }) as AuthInstance
-        expect(auth).toBeTruthy()
+        expect(auth.options.emailAndPassword?.requireEmailVerification).toBe(true)
+        expect(auth.options.emailVerification?.sendOnSignUp).toBe(true)
+        // 登录被 EMAIL_NOT_VERIFIED 拒绝时自动补发验证邮件（自助恢复的兜底通道）
+        expect(auth.options.emailVerification?.sendOnSignIn).toBe(true)
+        const changeEmail = (auth.options.user as unknown as {
+            changeEmail?: { updateEmailWithoutVerification?: boolean }
+        })?.changeEmail
+        expect(changeEmail?.updateEmailWithoutVerification).toBe(false)
+    })
+
+    it('keeps verification disabled when smtpHost is empty', async () => {
+        const auth = await getAuthInstance(baseOptions) as AuthInstance
+        expect(auth.options.emailAndPassword?.requireEmailVerification).toBe(false)
+        expect(auth.options.emailVerification?.sendOnSignUp).toBe(false)
+        expect(auth.options.emailVerification?.sendOnSignIn).toBe(false)
+        const changeEmail = (auth.options.user as unknown as {
+            changeEmail?: { updateEmailWithoutVerification?: boolean }
+        })?.changeEmail
+        expect(changeEmail?.updateEmailWithoutVerification).toBe(true)
     })
 })
 
@@ -115,7 +133,7 @@ describe('getAuth', () => {
         vi.stubGlobal('useRuntimeConfig', () => ({
             authSecret: 'test-secret-not-default',
             authMode: 'public',
-            smtpEnabled: false,
+            smtpHost: '',
             registrationDisabled: false,
             allowedEmailDomains: '',
             blockedEmailDomains: '',
@@ -137,7 +155,7 @@ describe('getAuth', () => {
         vi.stubGlobal('useRuntimeConfig', () => ({
             authSecret: 'test-secret-not-default',
             authMode: 'invalid-mode',
-            smtpEnabled: false,
+            smtpHost: '',
             registrationDisabled: false,
             allowedEmailDomains: '',
             blockedEmailDomains: '',
@@ -150,7 +168,7 @@ describe('getAuth', () => {
         vi.stubGlobal('useRuntimeConfig', () => ({
             authSecret: 'dev-secret-change-me',
             authMode: 'public',
-            smtpEnabled: false,
+            smtpHost: '',
             registrationDisabled: false,
             allowedEmailDomains: '',
             blockedEmailDomains: '',
@@ -163,7 +181,7 @@ describe('getAuth', () => {
 describe('邮件回调（sendVerificationEmail / sendResetPassword / sendChangeEmailConfirmation）', () => {
     beforeEach(() => {
         sendTemplateMailMock.mockReset()
-        // 默认 smtpEnabled = false（回调走 console.warn 降级）
+        // 默认 smtpHost 为空（回调走 console.warn 降级）
         sendTemplateMailMock.mockResolvedValue({ delivered: false, mode: 'noop' })
     })
 
@@ -176,7 +194,7 @@ describe('邮件回调（sendVerificationEmail / sendResetPassword / sendChangeE
         vi.stubGlobal('useRuntimeConfig', () => ({
             authSecret: 'test-secret',
             authMode: 'public',
-            smtpEnabled: false,
+            smtpHost: '',
             registrationDisabled: false,
             allowedEmailDomains: '',
             blockedEmailDomains: '',
@@ -203,7 +221,7 @@ describe('邮件回调（sendVerificationEmail / sendResetPassword / sendChangeE
         vi.stubGlobal('useRuntimeConfig', () => ({
             authSecret: 'test-secret',
             authMode: 'public',
-            smtpEnabled: true,
+            smtpHost: 'smtp.example.com',
             registrationDisabled: false,
             allowedEmailDomains: '',
             blockedEmailDomains: '',
@@ -225,7 +243,7 @@ describe('邮件回调（sendVerificationEmail / sendResetPassword / sendChangeE
         vi.stubGlobal('useRuntimeConfig', () => ({
             authSecret: 'test-secret',
             authMode: 'public',
-            smtpEnabled: true,
+            smtpHost: 'smtp.example.com',
             registrationDisabled: false,
             allowedEmailDomains: '',
             blockedEmailDomains: '',
@@ -246,7 +264,7 @@ describe('邮件回调（sendVerificationEmail / sendResetPassword / sendChangeE
         vi.stubGlobal('useRuntimeConfig', () => ({
             authSecret: 'test-secret',
             authMode: 'public',
-            smtpEnabled: true,
+            smtpHost: 'smtp.example.com',
             registrationDisabled: false,
             allowedEmailDomains: '',
             blockedEmailDomains: '',
@@ -275,7 +293,7 @@ describe('邮件回调（sendVerificationEmail / sendResetPassword / sendChangeE
         vi.stubGlobal('useRuntimeConfig', () => ({
             authSecret: 'test-secret',
             authMode: 'public',
-            smtpEnabled: true,
+            smtpHost: 'smtp.example.com',
             registrationDisabled: false,
             allowedEmailDomains: '',
             blockedEmailDomains: '',

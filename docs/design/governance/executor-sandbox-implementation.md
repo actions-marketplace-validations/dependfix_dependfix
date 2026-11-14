@@ -4,17 +4,18 @@
 
 ## 7. Sandbox 执行器设计
 
-> 状态：🔶 设计落盘（M10，2026-08-19 决策会议 / 2026-08-20 收口归档）——T1001-T1004 实施规划已在 [todo-archive-phases-m10-c53-c59c61.md §M10](../../plan/archive/todo-archive-phases-m10-c53-c59c61.md#m10-独立沙箱容器-c26-实施规划已归档) 落地；本文档定义接口契约与部署形态，详细任务拆解见 todo-archive 实施规划。
-> **决策依据**：Docker rootless mode + 应用层白名单代理 + cgroup v2 双层；Executor 抽象不与 rootless 强绑定；自托管 docker-compose 优先；与 `ContainerExecutor` 并存保留单机场景。一手调研依据见 [todo-archive-phases-m10-c53-c59c61.md §M10 决策依据](../../plan/archive/todo-archive-phases-m10-c53-c59c61.md#m10-独立沙箱容器-c26-实施规划已归档)。
+> 状态：🔶 设计落盘（M10，2026-08-19 决策会议 / 2026-08-20 收口归档）——T1001-T1004 实施规划已在 [todo-archive-phases-m10-c53-c59c61.md §M10](../../plan/archive/todo-archive-phases-m10-c53-c59c61.md#m10-独立沙箱容器-c26-实施规划-已归档) 落地；本文档定义接口契约与部署形态，详细任务拆解见 todo-archive 实施规划。
+> **决策依据**：Docker rootless mode + 应用层白名单代理 + cgroup v2 双层；Executor 抽象不与 rootless 强绑定；自托管 docker-compose 优先；与 `ContainerExecutor` 并存保留单机场景。一手调研依据见 [todo-archive-phases-m10-c53-c59c61.md §M10 决策依据](../../plan/archive/todo-archive-phases-m10-c53-c59c61.md#m10-独立沙箱容器-c26-实施规划-已归档)。
 
 ### 7.1 抽象边界（不强绑定 Docker rootless）
 
-> **2026-10-27 入口关闭**：当前 scan-orchestrator 不再路由 `SandboxExecutor`，存量 `executorKind=sandbox` 强制 `ContainerExecutor` + `degradedReason.code=sandbox_entry_disabled`。以下抽象与路由图为**恢复后的目标形态**。
+> **2026-11-09 入口恢复（M57.1）**：report-only 路由回 `SandboxExecutor`（独立容器内跑自包含 CLI）。
+> **2026-11-13（M59.1）**：fix / fix-and-pr 在出站策略就位时同样在沙箱内执行（容器内 clone → CLI，运行级审计代理约束出站）；仅 adapter 启动不可用时降级 `ContainerExecutor`。以下抽象与路由图为当前形态。
 
 `SandboxExecutor` 通过 §3 接口契约实现，**不与具体 OCI runtime 强绑定**——Runtime 形态作为配置项（`SANDBOX_RUNTIME` / Repository 字段）注入，避免今后切 Sysbox（`--runtime=sysbox-runc`）、Kata（`--runtime=kata-runtime`）等需要重写业务代码：
 
 ```text
-（恢复后）Repository.executorKind = 'sandbox'    → SandboxExecutor 路由
+Repository.executorKind = 'sandbox'（report-only）→ SandboxExecutor 路由
                   ↓
       scan-orchestrator 解析 → SandboxExecutor.execute(ctx)
                   ↓
@@ -39,7 +40,8 @@ export interface SandboxSpawnOpts {
     image: string                        // 复用平台镜像 tags（T1001-1）
     user: string                         // '100:100'（T1001）
     cgroupLimits?: { memoryMb: number; cpu: number }   // 透传 Repository.sandboxLimits
-    workDirBindMount: string             // /tmp/runs/{runId} → /workspace
+    /** 预留：宿主目录 → 容器挂载；当前沙箱不挂宿主目录（结果经 stdout 哨兵回传） */
+    workDirBindMount?: string
     networkEgressPolicy: 'allowlist'     // 白名单拦截代理对接（T1002）
     envSubset: NodeJS.ProcessEnv          // 仅解密后的 exec token（T1002 域名校验前置）
 }
@@ -55,16 +57,48 @@ export interface SandboxHandle {
 
 ### 7.2 镜像策略
 
-复用 `apps/platform/Dockerfile` runtime 阶段（T801 已落地 git + pnpm 11.18.0 工具链；C45 修复；2026-10-02 起 runtime 仅含 Nuxt `.output`，引擎由 Nitro 打包），**不维护双镜像**。Sandbox 容器启动命令与平台容器内执行 `DependfixApp.run()` 等价，差异仅在 UID/cgroup/网络隔离边界。**注意**：runtime 镜像不再随附 workspace CLI / `node_modules`，当前 `SandboxExecutor.buildCmd` 为占位实现；独立沙箱真实执行落地时须提供自包含入口（自包含 CLI bundle），不得依赖 workspace `node_modules`。镜像 tag 通过 `apps/platform/docker tag` 复用（与 C30 `Publish Docker` CI 链路解耦——CI 发布的镜像不可被 sandbox 直接拉，本场景使用平台内置镜像）。
+**双镜像（2026-11-14 起）**：平台镜像与沙箱镜像由同一 `apps/platform/Dockerfile` 的两个 target 产出，共享 `executor-base`（Node + pnpm 11.18.0 + git + python3/make/g++ 执行工具链）：
+
+| 镜像 | 内容 | 用途 |
+|:--|:--|:--|
+| 平台镜像（默认 target） | `.output`（Nuxt + 引擎）+ `/app/sandbox` + 控制面 | 平台自身部署；`ContainerExecutor` 在同一进程内执行 |
+| 沙箱镜像 `sandbox`（默认，slim） | `executor-base-slim`（Node + pnpm + git）+ `/app/sandbox` | 外置 rootless daemon 内跑 `node /app/sandbox/bin.mjs`；体积最小 |
+| 沙箱镜像 `sandbox-full` | `executor-base`（+ python3 / make / g++）+ `/app/sandbox` | 目标仓库原生模块无 prebuild、需 node-gyp 源码编译时使用 |
+
+- **构建**：沙箱 target 只依赖 `cli-builder`（core → engine → cli + `build:sandbox`），不触发 Nuxt 构建；`docker.yml` 按架构分别构建两个 target 并各自合成多架构 manifest。
+- **发布名**：slim 为 `…/dependfix-sandbox`、full 为 `…/dependfix-sandbox-full`（docker.io / ghcr.io / ACR 三处同名）；tag 与平台镜像一致（`latest`、`YYYY-MM-DD`、`sha-*`、发布时 `platform-x.y.z`），沙箱镜像**额外发裸版本 tag**（如 `1.0.0`）供默认解析使用。构建期自检 `--version` 非 unknown + skills doctor。
+- **体积取舍（2026-11-14 实测）**：平台镜像 815MB；slim 沙箱约 320MB（Node + git + pnpm + bundle），full 约 744MB（多出编译工具链）。默认 slim；需要源码编译回退的仓库改用 full（仓库级 `sandboxImage` 或 `SANDBOX_IMAGE_REPO` 指向 `-full`）。
+- **默认解析（三源）**：`Repository.sandboxImage` → `SANDBOX_IMAGE` → `SANDBOX_IMAGE_REPO` + `SANDBOX_IMAGE_TAG`；未显式指定时按「**平台镜像同 registry**（由 `DEPENDFIX_IMAGE` 推导 `dependfix-sandbox`）→ Docker Hub → ghcr → ACR（ACR 置末以减少其负荷）」生成候选，执行前逐个 inspect / pull（`SANDBOX_IMAGE_PULL_TIMEOUT_MS`，默认 300s/个），首个可用即用。平台走 ACR 时沙箱自动走 ACR，避免跨网慢速；全部失败才报 `sandbox_image_unavailable`（消息列出已尝试镜像）。不再把 `DEPENDFIX_IMAGE` 本身当沙箱镜像。
+- **约束**：镜像必须包含与平台版本匹配的 `/app/sandbox/bin.mjs` 与 skills；发布 tag 同源，仓库级自定义镜像由配置者承担版本同源责任（建议 digest 或固定发布 tag）。镜像缺失 / 不可拉取以 `sandbox_image_unavailable` 判 `failed`（runtime / deterministic）。
 
 ### 7.3 部署形态
 
 **自托管 docker-compose**（M10 目标，唯一交付形态）：
 
-- `apps/platform/docker-compose.yml` 增加 `sandbox-daemon` 服务（rootless Docker daemon 容器，挂载 `data/runs` 共享卷，映射 unix socket 给 platform 容器）
+- rootless daemon 由**宿主**启动（不在平台容器内启动 daemon）；平台容器只挂载其 unix socket（**不是**宿主 `/var/run/docker.sock`）
 - `apps/platform/Dockerfile` 工具链 / 非 root 链路不变（T801/C38 已落地）；runtime 自 2026-10-02 起仅含 Nuxt `.output`，不再随附 workspace `node_modules`，故 sandbox 独立入口须自包含（见 §7.2）
 - platform 镜像默认拉取已发布 tag（`docker compose pull && docker compose up -d`），本地构建经 `docker-compose.build.yml` 覆盖文件显式开启；运行身份默认 `dependfix`（uid 100 / gid 101），`PUID`/`PGID` 可对齐宿主用户以控制数据卷 / `$HOME` 所有权，且对 0 值 fail-closed（保持非 root 基线）
-- platform 容器通过 `DOCKER_HOST=unix:///var/run/docker.sock`（容器内 socket 路径，与 rootless daemon 共享）
+- **不需要**在宿主与平台容器间共享 `runs` 目录：沙箱容器不挂载宿主目录，结果经 stdout 哨兵回传（见 §7.2 / §7.8）；沙箱镜像须在目标 rootless daemon 内可拉取 / 已存在（独立精简镜像，解析顺序见 §7.2）
+- socket 属主是宿主启动 daemon 的用户（常见 uid 1000）；平台容器默认 uid 100 / gid 101 需通过 `PUID`/`PGID` 或 `group_add` 对齐，否则 `DockerAdapter` 探测失败 → 启动降级 `container`
+
+**可选 `sandbox-daemon` compose 片段（示例级，不纳入 M57.1 验收）**：
+
+rootless daemon 由宿主启动，平台只挂载其 socket：
+
+```yaml
+services:
+  platform:
+    environment:
+      # 宿主 rootless daemon 的 socket（不是 /var/run/docker.sock）
+      DOCKER_HOST: unix:///run/user/1000/docker.sock
+      # 沙箱镜像与平台容器镜像同源（compose 默认已注入；此处显式说明依赖关系）
+      DEPENDFIX_IMAGE: ${DEPENDFIX_IMAGE:-caomeiyouren/dependfix:latest}
+    volumes:
+      - /run/user/1000/docker.sock:/run/user/1000/docker.sock
+      - dependfix-data:/app/data
+```
+
+> 不要改为挂载宿主 `/var/run/docker.sock`（等价宿主 root），也不要在平台容器内启动 rootless daemon 自身作为 sandbox。真实生产请按 [Docker rootless 官方文档](https://docs.docker.com/engine/security/rootless/) 在宿主启动 daemon。
 
 **反模式登记**（绝对不可用）：
 - 挂宿主 `docker.sock` 直连：违反 [sandbox-security-governance.md §3 路径 D](./sandbox-security-governance.md)
@@ -75,17 +109,21 @@ export interface SandboxHandle {
 
 ### 7.4 与 ContainerExecutor 并存
 
-按 [todo-archive-phases-m10-c53-c59c61.md §M10 D6 决策（Q6 并存）](../../plan/archive/todo-archive-phases-m10-c53-c59c61.md#m10-独立沙箱容器-c26-实施规划已归档)：两 Executor 同时注册，**默认 `container`**（向后兼容单机场景不破坏）：
+按 [todo-archive-phases-m10-c53-c59c61.md §M10 D6 决策（Q6 并存）](../../plan/archive/todo-archive-phases-m10-c53-c59c61.md#m10-独立沙箱容器-c26-实施规划-已归档)：两 Executor 同时注册，**默认 `container`**（向后兼容单机场景不破坏）：
 
 | 触发条件 | 走向 | 备注 |
 |:--|:--|:--|
 | `Repository.executorKind` = `undefined`  | `ContainerExecutor` | M6 默认，单机/无 rootless 场景仍可用 |
 | `Repository.executorKind` = `'container'` | `ContainerExecutor` | 显式声明，与 M6 一致 |
-| `Repository.executorKind` = `'sandbox'`（2026-10-27 起入口关闭） | `ContainerExecutor` 强制降级 → **`degraded`** | 当前行为：`degradedReason.code=sandbox_entry_disabled`；恢复后按下方 A/B |
-| `Repository.executorKind` = `'sandbox'` + SandboxRuntimeAdapter 可用（**恢复后**） | `SandboxExecutor` | M10 目标 |
-| `Repository.executorKind` = `'sandbox'` + adapter **启动时**不可用（`isAvailable()` 返回 false，**恢复后**） | `ContainerExecutor` 降级执行 → **`degraded` 状态** | **A 场景**（配置层降级）：业务结果完整，UI info 提示「未启用 rootless，已自动使用平台容器」 |
-| `Repository.executorKind` = `'sandbox'` + adapter **启动可用**但 `execute()` 抛 errno（ENOENT/ENOTCONN/EACCES/ECONNREFUSED，**恢复后**） | 不静默降级 → `error.code = 'sandbox_unavailable'` → **`failed` 状态** | **B 场景**（环境中途变化）：业务未完成，UI warn 告警「沙箱运行时不可用，环境配置可能已变化」 |
+| `Repository.executorKind` = `'sandbox'` + 模式 = `report-only` + SandboxRuntimeAdapter 可用 | `SandboxExecutor` | 已落地：独立容器跑自包含 CLI，结果经容器内 `/tmp/result.json` + stdout 哨兵回传（无宿主挂载） |
+| `Repository.executorKind` = `'sandbox'` + 模式 = `fix` / `fix-and-pr` + 出站策略就位 | `SandboxExecutor` | 容器内 clone 到 `/tmp/repo` 后执行 CLI；运行级审计代理按白名单 deny-by-default，非白名单外联使运行 `failed`（`network_violation`） |
+| `Repository.executorKind` = `'sandbox'` + 模式 = `fix` / `fix-and-pr` + 审计关闭或白名单被显式清空 | 不降级 → **`failed`** | 执行器第二道闸返回 `sandbox_fix_requires_egress_policy` 且不 clone |
+| `Repository.executorKind` = `'sandbox'` + 模式 = `fix` / `fix-and-pr` + clone 基地址非法或未命中白名单 | 不降级 → **`failed`** | 执行器返回 `sandbox_clone_host_not_allowed` 且不执行；`SANDBOX_CLONE_BASE_URL` 的 host 须加入 `DEPENDFIX_ALLOWED_DOMAINS` |
+| `Repository.executorKind` = `'sandbox'` + adapter **启动时**不可用（`isAvailable()` 返回 false） | `ContainerExecutor` 降级执行 → **`degraded` 状态** | **A 场景**（配置层降级）：业务结果完整，UI info 提示「未启用 rootless，已自动使用平台容器」 |
+| `Repository.executorKind` = `'sandbox'` + adapter **启动可用**但 `execute()` 抛 errno（ENOENT/ENOTCONN/EACCES/ECONNREFUSED） | 不静默降级 → `error.code = 'sandbox_unavailable'` → **`failed` 状态** | **B 场景**（环境中途变化）：业务未完成，UI warn 告警「沙箱运行时不可用，环境配置可能已变化」 |
 | `Repository.executorKind` = `'github-action'` | `ActionTriggerExecutor` | M6 已有 |
+
+**镜像来源**：解析顺序与版本同源约束见 §7.2；外置 rootless daemon 通常没有平台本地镜像名，仓库级 `sandboxImage` 避免为单个仓库改全局 env。
 
 CLI 启动时（`@dependfix/cli` entrypoint）探测 SandboxRuntimeAdapter 可用性；不可用时输出 `[sandbox]` warn 提示管理员启动 rootless daemon，但**不阻断**运行（旧路径仍可用）。
 
@@ -102,16 +140,16 @@ CLI 启动时（`@dependfix/cli` entrypoint）探测 SandboxRuntimeAdapter 可�
 
 **预留接口**：`SandboxRuntimeAdapter` 抽象兼容 K8s（通过 Kubernetes RuntimeClass + Pod sandbox securityContext 实现，无需 runc/dockerd 依赖）。`Repository.executorKind='sandbox'` 在 K8s 场景下走 `KubernetesRuntimeAdapter`（未来 TBD），接口签名保持 §7.1 不变。
 
-**Helm Chart** 留 backlog：需 `values.yaml`（sandbox resource limits 默认 / RBAC 不挂 docker.sock / PodSecurityContext 非 root）/ `templates/deployment.yaml`（rootless daemon sidecar）/ `templates/servicemonitor.yaml`（[sandbox-security-governance.md §7 验收持续治理](./sandbox-security-governance.md#7-验收与持续治理)）。
+**Helm Chart** 留 backlog：需 `values.yaml`（sandbox resource limits 默认 / RBAC 不挂 docker.sock / PodSecurityContext 非 root）/ `templates/deployment.yaml`（rootless daemon sidecar）/ `templates/servicemonitor.yaml`（[sandbox-security-governance.md §7 验收持续治理](./sandbox-security-governance.md#_7-验收与持续治理)）。
 
 ### 7.6 验收对照（链接权威条款）
 
-实施时按 [sandbox-security-governance.md §4 安全基线](./sandbox-security-governance.md#4-安全基线不可简化作为后续开发安全指导) 与 [安全规范 §5.3](../../standards/security.md) 逐项核验：
+实施时按 [sandbox-security-governance.md §4 安全基线](./sandbox-security-governance.md#_4-安全基线-不可简化-作为后续开发安全指导) 与 [安全规范 §5.3](../../standards/security.md) 逐项核验：
 
 - **非 root 执行** → SandboxRuntimeAdapter 注入 `--user=100:100`（C38 路径延续）
 - **超时兜底** → T802 单命令超时（已落地）+ SandboxHandle.waitForExit 透传外层 30 分钟超时
 - **资源与网络** → T1002 白名单拦截代理 + T1003 cgroup v2
-- **工作目录隔离** → `runs/{runId}/` 临时目录 + bind-mount + 执行后 cleanup
+- **工作目录隔离** → 容器私有 `/tmp`（不挂宿主目录）+ `autoRemove` 执行后销毁
 - **新执行后端威胁建模评审** → [sandbox-security-governance.md §4.4](./sandbox-security-governance.md) 已要求；T1001 提交 Review Gate 时同节点触发 Code Auditor 复核
 - **规范单点声明** → 不在本节重复 [security.md §5.3](../../standards/security.md) 条款，仅挂引用
 
@@ -126,7 +164,9 @@ CLI 启动时（`@dependfix/cli` entrypoint）探测 SandboxRuntimeAdapter 可�
 
 ### 7.8 降级状态机契约（degraded vs failed）
 
-> **2026-10-27 入口临时关闭**：scan-orchestrator 不再路由 `SandboxExecutor`；存量 `executorKind=sandbox` 强制 `ContainerExecutor` + `degradedReason.code=sandbox_entry_disabled`（UI 禁用 / API 拒绝新写入）。以下 A/B 契约保留，供真实执行闭环后恢复。
+> **2026-11-09 入口恢复（M57.1）**：report-only 路由 `SandboxExecutor`；fix / fix-and-pr 策略降级 `ContainerExecutor` + `degradedReason.code=sandbox_fix_requires_egress_policy`。以下 A/B 契约对 report-only 生效。
+>
+> **2026-11-13 M59.1：fix / fix-and-pr 在沙箱内执行**（审计事件类型：策略缺失与 clone host 未命中白名单都记 `sandbox_egress_blocked`，与「启动降级」的 `sandbox_degraded` 区分；两者都只落库不通知。注意 `notificationSuppressed` 只抑制环境事件，业务失败通知仍按 run 终态发送）（clone 基地址可经 `SANDBOX_CLONE_BASE_URL` 指向企业镜像 / 自建 Git；仅 https + `github.com` 源注入凭据头，其它源匿名 clone；clone host 必须命中出站白名单，否则 `sandbox_clone_host_not_allowed`）：出站策略就位时（`DEPENDFIX_NETWORK_AUDIT` 未关闭且白名单非空）沙箱在容器内完成 clone → 安装 → 修复 → 验证，不再降级 container；仅 daemon 启动不可用仍降级（A 场景，`sandbox_unavailable`）。第二道闸保留拒绝分支：审计关闭或白名单被显式清空时，fix 返回 `sandbox_fix_requires_egress_policy` 且**不 clone**。容器内 clone 源由平台构造（默认 `github.com`，可经 `SANDBOX_CLONE_BASE_URL` 指向镜像 / 自建 Git；其 host 必须命中出站白名单，否则 `sandbox_clone_host_not_allowed`），审计面从 CLI 启动后覆盖安装 / 验证 / 修复命令（运行级审计代理，见 [run-conclusion-semantics.md](./run-conclusion-semantics.md) 与 `runners/egress-audit.ts`）；非白名单外联记为 `networkViolations`，运行出口码不得为 0。
 >
 > **状态**：🔶 M11 阶段登记（2026-08-20），T1005-C 实施中。**背景**：sandbox 路由在「启动时不可用」与「运行时不可用」两种场景下的语义边界——前者是**配置偏离**（业务完整），后者是**真实异常**（业务未完成）。统一归为 `failed` 会丢失降级路径的成功信息，统一归为 `degraded` 会掩盖运行时异常，故引入独立状态分流。
 
@@ -182,7 +222,7 @@ if (error && !result) {
 
 #### 7.8.3 orchestrator 降级信号传递
 
-> **当前实现（2026-10-27 起）**：入口关闭，sandbox 分支无条件走 `ContainerExecutor` + `degradedReason.code='sandbox_entry_disabled'`；以下代码为**恢复后目标形态**。
+> **当前实现（2026-11-13 起）**：report-only 与 fix / fix-and-pr 均走 `SandboxExecutor`（启动可用执行；不可用则降级并记 `sandbox_unavailable`）；出站策略缺失由执行器第二道闸拒绝。以下代码为 sandbox 路由块形态。
 
 `scan-orchestrator.service.ts` 在 sandbox 路由块维护 `degradedReason` 内部变量：
 
@@ -235,6 +275,25 @@ if (executorKind === 'sandbox') {
 - **环境容器变化告警**（已登记 backlog，未实施）：B 场景（运行时失败）当前仅 UI warn 提示 + 平台日志 stderr；未来若引入 audit log 设计 + 通知渠道（邮件 / Slack / Webhook），可推送「沙箱执行器运行时不可用」告警给管理员。当前阶段仅 stderr + UI 提示，登记 backlog 详见 [backlog.md §C-ENV-CHANGE-ALERT](../../plan/backlog.md)。
 
 ---
+
+### 7.9 执行资源采集（M59.4，2026-11-14）
+
+三类执行器的资源口径统一为 `ExecutorResourceUsage`（`null` 一律表示不可采集，不写 0）：
+
+| 执行器 | 采集方式 | 字段口径 |
+|:--|:--|:--|
+| container | 平台进程内 cgroup 采样（`startResourceMonitor`） | 既有实现不变；未预期抛错也返回执行窗口快照 |
+| sandbox | 容器内 `sh` 后台采样自身 cgroup（200ms；v2 `memory.current/max/events`、v1 `memory.usage_in_bytes/limit_in_bytes/oom_control`），窗口覆盖容器内 clone + CLI | `memoryMaxBytes` / `peakRssBytes` 必采；`oomKilled` 用前后计数差；任一项不可读 → null + `degradedReason`（含 `oom_kill counter unavailable`） |
+| github-action | 不采集（执行发生在目标仓库 workflow） | 显式 `{ source: 'none', degradedReason }`，UI / 导出不显示为 0 |
+
+实现要点：
+
+- 采样器与 CLI 共用同一 `sh -c`，脚本以换行分隔（后台采样器以 `&` 结尾，`;` 拼接会形成 `& ;` 语法错误）。
+- 读数经独立哨兵（`__DEPENDFIX_RESOURCE_JSON_*`）回传，解析后从执行日志中剥离；哨兵缺失 / 非 JSON 按 unavailable 处理，**不影响主结果解析与退出码**。
+- 上限为 v1 unlimited 哨兵（≥ 9223372036854771712）或 v2 `max` 时落 `null` + `limitReason=unlimited`；文件缺失 / 空值 → `null` 且不带原因（未知 ≠ 无上限）。
+- bootstrap 失败（clone / `cd`）也先停采样并回传读数再以原退出码结束（结果哨兵缺失仍按「未回传显式结果」处理）。
+- 超时 / 异常 / 容器整体 OOM 被杀：采样器随容器终止，无法回传 → 平台写 `unavailable` + 原因（sandbox 侧无法像 container 那样保留进程内快照，属设计边界）。
+- 采样停止后才回传（`touch` 停止标记 + `wait`），CLI 退出码先于停止标记保存。
 
 ## 8. A 模式 push + PR 推送机制
 
@@ -351,7 +410,7 @@ C53 引入 A 模式 `fix-and-pr` 链路完成的关键代价是 **凭据权限�
 - A 模式 fix-and-pr 适用于"自托管平台 + 强可控 PAT"场景（如专用 CI 账户）
 - 平台 UI 触发时显式提示当前所选凭据的权限范围（待 C28 设计落地）
 
-完整凭据安全条款见 [security.md §5.3 修复执行安全](../../standards/security.md#5-依赖与供应链安全-dependency--supply-chain-security)（凭据基线 + 权限阶）。
+完整凭据安全条款见 [security.md §5.3 修复执行安全](../../standards/security.md#_5-依赖与供应链安全-dependency-supply-chain-security)（凭据基线 + 权限阶）。
 
 ### 8.5 后续 backlog（依赖追踪）
 
@@ -359,3 +418,21 @@ C53 引入 A 模式 `fix-and-pr` 链路完成的关键代价是 **凭据权限�
 - **`sanitizeErrorMessage` 补充 `Authorization: token xxx` 模式**：当前实现不覆盖 GitHub REST API 实际形态；C53-2 RG-W2 登记后续 patch
 - **A 模式 dispatched UI 提示**：用户看到 dispatched 状态需明确"PR 创建失败，分支已推，可手动开 PR"——当前 UI 通用 dispatched 提示，需后续优化
 - **录入 M11 阶段**：C53 + T1005 sandbox 路由 + C28 security.md 凭据设计 共同组成 M11（业务可见性 + 沙箱落地 + 安全文档）阶段
+### 8.6 沙箱自包含交付（M59.2，2026-11-14）
+
+沙箱没有平台侧 workDir，A 模式的「引擎只 commit、平台 push」不成立。M59.2 起沙箱路径的交付在执行进程内完成：
+
+| 模式 | 容器内动作 | 结果契约（`RunResult.delivery`） |
+|:--|:--|:--|
+| `fix`（`https://github.com` 源） | `--commit --push`：修复 → 本地提交 → 推送当前分支 | `{ deliveredBy: 'engine', status: 'pushed', branch, commitSha }`（无新提交 → `status: 'none'`） |
+| `fix`（其它 clone 源） | 只 `--commit`：无 push 凭据，**不推送** | `{ deliveredBy: 'platform', status: 'none' }` → 沙箱路径无人接管，视为未交付（需改用 `fix-and-pr` 或 GitHub 源） |
+| `fix-and-pr` | 引擎自带 `createFixBranch → commit → push → createPullRequest` | 推送后 `pushed`；PR 建成或复用 `status: 'pr-created'` + `prUrl` / `prNumber` |
+| container（对照） | 引擎只 commit | `{ deliveredBy: 'platform', status: 'none' }`，平台接管 push / PR |
+
+关键约束：
+
+- **凭据**：容器内 `git config --local credential.helper` 注入只读 env 的 helper（token 不落 `.git/config`），仅 `https://github.com` 源启用；`fix` 与 `fix-and-pr` 共用同一 token。
+- **平台映射**：执行器按 `delivery` 映射 `runUrl` / `prNumber`（PR 地址或分支页），平台不再二次 push / 建 PR；`shouldPlatformDeliver()` 守卫容器路径，正向（`deliveredBy=platform` / 无记录）与反向（`pushed` / `pr-created`）都有用例。
+- **失败副作用**：分支已推但 PR 失败 / 取消时，平台按结果声明的 `branch` 清理 **仅 `dependfix/` 前缀**分支（默认分支直推不在范围），删除成功 / 失败 / 跳过（无凭据、越界）都落 `delivery_branch_cleanup` 审计事件。push 失败（受保护默认分支 / 凭据失效 / 网络）以 `PUSH_FAILED` 进入状态机交付失败白名单 → 运行判 `failed`（不再静默完成）；失败 run 不落 `runUrl`（避免指向已清理或不存在的分支）。
+- **落库与披露**：`summaryJson.delivery` 携带 status / deliveredBy / branch / commitSha（不新增 DB 列），运行详情「交付」项展示 `branch @ shortSha`。
+

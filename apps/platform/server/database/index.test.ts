@@ -1,6 +1,7 @@
 import 'reflect-metadata'
-import { closeSync, existsSync, mkdirSync, openSync, readdirSync, rmSync, writeSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
+import Database from 'better-sqlite3'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createDataSourceOptions, currentDatabaseType, ensureDatabaseInitialized } from './index'
 
@@ -98,10 +99,11 @@ describe('ensureDatabaseInitialized', () => {
         tmpDir = join(process.env.TMPDIR ?? '/tmp', `index-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
         mkdirSync(tmpDir, { recursive: true })
         dbPath = join(tmpDir, 'test.sqlite')
-        // 创建空的 SQLite 文件
-        const fd = openSync(dbPath, 'w')
-        writeSync(fd, 'seed')
-        closeSync(fd)
+        // 启动期备份走 SQLite 在线备份 API，源文件必须是真实数据库（裸文本会被判为损坏库）
+        const seed = new Database(dbPath)
+        seed.exec('CREATE TABLE seed (id INTEGER PRIMARY KEY, value TEXT)')
+        seed.prepare('INSERT INTO seed (value) VALUES (?)').run('seed')
+        seed.close()
 
         process.env = { ...realEnv }
         vi.stubEnv('DATABASE_PATH', dbPath)
@@ -120,12 +122,12 @@ describe('ensureDatabaseInitialized', () => {
         }
     })
 
-    it('creates startup backup before DataSource initialization', () => {
+    it('creates startup backup before DataSource initialization', async () => {
         const backupsDir = join(tmpDir, 'backups')
         expect(existsSync(backupsDir)).toBe(false)
 
-        // 调用 ensureDatabaseInitialized 会触发 runStartupBackup
-        ensureDatabaseInitialized().catch(() => { /* DataSource 可能初始化失败（测试环境限制），但 backup 已经在同步阶段完成 */ })
+        // 调用 ensureDatabaseInitialized 会触发 runStartupBackup（异步：在线备份 API）
+        await ensureDatabaseInitialized().catch(() => { /* DataSource 可能初始化失败（测试环境限制），备份已在初始化前完成 */ })
 
         // 备份目录应已创建 + 至少一份备份
         expect(existsSync(backupsDir)).toBe(true)
@@ -183,21 +185,18 @@ describe('ensureDatabaseInitialized', () => {
         vi.resetModules()
         const { ensureDatabaseInitialized: ensureFresh } = await import('./index')
 
-        const ds = await ensureFresh().catch(() =>
-            // 测试环境可能 DataSource 初始化失败，跳过断言
-            null)
+        const ds = await ensureFresh()
 
-        if (!ds?.isInitialized) {
-            // 测试环境 DataSource 初始化失败（无 better-sqlite3 native binding 等），跳过
-            return
-        }
+        // 显式断言初始化成功：早退守卫会让「PRAGMA 未生效」类回归静默通过
+        // （此前 busy_timeout 断言因取错列名恒为 0，正是被早退掩盖）
+        expect(ds.isInitialized).toBe(true)
 
         // 验证 journal_mode = wal
         const journalModeRows = await ds.query('PRAGMA journal_mode')
         expect(String(journalModeRows[0]?.journal_mode ?? '').toLowerCase()).toBe('wal')
 
-        // 验证 busy_timeout = 5000ms
+        // 验证 busy_timeout = 5000ms（SQLite 返回列名是 timeout，不是 busy_timeout）
         const busyTimeoutRows = await ds.query('PRAGMA busy_timeout')
-        expect(Number(busyTimeoutRows[0]?.busy_timeout ?? 0)).toBe(5000)
+        expect(Number(busyTimeoutRows[0]?.timeout ?? 0)).toBe(5000)
     })
 })

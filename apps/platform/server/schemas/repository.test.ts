@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { repositorySchema, repositoryUpdateSchema, SANDBOX_EXECUTOR_DISABLED_MESSAGE } from './repository'
+import { repositorySchema, repositoryUpdateSchema } from './repository'
 import { parseSandboxLimits, parseTags, parseVerifyCommands } from '#server/entities/repository'
 
 describe('repository schemas', () => {
@@ -22,6 +22,43 @@ describe('repository schemas', () => {
         expect(ok.success).toBe(true)
     })
 
+    it('更新：部分字段不注入默认值（PUT 只改 note 不重置执行器与分支）', () => {
+        // 历史缺陷：repositoryBase 带 .default()，.partial() 仍会注入默认值 →
+        // 只改 note 的 PUT 把 github-action 仓库重置为 container。基线字段集不带默认后不再发生。
+        const parsed = repositoryUpdateSchema.parse({ note: 'x' })
+        expect(parsed).toEqual({ note: 'x' })
+        expect(parsed).not.toHaveProperty('executorKind')
+        expect(parsed).not.toHaveProperty('defaultBranch')
+        expect(parsed).not.toHaveProperty('packageManager')
+        expect(parsed).not.toHaveProperty('platform')
+    })
+
+    it('跨大版本授权：更新不注入默认值，显式布尔可解析', () => {
+        expect(repositoryUpdateSchema.parse({ note: 'x' })).toEqual({ note: 'x' })
+        expect(repositoryUpdateSchema.parse({ allowMajorUpgrade: true })).toEqual({ allowMajorUpgrade: true })
+        // 创建侧默认由 API 层补 false（schema 不注入，避免与部分更新语义混淆）
+        expect(repositorySchema.parse({ owner: 'a', name: 'b' }).allowMajorUpgrade).toBeUndefined()
+    })
+
+    it('创建/更新：执行超时字段边界与交叉校验', () => {
+        const ok = repositorySchema.safeParse({
+            owner: 'a',
+            name: 'b',
+            executionTimeoutMs: 2_700_000,
+            verifyCommandTimeoutMs: 1_200_000,
+        })
+        expect(ok.success).toBe(true)
+
+        // 子项大于执行上限 → 拒绝（错误挂在子项字段）
+        const cross = repositoryUpdateSchema.safeParse({ executionTimeoutMs: 120_000, verifyCommandTimeoutMs: 600_000 })
+        expect(cross.success).toBe(false)
+        expect(cross.error?.issues[0]?.path).toEqual(['verifyCommandTimeoutMs'])
+
+        // 下限 / 上限
+        expect(repositoryUpdateSchema.safeParse({ executionTimeoutMs: 1_000 }).success).toBe(false)
+        expect(repositoryUpdateSchema.safeParse({ cloneTimeoutMs: 10_000 }).success).toBe(false)
+    })
+
     it('更新：允许部分字段（空对象合法）', () => {
         expect(repositoryUpdateSchema.safeParse({}).success).toBe(true)
         expect(repositoryUpdateSchema.safeParse({ note: 'x' }).success).toBe(true)
@@ -35,22 +72,16 @@ describe('repository schemas', () => {
         expect(repositoryUpdateSchema.safeParse({ actionWorkflowFile: 'ci.yml' }).success).toBe(true)
     })
 
-    it('创建：sandbox 执行器已临时关闭 → fail', () => {
-        const bad = repositorySchema.safeParse({ owner: 'a', name: 'b', executorKind: 'sandbox' })
-        expect(bad.success).toBe(false)
-        if (!bad.success) {
-            const issue = bad.error.issues.find((item) => item.path[0] === 'executorKind')
-            expect(issue?.message).toBe(SANDBOX_EXECUTOR_DISABLED_MESSAGE)
-        }
+    it('创建：sandbox 执行器可写入（入口已恢复，仅 report-only 真实执行）', () => {
+        const ok = repositorySchema.safeParse({ owner: 'a', name: 'b', executorKind: 'sandbox' })
+        expect(ok.success).toBe(true)
+        expect(ok.success && ok.data.executorKind).toBe('sandbox')
     })
 
-    it('更新：sandbox 执行器已临时关闭 → fail（存量仓库走编排层降级）', () => {
-        const bad = repositoryUpdateSchema.safeParse({ executorKind: 'sandbox' })
-        expect(bad.success).toBe(false)
-        if (!bad.success) {
-            const issue = bad.error.issues.find((item) => item.path[0] === 'executorKind')
-            expect(issue?.message).toBe(SANDBOX_EXECUTOR_DISABLED_MESSAGE)
-        }
+    it('更新：sandbox 执行器可写入', () => {
+        const ok = repositoryUpdateSchema.safeParse({ executorKind: 'sandbox' })
+        expect(ok.success).toBe(true)
+        expect(ok.success && ok.data.executorKind).toBe('sandbox')
     })
 
     describe('sandboxLimits（沙箱资源限额覆盖）', () => {

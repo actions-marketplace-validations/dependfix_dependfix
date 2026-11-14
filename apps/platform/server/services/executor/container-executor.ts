@@ -2,7 +2,7 @@ import { mkdir, rename, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import type { RunResult } from '@dependfix/core'
+import { parseDurationMs, type RunResult } from '@dependfix/core'
 import {
     DependfixApp,
     type DependfixRunResult,
@@ -11,16 +11,19 @@ import {
     createFixBranch,
     GIT_PUSH_HOOKS_ISOLATION_ARGS,
     GIT_PUSH_SIGNING_ISOLATION_ARGS,
+    getAbortReason,
+    getAbortSnapshot,
 } from '@dependfix/engine'
 import type { AuthProvider } from '@dependfix/engine/auth'
 import type { ScanExecutor, ScanExecutorContext, ScanExecutorResult } from './types'
 import {
     deliverFixAndPr,
     planFixAndPrDelivery,
+    shouldPlatformDeliver,
     PlatformDeliveryError,
     createPlatformOctokit,
 } from './platform-delivery'
-import { ABORT_GRACE_MS, ExecutionTimeoutError, settleWithin, withTimeout } from './engine-run'
+import { ABORT_GRACE_MS, describeUnsettledRun, ExecutionTimeoutError, settleWithin, withTimeout } from './engine-run'
 import { MemoryLogger } from '#server/utils/memory-logger'
 import { logger as platformLogger } from '#server/utils/logger'
 import { detectSigkill, startResourceMonitor } from '#server/utils/resource-usage'
@@ -47,10 +50,8 @@ export const DEFAULT_EXECUTION_TIMEOUT_MS = 30 * 60 * 1000
 
 /**
  * 解析环境变量为正整数（NaN / 负数 / 0 → 返回默认值）。
- * 对齐 queue-mode.ts:79-84 的 parseRetryConfig 模式。
- *
- * 已知边界：基于 `parseInt`，尾随非数字字符会被截断接受（如 `'600ms'` → 600）——env 为运维持有，
- * 保持与 `CLONE_TIMEOUT_MS` 等复用同一函数的一致性，不做严格 `/^\d+$/` 校验。
+ * 仅用于重试次数等非时长参数；时长请用 {@link resolveExecutionTimeoutMs} /
+ * {@link resolveCloneTimeoutMs}（支持 `30m` / `1h` 等单位写法）。
  */
 export function parsePositiveInt(raw: string | undefined, defaultValue: number): number {
     if (!raw) {
@@ -74,10 +75,20 @@ export const MAX_EXECUTION_TIMEOUT_MS = 24 * 60 * 60 * 1000
  * queue Worker 锁参数在模块加载期读取同一解析器 → 二者联动；env 变更需重启进程。
  */
 export function resolveExecutionTimeoutMs(raw: string | undefined = process.env.EXECUTION_TIMEOUT_MS): number {
-    const value = parsePositiveInt(raw, DEFAULT_EXECUTION_TIMEOUT_MS)
+    const value = parseDurationMs(raw, { defaultUnit: 'ms' }) ?? DEFAULT_EXECUTION_TIMEOUT_MS
     return value >= MIN_EXECUTION_TIMEOUT_MS && value <= MAX_EXECUTION_TIMEOUT_MS
         ? value
         : DEFAULT_EXECUTION_TIMEOUT_MS
+}
+
+/**
+ * 解析 clone 超时（`CLONE_TIMEOUT_MS` env）。
+ *
+ * 支持纯数字毫秒（历史口径）与 `5m` / `1h` 等单位写法；非法 / 非正数回退默认值。
+ * 上限不单独设：clone 超时按运维显式配置采纳，运行级 abort 仍由执行上限兜底。
+ */
+export function resolveCloneTimeoutMs(raw: string | undefined = process.env.CLONE_TIMEOUT_MS): number {
+    return parseDurationMs(raw, { defaultUnit: 'ms' }) ?? DEFAULT_CLONE_TIMEOUT_MS
 }
 
 /**
@@ -189,17 +200,29 @@ export async function cleanupRemoteBranch(branchName: string, workDir: string, t
  * 移动 workDir 到 _pending 子目录 + 写 metadata 文件（保留 24h 用于失败诊断）。
  *
  * 设计要点：
- * - 仅在 push 成功 + PR 失败时调用（其他路径 finally 立即清理）
+ * - 调用面：push 成功但 PR 失败（保留 24h）、取消宽限期结束仍未落定（延迟清理）；
+ *   其余路径 finally 直接删除工作目录
  * - 保留窗口通过 .meta.json 记录（writtenAt + retentionMs），便于后续 stale-cleanup 任务扫描
  * - 失败静默（move 可能因 fs 错误失败，但不影响 pr_creation_failed 错误回传）
  * - 当前阶段：保留语义落地，后续 stale-cleanup 任务按 metadata 清理
  */
+export interface MoveToPendingOptions {
+    /** 保留期（毫秒），默认 24h */
+    retentionMs?: number
+    /** `.meta.json` 的 reason，默认 `pr_creation_failed` */
+    reason?: string
+    /** 追加写入 `.meta.json` 的诊断字段（如取消未落定的现场快照） */
+    extraMeta?: Record<string, unknown>
+}
+
 export async function moveToPending(
     workDir: string,
     runId: string,
     pendingRoot: string,
-    retentionMs = 24 * 60 * 60 * 1000,
+    options: MoveToPendingOptions = {},
 ): Promise<string> {
+    const retentionMs = options.retentionMs ?? 24 * 60 * 60 * 1000
+    const reason = options.reason ?? 'pr_creation_failed'
     const runIdPattern = /^[A-Za-z0-9_-]+$/
     if (!runIdPattern.test(runId)) {
         throw new Error(`非法 runId: ${runId}`)
@@ -208,15 +231,49 @@ export async function moveToPending(
     await mkdir(pendingRoot, { recursive: true })
     await rename(workDir, targetDir)
     const now = new Date()
+    // 保留字段不可被 extraMeta 覆盖（来源为调用方上下文，避免误改保留期 / 归属）
+    const reserved = new Set(['runId', 'writtenAt', 'retentionMs', 'expiresAt', 'reason'])
+    const extra = Object.fromEntries(
+        Object.entries(options.extraMeta ?? {}).filter(([key]) => !reserved.has(key)),
+    )
     const meta = {
         runId,
         writtenAt: now.toISOString(),
         retentionMs,
         expiresAt: new Date(now.getTime() + retentionMs).toISOString(),
-        reason: 'pr_creation_failed',
+        reason,
+        ...extra,
     }
     await writeFile(join(targetDir, '.meta.json'), JSON.stringify(meta, null, 2), 'utf-8')
     return targetDir
+}
+
+
+/**
+ * 执行结束后的工作目录处置（可单测的选择点）。
+ *
+ * - 取消未落定：不删除仍可能被引擎写盘的目录，移入 `_pending` 延迟清理并保留诊断；
+ * - 其余：直接删除（执行结束不留存；清理失败静默）。
+ */
+export async function disposeWorkDirAfterRun(params: {
+    workDir: string
+    runId: string
+    pendingRoot: string
+    unsettledDiagnosis?: string
+    move?: typeof moveToPending
+    remove?: (path: string) => Promise<void>
+}): Promise<'moved' | 'removed'> {
+    const move = params.move ?? moveToPending
+    const remove = params.remove ?? ((path: string) => rm(path, { recursive: true, force: true }))
+    if (params.unsettledDiagnosis) {
+        await move(params.workDir, params.runId, params.pendingRoot, {
+            reason: 'execution_timeout_unsettled',
+            extraMeta: { diagnosis: params.unsettledDiagnosis },
+        })
+        return 'moved'
+    }
+    await remove(params.workDir).catch(() => { /* 清理失败静默 */ })
+    return 'removed'
 }
 
 /**
@@ -241,16 +298,30 @@ export class ContainerExecutor implements ScanExecutor {
     private readonly workRoot: string
     private readonly timeoutMs: number
     private readonly cloneTimeoutMs: number
+    private readonly verifyCommandTimeoutMs?: number
+    private readonly installTimeoutMs?: number
     private readonly cloneMaxRetries: number
     /** 超时取消后等待引擎落定的宽限期（见 `engine-run.ts` 的 `ABORT_GRACE_MS`）。 */
     private readonly abortGraceMs: number
 
-    constructor(options: { workRoot: string, timeoutMs?: number, cloneTimeoutMs?: number, cloneMaxRetries?: number, abortGraceMs?: number } = { workRoot: process.env.DATABASE_PATH ? join(process.env.DATABASE_PATH, '..', 'runs') : 'data/runs' }) {
+    constructor(options: {
+        workRoot: string
+        timeoutMs?: number
+        cloneTimeoutMs?: number
+        cloneMaxRetries?: number
+        abortGraceMs?: number
+        /** 仓库级验证命令超时（毫秒；缺省走引擎 env / 内置默认） */
+        verifyCommandTimeoutMs?: number
+        /** 仓库级安装类命令超时（毫秒；缺省走引擎 env / 内置默认） */
+        installTimeoutMs?: number
+    } = { workRoot: process.env.DATABASE_PATH ? join(process.env.DATABASE_PATH, '..', 'runs') : 'data/runs' }) {
         this.workRoot = options.workRoot
         this.timeoutMs = options.timeoutMs ?? resolveExecutionTimeoutMs()
         // clone 超时：优先构造参数 > 环境变量 > 默认值
         this.cloneTimeoutMs = options.cloneTimeoutMs
-            ?? parsePositiveInt(process.env.CLONE_TIMEOUT_MS, DEFAULT_CLONE_TIMEOUT_MS)
+            ?? resolveCloneTimeoutMs(process.env.CLONE_TIMEOUT_MS)
+        this.verifyCommandTimeoutMs = options.verifyCommandTimeoutMs
+        this.installTimeoutMs = options.installTimeoutMs
         // clone 重试次数：优先构造参数 > 环境变量 > 默认值
         this.cloneMaxRetries = options.cloneMaxRetries
             ?? parsePositiveInt(process.env.CLONE_MAX_RETRIES, DEFAULT_CLONE_MAX_RETRIES)
@@ -268,6 +339,7 @@ export class ContainerExecutor implements ScanExecutor {
     }
 
     async execute(ctx: ScanExecutorContext): Promise<ScanExecutorResult> {
+        const startedAt = new Date().toISOString()
         const monitor = startResourceMonitor()
         try {
             const result = await this.executeRun(ctx)
@@ -278,6 +350,20 @@ export class ContainerExecutor implements ScanExecutor {
             ])
             result.resource = resource
             return result
+        } catch (error) {
+            // 未预期抛错也要保留执行窗口快照（此前会在 finally 丢弃，运行详情显示「无资源读数」）。
+            // 归类沿用执行器契约的 execution_failed（编排层不再走 orchestration_failed），并留 error 日志。
+            const message = sanitizeErrorMessage(error instanceof Error ? error.message : String(error))
+            platformLogger.error('[container-executor] unexpected failure during execute', { error })
+            const resource = monitor.stop()
+            resource.sigkillDetected = detectSigkill([message])
+            return {
+                exitCode: 2,
+                error: { code: 'execution_failed', message },
+                resource,
+                startedAt,
+                finishedAt: new Date().toISOString(),
+            }
         } finally {
             // 异常路径也停止采样；stop 幂等，不覆盖已生成的快照
             monitor.stop()
@@ -288,6 +374,8 @@ export class ContainerExecutor implements ScanExecutor {
         const startedAt = new Date().toISOString()
         const { owner, name, defaultBranch } = ctx.repository
         const workDir = join(this.workRoot, ctx.runId)
+        // 延迟清理 / PR 失败保留的诊断根目录（finally 与失败分支共用）
+        const pendingRoot = join(this.workRoot, '_pending')
         // 扫描模式单一事实源：report-only 为只读扫描（仅拉告警 + 出报告，无 clone / commit / push）；
         // fix / fix-and-pr 才需要本地仓库文件与交付链路。
         // ⚠️ needsClone / needsPush / needsPr 与下方引擎 config 覆写（mode / commit）必须同源，
@@ -298,8 +386,6 @@ export class ContainerExecutor implements ScanExecutor {
         const needsPush = !isReportOnly
         // fix-and-pr 模式：push 成功后再创建 PR
         const needsPr = ctx.config.mode === 'fix-and-pr'
-        // push 成功 + PR 失败时保留 workDir 24h 供诊断（pendingRoot = workRoot/_pending）
-        const pendingRoot = join(this.workRoot, '_pending')
 
         // 创建 MemoryLogger 捕获执行日志（同时输出到控制台）
         // 作用域提升到 try 外部，确保 catch 块也能访问
@@ -311,6 +397,8 @@ export class ContainerExecutor implements ScanExecutor {
 
         // 引擎运行 promise 提升到 try 外：超时路径需要据它等待宽限期（避免与引擎落盘互相踩）
         let engineRun: Promise<DependfixRunResult> | undefined
+        // 取消未落定：finally 不直接删工作目录，改为移入 _pending 延迟清理并保留诊断
+        let unsettledDiagnosis: string | undefined
 
         try {
             await mkdir(workDir, { recursive: true })
@@ -349,6 +437,9 @@ export class ContainerExecutor implements ScanExecutor {
                 commands: ctx.repository.verifyCommands?.length ? ctx.repository.verifyCommands : undefined,
                 // 容器内执行属设计内沙箱（非 root + 临时目录），不触发本地模式风险警告
                 executionEnvironment: 'container',
+                // 仓库级验证命令 / 安装超时：与执行上限同源解析，未配置时走引擎 env / 默认
+                ...(this.verifyCommandTimeoutMs !== undefined ? { verifyCommandTimeoutMs: this.verifyCommandTimeoutMs } : {}),
+                ...(this.installTimeoutMs !== undefined ? { installTimeoutMs: this.installTimeoutMs } : {}),
                 // 注入 MemoryLogger 用于捕获执行日志
                 logger: memLogger,
             })
@@ -368,7 +459,7 @@ export class ContainerExecutor implements ScanExecutor {
             // 触发条件比原 `exitCode === 0` 更严格：exitCode 1 也算"有部分成功"，但只有真产生 commit 才推
             let runUrl: string | undefined
             let prNumber: number | undefined
-            if (needsPush && result && ctx.credential?.token) {
+            if (needsPush && result && ctx.credential?.token && shouldPlatformDeliver(result)) {
                 const hasNewCommit = await checkHasNewCommit(workDir, preRunHead)
                 if (!hasNewCommit) {
                     // 引擎未产生新 commit（无告警 / 告警已收敛 / 全部 failed 已被回滚）→ 不推
@@ -405,6 +496,7 @@ export class ContainerExecutor implements ScanExecutor {
                     if (deliveryError instanceof PlatformDeliveryError) {
                         if (deliveryError.code === 'pr_creation_failed') {
                             // 分支已推 + PR 失败 → 保留 workDir 24h 供诊断 + 状态机 dispatched
+                            // （保留失败静默：目录留在原处，不影响 run 结果）
                             await moveToPending(workDir, ctx.runId, pendingRoot).catch(() => { /* 保留失败静默 */ })
                             return {
                                 exitCode: 2,
@@ -418,6 +510,8 @@ export class ContainerExecutor implements ScanExecutor {
                                 // 此处使用 ctx.runId 兜底（虽然不是真分支名，但 user 可点进 run 详情查 workDir 状态）；
                                 // 实际场景下 platform-delivery PR 失败时仍可重新从 _pending 目录恢复
                                 runUrl: `https://github.com/${owner}/${name}/tree/dependfix/auto-fix-${runIdFingerprint(result)}`,
+                                // 失败也要带执行日志：否则运行详情 / 导出只剩「（无执行日志）」，无法离线归因
+                                logsJson: memLogger.toJson(),
                             }
                         }
                         // push_failed：分支未推
@@ -429,6 +523,7 @@ export class ContainerExecutor implements ScanExecutor {
                             },
                             startedAt,
                             finishedAt: new Date().toISOString(),
+                            logsJson: memLogger.toJson(),
                         }
                     }
                     // 未预期的非 PlatformDeliveryError → 走 execution_failed 兜底
@@ -466,9 +561,23 @@ export class ContainerExecutor implements ScanExecutor {
             // 否则会在引擎仍写盘时删除目录，且无法区分"已停止"与"仍在跑"
             if (isTimeout && engineRun) {
                 const settled = await settleWithin(engineRun, this.abortGraceMs)
-                memLogger.warn(
-                    `[executor] ${owner}/${name}: 超时后已请求运行级取消；引擎${settled ? '已在宽限期内落定' : `在 ${this.abortGraceMs}ms 宽限期内未落定（不再等待）`}`,
-                )
+                if (settled) {
+                    memLogger.warn(`[executor] ${owner}/${name}: 超时后已请求运行级取消；引擎已在宽限期内落定`)
+                } else {
+                    // 未落定：记录取消时刻在管子进程数 / 最后命令 / 取消原因，工作目录改为延迟清理
+                    // 子进程数取「取消当刻」快照：登记表在 kill 时已被清空，之后读数恒为 0
+                    const snapshot = getAbortSnapshot()
+                    unsettledDiagnosis = describeUnsettledRun({
+                        graceMs: this.abortGraceMs,
+                        childProcessCount: snapshot?.trackedCount ?? 0,
+                        lastCommand: snapshot?.lastCommand,
+                        abortReason: getAbortReason(),
+                    })
+                    memLogger.warn(
+                        `[executor] ${owner}/${name}: 超时后已请求运行级取消；${unsettledDiagnosis}`
+                        + '（工作目录将移入 _pending 延迟清理）',
+                    )
+                }
             }
 
             const executorFailMsg = `[executor] ${owner}/${name} failed: ${errorSource} - ${message}`
@@ -491,9 +600,13 @@ export class ContainerExecutor implements ScanExecutor {
                 logsJson: memLogger.toJson(),
             }
         } finally {
-            // 临时工作目录清理（执行后不留存）；清理失败不影响执行结果
-            // 这里已是"未走 pr_creation_failed 保留路径"的所有场景（completed / push_failed / execution_failed / execution_timeout）
-            await rm(workDir, { recursive: true, force: true }).catch(() => { /* 清理失败静默 */ })
+            try {
+                await disposeWorkDirAfterRun({ workDir, runId: ctx.runId, pendingRoot, unsettledDiagnosis })
+            } catch (error) {
+                // 迁移失败时目录留在 workRoot/<runId>：显式留痕（无清扫者，需人工或后续批次处置）
+                const reason = error instanceof Error ? error.message : String(error)
+                memLogger.warn(`[executor] ${owner}/${name}: 工作目录处置失败（保留原处）：${reason}`)
+            }
         }
     }
 

@@ -1,9 +1,10 @@
 import 'reflect-metadata'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { expectError, makeEvent, setupMemoryDatabase, teardownMemoryDatabase } from '../../../tests/api-helper'
+import { makeEvent, setupMemoryDatabase, teardownMemoryDatabase } from '../../../tests/api-helper'
 import reposHandler from './index'
 import { ensureDatabaseInitialized } from '#server/database'
 import { AuditEvent } from '#server/entities/audit-event'
+import { Repository } from '#server/entities/repository'
 
 // 鉴权由 guard.test.ts 单独覆盖：API handler 测试 mock guard 层，聚焦业务逻辑；
 // 但 todo.md §M16.5 T701-e2e 补强要求 API handler 测试也覆盖三角色鉴权——
@@ -79,6 +80,91 @@ describe('GET /api/repos', () => {
         })
     })
 
+    it('defaults allowMajorUpgrade to false when body omits it and no platform default is set', async () => {
+        const created = await call('POST', '/api/repos', {
+            owner: 'major-off',
+            name: 'repo',
+            platform: 'github',
+            packageManager: 'pnpm',
+            defaultBranch: 'main',
+            executorKind: 'container',
+        }) as { allowMajorUpgrade: boolean }
+        expect(created.allowMajorUpgrade).toBe(false)
+    })
+
+    it('stores a repository-level sandbox image and returns it in views', async () => {
+        const created = await call('POST', '/api/repos', {
+            owner: 'sandbox-image',
+            name: 'repo',
+            platform: 'github',
+            packageManager: 'pnpm',
+            defaultBranch: 'main',
+            executorKind: 'sandbox',
+            sandboxImage: 'ghcr.io/owner/dependfix:1.2.3',
+        }) as { sandboxImage: string | null }
+        expect(created.sandboxImage).toBe('ghcr.io/owner/dependfix:1.2.3')
+
+        const list = await call('GET', '/api/repos') as { owner: string, sandboxImage: string | null }[]
+        expect(list.find((item) => item.owner === 'sandbox-image')?.sandboxImage).toBe('ghcr.io/owner/dependfix:1.2.3')
+    })
+
+    it('normalizes a blank sandbox image to null and rejects invalid references', async () => {
+        const blank = await call('POST', '/api/repos', {
+            owner: 'sandbox-blank',
+            name: 'repo',
+            platform: 'github',
+            packageManager: 'pnpm',
+            defaultBranch: 'main',
+            executorKind: 'sandbox',
+            sandboxImage: '   ',
+        }) as { sandboxImage: string | null }
+        expect(blank.sandboxImage).toBeNull()
+
+        await expect(call('POST', '/api/repos', {
+            owner: 'sandbox-bad',
+            name: 'repo',
+            platform: 'github',
+            packageManager: 'pnpm',
+            defaultBranch: 'main',
+            executorKind: 'sandbox',
+            sandboxImage: 'https://ghcr.io/owner/dependfix:latest',
+        })).rejects.toMatchObject({ statusCode: 400 })
+    })
+
+    it('uses runtime-config default for allowMajorUpgrade when body omits it', async () => {
+        const globalScope = globalThis as { useRuntimeConfig?: () => unknown }
+        const original = globalScope.useRuntimeConfig
+        globalScope.useRuntimeConfig = () => ({ public: { allowMajorUpgradeDefault: true } })
+        try {
+            const base = { platform: 'github', packageManager: 'pnpm', defaultBranch: 'main', executorKind: 'container' }
+            const created = await call('POST', '/api/repos', {
+                ...base,
+                owner: 'major-default',
+                name: 'repo',
+            }) as { allowMajorUpgrade: boolean }
+            expect(created.allowMajorUpgrade).toBe(true)
+
+            // 默认开启仍走审计留痕
+            const ds = await ensureDatabaseInitialized()
+            const saved = await ds.getRepository(Repository).findOneByOrFail({ owner: 'major-default', name: 'repo' })
+            const events = await ds.getRepository(AuditEvent).find({
+                where: { repositoryId: saved.id, type: 'major_upgrade_policy_update' },
+            })
+            expect(events).toHaveLength(1)
+
+            // 请求体显式 false 优先于平台默认值（表单编辑 / 显式关闭）
+            const explicit = await call('POST', '/api/repos', {
+                ...base,
+                owner: 'major-explicit',
+                name: 'repo',
+                allowMajorUpgrade: false,
+            }) as { allowMajorUpgrade: boolean }
+            expect(explicit.allowMajorUpgrade).toBe(false)
+        } finally {
+            globalScope.useRuntimeConfig = original
+        }
+    })
+
     it('rejects invalid body with 400 + data.code: REPO_VALIDATION_FAILED + data.issues 透传', async () => {
         await expect(call('POST', '/api/repos', { owner: 'x' })).rejects.toMatchObject({
             statusCode: 400,
@@ -107,7 +193,7 @@ describe('GET /api/repos', () => {
 
     it('persists sandboxLimits object as JSON column and reads back', async () => {
         // POST 路径序列化 sandboxLimits → toView 反序列化读取
-        // （sandbox 执行入口已临时关闭；字段本身仍保留，存量数据可读）
+        // （sandbox 入口已恢复：report-only 真实执行；字段用于仓库级资源限额）
         await call('POST', '/api/repos', {
             owner: 'sb-limits',
             name: 'repo',
@@ -122,15 +208,18 @@ describe('GET /api/repos', () => {
         expect(item?.sandboxLimits).toEqual({ memoryMb: 8192, cpu: 1.5 })
     })
 
-    it('rejects sandbox executor (entry temporarily disabled)', async () => {
-        await expectError(call('POST', '/api/repos', {
-            owner: 'sb-disabled',
+    it('accepts sandbox executor (entry restored)', async () => {
+        await call('POST', '/api/repos', {
+            owner: 'sb-enabled',
             name: 'repo',
             platform: 'github',
             packageManager: 'pnpm',
             defaultBranch: 'main',
             executorKind: 'sandbox',
-        }), 400)
+        })
+        const list = await call('GET', '/api/repos') as Record<string, unknown>[]
+        const item = list.find((r) => r.owner === 'sb-enabled')
+        expect(item?.executorKind).toBe('sandbox')
     })
 
     it('omits sandboxLimits when not provided (走平台 SANDBOX_DEFAULTS)', async () => {

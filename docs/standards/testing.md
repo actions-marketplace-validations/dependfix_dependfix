@@ -49,11 +49,11 @@
 - **CI 最终裁决**：修复的验收标准是 CI 全部通过，不是本地通过。
 - **测试输入用真实形态**：fixture 应使用真实格式输入（如带固定前缀的 ID），合成数据会漏掉真实格式才触发的缺陷。
 - **lint 门禁**：`--max-warnings N` 让存量 warning 成为 CI 硬门禁倒逼清理；测试名必须与真实断言一致（误导性测试名会掩盖缺口）。
-- **zod `parseOptional<T>` 三态语义 helper**：`apps/platform/server/utils/zod-helpers.ts` 提供 `parseOptional<T>(schema, value): { success, value?, isProvided }`，强制区分「未传」与「传 undefined」；应用处配套单测覆盖三态边界（[归档 §六十一](../design/governance/experience-archive-§49-§69-recent-investigation.md#六十一m254-i18n-anchor-check-工具化locale-文件-insert-anchor-错位污染检测--zod-陷阱-helper2026-09-08commits-) + [归档 §五十六](../design/governance/experience-archive-§49-§69-recent-investigation.md#五十六m241-pr-check-状态监测-mvp5-phase-串行--a-阶段-reject-内联修复--6-atomic-commits-闭环2026-09-03commits)）。
+- **zod `parseOptional<T>` 三态语义 helper**：`apps/platform/server/utils/zod-helpers.ts` 提供 `parseOptional<T>(schema, value): { success, value?, isProvided }`，强制区分「未传」与「传 undefined」；应用处配套单测覆盖三态边界（[归档 §六十一](../design/governance/experience-archive-§49-§69-recent-investigation.md#六十一、m25-4-i18n-anchor-check-工具化-locale-文件-insert-anchor-错位污染检测-zod-optional-陷阱-helper-2026-09-08-commits-80912c2-65a8ec1) + [归档 §五十六](../design/governance/experience-archive-§49-§69-recent-investigation.md#五十六、m24-1-pr-check-状态监测-mvp-5-phase-串行-a-阶段-reject-内联修复-6-atomic-commits-闭环-2026-09-03-commits-36ee026-1068d6e-89e1344-e841b82-19037d5-4803372)）。
 
 - **6.1 E2E 实践模式（Playwright）**：**用例必须幂等**（同一数据库二次运行是回归验证手段；固定名必撞唯一索引 → 用 `Date.now()` 时间戳唯一名，global-setup 注册账号容忍已存在 200/201/422）。**服务端用构建产物**（`.output/server/index.mjs`，独立端口 + 独立库 + 独立 AUTH_SECRET；e2e 库须显式 `DATABASE_SYNCHRONIZE=true`）。**会话复用**（global-setup 注册首用户 admin 保存 storageState，管理页用例复用；权限用例在测试内注册登录）。**CI 单 worker 串行**（共享 SQLite 并行写互相干扰：`workers: 1` + retry 2 + blob 报告）。**目录隔离**（`*.e2e.test.ts` 须 `exclude: ['**/tests/e2e/**']`；新增 Playwright 容器沿用 `*.test.ts` 命名会命中 vitest 默认 include → 入库前先跑全量 `pnpm test` 并同步补 `test.exclude`）。**容器内 Chromium 需 `TMPDIR=/dev/shm`**（`/tmp` 处于 overlayfs 时 renderer 会在真实页面崩溃，`page.goto` 报 `Page crashed`）。**本机多 worker + 共享 SQLite 会偶发 flaky**（`workers` 仅 CI 强制为 1；「单跑失败但单独运行通过」不等于代码缺陷，权威证据用 `--workers=1`（CI 等价）连跑两遍）。**运行时 `data/` 产物会污染本地 vitest 与 check-docs**（平台克隆产物落在 `apps/platform/data/runs/`；`vitest.config.ts` 的 `test.exclude` + `check-docs.mjs` 遍历剪枝已根治，临时规避用 CLI `--exclude`）。**排除模式必须覆盖两个 root**（仓库根运行 root = 仓库根，包目录内运行 root = 包目录；两条模式并存并分别用 `vitest list` 计数验证）。**运行时目录排除要「下降前剪枝」且用路径前缀而非通用目录名**（`apps/platform/data`，不用 `data`——会误伤 `docs/data`；相邻前缀须有回归用例）。**限流豁免**（better-auth 内置 sign-in 规则优先于 customRules，无代理 IP 头时回退共享桶 → e2e 环境 `E2E_TEST=true` + `advanced.ipAddress.disableIpTracking: true` 跳过）。**浏览器 UI 验证必须使用视觉模型 agent**（V 阶段派发 `ui-validator` subagent；无视觉能力者只能报告计算样式值、无法确认视觉回归）。**Nuxt SSR + CSR 双层 fetch 的 mock 限制**（`page.route` 只在浏览器上下文生效；SSR 已渲染的真实数据无法被覆盖 → 需 spa mode / service worker / in-process 测试）。**webServer 缓存必须 rebuild**（改 `.vue` / `.ts` 后须清 `.nuxt` / `.output` 并重建再跑 e2e，否则加载旧 build）。**`page.route` 注册顺序铁律**（必须在 `page.goto` 之前注册，否则 `onMounted` 抢跑走真实 API）。**CI 失败分析必看 `error-context.md`**（含 accessibility tree，比堆栈更快定位 DOM-based 失败；诊断顺序 error-context.md → trace.zip → webServer 日志）。**Nuxt 4 payload 解析**（devalue 编码为稀疏数组，属性也是位置引用，必须递归解引用；不要假设标准 JSON 结构）。
 - **6.2 真实基础设施集成测试（进程内，优先于后台服务冒烟）**：验证依赖真实外部设施（Redis / DB 服务）的代码路径时优先进程内集成测试（vitest 直驱，跑完即退出），而非后台常驻服务冒烟（后者在 Windows shell 工具环境不可靠：进程脱离会话、文件锁、端口 / 句柄占用）。要求：**环境门控**（`describe.skipIf(!process.env.TEMP_XXX)`——本地设 env 启用、CI 无设施自动 skip 不失败）；**幂等设计**（随机 id 避免重复运行命中残留）；**依赖注入可测性**（处理器 / 回调支持注入，断言「收到正确数据」）；**资源清理**（尾部显式 `close()` + `disconnect()`）；**职责边界**（进程内覆盖基础设施层行为，HTTP 层状态流转才需后台服务 / CI service container）。
-- **6.3 集成外部库测试模式（薄引用）**：集成外部库时**集成层测试不 mock 真实被集成库**（保留真实代码路径可执行），mock 仅替换被测单元边界；完整规范见 [development.md §5.1.15](./development.md#51-工程实践规则)。
+- **6.3 集成外部库测试模式（薄引用）**：集成外部库时**集成层测试不 mock 真实被集成库**（保留真实代码路径可执行），mock 仅替换被测单元边界；完整规范见 [development.md §5.1.15](./development.md#_5-1-工程实践规则)。
 
 ### 6.4 E2E 网络抗性 + 未认证 API 调用标准模式
 
@@ -78,14 +78,15 @@
 - **动态区域显式遮蔽**：运行时派生值标 `data-visual-mask` 由 `dynamicMask()` 在截图前遮蔽，不用像素容差兜底；**加遮蔽会改变基线像素**，必须重新生成该页基线。
 - **兜底动作先验证副作用**：重试 / 复位动作要在**当前容器语义**下实测副作用后再采纳——模态弹窗内按 `Escape` 会关闭宿主弹窗（`closeOnEsc` 默认开启），使「复位后重试」直接失效；重试应只重复「原本要做的动作」，且首次等待不得低于原口径（压缩等待会把「慢但可通过」变成硬失败）。
 - **元素级补拍**：整页基线覆盖不到的溢出区域（如宽表右端列）滚到最右后截取容器，只改**容器内部滚动位置**，不动 viewport / 阈值 / 列宽；helper 支持可选 `mask` 参数以与整页基线同遮蔽口径。**弹窗内浮层**（门户面板不在弹窗子树内）用**视口级**截图覆盖弹窗 + 遮罩 + 面板的合成结果，并先断言「面板不是弹窗后代」挡住假绿。
-- **反例验证纪律**：基线落地必须做一次「人为注入样式改动 → 用例如期失败 → 还原后全绿」，证明阈值非恒真，不得只跑正例；**标定注入点按「页面主表面 → 文本色 → 边框」顺序选**，并记录差异像素与覆盖面积解释——`bg-elevated` 这类小面积 token 在整页基线上只命中数百像素（余量 6.5×），通过不等于基线灵敏，不得据此宣称「已证明」。**兜底类逻辑（重试）同样要做注入式标定**：注入目标故障后断言「最终成功 + 耗时 ≥ 首次等待窗口」，只靠「连跑 N 轮全绿」无法证明兜底分支被走到（1/6 抖动下 6 轮全绿概率约 33%）。**灵敏度取证手法**（可复用）：复制既有基线到临时 spec 的快照目录 → `page.addStyleTag` 注入改动 → 三档 expect 选项分别读全量差异像素 / 超阈像素数 / 门禁判定；不注入的对照组配 `maxDiffPixels: 1` 证明零漂移；新基线用**变异检验**证明真覆盖目标区域；脚手架跑完即删（按类名注入必须排除变体，其底色透明会制造高色差假信号）。**注入点必须落在新增层内部**（面板底色 / 弹窗底色 / 抽屉宽度 / 提示底色）——页面级全局样式只证明「阈值非恒真」，不能证明新基线对目标区域敏感；内容覆盖区另由截图前置断言承担。
+- **反例验证纪律**：基线落地必须做一次「人为注入样式改动 → 用例如期失败 → 还原后全绿」，证明阈值非恒真，不得只跑正例；**标定注入点按「页面主表面 → 文本色 → 边框」顺序选**，并记录差异像素与覆盖面积解释——`bg-elevated` 这类小面积 token 在整页基线上只命中数百像素（余量 6.5×），通过不等于基线灵敏，不得据此宣称「已证明」。**兜底类逻辑（重试）同样要做注入式标定**：注入目标故障后断言「最终成功 + 耗时 ≥ 首次等待窗口」，只靠「连跑 N 轮全绿」无法证明兜底分支被走到（1/6 抖动下 6 轮全绿概率约 33%）。**灵敏度取证手法**（可复用）：复制既有基线到临时 spec 的快照目录 → `page.addStyleTag` 注入改动 → 三档 expect 选项分别读全量差异像素 / 超阈像素数 / 门禁判定；不注入的对照组配 `maxDiffPixels: 1` 证明零漂移；新基线用**变异检验**证明真覆盖目标区域；脚手架跑完即删（按类名注入必须排除变体，其底色透明会制造高色差假信号）。**注入点必须落在新增层内部**（面板底色 / 弹窗底色 / 抽屉宽度 / 提示底色）——页面级全局样式只证明「阈值非恒真」，不能证明新基线对目标区域敏感；内容覆盖区另由截图前置断言承担。**注入点像素值按 token 实际值记录**（如 `$space-2` 是 8px，不是名称暗示的 2px；本仓 8px→16px 注入得 1559 px ≈ 闸值的 15.6 倍）；**注入与还原都必须重新 build 后再跑视觉**，否则比对的是旧 `.output`。
+- **取证三律（2026-10-31 M52.4 沉淀）**：① **重建要验副作用**——`--update-snapshots` 不带值时 preset 为 `changed`，比较通过**不写盘**；「连跑 N 轮 sha 不变」只证明文件没被改写。取证必须同时记录 mtime / 字节数变化，或用 `=all` 强制重写；② **update 与 compare 是两条取帧路径**——`toHaveScreenshot` 比对会重试到连续两帧一致，update 直接落首帧（实测 `=all` 重写后立即比对失配 4 例 1218-1313 px）；稳定检查必须前移到用例侧（`waitForVisualStable` 连续两帧逐字节相同），上限内未收敛要告警而非静默放行；③ **断言要收敛到目标元素**——泛化选择器（如 `.caomei-tag--danger`）会被同行其它标签满足，必须给被检元素专属 class 并断言「元素 × 属性 × 文案」成对，且用 mutation 验证新断言能拦住对应回归。
 - **测试库隔离与污染核验**：视觉库（`apps/platform/data/visual.sqlite`）与 e2e 库相互隔离，且只允许 fixtures 写入；**审计 / 探针不得向测试库写入业务数据**（探针一律只读或复制到 `/tmp`）。视觉复跑前若出现「与代码无关的整表差异」，先核对库内仓库集合是否等于 fixtures 集合（残留行会使视口级基线整体失配）；global-setup 现默认按 `VISUAL_FIXTURES.repos` 白名单清理并在截图前断言集合一致（`VISUAL_FIXTURES_AUTO_CLEAN=0` 可关闭，见 [visual/README.md](../../apps/platform/tests/visual/README.md)），确认污染后按主键清理再复跑，**不得**用重建基线掩盖污染。
 - **纯偏移归因手法**（可复用）：间距 / 位置类改动的基线更新必须回答「差异是否**只**由该偏移引起」——把新旧 PNG 双解码到 canvas，在重叠区逐字节比较，输出「首个差异行之上是否逐行全同 / 0-8 范围内最佳垂直位移 / 该位移下逐字节相等比例」三项。
 - **读基线须知**：`apps/platform/tests/visual/README.md` 记录已裁定的既有视觉差异（避免误判为新回归）与已知盲区；`pr-checks` 行级渲染 / `alerts` 宽表右端列 / 弹窗内浮层展开态 / 浮层落点页（schedules 表单浮层、scans 运行详情弹窗、alerts 运行抽屉、pr-checks Toast）的覆盖边界与未覆盖面（运行失败重试二次确认层、Tabs 切换态）见该 README 与 [迁移评估 §15](../design/governance/caomei-ui-migration.md)。
-- **与 `ui-validator` 的分工**：视觉回归只兜「像素漂移」，不做交互 / 可用性 / 语义审查（后者由 `ui-validator` 承担）。**上游归因与上报**按 [平台规范 §7.5](./platform.md#75-上游组件问题归因与-issue-上报流程) 执行。
+- **与 `ui-validator` 的分工**：视觉回归只兜「像素漂移」，不做交互 / 可用性 / 语义审查（后者由 `ui-validator` 承担）。**上游归因与上报**按 [平台规范 §7.5](./platform.md#_7-5-上游组件问题归因与-issue-上报流程) 执行。
 - **CI 接入**：`test.yml` 的 `visual` job（独立 runner + 失败产物上传）**阻断语义已启用**——视觉失败使 Test workflow 变红（**workflow 级阻断信号**；仓库未配置 required status checks，故不构成硬性合并门禁）。
 - **改动页面即需重建其基线（含以该页为取景底图的基线）**：整页 / 视口截图类基线在页面**可见结构 / 样式 / 文案**变更后必然失配（新增工具栏、页头改 flex、i18n 提示语增删词条等，即使「只加一个按钮」）；**以该页为取景底图的其他用例基线同样连带失配**（如弹窗内浮层的视口级截图会包含该页），需一并重建并连跑两遍验证幂等；未被视觉覆盖的页面须在交付说明显式登记「无视觉守卫」。**文案类改动同受本条款约束**（改的是一行字、检的是整张视图），且**归因前先比对失败谱**：像素数与差异区域在多次运行间一致时属确定性变更，不得归因为运行间抖动；**重建后的基线必须由不带 update 的连跑复核**——`--update-snapshots` 的落盘帧可能不是稳定帧，仅比对 update 产物不足以证明基线可用。判定口径与维护协议见 [visual/README.md](../../apps/platform/tests/visual/README.md)。
-- **review 检查点**：本节「取证前先 build / 加遮蔽须重生成基线 / 反例验证纪律 / 文案类改动连带失配与失败谱归因」四条**必须**级约定已挂 [review 检查点矩阵](../../.github/skills/code-reviewer/references/code-quality-checklist.md#规范条款-review-检查点矩阵严格约束逐条挂接)。
+- **review 检查点**：本节「取证前先 build / 加遮蔽须重生成基线 / 反例验证纪律 / 文案类改动连带失配与失败谱归因 / 取证三律」全部**必须**级约定已挂 [review 检查点矩阵](../../.github/skills/code-reviewer/references/code-quality-checklist.md#规范条款-review-检查点矩阵-严格约束逐条挂接)。
 
 ### 6.8 取证工件必须与冻结代码同批生成
 
@@ -106,6 +107,12 @@
 **多入口复用时必须单点声明**：同一门禁集被 Test / release / 周回归多处消费时，集合声明收敛到一个脚本（现有 `scripts/run-doc-gates.mjs` 的 `DOC_GATES`），各调用方只引用该单一集合，并用单测锁定「Test 文档步骤与集合双向差集为空」与「release / profile 均引用该入口」——否则新增门禁只接一处会出现「Test 红但 release 仍可发版」的口径缺口。
 
 **mutation 覆盖面**：mutation 必须打到「数据真正落库 / 分支真正复用」的层——只改端点传参覆不到编排层写回（实测：删除编排层两处来源写入后用例全绿），补「落库字段 / 复用分支 / 续用不覆写」断言后才检出。同类缺口见多仓共享 `workDir` 的复用分支。
+
+**去重 / 跳过类谓词必须配反向用例**：`alreadyRecorded` 这类「命中即跳过」的谓词，正向用例只证明「同键不重复」；把谓词改宽（丢掉 repository / target 任一维）仍全绿——被测行为从「重复记录」变成「静默丢记录」。为每个参与判定的键补一条「另一实体同值仍各自记录」的反向例，并用「只保留单一键」的变异标定，否则多仓 / 多命令场景的审计条目会被吞掉而不报错。
+
+**退出码 0 ≠ 通过（结论未知必须与 PASS 分离）**：带 `--ignore-registry-errors` 之类「网络故障降级为 exit 0」的步骤，只按退出码聚合会把「没查成」记成「查过且干净」。聚合器（周回归 / 发版前 profile 等）必须把这类结果单独标为 **UNKNOWN**：证据文档与回归窗口写 `UNKNOWN` + 未知原因，汇总层降级为 **warning**（可见但不冒充 blocker，避免 registry 抖动整批阻断），且 UNKNOWN 不计入「已执行验证」的通过项。判据与审计面同源见 [安全规范 §5.6 判据](./security.md#_5-6-依赖审计阻断语义-信号级-→-阻断的转正条件-2026-09-30-用户决策方案-c)（exit 0 + 日志含审计结果行才算 clean）；负例标定：模拟 registry 故障（非 0 + registry 特征，或 exit 0 且缺结论行）→ 步骤状态必须不是 `PASS`。**判据主次与匹配面**：① 以「是否出现审计结论行」为主判据，网络特征只在缺结论行时用于归因；结论行存在时以结论为准（registry 重试噪音不得把真实漏洞失败降级为 UNKNOWN）。② 匹配前须剥离命令回显——`pnpm run` 会把整条命令（含 `--ignore-registry-errors` 这类**开关名**）回显进捕获输出，把开关名当故障特征会让每次真实执行都命中（本批审计实测 over-match：真实漏洞失败被降级放行）。③ 用例夹具必须使用含回显的真实输出形态，裸文本夹具看不见这类 over-match。
+
+**受管证据块的插入必须落在顶层**：以 `<!-- marker:start:id -->` / `end` 包裹的滚动证据文件（如 `artifacts/regression/current.md`），新条目须插在**首个受管块 start 标记之前**（或首个既有标题之前，取更早者）——按「首个 `##` 日期标题」定位会把新块插进上一条记录的 start / end 之间：新块的标题与标记分离、块标记交叉配对形成多层嵌套（实测污染：4 start / 4 end 全部配对但三层嵌套交叉，阅读面只剩最外层标题）。用例须断言「两个 start 标记的顺序与其 end 标记一致、旧内容零改动」。已挂 [review 检查点矩阵](../../.github/skills/code-reviewer/references/code-quality-checklist.md)。
 
 ### 6.10 脚本级与被测服务同进程的测试模式
 
@@ -135,9 +142,15 @@
 - **做法**：涉及 `Date.now()` / timer / deadline 的断言优先给被测函数注入 `now`；无法注入时构造值必须留明确余量（如阈值 + 60s），不要用 `Date.now() + 阈值`——构造与取值间隔 ≥1ms 就会把余量吃掉，全量并发下偶发失败。
 - **判据**：边界两侧用显式常量断言（`= 阈值` 允许 / `阈值 - 1` 拒绝），真实时钟只用于「远大于 / 远小于」的场景；单文件连跑 3 次仅作 smoke，稳定性证明以注入 `now` / 常量两侧断言为准（连跑全绿不能替代反例验证）。
 
+### 6.15 构建期布尔 / 本地 `.env` 的测试前提
+
+- **构建期布尔必须在用例侧钉死**：由 `process.env` 在构建期烘焙的 public 布尔（如 `githubAvailable` / `googleAvailable` / `oidcAvailable`）不随测试环境自动归零——开发机存在 `.env` 凭据时，「未配置即隐藏」类用例本地必红，CI 干净检出却绿。e2e / 视觉等共享构建产物的套件必须用运行时 `NUXT_PUBLIC_*` 覆盖把断言前提写到用例侧（如「隐藏」钉 `false`、「已配置展示态」钉 `true`），且**两端都要钉**，只钉一侧会留下同样的环境依赖。
+- **判据**：改受构建期布尔影响的断言时，核对 `nuxt.config.ts` 的 `runtimeConfig.public` 派生条件与测试 env 是否同时覆盖；本地 `.env` 有凭据的场景要显式跑一次「钉 false」验证，不以 CI 绿替代。
+
 ## 7. 测试代码质量
 
 - 测试代码本身也需通过 lint + typecheck；测试描述（`it('does X')`）聚焦业务行为、使用清晰语言；避免过度耦合内部实现细节。
+- **新建测试文件前先查同名**：写 `foo.test.ts` 前跑 `git ls-files | grep foo.test`；同名文件可能是既有语义（本仓曾把已存在的回滚语义用例整文件覆盖，测试数变化又被新用例掩盖）。扩展既有语义用新文件名 + 明确 describe，不复用同名路径。
 
 ## 8. 高效运行技巧
 

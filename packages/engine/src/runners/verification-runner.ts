@@ -1,4 +1,6 @@
 import { spawn } from 'node:child_process'
+import { parseDurationMs } from '@dependfix/core'
+import { getActiveEgressAudit, getEgressProxyUrl } from './egress-audit'
 import {
     startNetworkAudit,
     extractUrlsFromOutput,
@@ -144,8 +146,12 @@ export const MIN_COMMAND_TIMEOUT_MS = 10_000
 /** 允许的最大单命令超时（30 分钟，与平台单仓执行上限同量级）。 */
 export const MAX_COMMAND_TIMEOUT_MS = 30 * 60 * 1000
 
+/** 已告警的非法 env 原值（避免同一进程内重复刷屏）。 */
+let warnedVerificationTimeoutRaw: string | undefined
+
 /**
- * 解析单命令超时（毫秒）：合法正整数且落在 [10s, 30min] 内才采纳，否则回退默认。
+ * 解析单命令超时：支持纯数字毫秒（历史口径）与 `10m` / `90s` 等单位写法；
+ * 解析成功且落在 [10s, 30min] 内才采纳，否则回退默认。
  * 与安装类超时（`fixers/install-timeouts.ts`）同族口径，但两者刻意不同源、互不覆盖。
  */
 export function resolveCommandTimeoutMs(
@@ -153,11 +159,13 @@ export function resolveCommandTimeoutMs(
     fallback: number = DEFAULT_COMMAND_TIMEOUT_MS,
 ): number {
     const raw = env[VERIFY_TIMEOUT_ENV]?.trim()
-    if (!raw || !/^\d+$/.test(raw)) {
-        return fallback
+    const value = parseDurationMs(raw, { defaultUnit: 'ms' })
+    if (raw && (value === undefined || value < MIN_COMMAND_TIMEOUT_MS || value > MAX_COMMAND_TIMEOUT_MS)
+        && warnedVerificationTimeoutRaw !== raw) {
+        warnedVerificationTimeoutRaw = raw
+        console.warn(`[verification] ${VERIFY_TIMEOUT_ENV}="${raw}" 非法或越界，回退 ${fallback}ms`)
     }
-    const value = Number(raw)
-    return Number.isInteger(value) && value >= MIN_COMMAND_TIMEOUT_MS && value <= MAX_COMMAND_TIMEOUT_MS
+    return value !== undefined && value >= MIN_COMMAND_TIMEOUT_MS && value <= MAX_COMMAND_TIMEOUT_MS
         ? value
         : fallback
 }
@@ -237,19 +245,22 @@ export async function runVerification(params: VerificationParams): Promise<Verif
     // 白名单 = 默认清单 + 环境变量扩展 + workDir 配置面动态发现的 registry host——
     // registry 指向镜像源 / 企业私服时，非白名单 registry 的 CONNECT 被拒会弄挂
     // `pnpm install` 并触发门禁全量回滚（安装链路的合法外联不应被误拦）。
-    let audit: NetworkAudit | undefined
-    if (!params.networkAuditDisabled) {
+    // 运行级审计（安装链 / 交付命令共用）：存在时直接复用同一代理与记录，不另起第二份
+    let audit: NetworkAudit | undefined = getActiveEgressAudit()
+    let ownsAudit = false
+    if (!audit && !params.networkAuditDisabled) {
         const discovery = discoverRegistryHosts(params.workDir)
         if (discovery.warning) {
             console.warn(`[network-audit] registry 动态发现降级（fail-open）：${discovery.warning}`)
         }
         audit = await startNetworkAudit({ extraAllowedDomains: discovery.hosts }).catch(() => undefined)
+        ownsAudit = true
     }
     const hasExistingProxy = Boolean(
         process.env.HTTP_PROXY || process.env.HTTPS_PROXY || process.env.ALL_PROXY
         || process.env.http_proxy || process.env.https_proxy || process.env.all_proxy,
     )
-    const proxyUrl = audit && !hasExistingProxy ? audit.proxyUrl : undefined
+    const proxyUrl = getEgressProxyUrl() ?? (audit && !hasExistingProxy ? audit.proxyUrl : undefined)
 
     try {
         for (const command of commands) {
@@ -301,7 +312,8 @@ export async function runVerification(params: VerificationParams): Promise<Verif
             }
         }
     } finally {
-        if (audit) {
+        // 仅停止自建的审计：运行级审计由 DependfixApp 统一收口（后续命令仍要用同一代理）
+        if (audit && ownsAudit) {
             await audit.stop().catch(() => { /* 停止失败静默 */ })
         }
     }

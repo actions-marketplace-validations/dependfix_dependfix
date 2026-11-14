@@ -40,6 +40,7 @@
 - 技术栈：[docs/guide/tech-stack.md](docs/guide/tech-stack.md)
 - AI 协同指南：[docs/guide/ai-development.md](docs/guide/ai-development.md)
 - 项目规范：[docs/standards/index.md](docs/standards/index.md)
+- GitHub 协作（issue / PR / 推送授权）：[docs/standards/github-collaboration.md](docs/standards/github-collaboration.md)
 - 当前任务：[docs/plan/todo.md](docs/plan/todo.md)
 - 路线图：[docs/plan/roadmap.md](docs/plan/roadmap.md)
 - 竞品分析：[docs/research/2026-07-26-competitive-research.md](docs/research/2026-07-26-competitive-research.md)
@@ -57,6 +58,7 @@
 | 文档 | [docs/standards/documentation.md](docs/standards/documentation.md) |
 | 安全 | [docs/standards/security.md](docs/standards/security.md) |
 | Git | [docs/standards/git.md](docs/standards/git.md) |
+| GitHub 协作 | [docs/standards/github-collaboration.md](docs/standards/github-collaboration.md) |
 | 规划 | [docs/standards/planning.md](docs/standards/planning.md) |
 
 momei 仅作为 1.0.0 前的参考蓝本，1.0.0 后按本项目自身实践演进，形成自有规范体系。
@@ -69,7 +71,7 @@ momei 仅作为 1.0.0 前的参考蓝本，1.0.0 后按本项目自身实践演�
 - `M\d+.\d+` 子阶段：阶段内原子条目（如 M25.1 / M25.2a），按类型平衡原则选取 4-6 个独立闭环
 - `M\d+.\d+.\d+` 任务/工作流：子阶段内具体任务
 
-**约束**：backlog 候选不得包含 `M\d+` 阶段编号（除非经用户明确授权上收）。完整规则见 [规划规范 §3.1](./docs/standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement)。
+**约束**：backlog 候选不得包含 `M\d+` 阶段编号（除非经用户明确授权上收）。完整规则见 [规划规范 §3.1](./docs/standards/planning.md#_3-1-新需求默认走-评估-→-backlog-原则-hard-requirement)。
 
 ## 设计文档架构
 
@@ -78,7 +80,7 @@ momei 仅作为 1.0.0 前的参考蓝本，1.0.0 后按本项目自身实践演�
 - **`modules/`** —— 单 monorepo 包总设计（`packages/core`、`packages/engine`、`packages/cli`、`packages/mcp`、`packages/skills`、`apps/platform`）
 - **`governance/`** —— 跨模块 / 治理 / 重大变更专项设计 + 经验归档（`architecture.md` / `security.md` / `experience-archive.md` 等）
 
-**硬阈值**：改动预计 > 10 文件 / > 800 行 → **必须有** governance 文档；> 5 文件 / > 350 行 → 建议有；跨 ≥ 2 个独立模块 → 必须有。完整规则见 [规范与文档治理设计 §2.4](./docs/design/governance/spec-and-doc-governance.md#24-设计文档硬阈值hard-requirement)。
+**硬阈值**：改动预计 > 10 文件 / > 800 行 → **必须有** governance 文档；> 5 文件 / > 350 行 → 建议有；跨 ≥ 2 个独立模块 → 必须有。完整规则见 [规范与文档治理设计 §2.4](./docs/design/governance/spec-and-doc-governance.md#_2-4-设计文档硬阈值-hard-requirement)。
 
 ## 审计触发
 
@@ -89,7 +91,7 @@ A 阶段 `code-auditor` 审计必须触发的场景：
 - 跨 ≥ 2 个独立模块的代码改动
 - 公开 API / 鉴权 / 数据写入 / 外部调用
 
-未触发审计的 F 阶段 commit 视为不合规，由 code-auditor Reject 退回。完整规则见 [规范与文档治理设计 §6.1](./docs/design/governance/spec-and-doc-governance.md#61-a-阶段-audit-required-触发判定hard-requirement)。
+未触发审计的 F 阶段 commit 视为不合规，由 code-auditor Reject 退回。完整规则见 [规范与文档治理设计 §6.1](./docs/design/governance/spec-and-doc-governance.md#_6-1-a-阶段-audit-required-触发判定-hard-requirement)。
 
 ## 必要检查
 
@@ -132,7 +134,7 @@ A 阶段 `code-auditor` 审计必须触发的场景：
 
 ## 新需求处理原则（hard requirement）
 
-按 [规划规范 §3.1 新需求默认走"评估 → backlog"原则](docs/standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement) + [AI 协作规范 §2.1.1 新需求总原则](docs/standards/ai-collaboration.md#211新需求总原则跨工作流适用)：
+按 [规划规范 §3.1 新需求默认走"评估 → backlog"原则](docs/standards/planning.md#_3-1-新需求默认走-评估-→-backlog-原则-hard-requirement) + [AI 协作规范 §2.1.1 新需求总原则](docs/standards/ai-collaboration.md#_2-1-1-新需求总原则-跨工作流适用)：
 
 1. **默认路径**：新需求（功能 / 模块 / 集成 / 监控 / 重构 / 体验优化等）的处理路径是 **先评估 → 进入 backlog.md → 等待用户明确决策阶段**。
 2. **不自动升级**：未经用户明确授权，backlog 候选**不得**进入 todo.md §当前阶段；候选条目**不包含** `M\d+` 阶段编号（如 `M23.1`、`M24` 等）。
@@ -141,7 +143,7 @@ A 阶段 `code-auditor` 审计必须触发的场景：
    - **安全问题**：已确认的安全漏洞（Code Scanning 告警、Snyk/Dependabot critical、有 PoC 的安全 issue）
    - **漏洞问题**：依赖链中高危漏洞（critical CVE、GHSA 标识 critical/high 且影响 dependfix 自身或被 dependfix 管理的仓库）
    - **直接影响可用性的任务**：生产环境故障、P0/P1 事故恢复、CI 主链路阻塞、用户报告的 blocker 级功能缺失
-5. **清单外经用户授权的追加通道**：清单外事项经用户明确授权后可写入 `todo.md` 当前阶段，但须按 [规划规范 §3.1](docs/standards/planning.md#31-新需求默认走评估--backlog原则hard-requirement)「**追加临时待办（不占阶段条目编号）**」标记口径处理。标记形态、位置与编号规则以 `planning.md §3.1` 为唯一权威声明，本条仅作指针。
+5. **清单外经用户授权的追加通道**：清单外事项经用户明确授权后可写入 `todo.md` 当前阶段，但须按 [规划规范 §3.1](docs/standards/planning.md#_3-1-新需求默认走-评估-→-backlog-原则-hard-requirement)「**追加临时待办（不占阶段条目编号）**」标记口径处理。标记形态、位置与编号规则以 `planning.md §3.1` 为唯一权威声明，本条仅作指针。
 6. **合规核验**：本原则由 [code-auditor 主责边界「新需求未默认升级为下一阶段 todo」必查项](.github/agents/code-auditor.agent.md) 强制检查，违规即 Reject 退回。
 
 ## 审查要求
@@ -172,8 +174,20 @@ A 阶段 `code-auditor` 审计必须触发的场景：
 2. **格式要求**：提交消息必须符合 Conventional Commits 规范（`type(scope): description`），且 `description` 统一使用**中文或用户使用的语言**。主题行最长 120 字符（commitlint 硬限制 140），消息格式细则见 [Git 规范 §3.1](docs/standards/git.md)。
 3. **质量前置**：提交前必须确认 A 阶段（`Code Auditor (代码审计员)`）已放行，且 `pnpm run lint:check`（涉及 CSS / SCSS / Vue 样式时另跑 `pnpm run lint:css:check`）、`pnpm typecheck` 和必要的定向测试均已通过。质量门禁未通过时不得提交。
 4. **原子粒度**：一个提交对应一个逻辑变更，关联且仅关联 `todo.md` 中的一个原子条目。
-5. **推送禁令**：`git commit` 后不得自动执行 `git push`，推送仅限用户明确要求时执行。提交完成后应告知用户"已提交到本地，等待推送确认"。
+5. **推送禁令**：`git commit` 后不得自动执行 `git push`，推送仅限用户明确要求时执行。提交完成后应告知用户"已提交到本地，等待推送确认"。**唯一例外**是 [GitHub 协作规范 §4](docs/standards/github-collaboration.md#_4-推送授权) 明列的两个窗口（CI 修复、条目完成收口），窗口外推送仍须用户明确指示。
 6. **src/dist 不一致时 build 在先（monorepo 纪律）**：改动涉及 `packages/*/src/**`（被其他 workspace 包 import）时，**提交前必须先 `pnpm -r build`（或定向 `pnpm --filter <changed-pkg> build`）重建 dist**，否则下游包的 typecheck 会报 TS2339（缺新字段）。CI 自动 rebuild 掩盖本地 dev 过期，导致 `pnpm exec tsc --noEmit` 通过但 `pnpm run typecheck`（含 nuxt typecheck pipeline）失败。**验证协议**：commit 前实测 `pnpm run typecheck` exit 0（覆盖 root tsc + nuxt typecheck）；如失败，第一动作是 `pnpm -r build` 而非修改源码。教训见 [经验归档 §五十五（M23.3 C66-C standard depth audit W1）](docs/design/governance/experience-archive.md)。
+
+## GitHub 协作与推送授权（hard requirement）
+
+issue、PR 与推送的处置口径以 [GitHub 协作规范](docs/standards/github-collaboration.md) 为唯一权威，本节只列必须遵守的结论：
+
+1. **来源核验**：先判来源——项目所有者（`author_association=OWNER`）、仓库协作者（`MEMBER`/`COLLABORATOR`），以及 `.user.type == "Bot"` 且 login 命中白名单（`dependabot[bot]` / `dependabot-preview[bot]` / `dependfix[bot]`）为可信；其他来源只审查与反馈。判定用 REST `gh api repos/<owner>/<repo>/{pulls,issues}/<n> --jq '.user.login, .user.type, .author_association'`，不按名字推断。
+2. **合并权限**：仅可信提交者的 PR 可合并；dependabot / dependfix 的 PR 继续走 Mergify，依赖升级风险由 CI 门禁承担；Mergify 未合并的按常规 PR 走审查 → 修复 → 合并或关闭。
+3. **issue 处理**：默认只做调研；外部 issue 核实后简短反馈（成立保留、不成立关闭并写依据）；入 backlog 候选按 §3.1 登记，上收为阶段任务需项目所有者审批。
+4. **推送**：仅 [GitHub 协作规范 §4](docs/standards/github-collaboration.md#_4-推送授权) 的两个窗口（CI 修复、条目完成收口）；推送前 A 阶段放行与本地必要验证齐备，推送后监控 CI；CI 结论未知时不叠加第二次推送；禁止 force push 与 `--no-verify`。
+5. **分支**：改动可能影响整体运行状态或规模过大时，走短生命周期分支 + PR，CI 通过后合并并清理分支。
+6. **上游反馈**：向上游项目提 issue 前先查重、按目标仓库模板撰写，并经用户审查授权。
+7. **巡检去重**：已评估且此后无实质更新的 PR / issue 不重复评论。
 
 ## 安全与行为红线
 

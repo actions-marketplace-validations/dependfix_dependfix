@@ -9,6 +9,7 @@ import pg from 'pg'
 import { SnakeCaseNamingStrategy } from './naming-strategy'
 import { resolveDatabaseType, type DatabaseType } from './type'
 import { isEmptySqliteDatabase } from './schema-guard'
+import { detectSchemaDrift, setSchemaStatus, type SchemaDrift } from './schema-drift'
 import { CreateInitialSchema1600000000000 } from './migrations/1600000000000-CreateInitialSchema'
 import { CreateAuditEventTable1700000000000 } from './migrations/1700000000000-CreateAuditEventTable'
 import { AddScanResultIdentifiers1750000000000 } from './migrations/1750000000000-AddScanResultIdentifiers'
@@ -28,7 +29,12 @@ import { AddScanRunResourceColumns2800000000000 } from './migrations/28000000000
 import { AddScanRunBuildColumns2900000000000 } from './migrations/2900000000000-AddScanRunBuildColumns'
 import { AddScanRunPrNumber2900000000001 } from './migrations/2900000000001-AddScanRunPrNumber'
 import { AddRepositoryPrFeedback2900000000002 } from './migrations/2900000000002-AddRepositoryPrFeedback'
+import { AddRepositoryExecutionLimits3000000000000 } from './migrations/3000000000000-AddRepositoryExecutionLimits'
+import { AddRepositoryAllowMajorUpgrade3000000000001 } from './migrations/3000000000001-AddRepositoryAllowMajorUpgrade'
+import { AddPrCheckLifecycleState3100000000000 } from './migrations/3100000000000-AddPrCheckLifecycleState'
+import { AddRepositorySandboxImage3100000000001 } from './migrations/3100000000001-AddRepositorySandboxImage'
 import { runStartupBackup } from './backup'
+import { isQueueWorkerProcess } from '#server/utils/process-role'
 import { Account } from '#server/entities/account'
 import { Session } from '#server/entities/session'
 import { User } from '#server/entities/user'
@@ -112,6 +118,10 @@ export const createDataSourceOptions = (): DataSourceOptions => {
             AddScanRunBuildColumns2900000000000,
             AddScanRunPrNumber2900000000001,
             AddRepositoryPrFeedback2900000000002,
+            AddRepositoryExecutionLimits3000000000000,
+            AddRepositoryAllowMajorUpgrade3000000000001,
+            AddPrCheckLifecycleState3100000000000,
+            AddRepositorySandboxImage3100000000001,
         ],
         migrationsRun,
         synchronize,
@@ -196,10 +206,11 @@ export const getDataSource = (): DataSource => {
  * 启动期自动备份（hard requirement，规范见 docs/standards/security.md §2.1.1 + todo.md §M22.1）：
  * - 仅 SQLite 数据库生效（其他数据库类型由 runStartupBackup 内部跳过）
  * - fail-open：备份失败不阻塞启动（恢复依赖用户的本地副本或外部备份）
- * - 仅应用启动时执行一次（once 保护）：ensureDatabaseInitialized 是 hot path idempotent 函数
- *   （60+ 处 API endpoint / service 引用），备份必须在 schema 同步 / 数据写入前完成但不能在每次调用时执行
+ * - 仅应用启动时执行一次（single-flight）：ensureDatabaseInitialized 是 hot path 幂等函数
+ *   （60+ 处 API endpoint / service 引用），备份必须在 schema 同步 / 数据写入前完成但不能在每次调用时执行。
+ *   用 Promise 而非布尔标记：并发首调时全部等待同一次快照完成，避免「第二个调用者越过备份直接初始化」
  */
-let startupBackupRan = false
+let startupBackupPromise: Promise<unknown> | null = null
 
 /**
  * SQLite 启动期 PRAGMA 优化：
@@ -235,6 +246,11 @@ const warnIfSchemaMissing = async (ds: DataSource): Promise<void> => {
     if (currentDatabaseType() !== 'sqlite') {
         return
     }
+    // 队列 worker 进程跳过：迁移由 HTTP 主进程执行（worker 侧 DATABASE_MIGRATIONS_RUN 恒 false），
+    // 双进程同时启动时 worker 会先于迁移打开空库，此处告警属误报（2026-10-31 运维实测命中）。
+    if (isQueueWorkerProcess()) {
+        return
+    }
     // 用 DataSource 生效值判定（含 createMigrateDataSource 强制 false 等场景），避免二次读 env 漂移
     if (ds.options.migrationsRun) {
         return
@@ -251,13 +267,70 @@ const warnIfSchemaMissing = async (ds: DataSource): Promise<void> => {
     }
 }
 
+/** 漂移日志单类最多列出的条目数（完整结果由 `/api/health` 的状态与 `db:migrate:show` 提供） */
+const MAX_DRIFT_LOG_ITEMS = 5
+
+/**
+ * 启动期 schema 漂移检测（只读，fail-open）。
+ *
+ * 触发场景：存量库在 `DATABASE_MIGRATIONS_RUN=false` 下升级镜像，pending migration 不执行，
+ * 首次查询缺列表即 500（2026-11-09 生产事故）。检测把「逐请求失败」提前为启动期 ERROR +
+ * `/api/health` 的 `schema` 状态，便于部署后一条命令确认。
+ *
+ * 跳过条件（避免误报与重复成本）：
+ * - `synchronize=true`：TypeORM 初始化时自行补齐 schema，检测无意义；
+ * - 队列 worker 进程：不执行迁移且启动早于 HTTP 主进程，此刻缺列属预期（口径同空库告警）；
+ * - SQLite 空库：由 `warnIfSchemaMissing` 单独给出「空库 + 未开迁移」告警，避免同一启动打两条 ERROR。
+ *
+ * 检测本身失败只告警不阻断启动（状态记 `unknown`）。
+ */
+export const checkSchemaDrift = async (ds: DataSource): Promise<SchemaDrift | null> => {
+    if (ds.options.synchronize || isQueueWorkerProcess()) {
+        return null
+    }
+    try {
+        if (ds.options.type === 'better-sqlite3' && await isEmptySqliteDatabase(ds)) {
+            return null
+        }
+        const drift = await detectSchemaDrift(ds)
+        setSchemaStatus(drift.hasDrift ? 'drift' : 'ok')
+        if (!drift.hasDrift) {
+            return drift
+        }
+        const tables = drift.missingTables.slice(0, MAX_DRIFT_LOG_ITEMS)
+        const columns = drift.missingColumns
+            .slice(0, MAX_DRIFT_LOG_ITEMS)
+            .map((item) => `${item.table}.${item.column}`)
+        const ellipsis = (shown: number, total: number) => (total > shown ? ' …等' : '')
+        const tableSummary = tables.length
+            ? `（表：${tables.join(', ')}${ellipsis(tables.length, drift.missingTables.length)}）`
+            : ''
+        const columnSummary = columns.length
+            ? `（列：${columns.join(', ')}${ellipsis(columns.length, drift.missingColumns.length)}）`
+            : ''
+        console.error([
+            `[database] schema 漂移：缺 ${drift.missingTables.length} 张表 / ${drift.missingColumns.length} 列`,
+            tableSummary,
+            columnSummary,
+            '；请执行 pending migration（DATABASE_MIGRATIONS_RUN=true 或 docker/init-db.sh / pnpm db:migrate）后重启',
+        ].join(''))
+        return drift
+    } catch (error) {
+        setSchemaStatus('unknown')
+        console.warn('[database] schema 漂移检测失败（非致命）:', error)
+        return null
+    }
+}
+
 export const ensureDatabaseInitialized = async (): Promise<DataSource> => {
     // 启动期备份（once 保护；详见 docs/standards/development.md §5.1.18）
     // 注：ensureDatabaseInitialized 是 hot path，每次调用都会执行；备份仅在首次调用时执行一次
-    if (!startupBackupRan) {
-        runStartupBackup()
-        startupBackupRan = true
+    if (!startupBackupPromise) {
+        // 兜住同步异常（如 statSync 竞态）：缓存 rejected promise 会让后续所有调用方永久失败，
+        // 与「备份 fail-open」语义相反；一次失败只影响本次快照，下次调用不再重试（single-flight 语义）
+        startupBackupPromise = runStartupBackup().catch(() => undefined)
     }
+    await startupBackupPromise
 
     const ds = getDataSource()
     if (ds.isInitialized) {
@@ -274,6 +347,7 @@ export const ensureDatabaseInitialized = async (): Promise<DataSource> => {
             // PRAGMA 应用必须在 initialize 之后（连接已建立）
             if (ds.isInitialized) {
                 await applySqlitePragmas(ds)
+                await checkSchemaDrift(ds)
                 await warnIfSchemaMissing(ds)
             }
         } catch (error) {

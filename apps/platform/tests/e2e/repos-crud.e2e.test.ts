@@ -9,6 +9,7 @@ import { waitForHydration } from './helpers/hydration.helper'
  * 3. 编辑仓库 → 列表更新
  * 4. 删除仓库 → 列表移除
  * 5. viewer 只读边界
+ * 6. 分页保持：编辑保存保留当前页码与每页条数；新增 / 删除后回到第 1 页
  */
 
 test.use({ storageState: 'tests/e2e/.auth/admin.json' })
@@ -153,6 +154,96 @@ test.describe('仓库管理 CRUD', () => {
         expect(clearedRepos.find((r) => r.owner === owner)?.prCheckFocus).toBeNull()
     })
 
+    test('执行预算：填写 → 保存 → API 落库 → 编辑回显', async ({ page }) => {
+        await page.goto('/repos')
+        await waitForHydration(page)
+        await page.locator('button:has-text("添加仓库")').click()
+        await expect(page.locator('.caomei-dialog__header')).toContainText('添加仓库', { timeout: 15000 })
+
+        const stamp = Date.now()
+        const owner = `repos-limits-${stamp}`
+        await page.locator('input#owner').fill(owner)
+        await page.locator('input#name').fill(`repo-${stamp}`)
+
+        // 折叠区默认收起：展开后填时长（纯数字按分钟），摘要显示覆盖项数
+        await page.locator('.repo-form__limits-summary').click()
+        await page.locator('input#executionTimeout').fill('45')
+        await page.locator('input#verifyCommandTimeout').fill('20')
+        await expect(page.locator('.repo-form__limits-summary')).toContainText('2')
+
+        // 跨大版本授权：默认关闭，显式开启
+        await expect(page.locator('#allowMajorUpgrade')).toHaveAttribute('aria-checked', 'false')
+        await page.locator('#allowMajorUpgrade').click()
+        await expect(page.locator('#allowMajorUpgrade')).toHaveAttribute('aria-checked', 'true')
+
+        await page.locator('.caomei-dialog__content button:has-text("保存")').click()
+        await expect(page.locator('.caomei-message--success')).toContainText('仓库已添加', { timeout: 15000 })
+
+        // API 落库：分钟换算为毫秒
+        const cookieHeader = await authedCookieHeader(page)
+        const response = await page.request.get('/api/repos', {
+            headers: { cookie: cookieHeader, origin: 'http://127.0.0.1:3101' },
+        })
+        const repos = await response.json() as {
+            owner: string
+            executionTimeoutMs: number | null
+            verifyCommandTimeoutMs: number | null
+            allowMajorUpgrade: boolean
+        }[]
+        const created = repos.find((r) => r.owner === owner)
+        expect(created?.executionTimeoutMs).toBe(45 * 60000)
+        expect(created?.verifyCommandTimeoutMs).toBe(20 * 60000)
+        expect(created?.allowMajorUpgrade).toBe(true)
+
+        // 编辑回显：毫秒还原为可读单位
+        const row = page.locator('.caomei-data-table__row', { hasText: owner })
+        await row.locator('button[aria-label="编辑"]').click()
+        await expect(page.locator('.caomei-dialog__header')).toContainText('编辑仓库', { timeout: 15000 })
+        await expect(page.locator('input#executionTimeout')).toHaveValue('45m')
+        await expect(page.locator('input#verifyCommandTimeout')).toHaveValue('20m')
+        await expect(page.locator('#allowMajorUpgrade')).toHaveAttribute('aria-checked', 'true')
+    })
+
+    test('保存校验：错误在弹窗内定位到字段，且支持时长单位', async ({ page }) => {
+        await page.goto('/repos')
+        await waitForHydration(page)
+        await page.locator('button:has-text("添加仓库")').click()
+        await expect(page.locator('.caomei-dialog__header')).toContainText('添加仓库', { timeout: 15000 })
+
+        const stamp = Date.now()
+        await page.locator('input#owner').fill(`repos-invalid-${stamp}`)
+        await page.locator('input#name').fill(`repo-${stamp}`)
+        await page.locator('.repo-form__limits-summary').click()
+        // 执行上限 10 分钟、验证命令 20 分钟：子项超过执行上限 → 客户端报红并聚焦
+        await page.locator('input#executionTimeout').fill('10m')
+        await page.locator('input#verifyCommandTimeout').fill('20m')
+        await page.locator('.caomei-dialog__content button:has-text("保存")').click()
+
+        const dialog = page.locator('.caomei-dialog__content')
+        await expect(dialog.locator('.caomei-message--danger')).toContainText('请检查表单中标红的字段', { timeout: 15000 })
+        const verifyField = page.locator('#verifyCommandTimeout').locator('xpath=ancestor::div[contains(@class, "repo-form__field")]')
+        await expect(verifyField.locator('.text-danger')).toContainText('不能大于执行上限')
+        await expect(verifyField.locator('.caomei-field--invalid')).toBeVisible()
+        await expect(page.locator('#verifyCommandTimeout')).toBeFocused()
+
+        // 非法单位同样在字段行内报红
+        await page.locator('input#executionTimeout').fill('abc')
+        await page.locator('.caomei-dialog__content button:has-text("保存")').click()
+        await expect(page.locator('#executionTimeout').locator('xpath=ancestor::div[contains(@class, "repo-form__field")]'))
+            .toContainText('时长格式无效')
+
+        // 服务端校验（客户端未覆盖的条数上限）：issues 同样映射到行内字段
+        await page.locator('input#executionTimeout').fill('30m')
+        await page.locator('textarea#verifyCommands').fill(
+            Array.from({ length: 21 }, (_, index) => `echo ${index}`).join('\n'),
+        )
+        await page.locator('.caomei-dialog__content button:has-text("保存")').click()
+        const commandsField = page.locator('#verifyCommands').locator('xpath=ancestor::div[contains(@class, "repo-form__field")]')
+        await expect(commandsField.locator('.text-danger')).toContainText('最多 20 条验证命令', { timeout: 15000 })
+        // 错误未把弹窗关掉（页面级错误容器不在本用例断言范围）
+        await expect(page.locator('.caomei-dialog__header')).toContainText('添加仓库')
+    })
+
     test('编辑仓库：点击编辑 → 改 defaultBranch → 保存 → 列表更新', async ({ page }) => {
         const stamp = Date.now()
         const owner = `repos-edit-${stamp}`
@@ -213,56 +304,167 @@ test.describe('仓库管理 CRUD', () => {
         await expect(page.locator('.caomei-data-table')).not.toContainText(owner)
     })
 
-    test('列表分页：seed 后 DataTable 渲染（分页契约已闭环）', async ({ page }) => {
+    test('分页保持：编辑保存保留当前页码与每页条数', async ({ page }) => {
+        const stamp = Date.now()
+        const owner = `repos-page-${stamp}`
+        const cookieHeader = await authedCookieHeader(page)
+        for (let index = 0; index < 11; index++) {
+            await page.request.post('/api/repos', {
+                headers: { cookie: cookieHeader, origin: 'http://127.0.0.1:3101' },
+                data: {
+                    owner,
+                    name: `repo-${index}`,
+                    platform: 'github',
+                    packageManager: 'pnpm',
+                    defaultBranch: 'main',
+                    executorKind: 'container',
+                },
+            })
+        }
+
         await page.goto('/repos')
         await waitForHydration(page)
-        await expect(page.locator('.caomei-data-table')).toBeVisible({ timeout: 15000 })
-        // caomei DataTable 容器渲染（不强制 paginator — 由数据量决定）
-        // /api/repos 单测已覆盖分页契约
+        // 按唯一 owner 过滤，令列表恰为 11 条（2 页 @10/页）
+        await page.locator('#repos-filter-search').fill(owner)
+        const rows = page.locator('.caomei-data-table__row')
+        await expect(rows).toHaveCount(10, { timeout: 15000 })
+
+        // 第 2 页只剩 1 行
+        await page.locator('.caomei-paginator__list').getByText('2', { exact: true }).click()
+        await expect(rows).toHaveCount(1, { timeout: 15000 })
+
+        // 编辑保存后仍在第 2 页（回退首页会变成 10 行）
+        await rows.first().locator('button[aria-label="编辑"]').click()
+        await expect(page.locator('.caomei-dialog__header')).toContainText('编辑仓库', { timeout: 15000 })
+        const originalName = await page.locator('input#name').inputValue()
+        const editedName = `${originalName}-edited`
+        await page.locator('input#name').fill(editedName)
+        await page.locator('.caomei-dialog__content button:has-text("保存")').click()
+        await expect(page.locator('.caomei-message--success')).toContainText('仓库已更新', { timeout: 15000 })
+        await expect(rows).toHaveCount(1, { timeout: 15000 })
+        await expect(rows.first()).toContainText(editedName)
+
+        // 每页条数 25：11 条全部落在第 1 页
+        await page.locator('.caomei-paginator__rows-per-page').click()
+        await page.locator('.caomei-select__item', { hasText: '25' }).click()
+        await expect(rows).toHaveCount(11, { timeout: 15000 })
+
+        // 再保存一次：每页条数保持 25（回退默认 10 会变成 10 行）
+        await rows.first().locator('button[aria-label="编辑"]').click()
+        await expect(page.locator('.caomei-dialog__header')).toContainText('编辑仓库', { timeout: 15000 })
+        await page.locator('.caomei-dialog__content button:has-text("保存")').click()
+        await expect(page.locator('.caomei-message--success')).toContainText('仓库已更新', { timeout: 15000 })
+        await expect(rows).toHaveCount(11, { timeout: 15000 })
+        await expect(page.locator('.caomei-paginator__rows-per-page .caomei-select__value')).toHaveText('25')
     })
 
-    test('sandbox 入口临时关闭：新增不可选 + 存量编辑自动迁移', async ({ page }) => {
+    test('分页回退：新增 / 删除后回到第 1 页', async ({ page }) => {
+        const stamp = Date.now()
+        const owner = `repos-page-reset-${stamp}`
+        const cookieHeader = await authedCookieHeader(page)
+        for (let index = 0; index < 11; index++) {
+            await page.request.post('/api/repos', {
+                headers: { cookie: cookieHeader, origin: 'http://127.0.0.1:3101' },
+                data: {
+                    owner,
+                    name: `repo-${index}`,
+                    platform: 'github',
+                    packageManager: 'pnpm',
+                    defaultBranch: 'main',
+                    executorKind: 'container',
+                },
+            })
+        }
+
+        await page.goto('/repos')
+        await waitForHydration(page)
+        await page.locator('#repos-filter-search').fill(owner)
+        const rows = page.locator('.caomei-data-table__row')
+        await expect(rows).toHaveCount(10, { timeout: 15000 })
+
+        await page.locator('.caomei-paginator__list').getByText('2', { exact: true }).click()
+        await expect(rows).toHaveCount(1, { timeout: 15000 })
+
+        // 新增：12 条 → 回第 1 页（10 行）；留在第 2 页会是 2 行
+        await page.locator('button:has-text("添加仓库")').click()
+        await expect(page.locator('.caomei-dialog__header')).toContainText('添加仓库', { timeout: 15000 })
+        await page.locator('input#owner').fill(owner)
+        await page.locator('input#name').fill(`repo-new-${stamp}`)
+        await page.locator('.caomei-dialog__content button:has-text("保存")').click()
+        await expect(page.locator('.caomei-message--success')).toContainText('仓库已添加', { timeout: 15000 })
+        await expect(rows).toHaveCount(10, { timeout: 15000 })
+
+        // 删除：在第 2 页操作后回第 1 页（11 条 → 10 行）；留在第 2 页会是 1 行
+        await page.locator('.caomei-paginator__list').getByText('2', { exact: true }).click()
+        await expect(rows).toHaveCount(2, { timeout: 15000 })
+        // 删除无页面内二次确认；保留 native dialog 兜底，避免意外弹窗阻塞点击
+        page.once('dialog', (dialog) => dialog.accept())
+        await rows.first().locator('button[aria-label="删除"]').click()
+        await expect(page.locator('.caomei-message--success')).toContainText('仓库已删除', { timeout: 15000 })
+        await expect(rows).toHaveCount(10, { timeout: 15000 })
+    })
+
+    test('sandbox 入口已恢复：镜像字段可见 / 校验 / 回显，编辑保持 sandbox', async ({ page }) => {
         const stamp = Date.now()
         const owner = `repos-sandbox-${stamp}`
         const cookieHeader = await authedCookieHeader(page)
 
-        // 生产 API 已拒绝 sandbox；用 e2e fixtures 注入存量仓库（仅测试端点，绕过生产 schema）
-        const fixtureRes = await page.request.post('/api/e2e/fixtures', {
+        // 生产 API 接受 sandbox（入口恢复；仅 report-only 真实执行）
+        const created = await page.request.post('/api/repos', {
             headers: { cookie: cookieHeader, origin: 'http://127.0.0.1:3101' },
-            data: { repos: [{ owner, name: 'app', executorKind: 'sandbox' }] },
+            data: {
+                owner,
+                name: 'app',
+                platform: 'github',
+                packageManager: 'pnpm',
+                defaultBranch: 'main',
+                executorKind: 'sandbox',
+            },
         })
-        expect(fixtureRes.ok()).toBe(true)
+        expect(created.ok()).toBe(true)
 
         await page.goto('/repos')
         await waitForHydration(page)
         const row = page.locator('.caomei-data-table__row', { hasText: owner })
         await expect(row).toBeVisible({ timeout: 15000 })
-        // 存量 sandbox 在列表标注暂不可用
-        await expect(row).toContainText('独立沙箱容器（暂不可用）')
+        await expect(row).toContainText('独立沙箱容器')
 
-        // 编辑：自动迁移为平台容器 + 提示；保存后 API 持久化为 container
+        // 编辑：执行方式保持 sandbox（不再自动迁移 container）；沙箱镜像字段可见
         await row.locator('button[aria-label="编辑"]').click()
         await expect(page.locator('.caomei-dialog__header')).toContainText('编辑仓库', { timeout: 15000 })
-        await expect(page.locator('#executorKind')).toContainText('平台容器')
-        await expect(page.locator('.caomei-dialog__content')).toContainText('该仓库原使用独立沙箱容器，当前暂不可用；保存后将改为平台容器。')
+        await expect(page.locator('#executorKind')).toContainText('独立沙箱容器')
+        await expect(page.locator('#sandboxImage')).toBeVisible()
+
+        // 非法镜像地址：服务端 400 → 行内错误（字段保持 sandbox 可见）
+        await page.locator('#sandboxImage').fill('https://ghcr.io/owner/dependfix:latest')
+        const badResponse = page.waitForResponse((res) => res.request().method() === 'PUT' && res.status() === 400)
+        await page.locator('.caomei-dialog__content button:has-text("保存")').click()
+        await badResponse
+        await expect(page.locator('.text-danger').filter({ hasText: '镜像地址' })).toBeVisible({ timeout: 15000 })
+
+        // 合法镜像地址：随 PUT 提交并回读
+        await page.locator('#sandboxImage').fill('ghcr.io/owner/dependfix:1.2.3')
         const putRequest = page.waitForRequest((req) => req.method() === 'PUT' && req.url().includes('/api/repos/'))
         await page.locator('.caomei-dialog__content button:has-text("保存")').click()
-        const putBody = (await putRequest).postDataJSON() as { executorKind?: string }
-        expect(putBody.executorKind).toBe('container')
+        const putBody = (await putRequest).postDataJSON() as { executorKind?: string, sandboxImage?: string | null }
+        expect(putBody.executorKind).toBe('sandbox')
+        expect(putBody.sandboxImage).toBe('ghcr.io/owner/dependfix:1.2.3')
         await expect(page.locator('.caomei-message--success')).toContainText('仓库已更新', { timeout: 15000 })
 
-        const reposRes = await page.request.get('/api/repos', {
-            headers: { cookie: cookieHeader, origin: 'http://127.0.0.1:3101' },
-        })
-        const repos = await reposRes.json() as { owner: string, executorKind: string }[]
-        expect(repos.find((item) => item.owner === owner)?.executorKind).toBe('container')
+        // 再次编辑：镜像回显；切到平台容器后字段隐藏
+        await row.locator('button[aria-label="编辑"]').click()
+        await expect(page.locator('#sandboxImage')).toHaveValue('ghcr.io/owner/dependfix:1.2.3')
+        await page.locator('#executorKind').click()
+        await page.getByRole('option', { name: '平台容器' }).click()
+        await expect(page.locator('#sandboxImage')).toHaveCount(0)
+        await page.locator('.caomei-dialog__content button:has-text("取消")').click()
 
-        // 新增：sandbox 选项 disabled，不能选择
+        // 新增：sandbox 选项可选择（不再 disabled）
         await page.locator('button:has-text("添加仓库")').click()
         await expect(page.locator('.caomei-dialog__header')).toContainText('添加仓库', { timeout: 15000 })
         await page.locator('#executorKind').click()
-        const sandboxOption = page.getByRole('option', { name: '独立沙箱容器（暂不可用）' })
-        await expect(sandboxOption).toHaveAttribute('aria-disabled', 'true')
+        const sandboxOption = page.getByRole('option', { name: '独立沙箱容器' })
+        await expect(sandboxOption).not.toHaveAttribute('aria-disabled', 'true')
     })
 })
 

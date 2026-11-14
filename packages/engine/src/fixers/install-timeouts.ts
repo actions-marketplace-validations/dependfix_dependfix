@@ -1,3 +1,5 @@
+import { parseDurationMs } from '@dependfix/core'
+
 // install-timeouts.ts — `pnpm install` 类调用（安装 / lockfile 诊断 / frozen 校验 / 修复策略）
 // 的超时口径**单一事实源**。
 //
@@ -33,23 +35,54 @@ export const MAX_INSTALL_TIMEOUT_MS = 30 * 60 * 1000
 export const INSTALL_TIMEOUT_ENV = 'DEPENDFIX_INSTALL_TIMEOUT_MS'
 
 /**
- * 解析安装类命令超时（毫秒）。
+ * 解析安装类命令超时：支持纯数字毫秒（历史口径）与 `5m` / `90s` 等单位写法。
  *
- * 口径与平台侧 `resolveExecutionTimeoutMs` 同族：正整数且落在
+ * 口径与平台侧 `resolveExecutionTimeoutMs` 同族：解析成功且落在
  * `[MIN_INSTALL_TIMEOUT_MS, MAX_INSTALL_TIMEOUT_MS]` 内才采纳，否则回退默认。
- * 已知边界：基于 `parseInt`，尾随非数字字符会被截断接受（如 `'300000ms'` → 300000）；
- * env 为运维持有，与既有 `CLONE_TIMEOUT_MS` / `EXECUTION_TIMEOUT_MS` 保持同一宽松口径。
  */
 export function resolveInstallTimeoutMs(
     env: NodeJS.ProcessEnv = process.env,
     fallback: number = DEFAULT_INSTALL_TIMEOUT_MS,
 ): number {
-    const raw = env[INSTALL_TIMEOUT_ENV]
-    if (!raw) {
-        return fallback
+    // 仓库级覆盖优先于 env（与平台 resolveExecutionLimits 的优先级一致）
+    if (runOverrideMs !== undefined) {
+        return runOverrideMs
     }
-    const value = parseInt(raw, 10)
-    return Number.isInteger(value) && value >= MIN_INSTALL_TIMEOUT_MS && value <= MAX_INSTALL_TIMEOUT_MS
+    const raw = env[INSTALL_TIMEOUT_ENV]?.trim()
+    const value = parseDurationMs(raw, { defaultUnit: 'ms' })
+    if (raw && (value === undefined || value < MIN_INSTALL_TIMEOUT_MS || value > MAX_INSTALL_TIMEOUT_MS)
+        && warnedInvalidValue !== raw) {
+        warnedInvalidValue = raw
+        console.warn(`[install] ${INSTALL_TIMEOUT_ENV}="${raw}" 非法或越界，回退 ${fallback}ms`)
+    }
+    return value !== undefined && value >= MIN_INSTALL_TIMEOUT_MS && value <= MAX_INSTALL_TIMEOUT_MS
         ? value
         : fallback
+}
+
+/**
+ * 运行级安装超时覆盖（仓库配置；`undefined` = 不覆盖）。
+ *
+ * 安装类调用（安装 / lockfile 诊断 / frozen 校验 / 修复策略）散布在无 ctx 的底层函数里，
+ * 逐层透传签名会侵入 4 个模块；这里用与 `runners/process-control` 同类的运行级上下文承载，
+ * 由 `DependfixApp.run()` 在开跑时设置、结束时重置（单进程单运行，无并发歧义）。
+ */
+let runOverrideMs: number | undefined
+
+/** 已告警的非法 env 原值（避免同一进程内每次 install 调用重复刷屏）。 */
+let warnedInvalidValue: string | undefined
+
+/** 设置运行级安装超时覆盖（越界 / 非法按默认回退；`undefined` = 清除覆盖）。 */
+export function setRunInstallTimeoutMs(overrideMs: number | undefined): void {
+    runOverrideMs = overrideMs !== undefined
+        && Number.isInteger(overrideMs)
+        && overrideMs >= MIN_INSTALL_TIMEOUT_MS
+        && overrideMs <= MAX_INSTALL_TIMEOUT_MS
+        ? overrideMs
+        : undefined
+}
+
+/** 当前运行级覆盖（供测试断言与诊断）。 */
+export function getRunInstallTimeoutMs(): number | undefined {
+    return runOverrideMs
 }

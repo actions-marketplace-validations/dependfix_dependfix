@@ -10,6 +10,7 @@ import {
     type AiUsageAggregate,
     type FixAction,
     type NormalizedSecurityAlert,
+    type VerificationSkipReason,
 } from '@dependfix/core'
 import {
     applyVersionedOverrides,
@@ -68,8 +69,8 @@ export interface RepoFixProgress {
     verificationPassed: boolean | undefined
     /** 是否存在本次改动引入的验证失败（决定交付回滚；见 RepositoryResult.verificationBlocking） */
     verificationBlocking: boolean | undefined
-    /** 主动跳过验证的原因（运行预算不足；见 RepositoryResult.verificationSkipped） */
-    verificationSkipped?: 'budget'
+    /** 主动跳过验证的原因（运行预算不足 / 本次无写入；见 RepositoryResult.verificationSkipped） */
+    verificationSkipped?: VerificationSkipReason
     defaultBranch: string
 }
 
@@ -99,6 +100,11 @@ export interface RepoFixCtx extends AppContext {
     verificationCheckpoints?: VerificationCheckpoint[]
     /** 运行前工作区已有未提交改动：沿用门禁保护面，禁用选择性回滚。 */
     preExistingDirty?: boolean
+    /**
+     * checkpoint 建立失败的去重键（`仓库:原因`，run 级）。
+     * 逐单元重试同一失败原因时只记一条降级审计，避免刷屏。
+     */
+    checkpointFailures?: Set<string>
 }
 
 /** lockfile 依赖告警分区产物（供 lockfile / 成员 / 常规升级步骤共用）。 */
@@ -138,10 +144,34 @@ export async function processRepoFix(
         // 告警分区 + 同告警尝试判定（纯读）：在基线采样之前完成，使「全部命中尝试上限」与
         // 零告警仓库同语义（无任何写操作 ⇒ 不必付一次完整基线验证链）
         const planned = await planRepoFixAlerts(ctx, client, repo, alertInputs)
+        // 可执行工作判定：lockfile 告警全部需要跨 major 且未授权时，本次不会有任何写操作
+        // （「有告警但 0 写入」形态），不付基线采样成本；未授权跨 major 的告警在后续链路记跳过。
+        const lockfileTargets = planned.rootManifestAlerts.filter((alert) =>
+            alert.source !== 'code-scanning' && alert.source !== 'code-quality'
+            && alert.manifestPath.trim().replace(/\\/g, '/') === 'pnpm-lock.yaml'
+            && alert.fixable && alert.recommendedVersion)
+        const crossMajorOnly = lockfileTargets.length > 0
+            && !ctx.config.allowMajorUpgrade
+            && lockfileTargets.every((alert) => isCrossMajorFixRequired(join(ctx.workDir, 'pnpm-lock.yaml'), alert))
         // 修复前按需采样验证基线（首个有工作的仓库处采样，在任何改动之前；用于区分「本次引入」与「既有」失败）
-        const { exemptAttribution, baseline } = await ensureVerificationBaseline(ctx, repo, {
-            hasWork: alertInputs.length - planned.skippedCount > 0,
-        })
+        // 「有工作」按**可能写盘**判定（可修复的依赖告警 / 成员清单告警 / 可自动修复的 Code Scanning 告警）：
+        // 全部不可修复的告警不会产生任何写入，其验证失败在 pristine 工作区下必然也是既有失败，无需付基线成本
+        const codeScanningFixable = alertInputs.some((alert) => (
+            alert.source === 'code-scanning' && alert.alertClass === 'auto-fixable'
+        ))
+        const manifestPathOf = (alert: NormalizedSecurityAlert) => alert.manifestPath.trim().replace(/\\/g, '/')
+        // 跨 major 未授权只否决 **lockfile 告警**这一贡献：package.json / 成员清单 / 模板修复
+        // 仍会写盘，不能被它一起否决（否则有写入却跳过基线 → 失败被误判既有失败）
+        const fixableLockfileRoot = planned.rootManifestAlerts.some((alert) => (
+            alert.fixable && alert.recommendedVersion && manifestPathOf(alert) === 'pnpm-lock.yaml'
+        ))
+        const fixableNonLockfileRoot = planned.rootManifestAlerts.some((alert) => (
+            alert.fixable && alert.recommendedVersion && manifestPathOf(alert) !== 'pnpm-lock.yaml'
+        ))
+        const fixableMemberAlerts = planned.memberManifestAlerts.some((item) => item.alert.recommendedVersion)
+        const hasWork = fixableNonLockfileRoot || fixableMemberAlerts || codeScanningFixable
+            || (fixableLockfileRoot && !crossMajorOnly)
+        const { exemptAttribution, baseline } = await ensureVerificationBaseline(ctx, repo, { hasWork })
         // pristine 安装失败 ⇒ overrides 安装必然同因失败；逐包重试只会耗尽预算，写盘前快速失败
         const installBaselineFailure = recordInstallBaselineFailure(ctx, repo, baseline)
         const sets = await prepareRepoFixSets(ctx, repo, planned, alertInputs, progress)
@@ -163,7 +193,11 @@ export async function processRepoFix(
                 }
             }
         }
-        await finalizeRepoFix(ctx, repo, progress, { exemptAttribution, client })
+        await finalizeRepoFix(ctx, repo, progress, {
+            exemptAttribution,
+            client,
+            ...(installBaselineFailure ? { installBaselineFailure } : {}),
+        })
     } catch (error: unknown) {
         const message = toErrorMessage(error)
         const hint = alertsFetchTokenHint(error)
@@ -234,8 +268,6 @@ interface PlannedRepoFixAlerts {
     memberManifestAlerts: MemberManifestAlert[]
     /** 子目录 / 根直接依赖 lockfile 等需人工复核的告警（不进入修复链路） */
     submanifestAlerts: NormalizedSecurityAlert[]
-    /** 因同告警尝试上限被跳过的告警数（用于 hasWork 判定） */
-    skippedCount: number
 }
 
 /**
@@ -275,7 +307,6 @@ async function planRepoFixAlerts(
         rootManifestAlerts,
         memberManifestAlerts,
         submanifestAlerts: partition.sub,
-        skippedCount,
     }
 }
 
@@ -438,7 +469,15 @@ async function applyLockfileFixes(
             recordConvergedAlerts(ctx, convergedAlerts, 'no vulnerable instances below targets')
             continue
         }
-        batchItems.push({ alert, versionedOverrides, targets })
+        batchItems.push({
+            alert,
+            versionedOverrides,
+            targets,
+            // From 列展示用：写入前该包的锁定实例（多实例以 `, ` 连接）
+            fromVersion: readLockfileVersions(lockfilePath, alert.packageName).join(', '),
+            // 同包全部告警：peer-only 跳过按告警级展开（与逐包路径同源）
+            alerts: multiVersionAlerts.filter((a) => a.packageName === alert.packageName),
+        })
     }
 
     // 合批快路径（≥2 个包）：把 K 次完整安装压到 1 次；失败则回滚并由下方逐包路径重试。
@@ -446,7 +485,10 @@ async function applyLockfileFixes(
     const batchOutcome = batchItems.length > 1
         ? await tryBatchVersionedOverrides(ctx, repo, progress, batchItems)
         : { applied: false }
-    const itemsToRetry = batchOutcome.applied || batchOutcome.skipSequential ? [] : batchItems
+    const skippedByBatch = new Set(batchOutcome.skipPackages ?? [])
+    const itemsToRetry = batchOutcome.applied || batchOutcome.skipSequential
+        ? []
+        : batchItems.filter((item) => !skippedByBatch.has(item.alert.packageName))
 
     if (batchOutcome.budgetStop) {
         stopReason = 'budget'
@@ -483,7 +525,7 @@ async function applyLockfileFixes(
             type: 'dependency-upgrade',
             repository: alert.repository,
             target: alert.packageName,
-            fromVersion: '',
+            fromVersion: result.fromVersion || '',
             toVersion: result.toVersion,
             isMajor: false,
             strategy: 'versioned-override',
@@ -507,6 +549,15 @@ async function applyLockfileFixes(
                 })
                 stopReason = 'environmental'
                 break
+            }
+            if (result.manualReview) {
+                // 无法通过 overrides 自动修复（当前仅 peer-only 实例）：已回滚，记跳过而非失败动作，
+                // 同包告警按告警级明细同步（与 convergent 计数口径一致）。
+                const packageAlerts = multiVersionAlerts.filter((a) => a.packageName === alert.packageName)
+                addSkipped(ctx.summary, 'peer-only', packageAlerts.length)
+                recordSkippedAlerts(ctx, packageAlerts, 'peer-only')
+                ctx.logger.warn(`[multi-version] ${alert.packageName}: ${result.error ?? 'manual review required'}`)
+                continue
             }
             ctx.allActions.push(action)
             recordUpgradeFailure(ctx, progress, 'multi-version', alert.packageName, result.error)

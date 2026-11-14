@@ -95,6 +95,18 @@ describe('GET /api/pr-checks', () => {
         expect(list.every((r) => r.repository === 'demo/app')).toBe(true)
     })
 
+    it('视图暴露 prState（存量行默认 unknown）', async () => {
+        const list = await call('/api/pr-checks') as { prNumber: number, prState: string }[]
+        const target = list.find((r) => r.prNumber === 1)!
+        expect(target.prState).toBe('unknown')
+    })
+
+    it('非法 conclusion → 400（不再静默退回全量）', async () => {
+        await expect(call('/api/pr-checks?conclusion=not-a-conclusion')).rejects.toMatchObject({
+            statusCode: 400,
+        })
+    })
+
     it('repositoryId 过滤：限定仓库', async () => {
         const ds = await ensureDatabaseInitialized()
         await ds.getRepository(Repository).save(ds.getRepository(Repository).create({
@@ -358,5 +370,39 @@ describe('GET /api/pr-checks', () => {
         const list = await call('/api/pr-checks?alertFiring=false') as { alertFiring: boolean }[]
         expect(list.length).toBeGreaterThan(0)
         expect(list.every((r) => !r.alertFiring)).toBe(true)
+    })
+
+    it('同毫秒并列按 id DESC 稳定，take(500) 窗口可复算', async () => {
+        const ds = await ensureDatabaseInitialized()
+        const repoRepo = ds.getRepository(PRCheck)
+        const tieTime = new Date('2020-06-01T00:00:00.000Z')
+        const seedTie = (prNumber: number, headSha: string) => repoRepo.save(repoRepo.create({
+            repositoryId,
+            prNumber,
+            headSha,
+            authorLogin: 'dependabot[bot]',
+            conclusion: 'success',
+            checkRunId: null,
+            detailsUrl: null,
+            errorMessage: null,
+            alertFiring: false,
+            acknowledgedAt: null,
+            acknowledgedByUserId: null,
+            lastPolledAt: tieTime,
+            createdAt: tieTime,
+        }))
+        const older = await seedTie(901, '9'.repeat(40))
+        const newer = await seedTie(902, '8'.repeat(40))
+        try {
+            const ids = (await call('/api/pr-checks') as { id: string }[]).map((r) => r.id)
+            // 两行 createdAt 完全同毫秒，且早于其它用例数据 → 落在列表末尾且按主键倒序
+            expect(ids.slice(-2)).toEqual([newer.id, older.id])
+
+            const again = (await call('/api/pr-checks') as { id: string }[]).map((r) => r.id)
+            expect(again).toEqual(ids)
+        } finally {
+            // 本用例自建行不污染其它用例的计数断言
+            await repoRepo.delete([older.id, newer.id])
+        }
     })
 })

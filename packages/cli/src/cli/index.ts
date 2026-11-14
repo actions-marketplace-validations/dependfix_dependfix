@@ -22,6 +22,8 @@ export interface CliInvocation {
     mode?: RuntimeMode
     configOverrides: CliConfigOverrides
     rawArgs: string[]
+    /** `--result-json` 目标文件（仅执行层消费，不进入 RuntimeConfig） */
+    resultJsonPath?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -88,6 +90,11 @@ export const argsDef = {
         description: '修复完成后在本地当前分支直接提交（不推送、不创建 PR）',
         negativeDescription: '不自动提交（默认）',
     },
+    push: {
+        type: 'boolean' as const,
+        description: '提交后把当前分支推到远端（仅 fix 模式，配合 --commit；不创建 PR）',
+        negativeDescription: '不推送（默认；容器路径由平台接管推送）',
+    },
     'cleanup-branches': {
         type: 'boolean' as const,
         description: '（fix-and-pr 模式）结束后列出已合并的 dependfix 分支到报告，不自动删除',
@@ -151,12 +158,16 @@ export const argsDef = {
     },
     'max-repos': {
         type: 'string' as const,
-        description: '发现规模上限：最多保留的仓库数（默认 100；0 或负数表示不限制；大 org 场景下防止一次性全量发现）',
+        description: '发现规模上限：最多保留的仓库数（默认 100；0 表示不限制，负数会被拒绝；大 org 场景下防止一次性全量发现）',
         default: '100' as const,
     },
     history: {
         type: 'string' as const,
         description: '查询仓库历史运行摘要（读 dependfix-reports/index.json，倒序时间；不执行扫描）',
+    },
+    'result-json': {
+        type: 'string' as const,
+        description: '把运行结果写入指定 JSON 文件（{exitCode, result}）；沙箱执行器据此读取结果，不复用报告副产物',
     },
     'upgrade-groups': {
         type: 'string' as const,
@@ -217,7 +228,7 @@ export const argsDef = {
     },
     'ai-api-key': {
         type: 'string' as const,
-        description: 'AI API Key（优先 DEPENDFIX_AI_API_KEY env；注意命令行参数会出现在进程列表/shell history，敏感环境请用 env）',
+        description: 'AI API Key（命令行参数优先，DEPENDFIX_AI_API_KEY 环境变量兜底；注意命令行参数会出现在进程列表/shell history，敏感环境请用 env）',
     },
     'ai-trigger': {
         type: 'string' as const,
@@ -369,6 +380,11 @@ function parsedArgsToCliOverrides(parsed: ParsedArgs<typeof argsDef>): CliConfig
         overrides.commit = parsed.commit
     }
 
+    // push (three-state: true / false / undefined)
+    if (parsed.push !== undefined) {
+        overrides.push = parsed.push
+    }
+
     // cleanup-branches (three-state: true / false / undefined)
     if (parsed['cleanup-branches'] !== undefined) {
         overrides.cleanupBranches = parsed['cleanup-branches']
@@ -514,7 +530,7 @@ function parsedArgsToCliOverrides(parsed: ParsedArgs<typeof argsDef>): CliConfig
         overrides.toolchainPnpmVersion = toolchainPnpmVersion
     }
 
-    // AI 研判（--ai 系列；--ai-api-key 为敏感参数，env 优先）
+    // AI 研判（--ai 系列；--ai-api-key 为敏感参数：CLI 参数优先、env 兜底，敏感环境建议用 env）
     if (parsed.ai !== undefined) {
         overrides.aiEnabled = parsed.ai
     }
@@ -604,10 +620,12 @@ export function parseUpgradeGroupsFlag(value: string): Record<string, string[]> 
 export function parseCliArgs(rawArgs: string[]): CliInvocation {
     const parsed = parseArgs<typeof argsDef>(rawArgs, argsDef)
     const configOverrides = parsedArgsToCliOverrides(parsed)
+    const resultJsonPath = parsed['result-json']?.trim() || undefined
 
     return {
         mode: configOverrides.mode,
         configOverrides,
         rawArgs: [...rawArgs],
+        ...(resultJsonPath ? { resultJsonPath } : {}),
     }
 }

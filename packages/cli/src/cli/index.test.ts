@@ -82,6 +82,7 @@ describe('parseCliArgs', () => {
             dryRun: false,
             createPullRequest: false,
             commit: false,
+            push: false,
             cleanupBranches: false,
             cleanupBranchesAuto: false,
             githubToken: 'token-from-cli',
@@ -328,5 +329,14 @@ describe('parseCliArgs', () => {
                 DEPENDFIX_AI_PROVIDER: 'google',
             },
         })).toThrow('Invalid DEPENDFIX_AI_PROVIDER')
+    })
+
+    it('parses --result-json as an execution-layer path (not a RuntimeConfig override)', () => {
+        const invocation = parseCliArgs(['report-only', '--repo', 'owner/repo', '--result-json', '/work/result.json'])
+
+        expect(invocation.resultJsonPath).toBe('/work/result.json')
+        expect(invocation.configOverrides).not.toHaveProperty('resultJsonPath')
+
+        expect(parseCliArgs(['report-only']).resultJsonPath).toBeUndefined()
     })
 })

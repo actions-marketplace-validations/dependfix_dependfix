@@ -1,5 +1,30 @@
 # @dependfix/core
 
+# [1.0.0](https://github.com/dependfix/dependfix/compare/@dependfix/core@0.7.0...@dependfix/core@1.0.0) (2026-11-06)
+
+### ⚙️ 运行时基线更新
+
+* 本版本仅随仓库基线调整（依赖 / 运行时 / 构建配置）提升，无包内功能变更；对照根 CHANGELOG 同版本段。
+
+### 首个稳定版
+
+* 1.0.0 首个稳定版：本包随 1.0 契约冻结一并发布（迁移说明见仓库根 `docs/guide/contract-freeze.md`）
+
+# [0.7.0](https://github.com/dependfix/dependfix/compare/@dependfix/core@0.6.0...@dependfix/core@0.7.0) (2026-11-01)
+
+
+### ✨ 新功能
+
+* **core:** 交付跳过契约与报告段 ([aa90062](https://github.com/dependfix/dependfix/commit/aa90062))
+* **core:** 新增告警级修复结果契约与引擎产出 ([1d5e187](https://github.com/dependfix/dependfix/commit/1d5e187))
+* **monorepo:** 统一 PR Check 结论口径并按 workflow run 收敛同名轮次 ([2a9a588](https://github.com/dependfix/dependfix/commit/2a9a588))
+
+
+### 🐛 Bug 修复
+
+* **engine:** 区分已启动后被取消的 git 失败文案 ([f6d8911](https://github.com/dependfix/dependfix/commit/f6d8911))
+* **engine:** 收口交付异步化的取消、预算与编码边界 ([11c1427](https://github.com/dependfix/dependfix/commit/11c1427))
+
 # [0.6.0](https://github.com/dependfix/dependfix/compare/@dependfix/core@0.5.0...@dependfix/core@0.6.0) (2026-10-28)
 
 

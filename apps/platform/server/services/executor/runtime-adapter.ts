@@ -15,9 +15,10 @@ const execFileAsync = promisify(execFile)
  *   user 默认 `100:100`（rootless 标配；rootful daemon 上亦生效但无 user namespace 隔离）
  *
  * 安全边界：凭据通过 `-e KEY=VALUE` 注入容器进程 env，不进 cmd 字段（避免 spy/test 日志
- * 泄露）、不进 git URL（避免 exec 错误回显）、不进 docker daemon 配置文件（避免 docker
- * inspect 可见）。当前仍走 docker CLI args，未来切 docker socket API 可换 stdin/env 注入。
- * bind mount 源 workDir 由 sandbox-executor 准备（沙箱进程内构造的临时目录）。
+ * 泄露）、不进 git URL（避免 exec 错误回显）。注意 `-e` 值会出现在容器 `Config.Env`
+ * （`docker inspect` 可见；rootless daemon 下仅 daemon 用户可读），不要把它当作对 inspect 隐藏。
+ * 当前仍走 docker CLI args，未来切 docker socket API 可换 stdin/env 注入。
+ * mounts 由调用方按需提供；沙箱执行器当前不挂载宿主目录（结果经 stdout 哨兵回传）。
  */
 
 /** 容器执行规格（OCI runtime 子集，足够 pnpm 脚本类场景） */
@@ -26,9 +27,9 @@ export interface ContainerSpec {
     image: string
     /** 容器内用户（默认 '100:100'——rootless 标配） */
     user?: string
-    /** 容器内工作目录（必须同时出现在 mounts 中） */
+    /** 容器内工作目录（可由 mounts 提供映射；沙箱执行器当前使用容器私有 /tmp） */
     workDir: string
-    /** bind mount 列表（沙箱场景至少一项：workDir → 容器内路径） */
+    /** bind mount 列表（可选；沙箱执行器当前不挂载宿主目录） */
     mounts?: { src: string, dst: string, readonly?: boolean }[]
     /** 环境变量（沙箱场景至少一项：GITHUB_TOKEN / GITHUB_REPOSITORY） */
     env?: Record<string, string>
@@ -67,6 +68,11 @@ export interface RuntimeAdapter {
     readonly name: string
     /** 探测 daemon/runtime 可用性（不抛错，返回布尔） */
     isAvailable(): Promise<boolean>
+    /**
+     * 确保镜像可用（可选能力）：本地存在直接返回 true，否则尝试拉取。
+     * 未实现的 adapter（测试替身）视为「跳过预检」，由 `run` 的镜像错误兜底。
+     */
+    ensureImage?(image: string, options?: { timeoutMs?: number }): Promise<boolean>
     /**
      * 启动容器执行命令。
      *
@@ -120,6 +126,29 @@ export class DockerAdapter implements RuntimeAdapter {
             const version = stdout.trim()
             // ServerVersion 存在即 daemon 运行中（rootless/rootful 都通过——本探测不区分）
             return version.length > 0
+        } catch {
+            return false
+        }
+    }
+
+    /**
+     * 确保镜像可用：先本地 inspect（快），缺失再 `docker pull`（限时）。
+     * 拉取失败返回 false，由调用方尝试下一个镜像源；不抛错、不输出凭据。
+     */
+    async ensureImage(image: string, options: { timeoutMs?: number } = {}): Promise<boolean> {
+        const dockerBin = this.options.dockerBin ?? 'docker'
+        try {
+            await execFileAsync(dockerBin, ['image', 'inspect', image], { timeout: 10_000, maxBuffer: 64 * 1024 })
+            return true
+        } catch {
+            // 本地缺失 → 尝试拉取
+        }
+        try {
+            await execFileAsync(dockerBin, ['pull', image], {
+                timeout: options.timeoutMs ?? 300_000,
+                maxBuffer: 2 * 1024 * 1024,
+            })
+            return true
         } catch {
             return false
         }
@@ -183,7 +212,7 @@ export class DockerAdapter implements RuntimeAdapter {
         if (spec.cpu ?? SANDBOX_DEFAULTS.cpu) {
             args.push('--cpus', String(spec.cpu ?? SANDBOX_DEFAULTS.cpu))
         }
-        // 挂载点（沙箱场景必含 workDir）
+        // 挂载点（可选；沙箱执行器当前不挂载宿主目录）
         for (const mount of spec.mounts ?? []) {
             if (mount.readonly) {
                 args.push('--mount', `type=bind,source=${mount.src},target=${mount.dst},readonly`)

@@ -119,8 +119,6 @@
         "notLinked": "未关联",
         "platformContainer": "平台容器",
         "sandboxContainer": "独立沙箱容器",
-        "sandboxContainerUnavailable": "独立沙箱容器（暂不可用）",
-        "sandboxMigratedNotice": "该仓库原使用独立沙箱容器，当前暂不可用；保存后将改为平台容器。",
         "githubAction": "GitHub Action",
         "privateRepo": "私有",
         "publicRepo": "公开",
@@ -221,12 +219,45 @@
             "repoFetchFailed": "拉取仓库失败：{message}",
             "importFailed": "批量导入失败：{message}",
             "selectAtLeastOne": "请至少选择一个仓库",
-            "ownersFetchFailed": "加载 owner 列表失败：{message}"
+            "ownersFetchFailed": "加载 owner 列表失败：{message}",
+            "validationSummary": "请检查表单中标红的字段后重试"
+        },
+        "validation": {
+            "ownerRequired": "Owner 不能为空",
+            "ownerInvalid": "Owner 仅允许字母、数字、下划线、点和连字符",
+            "ownerTooLong": "Owner 最长 {max} 个字符",
+            "nameRequired": "仓库名不能为空",
+            "nameInvalid": "仓库名仅允许字母、数字、下划线、点和连字符",
+            "nameTooLong": "仓库名最长 {max} 个字符",
+            "defaultBranchRequired": "默认分支不能为空",
+            "defaultBranchTooLong": "默认分支最长 {max} 个字符",
+            "workflowRequired": "选择 GitHub Action 执行时必须填写 workflow 文件路径",
+            "durationInvalid": "时长格式无效，请输入 30m / 1h / 90s 或纯数字（分钟）",
+            "durationTooSmall": "不得小于 {min}",
+            "durationTooLarge": "不得超过 {max}",
+            "durationExceedsExecution": "{label}不能大于执行上限（{max}）"
         },
         "importOwner": "Resource owner",
         "importOwnerPlaceholder": "请先选择凭据",
         "importOwnerPersonalBadge": "个人",
-        "importOwnerOrgBadge": "组织"
+        "importOwnerOrgBadge": "组织",
+        "executionLimitsTitle": "执行预算（高级）",
+        "executionLimitsInheritAll": "全部继承全局",
+        "executionLimitsCoveredSuffix": "项已覆盖",
+        "executionTimeout": "执行上限",
+        "executionTimeoutHint": "留空 = 继承全局；不得超过平台封顶",
+        "verifyCommandTimeout": "验证命令超时",
+        "installTimeout": "安装超时",
+        "cloneTimeout": "clone 超时",
+        "durationRange": "范围 {min} – {max}",
+        "durationHint": "支持 30m / 1h / 90s 等单位，纯数字按分钟；留空继承平台默认值",
+        "executionLimitsHint": "修改执行上限会同步影响 Worker 锁与孤儿判定窗口",
+        "allowMajorUpgrade": "允许跨大版本升级",
+        "allowMajorUpgradeHint": "跨大版本告警按人工处理；开启后仅对根直接依赖且 lockfile 单版本的告警自动升级，仍走完整验证链并在失败时自动回滚；间接依赖与多版本共存保持人工",
+        "allowMajorUpgradeDefaultOn": "平台已将新建仓库默认设为开启；既有仓库保持原设置",
+        "fieldSandboxImage": "沙箱镜像",
+        "fieldSandboxImagePlaceholder": "ghcr.io/owner/dependfix-sandbox:latest",
+        "fieldSandboxImageHint": "留空 = 平台默认（slim 沙箱镜像）。原生模块需源码编译时填写 -full 变体或完整镜像引用；镜像须可被目标 rootless daemon 拉取"
     },
     "schedules": {
         "title": "定时计划",
@@ -323,14 +354,23 @@
             "passwordPlaceholder": "请输入密码",
             "submit": "登录",
             "or": "或",
-            "ssoLogin": "企业 SSO 登录",
-            "socialLogin": "{provider} 登录",
+            "ssoLogin": "使用企业 SSO 登录",
+            "socialLogin": "使用 {provider} 登录",
             "noAccount": "还没有账号？",
             "registerNow": "立即注册",
             "toggleDarkMode": "切换暗色模式",
             "errors": {
                 "loginFailed": "登录失败：{message}",
-                "invalidCredentials": "登录失败：邮箱或密码错误"
+                "invalidCredentials": "登录失败：邮箱或密码错误",
+                "emailNotVerified": "登录失败：邮箱尚未验证",
+                "tooManyRequests": "尝试过于频繁，请稍后再试"
+            },
+            "resend": {
+                "action": "重新发送验证邮件",
+                "sending": "发送中…",
+                "sent": "验证邮件已重新发送，请查收（含垃圾邮件）",
+                "rateLimited": "发送过于频繁，请约一分钟后重试",
+                "failed": "验证邮件发送失败，请稍后重试"
             }
         },
         "register": {
@@ -457,6 +497,16 @@
         },
         "confirm": {
             "unlinkAccount": "确认解绑 {provider} 账号？"
+        },
+        "executionLimits": {
+            "card": "当前运行限制",
+            "execution": "单仓执行上限",
+            "ceiling": "平台封顶",
+            "verifyCommand": "验证命令超时",
+            "install": "安装超时",
+            "clone": "clone 超时",
+            "minuteUnit": "分钟",
+            "hint": "只读展示，全局值由部署环境变量管理；仓库可在「添加 / 编辑仓库」的执行预算区按仓库覆盖"
         }
     },
     "notifications": {
@@ -614,10 +664,13 @@
         "alertFiringAll": "全部",
         "alertFiringTrue": "仅 firing",
         "alertFiringFalse": "仅已 ack",
+        "filterConclusion": "结论",
+        "conclusionAll": "全部结论",
         "colRepository": "仓库",
         "colPrNumber": "PR",
         "colAuthor": "作者",
         "colConclusion": "结论",
+        "colPrState": "PR 状态",
         "colLastPolledAt": "最近采集",
         "colStatus": "Alert",
         "colLink": "链接",
@@ -673,6 +726,12 @@
             "externalNoise": "外部噪音",
             "cancelled": "已取消 / 跳过",
             "unknown": "未判定"
+        },
+        "prState": {
+            "open": "开启",
+            "closed": "已关闭",
+            "merged": "已合并",
+            "unknown": "未知"
         }
     },
     "envEvents": {
@@ -712,7 +771,11 @@
         "collapse": "收起",
         "errors": {
             "loadFailed": "加载失败：{message}"
-        }
+        },
+        "typeSandboxEgressBlocked": "出站策略拦截",
+        "typeExecutionLimitsUpdate": "执行预算更新",
+        "typeMajorUpgradePolicyUpdate": "跨大版本策略更新",
+        "typeDeliveryBranchCleanup": "交付分支清理"
     },
     "credentials": {
         "title": "凭据管理",
@@ -837,6 +900,13 @@
         "environmentalFailures": "环境性失败 {count}",
         "environmentalFailuresLabel": "环境性失败",
         "environmentalFailuresHint": "环境性失败（安装被信号杀死 / 超时 / 静默非零退出）不归因本次运行，仅在此提示可见",
+        "verificationsSkipped": "验证跳过 {count} 个仓库",
+        "verificationsSkippedLabel": "验证跳过",
+        "verificationsSkippedHint": "验证未执行（运行预算不足 / 本次无写入）；不计为失败，也不代表验证通过：预算跳过会阻断交付，本次无写入则无交付内容",
+        "verificationSkipReason": {
+            "budget": "运行预算不足",
+            "noWrite": "本次无写入"
+        },
         "deliverySkipped": "交付跳过 {count} 个仓库",
         "deliverySkippedLabel": "交付跳过",
         "deliverySkippedHint": "修复后安装验证仍为既有失败（本次改动前即为红），本次修复未交付（改动已回滚）；载体（issue / 草稿 PR）仅在引擎 fix-and-pr 路径按 DEPENDFIX_ON_BASELINE_RED 创建。exit code 不受影响",
@@ -868,7 +938,8 @@
                 "crossMajor": "跨大版本 / 人工复核",
                 "notFixable": "不可自动修复",
                 "overrideProtected": "保护名单",
-                "repeatedFailure": "同告警重复失败（尝试上限）"
+                "repeatedFailure": "同告警重复失败（尝试上限）",
+                "peerOnly": "仅 peer 依赖（需人工处置）"
             }
         },
         "failureStage": {
@@ -921,7 +992,14 @@
             "loadFailed": "加载失败：{message}",
             "detailLoadFailed": "详情加载失败：{message}",
             "logsDownloadFailed": "日志下载失败：{message}"
-        }
+        },
+        "networkViolationsLabel": "外联违规",
+        "networkViolations": "拦截 {count} 次",
+        "networkViolationsHint": "非白名单外联已被本地审计代理拦截（502）；出现违规时该运行不得判定为验证通过",
+        "networkAudited": "已审计 {count} 条",
+        "networkViolationFailure": "本次运行拦截到非白名单外联，已判定失败（详见外联违规与报告）",
+        "deliveryLabel": "交付",
+        "deliveryBranch": "分支 {branch}"
     },
     "scans": {
         "title": "扫描",
@@ -955,6 +1033,11 @@
             "filterStatus": "状态",
             "filterFailureStage": "失败阶段",
             "filterFailureKind": "处置建议",
+            "filterFrom": "开始时间（起）",
+            "filterTo": "开始时间（止）",
+            "filterFromPlaceholder": "选择起始时间",
+            "filterToPlaceholder": "选择结束时间",
+            "invalidRange": "开始时间不能晚于结束时间",
             "filterAll": "全部",
             "clearFilters": "清除筛选",
             "failureStageSummary": "失败阶段分布：",
@@ -1088,6 +1171,10 @@
         "PR_CHECK_ACK_VALIDATION_FAILED": {
             "zh-CN": "参数校验失败",
             "en": "Request validation failed"
+        },
+        "PR_CHECK_VALIDATION_FAILED": {
+            "zh-CN": "查询参数校验失败",
+            "en": "Invalid query parameters"
         },
         "BATCH_RUN_ID_MISSING": {
             "zh-CN": "缺少批量运行 id",

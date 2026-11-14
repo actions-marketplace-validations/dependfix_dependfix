@@ -67,6 +67,21 @@ describe('GET /api/repos/[id]', () => {
         expect(detail.tags).toEqual(['prod'])
     })
 
+    it('updates and clears the repository-level sandbox image', async () => {
+        await callId('PUT', `/api/repos/${id}`, { sandboxImage: 'ghcr.io/owner/dependfix:2.0.0' }, { id })
+        let detail = await callId('GET', `/api/repos/${id}`, undefined, { id }) as Record<string, unknown>
+        expect(detail.sandboxImage).toBe('ghcr.io/owner/dependfix:2.0.0')
+
+        // 省略字段的局部 PUT 不清空既有值
+        await callId('PUT', `/api/repos/${id}`, { note: '只改备注' }, { id })
+        detail = await callId('GET', `/api/repos/${id}`, undefined, { id }) as Record<string, unknown>
+        expect(detail.sandboxImage).toBe('ghcr.io/owner/dependfix:2.0.0')
+
+        await callId('PUT', `/api/repos/${id}`, { sandboxImage: null }, { id })
+        detail = await callId('GET', `/api/repos/${id}`, undefined, { id }) as Record<string, unknown>
+        expect(detail.sandboxImage).toBeNull()
+    })
+
     it('rejects owner/name conflict with 409', async () => {
         await callIndex('POST', '/api/repos', { ...basePayload, owner: 'other', name: 'repo' })
         await expectError(
@@ -79,8 +94,11 @@ describe('GET /api/repos/[id]', () => {
         await expectError(callId('PUT', `/api/repos/${id}`, { executorKind: 'nope' }, { id }), 400)
     })
 
-    it('rejects sandbox executor (entry temporarily disabled)', async () => {
-        await expectError(callId('PUT', `/api/repos/${id}`, { executorKind: 'sandbox' }, { id }), 400)
+    it('accepts sandbox executor via PUT (entry restored)', async () => {
+        const result = await callId('PUT', `/api/repos/${id}`, { executorKind: 'sandbox' }, { id }) as { updated: boolean }
+        expect(result).toEqual({ id, updated: true })
+        const detail = await callId('GET', `/api/repos/${id}`, undefined, { id }) as Record<string, unknown>
+        expect(detail.executorKind).toBe('sandbox')
     })
 
     it('persists sandboxLimits JSON via PUT', async () => {
@@ -293,4 +311,80 @@ describe('/api/repos/[id] 三角色鉴权（todo.md §M16.5）', () => {
         await expect(callId('PUT', `/api/repos/${created.id}`, { note: 'org-override' }, { id: created.id }))
             .rejects.toMatchObject({ statusCode: 403 })
     })
+    it('PUT 只改 note 不重置执行器与四个执行超时（AC7）', async () => {
+        // 隔离上一用例残留的 once mock（requireOrgResource）
+        mockRequireOrgResource.mockReset()
+        mockRequireOrgResource.mockImplementation(async () => undefined)
+        const created = await callIndex('POST', '/api/repos', {
+            ...basePayload,
+            name: 'partial-update',
+            executorKind: 'github-action',
+            actionWorkflowFile: 'ci.yml',
+            executionTimeoutMs: 2_700_000,
+            verifyCommandTimeoutMs: 1_200_000,
+        }) as { id: string }
+
+        await callId('PUT', `/api/repos/${created.id}`, { note: '仅改备注' }, { id: created.id })
+
+        const detail = await callId('GET', `/api/repos/${created.id}`, undefined, { id: created.id }) as Record<string, unknown>
+        expect(detail.executorKind).toBe('github-action')
+        expect(detail.executionTimeoutMs).toBe(2_700_000)
+        expect(detail.verifyCommandTimeoutMs).toBe(1_200_000)
+        expect(detail.note).toBe('仅改备注')
+    })
+
+    it('仓库执行上限超过平台封顶 → 400 且不落库（AC2）', async () => {
+        mockRequireOrgResource.mockReset()
+        mockRequireOrgResource.mockImplementation(async () => undefined)
+        const created = await callIndex('POST', '/api/repos', { ...basePayload, name: 'ceiling-check' }) as { id: string }
+
+        // 3.7h 在 schema 静态上限内，但超过默认封顶 60 分钟 → 由 API 层封顶校验拒绝
+        const err = await expectError(
+            callId('PUT', `/api/repos/${created.id}`, { executionTimeoutMs: 3_700_000 }, { id: created.id }),
+            400,
+        )
+        expect(JSON.stringify(err.data)).toContain('封顶')
+
+        const detail = await callId('GET', `/api/repos/${created.id}`, undefined, { id: created.id }) as Record<string, unknown>
+        expect(detail.executionTimeoutMs).toBeNull()
+    })
+
+    it('执行超时实际变化时登记 execution_limits_update 审计（AC9）', async () => {
+        mockRequireOrgResource.mockReset()
+        mockRequireOrgResource.mockImplementation(async () => undefined)
+        const created = await callIndex('POST', '/api/repos', { ...basePayload, name: 'limits-audit' }) as { id: string }
+
+        await callId('PUT', `/api/repos/${created.id}`, { executionTimeoutMs: 2_700_000 }, { id: created.id })
+
+        const ds = await ensureDatabaseInitialized()
+        const events = await ds.getRepository(AuditEvent).find({ where: { type: 'execution_limits_update' } })
+        const event = events.find((item) => item.repositoryId === created.id)
+        expect(event).toBeDefined()
+        expect(event!.payloadJson).toContain('2700000')
+    })
+
+    it('跨大版本授权：默认关闭、开启落库并登记审计、重复设置不新增审计', async () => {
+        mockRequireOrgResource.mockReset()
+        mockRequireOrgResource.mockImplementation(async () => undefined)
+        const created = await callIndex('POST', '/api/repos', { ...basePayload, name: 'major-upgrade' }) as { id: string }
+
+        const initial = await callId('GET', `/api/repos/${created.id}`, undefined, { id: created.id }) as Record<string, unknown>
+        expect(initial.allowMajorUpgrade).toBe(false)
+
+        await callId('PUT', `/api/repos/${created.id}`, { allowMajorUpgrade: true }, { id: created.id })
+        const enabled = await callId('GET', `/api/repos/${created.id}`, undefined, { id: created.id }) as Record<string, unknown>
+        expect(enabled.allowMajorUpgrade).toBe(true)
+
+        const ds = await ensureDatabaseInitialized()
+        const events = await ds.getRepository(AuditEvent).find({ where: { type: 'major_upgrade_policy_update' } })
+        const mine = events.filter((item) => item.repositoryId === created.id)
+        expect(mine).toHaveLength(1)
+        expect(mine[0]!.payloadJson).toContain('"next":true')
+
+        // 同值重复设置不新增审计
+        await callId('PUT', `/api/repos/${created.id}`, { allowMajorUpgrade: true }, { id: created.id })
+        const afterRepeat = await ds.getRepository(AuditEvent).find({ where: { type: 'major_upgrade_policy_update' } })
+        expect(afterRepeat.filter((item) => item.repositoryId === created.id)).toHaveLength(1)
+    })
+
 })

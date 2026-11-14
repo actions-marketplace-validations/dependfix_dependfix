@@ -19,10 +19,12 @@
 // 生命周期：模块级单例，由 `DependfixApp` 构造期 `resetProcessControlState()` 复位
 // （与 `resetActiveRulesConfig()` 同族的进程级状态口径——同一进程多次运行不得互相污染）。
 //
-// 边界：本模块只做状态与进程控制，不感知业务语义；**不在 engine 公共出口 re-export**
-// （内部实现，不扩大公开 API，口径同 `runners/verification-gate.ts`）。
+// 边界：本模块只做状态与进程控制，不感知业务语义。经 `runners/index.ts` 只暴露**受支持的最小诊断面**
+// （`getAbortReason` / `getAbortSnapshot`，只读）；kill / 记录原语不出包，新增导出需按公共 API 变更评估
+// （口径同 `runners/verification-gate.ts` 的「非必要不外露」）。
 import { spawn, spawnSync } from 'node:child_process'
 import { StringDecoder } from 'node:string_decoder'
+import { getEgressProxyEnv } from './egress-audit'
 
 /** 单流捕获上限（与 `execSync` 默认 `maxBuffer` 同量级）：超限后继续 drain 但不再累积。 */
 const MAX_STREAM_CAPTURE_BYTES = 1024 * 1024
@@ -46,6 +48,17 @@ let abortReason: string | undefined
 /** 已登记的活跃子进程 PID（超时 / abort 时按进程树终止）。 */
 const trackedPids = new Set<number>()
 
+/** 最近一条受管命令（`binary args…`，截断 200 字符）：取消未落定时用于归因。 */
+let lastTrackedCommandLine: string | undefined
+
+/**
+ * 取消时刻的现场快照。
+ *
+ * `killAllTrackedChildProcesses()` 会**立即清空登记表**（PID 可能被系统复用），
+ * 因此「取消后仍有几个受管子进程」只能在取消当刻取数；诊断（宽限期结束后）读它。
+ */
+let abortSnapshot: { trackedCount: number, lastCommand?: string } | undefined
+
 /**
  * 复位运行级进程控制状态（每次构造 `DependfixApp` 时调用）。
  *
@@ -55,6 +68,8 @@ const trackedPids = new Set<number>()
 export function resetProcessControlState(): void {
     abortReason = undefined
     trackedPids.clear()
+    lastTrackedCommandLine = undefined
+    abortSnapshot = undefined
 }
 
 /**
@@ -67,7 +82,26 @@ export function requestAbort(reason?: string): void {
     if (abortReason === undefined) {
         abortReason = reason ?? 'abort requested'
     }
+    // 取数先于 kill：登记表在 kill 时被清空，之后无法再回答「取消时在管几个」。
+    // 与 abortReason 同口径「首次为准」：重复取消（引擎自取消 + 平台超时）不覆盖首次现场，
+    // 否则第二次的 trackedCount 恒 0，诊断会退化成常量。
+    if (!abortSnapshot) {
+        abortSnapshot = {
+            trackedCount: trackedPids.size,
+            ...(lastTrackedCommandLine ? { lastCommand: lastTrackedCommandLine } : {}),
+        }
+    }
     killAllTrackedChildProcesses()
+}
+
+/**
+ * 取消时刻的现场快照（未取消时为 `undefined`）。
+ *
+ * 用于「宽限期结束仍未落定」的诊断：`trackedCount` 是**取消当刻**的受管子进程数，
+ * 不是当前登记数（后者在取消后即为 0）。
+ */
+export function getAbortSnapshot(): { trackedCount: number, lastCommand?: string } | undefined {
+    return abortSnapshot
 }
 
 /** 是否已请求取消（调用方在启动新命令 / 新仓库之前短路）。 */
@@ -112,6 +146,20 @@ export function killAllTrackedChildProcesses(): number {
 /** 当前登记的活跃子进程数量（测试 / 诊断用）。 */
 export function trackedChildProcessCount(): number {
     return trackedPids.size
+}
+
+/**
+ * 最近一条受管命令（`binary args…`）；无命令时为 `undefined`。
+ *
+ * 用于「取消后未在宽限期内落定」的诊断：与存活子进程数一起说明卡在哪一步。
+ */
+export function getLastTrackedCommand(): string | undefined {
+    return lastTrackedCommandLine
+}
+
+/** 记录最近一条受管命令（内部接线；截断防超长参数撑爆日志）。 */
+export function recordTrackedCommand(commandLine: string): void {
+    lastTrackedCommandLine = commandLine.length > 200 ? `${commandLine.slice(0, 200)}…` : commandLine
 }
 
 /**
@@ -223,6 +271,16 @@ export function runTrackedCommand(params: TrackedCommandParams): Promise<Tracked
         })
     }
 
+    // 诊断面：记录最近一条受管命令（取消未落定时可归因到具体步骤）
+    recordTrackedCommand([params.binary, ...params.args].join(' '))
+
+    // 运行级外联审计：默认把代理注入所有受管命令（安装链 / 验证链 / 交付 git）。
+    // 显式 env 里已带代理时不覆盖（调用方自知其网络路径）。
+    const egressProxyEnv = getEgressProxyEnv()
+    const mergedEnv = egressProxyEnv && params.env
+        ? { ...egressProxyEnv, ...params.env }
+        : (params.env ?? egressProxyEnv)
+
     return new Promise((resolve) => {
         const startedAt = Date.now()
         let timedOut = false
@@ -242,7 +300,7 @@ export function runTrackedCommand(params: TrackedCommandParams): Promise<Tracked
             shell: params.shell ?? resolveShellOption(),
             // POSIX 下创建独立进程组，超时 / abort 时可终止整个进程树
             detached: process.platform !== 'win32',
-            ...(params.env ? { env: params.env } : {}),
+            ...(mergedEnv ? { env: mergedEnv } : {}),
         })
 
         trackChildProcess(cp.pid)

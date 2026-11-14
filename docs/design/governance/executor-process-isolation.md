@@ -179,8 +179,8 @@ scan-queue.add(jobId = scan-<repositoryId>)   [scan-queue.ts]
 **残余边界（登记，不阻断）**：
 
 - 两进程共享 SQLite（多进程写）——依赖既有 WAL + `busy_timeout`（M23.1 落地）；需运行期验证。
-- worker 进程会重复启动周期插件（`stale-cleanup` / 启动期备份），均为幂等操作，代价为重复查询。**实施结果（2026-10-16）**：周期清理与部署产物版本戳已按进程角色收敛为 HTTP 主进程单点执行——入口向两进程分别注入 `DEPENDFIX_ROLE`（worker / server），worker 侧据此跳过 HTTP-only 插件；worker 侧仅保留两进程共用的启动期数据源引导；启动期备份的双份副作用（保留窗口减半）登记为已知边界。口径见 [platform.md §10.6](../../standards/platform.md#106-队列执行进程隔离独立-worker-进程)。
-- worker 进程崩溃后由 entrypoint 看护循环自动重启（M40.4 落地，指数退避 + 连续重启上限，口径见 [platform.md §10.6](../../standards/platform.md#106-队列执行进程隔离独立-worker-进程)）；连续重启超上限后由 `stale-cleanup` 兜底。
+- worker 进程会重复启动周期插件（`stale-cleanup` / 启动期备份），均为幂等操作，代价为重复查询。**实施结果（2026-10-16）**：周期清理与部署产物版本戳已按进程角色收敛为 HTTP 主进程单点执行——入口向两进程分别注入 `DEPENDFIX_ROLE`（worker / server），worker 侧据此跳过 HTTP-only 插件；worker 侧仅保留两进程共用的启动期数据源引导；启动期备份的双份副作用（保留窗口减半）登记为已知边界。口径见 [本文档 §9](#_9-队列执行进程隔离-运行时形态)。
+- worker 进程崩溃后由 entrypoint 看护循环自动重启（M40.4 落地，指数退避 + 连续重启上限，口径见 [本文档 §9](#_9-队列执行进程隔离-运行时形态)）；连续重启超上限后由 `stale-cleanup` 兜底。
 
 ## 4. 决策点（待用户裁定）
 
@@ -213,7 +213,7 @@ scan-queue.add(jobId = scan-<repositoryId>)   [scan-queue.ts]
 - [executor-sandbox.md](./executor-sandbox.md)：§3 接口契约；[沙箱执行器设计与推送机制分片](./executor-sandbox-implementation.md)：§7.2 镜像策略（自包含入口缺口）/ §7.4 执行器并存路由 / §7.8 降级状态机契约
 - [platform.md](../../standards/platform.md)：§3.3 迁移与数据库口径 / §10 运行时与部署
 - 代码锚点：`apps/platform/server/services/queue/queue.service.ts`、`scan-worker.ts`、`scan-queue.ts`、`apps/platform/server/services/executor/container-executor.ts`、`apps/platform/server/plugins/stale-cleanup.ts`
-- 规划：`docs/plan/roadmap.md` §M38（2026-10-09 已闭环归档，见 [M38](../../plan/archive/todo-archive-phases-m38.md#m38-平台执行模型隔离m381m386-全部已闭环--2026-10-09-归档)）+ [platform.md §10.5 / §10.6](../../standards/platform.md)
+- 规划：`docs/plan/roadmap.md` §M38（2026-10-09 已闭环归档，见 [M38](../../plan/archive/todo-archive-phases-m38.md#m38-平台执行模型隔离-m38-1-m38-6-全部已闭环-2026-10-09-归档)）+ [platform.md §10.5 / §10.6](../../standards/platform.md)
 
 ## 8. 执行超时与运行级取消（2026-10-17）
 
@@ -242,7 +242,7 @@ scan-queue.add(jobId = scan-<repositoryId>)   [scan-queue.ts]
 
 1 次修复前基线链 + **至多 1 次合批安装**（可修包 ≥ 2 时把 K 次压到 1 次；失败回退逐包最坏 K+1 次）+ 1 次修复后验证链 + 锁文件修复链**最坏 7 次安装类调用**（1 次 frozen 诊断 + ≤3 次策略命令 + ≤3 次策略后 frozen 校验）。合批语义见 [dependency-fixer-records.md §12.10](../modules/dependency-fixer-records.md#_12-10-安装类命令的超时口径与版本化-overrides-合批-2026-10-17)。
 
-**快速失败收敛（2026-10-18）**：上述最坏次数只在"环境可装、单个 override 有问题"时才有归因价值。以下三条短路把环境性失败的预算压到常数级：① pristine 安装基线失败 → 跳过依赖安装链（版本化 overrides / 跨线 / 成员 / 分组），仍保留 lockfile repair 与修复后验证；② 合批安装以信号 / 超时失败 → 跳过逐包重试（记 `ENVIRONMENT_ERROR`，不归因）；③ 逐包安装以信号 / 超时失败 → 记录该包后立即停止本仓库剩余安装尝试。普通 exit 1 仍保留逐包回退，用于隔离单个坏 override。
+**快速失败收敛（2026-10-18）**：上述最坏次数只在"环境可装、单个 override 有问题"时才有归因价值。以下三条短路把环境性失败的预算压到常数级：① pristine 安装基线失败 → 跳过依赖安装链（版本化 overrides / 跨线 / 成员 / 分组），lockfile repair 与修复后验证照常启动（repair 未改文件且无成功升级时，终验按 0 写入跳过，见 [dependency-fixer-records.md §12.9](../modules/dependency-fixer-records.md#_12-9-验证链与既有失败基线-默认链-既有失败归因-零告警按需采样)）；② 合批安装以信号 / 超时失败 → 跳过逐包重试（记 `ENVIRONMENT_ERROR`，不归因）；③ 逐包安装以信号 / 超时失败 → 记录该包后立即停止本仓库剩余安装尝试。普通 exit 1 仍保留逐包回退，用于隔离单个坏 override。
 
 ### 8.4 资源口径与部署建议（2026-10-17 用户裁定：仅观测，不改默认注入；2026-10-21 补启动 / 运行期信号）
 
@@ -287,7 +287,7 @@ scan-queue.add(jobId = scan-<repositoryId>)   [scan-queue.ts]
 - 预算由**上层计算**为绝对截止时间：平台执行器在构造引擎 config 时注入 `deadlineAt = now + timeoutMs`（`RuntimeConfig.deadlineAt`，epoch ms）；引擎只消费不解析，CLI 本地运行不设置 ⇒ 不限预算。
 - 引擎把 `deadlineAt` 暴露为 `AppContext.deadlineAt`，并在**启动新工作前**检查剩余预算：剩余 ≥ `MIN_STEP_BUDGET_MS`（1 分钟）才启动；命中即跳过并写一条 `BUDGET_EXHAUSTED` 审计（跳过类白名单，不影响 exit code）。
 - 检查点：修复前基线采样、lockfile repair（含选择性回滚后的重做）、合批版本化 overrides、逐包（多版本 / 分组内 / 成员 / 跨线）、修复后验证。
-- **交付口径**：预算只跳过**未开始**的工作；已经跑完并全绿的终验按结果交付。若**终验本身**被预算跳过，则视为「未验证」——`verificationPassed` 保持 `undefined`、`RepositoryResult.verificationSkipped = 'budget'`，门禁**不交付**且**不回滚**（保留已通过单元供人工复核），不写 `VERIFICATION_FAILED`。
+- **交付口径**：预算只跳过**未开始**的工作；已经跑完并全绿的终验按结果交付。若**终验本身**被预算跳过，则视为「未验证」——`verificationPassed` 保持 `undefined`、`RepositoryResult.verificationSkipped = 'budget'`，门禁**不交付**且**不回滚**（保留已通过单元供人工复核），不写 `VERIFICATION_FAILED`。该字段另有 `no-write` 原因（本次无写入、无交付内容，语义见 [dependency-fixer-records.md §12.9](../modules/dependency-fixer-records.md#_12-9-验证链与既有失败基线-默认链-既有失败归因-零告警按需采样)），两者按原因可区分。
 - 预算与取消互不替代：预算只减少"启动新工作"，取消仍会终止在跑进程树。预算跳过属跳过类白名单（不参与 exit code / 不驱动仓库失败）；取消以 `ABORTED` 记录并可计入非零退出码（运行级，不归因具体仓库）。
 - **破坏性变更（0.x 内部 API）**：交付链导出的 `createFixBranch` / `stageAndCommit` / `pushBranch` / `commitStaged` / `stageScopedChanges` / `listChangedPaths` / `computeCommitScope` / `ensureGitConfig` / `branchExists` / `rollbackChanges` / `enforceVerificationGate` / `recordVerificationCheckpoint` / `commitLocalChanges` / `skipDeliveryForInstallFailure` / `rollbackForSkippedDelivery` 由同步改为异步；外部消费者必须 `await`（未 await 时 `Promise` 恒真，TypeScript 不报错）。发布说明需标注该项。
 - 时钟与窗口：预算按**墙钟** epoch ms 计算（依赖宿主时钟单调性，NTP 回跳会让引擎晚于平台超时停手）；窗口只覆盖引擎 `run()`（clone 与平台交付的 push / PR 不在其中），单次总墙钟上限约为 `timeoutMs + clone + delivery`。
@@ -295,13 +295,38 @@ scan-queue.add(jobId = scan-<repositoryId>)   [scan-queue.ts]
 ### 8.6 残余与观察项
 
 - 引擎子进程化（彻底消除"引擎与平台同进程"的阻塞面）—— 未立项。
-- 取消发生时工作区可能残留**部分修复**（未提交，随运行目录清理消失；CLI 就地运行场景需人工 `git restore`）。
+- 取消发生时工作区可能残留**部分修复**（未提交；平台侧随运行目录处置消失——落定即删除，未落定移入 `_pending` 到期清理；CLI 就地运行场景需人工 `git restore`）。
 - 宽限期内的引擎落定与否只写日志，未落库为结构化字段（如需按 run 统计"僵尸率"，需补信号）。
-- **宽限期结束后仍会清理工作目录**（`finally` 的 `rm`），此时引擎若仍在写盘存在"写 / 删并发"窗口——已用日志留痕区分，未做互斥。
+- **宽限期结束仍未落定时不再当场清理工作目录**（2026-11-13）：执行器记录取消时刻的在管子进程数 / 最后受管命令 / 取消原因，工作目录移入 `_pending/{runId}`（reason=`execution_timeout_unsettled`，24h）延迟清理，消除"写 / 删并发"窗口；绝对超长悬挂由 `_pending` 保留期与既有清扫兜底，不引入无限宽限。
 - 短状态查询（`git rev-parse` / `git diff --quiet` / `git remote get-url`，非穷举）仍为同步调用：极慢的巨型仓库下仍可能造成秒级事件循环停顿（非分钟级）。
 - 混合运行（同一 workDir 内 A 仓预算跳过终验 + B 仓真实验证失败）：存在真实失败时按失败路径整仓回滚，预算跳过仓随之回滚（真实失败优先，不回滚会留下未声明的坏改动）；「跳过不回滚」只适用于**全部**失败仓库都是预算跳过的情况。
-- 预算跳过终验时**不交付也不回滚**：已完成的修复留在工作区（平台删运行目录、CLI 由用户复核），报告记 `verificationSkipped`（平台运行详情暂不单独展示该字段）。
+- 预算跳过终验时**不交付也不回滚**：已完成的修复留在工作区（平台删运行目录、CLI 由用户复核），报告记 `verificationSkipped`；平台运行详情已展示「验证跳过」与原因（2026-11-09 起）。0 写入跳过（`no-write`）不阻断其他仓库交付，也不回滚。
 - 单条交付 git 命令的上限固定 5 分钟，不随剩余预算收缩（剩余不足时仍可能「启动合规、执行中被平台砍断」）。
 - 取消态下的回滚被前置守卫拦下（不启动子进程）：工作区保持"部分修复"状态，由调用方清理（平台删运行目录；CLI 用户自行 `git restore` / `git reset`），日志显式说明且不记 `ROLLBACK_FAILED`。
 - 预算粒度是「步骤」而非「命令」：`MIN_STEP_BUDGET_MS` 只保证"启动时还有 1 分钟"，单条命令仍可能超出剩余预算并被平台超时中止（此时按 `execution_timeout` 收尾）。
 - 平台侧只注入 `deadlineAt`，未做仓库级 / 分阶段预算（登记为 backlog 候选，避免与执行器超时耦合）。
+
+---
+
+## 9. 队列执行进程隔离（运行时形态）
+
+> 2026-11-08 从 [平台规范 §10.6](../../standards/platform.md) 迁入（文档预算治理）：本节是该运行时形态的**唯一权威声明**，平台规范只保留要点摘要与指针。迁入内容未改语义（双进程形态 / 进程角色与 HTTP-only 插件 / 向后兼容 / 崩溃自愈 / 信号处置顺序 / 已知边界）。
+
+## 9. 队列执行进程隔离（运行时形态）
+
+- **形态与监听收敛**：容器部署**默认**启动双进程（`DEPENDFIX_QUEUE_WORKER=1`，由 `docker/entrypoint.sh` 实现）——独立 worker 进程 `NUXT_IN_PROCESS_WORKER=true` 消费队列，HTTP 进程 `=false` 不消费；扫描执行完全在 worker，**HTTP 进程 event loop 不被阻塞**，从根上消除锁续期失败（锁参数与观测见 10.5）。worker 的 Nitro HTTP 监听经 `NITRO_UNIX_SOCKET`（默认 `/tmp/dependfix-queue-worker.sock`）收敛，不占端口、不对外暴露。**迁移唯一执行者**：worker 侧 `DATABASE_MIGRATIONS_RUN=false`，迁移只由主进程执行。**Redis 不可用**：两进程各自按 [§10.4](../../standards/platform.md#_10-4-队列模式自动降级必须含「消费者维度」) 降级 `sync`。
+- **进程角色与 HTTP-only 插件**：入口向两进程分别注入 `DEPENDFIX_ROLE`（worker 子进程 `worker` / HTTP 主进程 `server`；单进程形态由入口归一化为 `server`，外部误设 `worker` 不生效），worker 侧据此**跳过 HTTP-only 插件**——`stale-cleanup`（周期清理：30s 首跑 + 5min 节拍）、`build-info`（版本戳，见 10.7）与 `weekly-digest`（周汇总）。判定由 `server/utils/process-role.ts` 单点实现（两份插件清单为单一事实源，单测锁定「插件目录内每个插件都已分类」）。**非 HTTP-only**：`database-bootstrap` 两进程均保留——worker 自身依赖数据源引导，且迁移唯一执行者已由 `DATABASE_MIGRATIONS_RUN=false` 隔离；`queue-consumer` 是消费端唯一启动点（`inProcessWorker=true` 时初始化消费者，HTTP 主进程 no-op）——**不得**依赖 HTTP-only 插件的副作用初始化队列；`resource-probe` 两进程均保留——worker 需要输出执行面内存 / 并发探测（只读、不阻断）；`logger` 亦两进程共用（见 10.9）。**缺省与回退**：单进程形态归一化为 `server`；未设置（本地 `pnpm dev` / 直连产物）与 `=server` 行为一致；未识别值按 `server` 处理并告警（fail-safe：宁可多跑一次幂等清理）。**为何不用 `IN_PROCESS_WORKER` 作判据**：双进程 worker 与单进程形态都是 `true`（`false` 的是 HTTP 主进程，语义相反）。机检落点：`process-role.test.ts`（三态）+ `server/plugins/*.test.ts`（注册守卫）+ `docker/entrypoint.test.mjs`（角色注入）。
+- **向后兼容与回退**：入口层不设 `DEPENDFIX_QUEUE_WORKER` 时默认 `0`（单进程）；compose 默认 `QUEUE_WORKER=1`，设 `0` 回退；`NUXT_QUEUE_ENABLED=false` 时入口跳过 worker 并 warn；本地 `pnpm dev` / 直接 `node .output/server/index.mjs` 不经 entrypoint，仍用进程内 worker。
+- **崩溃自愈（看护循环）**：entrypoint 以看护子 shell 托管 worker——异常退出按指数退避自动重启（1s 起翻倍、封顶 30s，记录退出码 / 次数 / 时间）；连续快速失败超上限（5 次）后**转为慢重试**（`DEPENDFIX_QUEUE_WORKER_SLOW_RETRY_SECONDS`，缺省 300s，日志降噪），**不得永久停止重启**——`stale-cleanup` 只能改 DB、不能消费队列，worker 永久退出会让所有任务无声挂起；**HTTP 主进程始终继续服务**；稳定运行 60s 后快速计数与慢重试状态归零；容器停止（TERM / INT）时终止看护循环与 worker。**退避等待必须可被信号打断**：用 `sleep N & wait $!`（前台 `sleep` 会阻塞 trap，容器 `docker stop` 宽限内被 SIGKILL 成 137，破坏约定的 143 退出语义），并以真实 `sleep` + `TERM` 计时用例锁定。
+- **信号处置顺序**：双进程形态下，容器停止（TERM / INT）的转发 trap **必须**先于「启动子进程」与「输出就绪行」安装（本条为**严格约束**，已登记 [review 检查点矩阵](../../../.github/skills/code-reviewer/references/code-quality-checklist.md#规范条款-review-检查点矩阵-严格约束逐条挂接)）。就绪行是外部观测方（容器编排 / 健康检查 / 行为测试）唯一的同步点，落在 trap 安装之前的信号按默认处置直接终止 PID 1——看护循环与 worker 因此失去父进程，观测方读到的也是 signal 终止而非约定的 143 退出码；主进程尚未启动（`MAIN_PID` 未赋值）时无主进程可转发，应直接退出（看护进程仍由 `stop_queue_worker` 兜底）而非吞掉停止信号后照旧启动。机检落点为 `apps/platform/docker/entrypoint.test.mjs` 的源码顺序断言。
+- **已知边界**：① 两进程共享 SQLite（WAL + `busy_timeout` 由 DataSource 初始化落地）；② **插件面已按进程角色收敛**：worker 侧不再重复启动 HTTP-only 插件（周期清理 / 版本戳），仅保留两进程共用的启动期数据源引导与资源探测（判定与清单见上「进程角色与 HTTP-only 插件」）；③ 连续快速重启超上限后转慢重试（消费者不会永久消失，见 [队列僵尸任务终结与去重键释放设计](./queue-stale-recovery.md)）；④ **空库 / 升级窗口时序**——消费端随 worker 启动即就绪；空库或迁移进行中若残留历史 job，job 会先失败并按队列重试预算（默认 3 次 / 指数退避）重试，迁移完成后即成功；⑤ **入口脚本前导段**（`run_platform` 之前的权限 / 路径校验）无 trap，此窗口 TERM / INT 按默认处置终止 PID 1，但子进程尚未创建，无孤儿面；⑥ **子进程启动窗口**——trap 已生效但 pid 变量尚未捕获的极窄窗口内 TERM / INT 无变量可转发（仅 pid 文件兜底），短暂孤儿化由容器运行时随 PID 1 退出回收；⑦ **备份只由 HTTP 主进程执行**（worker 跳过），且走在线备份 API 覆盖 WAL 未 checkpoint 数据（[EP-16](./engineering-practice-notes.md)）；预留多容器拓扑不在本次实测面内（入口单进程路径会把角色归一化为 server）。
+
+- **迁入补充**：`lockDuration` / `lockRenewTime` 的取值口径见本节 §9.1（2026-11-09 自平台规范 §10.5 迁入），本节其余内容只承载进程形态与插件分类。
+
+### 9.1 队列锁参数与观测
+
+- in-process Worker **必须**显式配置 `lockDuration` / `lockRenewTime`（`SCAN_WORKER_LOCK_OPTIONS`，见 `server/services/queue/scan-worker.ts`），不得依赖 BullMQ 隐式默认（30 秒）——引擎同步子进程会阻塞 event loop 使续期定时器延后，易触发 `could not renew lock` / `Missing lock`，job 被判 stalled 重排（存在重复执行风险）。
+- **取值口径**：`lockDuration` 取平台执行**封顶值** `resolveExecutionCeilingMs()`（缺省 60 分钟，可经 `DEPENDFIX_MAX_EXECUTION_TIMEOUT_MS` 覆盖，范围 30 分钟–4 小时），`lockRenewTime` 取其一半；两处口径**同源联动**（单测锁定该对齐关系），env 变更需重启进程。
+- **为何取封顶而非全局默认**：仓库级执行上限可高于全局默认（见 [repo-execution-limits.md](./repo-execution-limits.md)），锁若按全局默认会被长预算运行耗到被判 stalled；代价是崩溃恢复窗口随封顶变长（`lockRenewTime` 取半缓解）。
+- **锁问题观测**：Worker **必须**注册 `stalled` / `lockRenewalFailed` / `error` 事件并输出结构化日志（`[scan-worker] {json}`）；`stalled` / `lockRenewalFailed` 载荷含 `jobId` 并经注入的 `queue.getJob` 补全 `runId`（未解析显式 `null`）；`error` 载荷无 job 上下文（由配对的 `lockRenewalFailed` 承载）。
+- **同根因去重**：LockManager 续期失败会同时 emit `lockRenewalFailed` 与 `error`（message 前缀 `could not renew lock for job`）——`error` 日志须标 `duplicateOf: 'lockRenewalFailed'` 供聚合去重（与平台规范 §6.1「同一根因不重复告警」同思路）。

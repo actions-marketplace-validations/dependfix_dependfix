@@ -21,7 +21,7 @@ import {
  * （独立 SQLite 库 + 固定时间戳，见 helpers/fixtures.ts）。
  *
  * 覆盖：亮色 5 张（alerts / repos / pr-checks / dialog-import-repos / login）+
- * 暗色 2 张（alerts / repos）+ 浮层落点页 5 张（todo.md §M45.5：schedules 表单浮层 light / dark、
+ * 暗色 3 张（alerts / repos / login）+ 浮层落点页 5 张（todo.md §M45.5：schedules 表单浮层 light / dark、
  * scans 运行详情弹窗、alerts 运行抽屉、pr-checks Toast）。基线快照入仓库（`tests/visual/__screenshots__/`）。
  *
  * 不做的：不做全量页面 × 多浏览器 × 多 viewport 矩阵；不替代 ui-validator 的交互 /
@@ -210,6 +210,16 @@ test.describe('平台页面视觉基线', () => {
         for (const label of ['仅 firing', '仅已 ack', 'OK']) {
             await expect(table).toContainText(label)
         }
+        // PR 生命周期四档文案（新增列覆盖）
+        for (const label of ['开启', '已关闭', '已合并', '未知']) {
+            await expect(table).toContainText(label)
+        }
+        // 逐行绑定生命周期色调：#103 merged → primary；#102 closed → neutral（文案对但色调回退可检出）
+        const lifecycleRows = table.locator('tbody .caomei-data-table__row')
+        await expect(lifecycleRows.filter({ hasText: '#103' }).locator('.pr-checks__pr-state .caomei-tag--primary'))
+            .toHaveCount(1)
+        await expect(lifecycleRows.filter({ hasText: '#102' }).locator('.pr-checks__pr-state .caomei-tag--neutral'))
+            .toHaveCount(1)
         /* 展开首行（默认按「最近采集」降序 → #101 失败行）覆盖三源信号面板：
            先断言语义再截图，避免面板未挂载时基线被落成缺面板形态。 */
         const firstRow = table.locator('tbody .caomei-data-table__row').first()
@@ -219,6 +229,16 @@ test.describe('平台页面视觉基线', () => {
         await expect(panel).toContainText('构建 / 部署信号')
         await expect(panel.locator('.pr-checks__signal')).toHaveCount(2)
         await expect(panel).toContainText('vercel')
+        /* 归因标签：失败信号的「归因文案 + 色调 class」两档都要锁住。
+           fixtures 里 check 信号 = self_caused（danger）、deployment 信号 = external_noise（neutral）；
+           只断文案会漏掉色调映射改革，只断 class 会漏掉 i18n 键漂移，两者一起才锁得住。 */
+        /* 断言必须落在归因标签自身（`.pr-checks__signal-attribution`）上：
+           行内另有 kind（neutral）与 state（failure → danger）标签，直接查 `.caomei-tag--danger`
+           会被它们满足，色调映射回归就拦不住。 */
+        const attributionTags = panel.locator('.pr-checks__signal-attribution')
+        await expect(attributionTags).toHaveCount(2)
+        await expect(panel.locator('.pr-checks__signal-attribution.caomei-tag--danger')).toHaveText('本次改动导致')
+        await expect(panel.locator('.pr-checks__signal-attribution.caomei-tag--neutral')).toHaveText('外部噪音')
         await waitForVisualStable(page)
         await expectThemeApplied(page, 'light')
         await expectPageScreenshot(page, 'pr-checks-light.png')
@@ -378,13 +398,30 @@ test.describe('平台页面视觉基线', () => {
 test.describe('登录页视觉基线（未认证）', () => {
     test.use({ storageState: { cookies: [], origins: [] } })
 
-    test('login（light）', async ({ page }) => {
-        await applyTheme(page, 'light')
-        await page.goto('/login')
-        await waitForHydration(page)
-        await expect(page.locator('input#email')).toBeVisible({ timeout: 15000 })
-        await waitForVisualStable(page)
-        await expectThemeApplied(page, 'light')
-        await expectPageScreenshot(page, 'login-light.png')
-    })
+    for (const theme of VISUAL_THEMES) {
+        test(`login（${theme}）`, async ({ page }) => {
+            await applyTheme(page, theme)
+            await page.goto('/login')
+            await waitForHydration(page)
+            await expect(page.locator('input#email')).toBeVisible({ timeout: 15000 })
+
+            /* 第三方登录区（视觉环境由 `NUXT_PUBLIC_*_AVAILABLE` 模拟凭据已配置）：
+               前置断言锁住「品牌图标 + 官方文案」形态，避免图标回退成通用用户图标时
+               基线只差几十像素而被阈值吞掉，也避免按钮整体缺失时截成无第三方区的旧形态。 */
+            const githubButton = page.locator('.auth__social button[data-provider="github"]')
+            await expect(githubButton).toBeVisible()
+            await expect(githubButton).toHaveText('使用 GitHub 登录')
+            await expect(githubButton.locator('svg path')).toHaveAttribute('fill', 'currentColor')
+
+            const googleButton = page.locator('.auth__social button[data-provider="google"]')
+            await expect(googleButton).toBeVisible()
+            await expect(googleButton).toHaveText('使用 Google 登录')
+            await expect(googleButton.locator('svg path')).toHaveCount(4)
+            await expect(googleButton.locator('svg path').first()).toHaveAttribute('fill', '#EA4335')
+
+            await waitForVisualStable(page)
+            await expectThemeApplied(page, theme)
+            await expectPageScreenshot(page, `login-${theme}.png`)
+        })
+    }
 })

@@ -44,7 +44,7 @@
 若后续看到这些位置的像素变化，先对照裁定依据，而不是直接当作新回归上报。
 
 **M31.5 裁定 8 项（7 项接受 + 1 项已修复）**——逐项依据（含测量方式与截图索引）见
-[caomei-ui-migration.md §15.13 第 6 条](../../../../docs/design/governance/caomei-ui-migration.md#1513-b3-收尾实证m3152026-09-29)：
+[caomei-ui-migration.md §15.13 第 6 条](../../../../docs/design/governance/caomei-ui-migration.md#_15-13-b3-收尾实证-m31-5-2026-09-29)：
 
 | 项 | 结论 |
 | :--- | :--- |
@@ -60,13 +60,13 @@
 **另一处跨页形态**（同属迁移期裁定）：
 
 - `env-events` 表格改为外层容器滚动后**表头不再吸顶**（迁移前组件库曾固定表头）→ 接受；依据见
-  [§15.11 第 5 条](../../../../docs/design/governance/caomei-ui-migration.md#1511-其余表页迁移实证m3132026-09-28)。
+  [§15.11 第 5 条](../../../../docs/design/governance/caomei-ui-migration.md#_15-11-其余表页迁移实证-m31-3-2026-09-28)。
 - 6 处 `tone="neutral"` 实底次要动作按钮的实测计算样式（`--caomei-color-neutral-solid` + 白字）见
-  [§15.13 第 5 条](../../../../docs/design/governance/caomei-ui-migration.md#1513-b3-收尾实证m3152026-09-29)；
+  [§15.13 第 5 条](../../../../docs/design/governance/caomei-ui-migration.md#_15-13-b3-收尾实证-m31-5-2026-09-29)；
   `Message` soft 档无边框即上表第 4 项。
 
 **上游版本升级带来的基线刷新（caomei-ui 0.6.0，2026-10-12）**——依据见
-[§15.15](../../../../docs/design/governance/caomei-ui-migration.md#1515-caomei-ui-060-升级回归实证插队热修2026-10-12)：
+[§15.15](../../../../docs/design/governance/caomei-ui-migration.md#_15-15-caomei-ui-0-6-0-升级回归实证-插队热修-2026-10-12)：
 
 | 项 | 结论 |
 | :--- | :--- |
@@ -75,16 +75,17 @@
 
 ## 覆盖边界（现状）
 
-- `pr-checks`：行级渲染已由 M33.4 覆盖——fixtures 端点新增可选 `prChecks` 写入路径（5 行覆盖结论标签四档 danger / success / warning / primary 与 Alert 状态三态 firing / 已 ack / OK）；时间列由 fixtures 钉死 `lastPolledAt` + 视觉环境固定 `locale` / `timezoneId` 保证 `toLocaleString()` 确定性，无需 `data-visual-mask`。
+- `pr-checks`：行级渲染已由 M33.4 覆盖——fixtures 端点新增可选 `prChecks` 写入路径（5 行覆盖结论标签四档 danger / success / warning / primary 与 Alert 状态三态 firing / 已 ack / OK；**PR 生命周期列**覆盖 `open` / `closed` / `merged` / `unknown` 四档，用例按行断言 `#103 merged` 为 primary、`#102 closed` 为 neutral）；时间列由 fixtures 钉死 `lastPolledAt` + 视觉环境固定 `locale` / `timezoneId` 保证 `toLocaleString()` 确定性，无需 `data-visual-mask`。**失败信号归因标签（2026-10-31）**：首行两个失败信号分别带 `attribution: self_caused`（danger 档）与 `external_noise`（neutral 档），用例断言两段文案（`本次改动导致` / `外部噪音`）与两个色调 class 同时存在——只断文案会漏色调映射改革，只断 class 会漏 i18n 键漂移。重建基线时该图变化 4242 px（ratio 0.01，新增两个标签）。注：fixtures 端点的信号写入映射此前漏透传 `attribution`（schema 允许但落库丢字段），已同批修复。
 - `alerts`：1440 视口下表格容器横向溢出（`clientWidth 1166 < scrollWidth 1318`），整页基线只覆盖可视区左端；最右 `链接` / `详情` 两列由 `alerts-right-<theme>.png` 覆盖（M33.5：容器横向滚到最右后的元素级补拍，仅改容器内部滚动位置，不动 viewport / 阈值 / 列宽）。
 - 弹窗内浮层（M34.3）：`dialog-select-open-<theme>.png` 覆盖弹窗内 Select **展开态**（light / dark 各一张）。用**视口级**截图而非元素级 / 整页——门户面板挂在 body、不在弹窗子树内（元素级取不到），整页截图又会把 fixed 定位的遮罩与面板混进拼接；截图前另断言「面板不是弹窗后代」，防止面板未挂载时基线被落成缺面板形态。
-- 三个页面仅取亮色（`pr-checks` / `dialog-import-repos` / `login`），明暗两态覆盖 `alerts` / `repos` / `notifications` / `settings` / `dialog-select-open`（后者因门户面板与遮罩存在叠色，分主题采基线）。
+- 两个页面仅取亮色（`pr-checks` / `dialog-import-repos`），明暗两态覆盖 `alerts` / `repos` / `notifications` / `settings` / `login` / `dialog-select-open`（后者因门户面板与遮罩存在叠色，分主题采基线）。
+- **`login`（2026-11-01）**：登录页明暗两态基线。视觉环境以 `NUXT_PUBLIC_GITHUB_AVAILABLE` / `NUXT_PUBLIC_GOOGLE_AVAILABLE` 模拟凭据已配置（不注入真实 OAuth 凭据、不点击登录按钮），前置断言锁住第三方登录区的官方文案（`使用 GitHub 登录` / `使用 Google 登录`）与品牌图标形态（GitHub 单色 `currentColor`、Google 四色 4 条 path），用于检出「图标回退成通用用户图标 / 按钮退化为文本链接」这类小面积变更。
 - **`settings` / `notifications`（M50.4）**：个人设置页与通知管理员页各按整页截图覆盖明暗两态（`settings-<theme>.png` / `notifications-<theme>.png`）。前置断言锁定本页承载的通知语义（必选 `Critical` 只读行、周汇总提示、`严重级别阈值` 文案）与「当前生效」完整兜底串、语言选值、AI 表单已加载；设备级扫描偏好为空时走系统兜底（确定性），故不额外遮蔽。
   - **投递记录为「空态」**：视觉库不注入 `notification_log`，`最近投递记录` 卡片只覆盖空态与表头；行级状态 / 类别 / 时间列**无基线覆盖**（登记为盲区）。
   - **纵向溢出**：`settings` 整页为 1440×1473（两张卡片位于 900 视口线以下），靠 `fullPage` 拼接覆盖；实测无粘性元素重复与懒加载区块，故不使用 `data-visual-mask`。与 `alerts` 的**横向**溢出边界（整页基线只覆盖左端 + `alerts-right-*` 补拍）是两类不同处理。
 - **浮层落点页（M45.5，light 4 张 + dark 1 张）**——均按视口级截图覆盖「页面 + 遮罩 + 浮层」的合成结果：
   - `schedules-form-layer-<theme>.png`：定时计划「新建计划」弹窗 + 业务类型 Select 的**门户面板展开态**。表单的 cron 预览是「当前时刻 + cron」派生值（逐日/逐周变化），已在 `schedules.vue` 标 `data-visual-mask`（遮蔽块入基线）；其余字段与提示文案静态。
-  - `scans-run-detail-light.png`：`/scans?run=` 深链触发的 `repo-history-dialog`（`scans.vue` 唯一弹窗落点）。该视图**不渲染运行元信息块**（id / 时间 / 时长），内容主体是结果表——故运行 ID 与时间戳不是本基线的检查面，时间列由底图运行列表覆盖。
+  - `scans-run-detail-light.png`：`/scans?run=` 深链触发的 `repo-history-dialog`（`scans.vue` 唯一弹窗落点）。该视图**不渲染运行元信息块**（id / 时间 / 时长），内容主体是结果表——故运行 ID 与时间戳不是本基线的检查面，时间列由底图运行列表覆盖。**重建记录（2026-11-10）**：结果明细补并列次键 `severity ASC, id DESC`（api.md §4）后，同 severity 组内行序反转，包名 / 来源 / 可修复 / 推荐版本与等级徽章均不变；旧基线检出 2065 px（ratio 0.01）差异，属预期行序变更，故同批重建（重建后连跑两遍通过）。
   - `alerts-run-drawer-light.png`：`alert-run-sidebar` 的 `CaomeiDrawer` 展开态（右侧滑入面板 + 遮罩）。
   - `pr-checks-toast-light.png`：`CaomeiToastProvider` 的门户轻提示，由「立即检查」在监测未启用时触发（视觉环境未设 `ACTION_STATUS_MONITOR_ENABLED` → 端点返回 `skipped`，**不触网、不改库**，故可与其它用例同批串行）。
 
@@ -105,6 +106,24 @@
 | 设置页「界面语言」 | `useI18n().locale`（默认 `zh-CN`，受 cookie / 浏览器语言检测影响） | 视觉环境以固定 admin 上下文启动、无语言 cookie → 恒为 `zh-CN`；用例断言下拉含「简体中文」，避免语言偏好变化无声进入基线 |
 
 用例侧以 `pinnedRunId(index)` 读取钉死取值并 **fail-fast**：fixtures 被改动去掉 `id` 时用例直接失败，而不是静默产出一张不可复现的基线。
+
+### 运行间确定性取证（2026-10-31）
+
+取证口径分两条路径，**结论不同，不能混用**：
+
+| 路径 | 轮次 | 结果 |
+| :--- | :--- | :--- |
+| **比对路径**（`toHaveScreenshot`，自带重试）`dialog-select-open-dark` | 连续 10 次不带 update | 10/10 通过 |
+| **比对路径** 全量 20 例 | 连续 2 次 | 20/20 通过（31.4s / 29.6s） |
+| **重写路径**（`--update-snapshots=all`）全量 20 例 | 连续 3 次 | 3/3 快照集合 sha256 相同（`8970afaa…`；复算命令 `cd apps/platform && find tests/visual/__screenshots__ -name '*.png' \| sort \| xargs sha256sum \| sha256sum`），随后 2 次比对全绿 |
+| **重写路径** `dialog-select-open-dark` 单图 | 连续 10 次 | 9/10 与基线逐字节相同；**1/10 出现 99 px / maxΔ2**（比值 0.0076%）的窄带差异 |
+
+**两条订正**（此前的说法都不成立，以此处为准）：
+
+1. **「`--update-snapshots` 连跑 N 轮即字节稳定」是伪证**。不带值时的 preset 是 `changed`，比较通过时**根本不写盘**（Playwright 1.64 `updateSnapshots: 'changed'` 语义），10 轮"重建"其实是同一个文件的哈希。要取证必须用 `=all` 并同时记录 mtime。
+2. **update 路径写出的帧此前与比对帧不同**：`=all` 重写后立刻比对会 1218-1313 px 失配（`dialog-select-open-{light,dark}` / `repos-{light,dark}`，2026-10-31 实测）。根因是 update 不做比对、直接落首帧，可能落在门户定位 / 字体替换的中间态；`toHaveScreenshot` 自己会重试到连续两帧一致，所以只有 update 路径中招。**处置**：`waitForVisualStable` 增加「连续两帧截图逐字节相同才返回」（`helpers/visual.ts`），修复后全量 `=all` 3 轮快照集合恒定、随后比对 20/20。
+
+**残余风险（未消除，已登记 backlog 候选 P2）**：`dialog-select-open-dark` 仍有 1/10 概率出现 99 px / maxΔ2 的边缘窄带差异（bbox x 476-483 × y 303-723，位于门户面板左缘）。量级低于门禁（`maxDiffPixels` 100 / `threshold` 0.1 → maxDelta 352），但**仅剩 1 px 余量**——若抖动放大即会偶发红。未加遮罩的原因：Playwright 的 `mask` 只能按元素遮罩，遮住面板边缘等于遮住目标内容本身；根因（门户面板定位的亚像素取值）需单独排查，已登记为 backlog 候选（P2：门户面板左缘亚像素抖动，触发条件 = 该基线偶发红或差异放大）。两帧检查口径补充：取帧为**视口级**，`fullPage` 基线（settings / notifications / alerts）折叠线以下区域不在该检查内，仍由 `toHaveScreenshot` 的比对重试兜底；12 × 120ms 上限内未收敛时**告警不抛错**（避免慢机器假红），日志可定位本轮基线可能非稳定帧。
 
 ### 反例标定记录（新增基线非恒真的证据）
 

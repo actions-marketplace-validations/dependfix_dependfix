@@ -3,10 +3,10 @@ on:
   # 0.x 阶段仅手动发布（workflow_dispatch）；1.0.0 正式版发布前不启用任何自动触发
   workflow_dispatch:
   # 定时自动发布（参照 momei）：每周六 UTC+0 12:00 = UTC+8 20:00
-  # 1.0.0 正式版发布后取消注释即可启用（自动发布逻辑已内嵌于 Auto version 步骤）
+  # 1.0.0 发布后**不会自动启用**：须用户另行授权并逐项核对发布指南「自动发布启用清单」后再取消注释
   # schedule:
   #   - cron: "0 12 * * 6"
-  # 1.0.0 正式版发布后如需提交即发布，可取消注释：
+  # 1.0.0 发布后如需提交即发布，同样须用户另行授权后再取消注释：
   # push:
   #   branches:
   #     - master
@@ -41,6 +41,15 @@ jobs:
           cache: "pnpm"
           registry-url: "https://registry.npmjs.org"
       - run: pnpm i --frozen-lockfile
+      # 依赖审计（与 test.yml 同集合同命令，安全规范 §5.6）：
+      # - 全量信号步覆盖 prod + devDeps，失败不阻断（`|| true` 只在这一步）；
+      # - prod 阻断步无 `|| true`，显式 `--registry` + `--ignore-registry-errors`：
+      #   该 flag 只把 registry 故障降为 exit 0，不放宽漏洞判定（真实漏洞仍 exit 1）；
+      # - 位置在 Auto version 之前：审计红不得先提升版本并推送 master。
+      - name: pnpm audit (all deps, moderate+, signal)
+        run: pnpm audit --audit-level=moderate --registry=https://registry.npmjs.org || true
+      - name: pnpm audit (prod, moderate+, blocking)
+        run: pnpm audit --prod --audit-level=moderate --ignore-registry-errors --registry=https://registry.npmjs.org
       # Nuxt 平台 eslint 依赖 .nuxt/tsconfig.json（Nuxt 生成的类型），需先 prepare 生成
       - run: pnpm --filter @dependfix/platform exec nuxt prepare
       # 平台 server 代码 import dependfix、@dependfix/core、@dependfix/engine 的 dist 类型声明（Nuxt tsconfig 不映射 workspace 源码）：
@@ -63,7 +72,7 @@ jobs:
       # - 无待发布变更时脚本内部安全 no-op（notice 退出，job 不红）；
       # - 提交推送使用显式 token URL（不依赖 insteadOf，见经验归档 §二十六）；
       #   详细行为见 scripts/auto-version.mjs。
-      # 1.0.0 正式版发布后取消上方 schedule 注释即启用。
+      # 1.0.0 发布后不会自动启用：须用户另行授权后再取消上方 schedule 注释。
       - name: Auto version & changelog (schedule only)
         if: github.event_name == 'schedule'
         env:
@@ -78,13 +87,22 @@ jobs:
       - run: pnpm run typecheck
       - run: pnpm run test
       - run: pnpm run build
+      # 平台构建前置：根 build 只构建 ./packages/*，apps/platform 的构建坏
+      # 不会在发布前暴露（发布物含 platform tag + 镜像）。实测增量 45-58s（warm，
+      # 2026-11-12 本地计时），低于发布管线设计 §4.5 的 2 分钟预算，故取「job 内追加」
+      # 而非拆独立并行 job（拆分需把发布链再切一个 job 并重复 checkout / install / build）。
+      - name: Build platform
+        run: pnpm --filter @dependfix/platform build
 
-      # CHANGELOG 校验：发布前确认各份 CHANGELOG（根级 + 全部发布包级）已包含当前版本段。
+      # CHANGELOG 校验：发布前确认各份 CHANGELOG（根级 + 全部发布包级）已包含当前版本段，
+      # 且该段条目与当前 git 历史重算结果一致（--fresh：发现「生成后又有新 commit」的陈旧日志）。
+      # 已打 tag 的段视为已发布、允许人工编辑，不参与新鲜度比对；浅克隆 / 无 tag 时
+      # --fresh 输出 warning 后放行（只降级新鲜度比对，版本段存在性仍校验，不作为通过证据）。
       # 包清单来自单点配置 scripts/packages.config.mjs（新增发布包自动生效）。
       # CHANGELOG 由本地 `pnpm changelog` 生成并随发布提交入库，CI 不重新生成；
-      # 若版本已提升但日志缺失，说明漏跑了生成步骤，禁止发布（详见 scripts/verify-changelog.mjs）。
+      # 若版本已提升但日志缺失 / 陈旧，说明漏跑了生成步骤，禁止发布（详见 scripts/verify-changelog.mjs）。
       - name: Verify changelog is up to date
-        run: pnpm verify:changelog
+        run: pnpm verify:changelog --fresh
 
       # 发布级安全告警门禁（安全规范 §5.9）：Dependabot + Code Scanning 的告警中，
       # critical 一律阻断（含 dismissed，禁止任何形式豁免）；high 仅当豁免台账登记后才放行
@@ -98,6 +116,14 @@ jobs:
           GH_PAT: ${{ secrets.GH_PAT }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: pnpm run check:release-security
+
+      # 发布前预演（pack → 临时工程安装 → `dependfix --version` 断言 → 工作区留痕检查）：
+      # 0.6.0 曾发出 `--version` 报 0.1.0 的产物，发布后再发现只能补发；本步骤用真实 tarball
+      # 复核同一路径，同时校验 tarball 内无 workspace 协议、bin / main / exports 入口齐全、
+      # 必需 payload（skills）存在。放在便宜门禁之后：被门禁拦下的轮次不必付安装成本。
+      - name: Release preflight (pack + install + version assertion)
+        timeout-minutes: 15
+        run: pnpm release:preflight --out-dir=artifacts/release-preflight
 
       # git tag 需要 committer identity：annotated tag 创建依赖 user.name/user.email。
       # runner 全局 git config 为空（教训 2026-08-12，经验归档 §三十七），而 identity
@@ -119,7 +145,14 @@ jobs:
       #   HEAD 锚点校验：HEAD 必须 touch 待发布包路径，防误发布）
       # - 幂等自愈：npm 已发布但本地无 tag（上次发布中途失败等中间态）时自动补
       #   annotated tag 并计入 v tag 锚点解析，重跑即可全链路恢复，无需手动补打
+      # - 发布前安全告警门禁：release:publish 自身会再执行一次同一门禁脚本
+      #   （本地 / CI 同一入口，fail-closed），故本步骤必须注入 token——否则 CI
+      #   会在发布器内被 fail-closed 拦下。三处执行（预检 / 阻断判定 / 发布器内）
+      #   同源同口径，多跑一次换取「本地也不可绕过」。
       - name: Release Publish
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: pnpm release:publish
 
       # release:publish 只创建本地 tag，需要显式推送（checkout 使用 persist-credentials: false，
@@ -151,16 +184,39 @@ jobs:
       # workflow_dispatch docker.yml 传 platform_version 入参，docker 在 build
       # 阶段打 platform-x.y.z tag。触发条件 = release.yml 手动/定时触发；仅当
       # apps/platform 的 version 不为空时执行（防御 platform 未登记空 string）。
-      - name: Read platform version for docker tag
-        if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
-        id: read-platform-version
+      # 发布锚版本与 platform 版本：docker 构建必须钉在 release tag 上（`--ref v<锚版本>`），
+      # 否则用 master 的当前 HEAD 构建会混入发布后的提交，platform-x.y.z 镜像内容与版本不符。
+      # 锚版本取自 release:publish 写出的 release-publish-result.json（本轮有发布才有值）。
+      # 是否派发 docker：判据为「HEAD 上有 v<锚版本> tag」而不是事件类型——
+      # ① 无发布轮次（result.json 的 anchorVersion 为 null）时回退到 cli 包版本；
+      # ② 重跑同一发布提交（tag 已在 HEAD）时仍能补出镜像；注意构建使用的是**该 tag 上的
+      #    workflow 文件**，故对修复前创建的旧 tag（如 v0.6.0）不成立，补发须新 tag 或手工 --ref master；
+      # ③ 未来 1.0 启用 push 触发后，普通提交（HEAD 无 v tag）不会白跑一次多小时多架构构建。
+      - name: Read release anchor for docker tag
+        id: read-release-anchor
         run: |
-          VERSION=$(node -p "require('./apps/platform/package.json').version")
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          ANCHOR=$(node -p "try { require('./release-publish-result.json').anchorVersion || '' } catch { '' }")
+          if [ -z "$ANCHOR" ]; then
+            ANCHOR=$(node -p "require('./packages/cli/package.json').version")
+          fi
+          # 判据必须是「tag 指向 HEAD」而不是「tag 存在」：后者在后续 push 上恒为真，会让每次 push
+          # 都派发一次多架构构建并钉在旧 tag 上（且与 push 直构的 latest 竞争）。
+          if [ -n "$(git tag --points-at HEAD --list "v$ANCHOR")" ]; then
+            # 构建 ref 与版本来源结构性一致：平台版本从 tag 内容读，不取工作树。
+            # 读不到即显式报错（好过用错版本打 tag 发镜像）。
+            VERSION=$(git show "v$ANCHOR:apps/platform/package.json" | node -e "let s='';process.stdin.on('data',(d)=>{s+=d}).on('end',()=>process.stdout.write(JSON.parse(s).version))") || { echo "::error::无法从 v$ANCHOR 读取 apps/platform/package.json"; exit 1; }
+            echo "anchor=$ANCHOR" >> "$GITHUB_OUTPUT"
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::HEAD 上没有 v$ANCHOR tag（本轮无发布或非发布提交），跳过 docker 派发"
+            echo "anchor=" >> "$GITHUB_OUTPUT"
+            echo "version=" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Trigger Docker build with platform-x.y.z tag
-        if: steps.read-platform-version.outputs.version != ''
+        if: steps.read-release-anchor.outputs.version != '' && steps.read-release-anchor.outputs.anchor != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PLATFORM_VERSION: ${{ steps.read-platform-version.outputs.version }}
-        run: gh workflow run docker.yml --ref master -f platform_version="$PLATFORM_VERSION"
+          PLATFORM_VERSION: ${{ steps.read-release-anchor.outputs.version }}
+          ANCHOR_VERSION: ${{ steps.read-release-anchor.outputs.anchor }}
+        run: gh workflow run docker.yml --ref "v$ANCHOR_VERSION" -f platform_version="$PLATFORM_VERSION"

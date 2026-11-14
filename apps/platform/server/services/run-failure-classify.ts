@@ -108,6 +108,9 @@ const FAILURE_CODE_MAP: Readonly<Record<string, FailureCodeMapping>> = {
     CREDENTIAL_ERROR: { stage: 'install', kind: 'deterministic' },
     RESOLVE_ERROR: { stage: 'install', kind: 'unknown' },
     MINIMUM_RELEASE_AGE: { stage: 'install', kind: 'deterministic' },
+    // 基线已判安装失败但复检通过（拒绝「已合规」捷径后结构兜底全败）：
+    // 锁文件本身需要人工确认，属确定性失败（当前仅在环境性失败外写审计，防御性登记）。
+    PRECONDITION_FAILED: { stage: 'install', kind: 'deterministic' },
     // 环境性安装失败（诊断步无 stderr 诊断：被信号杀死 / 超时 / 静默非零退出）。
     // 引擎侧记 `ENVIRONMENT_ERROR` 并标记为**非归因**（`SKIPPED_AUDIT_CATEGORIES` +
     // `FixAction.environmentalFailure`）→ 不驱动 status=failed、不参与 exit code；
@@ -130,6 +133,14 @@ const FAILURE_CODE_MAP: Readonly<Record<string, FailureCodeMapping>> = {
     ROLLBACK_GRANULARITY_DEGRADED: { stage: 'verify', kind: 'deterministic' },
     SCRIPT_NOT_FOUND: { stage: 'verify', kind: 'deterministic' },
     network_violation: { stage: 'verify', kind: 'deterministic' },
+    // 运行级外联违规（引擎 `NETWORK_VIOLATION`，deny-by-default 拦截）：与验证链同类，确定性失败
+    NETWORK_VIOLATION: { stage: 'verify', kind: 'deterministic' },
+    // 沙箱出站策略缺失（审计关闭 / 白名单被清空）：执行器第二道闸拒绝，属确定性配置错误
+    sandbox_fix_requires_egress_policy: { stage: 'runtime', kind: 'deterministic' },
+    // 沙箱 clone 基地址非法或不在出站白名单内：执行器执行前拒绝，属确定性配置错误
+    sandbox_clone_host_not_allowed: { stage: 'runtime', kind: 'deterministic' },
+    // 沙箱镜像缺失 / 不可拉取：配置 / 环境问题，确定性失败（此前落未知阶段）
+    sandbox_image_unavailable: { stage: 'runtime', kind: 'deterministic' },
 
     // 运行预算不足：主动跳过未开始的工作（引擎侧属跳过类白名单，正常路径不可达；防御性映射）
     BUDGET_EXHAUSTED: { stage: 'runtime', kind: 'transient' },
@@ -142,6 +153,8 @@ const FAILURE_CODE_MAP: Readonly<Record<string, FailureCodeMapping>> = {
 
     // deliver — commit / push / PR 交付
     COMMIT_FAILED: { stage: 'deliver', kind: 'deterministic' },
+    // 自包含交付推送失败（引擎 `PUSH_FAILED`）：分支未推，确定性失败
+    PUSH_FAILED: { stage: 'deliver', kind: 'deterministic' },
     // 提交集合判定：未声明的已跟踪改动 / 只有生成物或未跟踪文件 → 未交付，需人工清理工作区
     UNEXPECTED_CHANGES: { stage: 'deliver', kind: 'deterministic' },
     NO_CHANGES: { stage: 'deliver', kind: 'deterministic' },

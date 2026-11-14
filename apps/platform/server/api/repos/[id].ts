@@ -1,11 +1,14 @@
+import { formatDurationMs } from '@dependfix/core'
 import type { H3Event } from 'h3'
+import { normalizeDockerImage } from '#server/utils/docker-image'
 import { parseSandboxLimits, parseTags, parseVerifyCommands, Repository } from '#server/entities/repository'
 import { ensureDatabaseInitialized } from '#server/database'
 import { repositoryUpdateSchema } from '#server/schemas/repository'
 import { requireAuth, requireOrgResource, requireRole } from '#server/utils/guard'
 import { createLocalizedError } from '#server/utils/localized-error'
 import { normalizePRCheckFocus, parsePRCheckFocus } from '#server/utils/pr-check-focus'
-import { recordVerifyCommandsAudit } from '#server/services/repository-audit'
+import { recordExecutionLimitsAudit, recordMajorUpgradePolicyAudit, recordVerifyCommandsAudit } from '#server/services/repository-audit'
+import { resolveExecutionCeilingMs } from '#server/utils/execution-limits'
 
 /** GET /api/repos/[id]：仓库详情 */
 const getRepository = async (event: H3Event, id: string) => {
@@ -34,8 +37,14 @@ const getRepository = async (event: H3Event, id: string) => {
         note: found.note,
         tags: parseTags(found.tags),
         sandboxLimits: parseSandboxLimits(found.sandboxLimits),
+        sandboxImage: found.sandboxImage,
         verifyCommands: parseVerifyCommands(found.verifyCommands),
         prCheckFocus: parsePRCheckFocus(found.prCheckFocus),
+        executionTimeoutMs: found.executionTimeoutMs,
+        verifyCommandTimeoutMs: found.verifyCommandTimeoutMs,
+        installTimeoutMs: found.installTimeoutMs,
+        cloneTimeoutMs: found.cloneTimeoutMs,
+        allowMajorUpgrade: found.allowMajorUpgrade,
         lastScanAt: found.lastScanAt,
         createdAt: found.createdAt,
         updatedAt: found.updatedAt,
@@ -53,6 +62,23 @@ const updateRepository = async (event: H3Event, id: string) => {
             statusCode: 400,
             code: 'REPO_VALIDATION_FAILED',
             data: { issues: parsed.error.issues },
+        })
+    }
+
+    // 封顶校验（AC2）：仓库值不得超过平台封顶，超限 400 且不落库
+    const ceilingMs = resolveExecutionCeilingMs(process.env)
+    const requestedExecutionTimeoutMs = parsed.data.executionTimeoutMs
+    if (requestedExecutionTimeoutMs !== null && requestedExecutionTimeoutMs !== undefined
+        && requestedExecutionTimeoutMs > ceilingMs) {
+        throw createLocalizedError(event, {
+            statusCode: 400,
+            code: 'REPO_VALIDATION_FAILED',
+            data: {
+                issues: [{
+                    path: ['executionTimeoutMs'],
+                    message: `执行上限不能超过平台封顶 ${formatDurationMs(ceilingMs)}`,
+                }],
+            },
         })
     }
 
@@ -93,6 +119,11 @@ const updateRepository = async (event: H3Event, id: string) => {
             : null
     }
 
+    // 仓库级沙箱镜像：undefined=不修改 / null 或空串=清空（回退平台默认）
+    const sandboxImageValue: string | null = parsed.data.sandboxImage !== undefined
+        ? normalizeDockerImage(parsed.data.sandboxImage)
+        : found.sandboxImage
+
     // verifyCommands 数组 → JSON 字符串列（与 tags 同模式；更新语义：undefined=不修改 / null 或 [] = 清空 → 走默认链）
     const previousCommands = parseVerifyCommands(found.verifyCommands)
     let verifyCommandsValue: string | null = found.verifyCommands
@@ -109,6 +140,17 @@ const updateRepository = async (event: H3Event, id: string) => {
         prCheckFocusValue = normalized ? JSON.stringify(normalized) : null
     }
 
+    // 变更前的跨大版本授权（审计用；Object.assign 会原地修改 found）
+    const previousAllowMajorUpgrade = found.allowMajorUpgrade
+
+    // 变更前的执行预算快照（审计用；Object.assign 会原地修改 found）
+    const previousLimits = {
+        executionTimeoutMs: found.executionTimeoutMs,
+        verifyCommandTimeoutMs: found.verifyCommandTimeoutMs,
+        installTimeoutMs: found.installTimeoutMs,
+        cloneTimeoutMs: found.cloneTimeoutMs,
+    }
+
     Object.assign(found, {
         owner: parsed.data.owner ?? found.owner,
         name: parsed.data.name ?? found.name,
@@ -121,8 +163,14 @@ const updateRepository = async (event: H3Event, id: string) => {
         note: parsed.data.note !== undefined ? parsed.data.note : found.note,
         tags: tagsValue,
         sandboxLimits: sandboxLimitsValue,
+        sandboxImage: sandboxImageValue,
         verifyCommands: verifyCommandsValue,
         prCheckFocus: prCheckFocusValue,
+        executionTimeoutMs: parsed.data.executionTimeoutMs !== undefined ? parsed.data.executionTimeoutMs : found.executionTimeoutMs,
+        verifyCommandTimeoutMs: parsed.data.verifyCommandTimeoutMs !== undefined ? parsed.data.verifyCommandTimeoutMs : found.verifyCommandTimeoutMs,
+        installTimeoutMs: parsed.data.installTimeoutMs !== undefined ? parsed.data.installTimeoutMs : found.installTimeoutMs,
+        cloneTimeoutMs: parsed.data.cloneTimeoutMs !== undefined ? parsed.data.cloneTimeoutMs : found.cloneTimeoutMs,
+        allowMajorUpgrade: parsed.data.allowMajorUpgrade !== undefined ? parsed.data.allowMajorUpgrade : found.allowMajorUpgrade,
     })
     const saved = await repo.save(found)
 
@@ -135,6 +183,34 @@ const updateRepository = async (event: H3Event, id: string) => {
             name: saved.name,
             previous: previousCommands,
             next: nextCommands,
+        })
+    }
+
+    // 跨大版本授权审计：仅在实际变化时登记
+    if (previousAllowMajorUpgrade !== saved.allowMajorUpgrade) {
+        await recordMajorUpgradePolicyAudit(ds, {
+            repositoryId: saved.id,
+            owner: saved.owner,
+            name: saved.name,
+            previous: previousAllowMajorUpgrade,
+            next: saved.allowMajorUpgrade,
+        })
+    }
+
+    // 执行预算配置审计：仅在实际变化时登记
+    const nextLimits = {
+        executionTimeoutMs: saved.executionTimeoutMs,
+        verifyCommandTimeoutMs: saved.verifyCommandTimeoutMs,
+        installTimeoutMs: saved.installTimeoutMs,
+        cloneTimeoutMs: saved.cloneTimeoutMs,
+    }
+    if (JSON.stringify(previousLimits) !== JSON.stringify(nextLimits)) {
+        await recordExecutionLimitsAudit(ds, {
+            repositoryId: saved.id,
+            owner: saved.owner,
+            name: saved.name,
+            previous: previousLimits,
+            next: nextLimits,
         })
     }
 

@@ -119,8 +119,6 @@
         "notLinked": "Not linked",
         "platformContainer": "Platform container",
         "sandboxContainer": "Isolated Sandbox Container",
-        "sandboxContainerUnavailable": "Isolated Sandbox Container (temporarily unavailable)",
-        "sandboxMigratedNotice": "This repository used the isolated sandbox container, which is temporarily unavailable. Saving will switch it to the platform container.",
         "githubAction": "GitHub Action",
         "privateRepo": "Private",
         "publicRepo": "Public",
@@ -221,12 +219,45 @@
             "repoFetchFailed": "Failed to fetch repositories: {message}",
             "importFailed": "Import failed: {message}",
             "selectAtLeastOne": "Select at least one repository",
-            "ownersFetchFailed": "Failed to load owners: {message}"
+            "ownersFetchFailed": "Failed to load owners: {message}",
+            "validationSummary": "Check the fields highlighted in red and try again"
+        },
+        "validation": {
+            "ownerRequired": "Owner is required",
+            "ownerInvalid": "Owner may contain only letters, digits, underscores, dots and hyphens",
+            "ownerTooLong": "Owner must be at most {max} characters",
+            "nameRequired": "Repository name is required",
+            "nameInvalid": "Repository name may contain only letters, digits, underscores, dots and hyphens",
+            "nameTooLong": "Repository name must be at most {max} characters",
+            "defaultBranchRequired": "Default branch is required",
+            "defaultBranchTooLong": "Default branch must be at most {max} characters",
+            "workflowRequired": "A workflow file path is required when using GitHub Action",
+            "durationInvalid": "Invalid duration. Use 30m / 1h / 90s or a plain number of minutes",
+            "durationTooSmall": "Must be at least {min}",
+            "durationTooLarge": "Must be at most {max}",
+            "durationExceedsExecution": "{label} must not exceed the execution limit ({max})"
         },
         "importOwner": "Resource owner",
         "importOwnerPlaceholder": "Select credential first",
         "importOwnerPersonalBadge": "Personal",
-        "importOwnerOrgBadge": "Organization"
+        "importOwnerOrgBadge": "Organization",
+        "executionLimitsTitle": "Execution budget (advanced)",
+        "executionLimitsInheritAll": "All inherited",
+        "executionLimitsCoveredSuffix": "override(s)",
+        "executionTimeout": "Execution limit",
+        "executionTimeoutHint": "Empty = inherit global; must not exceed the platform ceiling",
+        "verifyCommandTimeout": "Verify command timeout",
+        "installTimeout": "Install timeout",
+        "cloneTimeout": "Clone timeout",
+        "durationRange": "Range {min} – {max}",
+        "durationHint": "Supports 30m / 1h / 90s; a plain number means minutes. Empty inherits the platform default",
+        "executionLimitsHint": "Changing the execution limit also affects worker locks and orphan detection windows",
+        "allowMajorUpgrade": "Allow cross-major upgrades",
+        "allowMajorUpgradeHint": "Cross-major alerts are left for manual review. When on, only alerts that are root direct dependencies with a single lockfile version are auto-upgraded, still running the full verification chain and rolling back on failure; indirect dependencies and multi-version coexistence stay manual",
+        "allowMajorUpgradeDefaultOn": "The platform defaults new repositories to enabled; existing repositories keep their current setting",
+        "fieldSandboxImage": "Sandbox image",
+        "fieldSandboxImagePlaceholder": "ghcr.io/owner/dependfix-sandbox:latest",
+        "fieldSandboxImageHint": "Leave empty for the platform default (slim sandbox image). Use the -full variant or a full reference when native modules need source builds; the image must be pullable by the target rootless daemon"
     },
     "schedules": {
         "title": "Schedules",
@@ -330,7 +361,16 @@
             "toggleDarkMode": "Toggle dark mode",
             "errors": {
                 "loginFailed": "Sign in failed: {message}",
-                "invalidCredentials": "Sign in failed: incorrect email or password"
+                "invalidCredentials": "Sign in failed: incorrect email or password",
+                "emailNotVerified": "Sign-in failed: email not verified yet",
+                "tooManyRequests": "Too many attempts, try again later"
+            },
+            "resend": {
+                "action": "Resend verification email",
+                "sending": "Sending…",
+                "sent": "Verification email resent — check your inbox (and spam)",
+                "rateLimited": "Too many requests, try again in about a minute",
+                "failed": "Could not send the verification email, try again later"
             }
         },
         "register": {
@@ -457,6 +497,16 @@
         },
         "confirm": {
             "unlinkAccount": "Unlink the {provider} account?"
+        },
+        "executionLimits": {
+            "card": "Current runtime limits",
+            "execution": "Per-repo execution limit",
+            "ceiling": "Platform ceiling",
+            "verifyCommand": "Verify command timeout",
+            "install": "Install timeout",
+            "clone": "Clone timeout",
+            "minuteUnit": "min",
+            "hint": "Read-only; global values come from deployment env vars. A repository may override them in the execution budget section of the add/edit dialog"
         }
     },
     "notifications": {
@@ -614,10 +664,13 @@
         "alertFiringAll": "All",
         "alertFiringTrue": "Firing only",
         "alertFiringFalse": "Acked only",
+        "filterConclusion": "Conclusion",
+        "conclusionAll": "All conclusions",
         "colRepository": "Repository",
         "colPrNumber": "PR",
         "colAuthor": "Author",
         "colConclusion": "Conclusion",
+        "colPrState": "PR state",
         "colLastPolledAt": "Last collected",
         "colStatus": "Alert",
         "colLink": "Link",
@@ -673,6 +726,12 @@
             "externalNoise": "External noise",
             "cancelled": "Cancelled / skipped",
             "unknown": "Undetermined"
+        },
+        "prState": {
+            "open": "Open",
+            "closed": "Closed",
+            "merged": "Merged",
+            "unknown": "Unknown"
         }
     },
     "envEvents": {
@@ -712,7 +771,11 @@
         "collapse": "Collapse",
         "errors": {
             "loadFailed": "Failed to load: {message}"
-        }
+        },
+        "typeSandboxEgressBlocked": "Egress policy blocked",
+        "typeExecutionLimitsUpdate": "Execution limits update",
+        "typeMajorUpgradePolicyUpdate": "Major upgrade policy update",
+        "typeDeliveryBranchCleanup": "Delivery branch cleanup"
     },
     "credentials": {
         "title": "Credentials",
@@ -837,6 +900,13 @@
         "environmentalFailures": "{count} environmental failures",
         "environmentalFailuresLabel": "Environmental failures",
         "environmentalFailuresHint": "Environmental failures (killed by signal / timeout / silent non-zero exit) are not attributed to this run; shown for visibility",
+        "verificationsSkipped": "{count} repo(s) verification skipped",
+        "verificationsSkippedLabel": "Verification skipped",
+        "verificationsSkippedHint": "Verification did not run (budget exhausted / no writes in this run); not a failure and not a pass: budget skips block delivery, while no-write runs have nothing to deliver",
+        "verificationSkipReason": {
+            "budget": "Run budget exhausted",
+            "noWrite": "No writes in this run"
+        },
         "deliverySkipped": "{count} repo(s) delivery skipped",
         "deliverySkippedLabel": "Delivery skipped",
         "deliverySkippedHint": "Install verification is still failing (pre-existing) after the fix, so the fix was not delivered (changes rolled back). Carriers (issue / draft PR) are only created by the engine fix-and-pr path via DEPENDFIX_ON_BASELINE_RED. Exit code is unaffected",
@@ -868,7 +938,8 @@
                 "crossMajor": "Cross-major / manual review",
                 "notFixable": "Not auto-fixable",
                 "overrideProtected": "Protected by policy",
-                "repeatedFailure": "Repeated failure (attempt limit)"
+                "repeatedFailure": "Repeated failure (attempt limit)",
+                "peerOnly": "Peer-only dependency (manual review)"
             }
         },
         "failureStage": {
@@ -921,7 +992,14 @@
             "loadFailed": "Failed to load: {message}",
             "detailLoadFailed": "Failed to load details: {message}",
             "logsDownloadFailed": "Failed to download logs: {message}"
-        }
+        },
+        "networkViolationsLabel": "Blocked egress",
+        "networkViolations": "{count} blocked",
+        "networkViolationsHint": "Non-allowlisted outbound requests were blocked by the local audit proxy (502); such a run must not be reported as verified",
+        "networkAudited": "audited {count}",
+        "networkViolationFailure": "Non-allowlisted outbound traffic was blocked; this run is marked as failed (see blocked egress and the report)",
+        "deliveryLabel": "Delivery",
+        "deliveryBranch": "Branch {branch}"
     },
     "scans": {
         "title": "Scans",
@@ -955,6 +1033,11 @@
             "filterStatus": "Status",
             "filterFailureStage": "Failure stage",
             "filterFailureKind": "Suggested action",
+            "filterFrom": "Started from",
+            "filterTo": "Started to",
+            "filterFromPlaceholder": "Select start time",
+            "filterToPlaceholder": "Select end time",
+            "invalidRange": "Start time must not be later than end time",
             "filterAll": "All",
             "clearFilters": "Clear filters",
             "failureStageSummary": "Failure stage distribution:",
@@ -1088,6 +1171,10 @@
         "PR_CHECK_ACK_VALIDATION_FAILED": {
             "zh-CN": "参数校验失败",
             "en": "Request validation failed"
+        },
+        "PR_CHECK_VALIDATION_FAILED": {
+            "zh-CN": "查询参数校验失败",
+            "en": "Invalid query parameters"
         },
         "BATCH_RUN_ID_MISSING": {
             "zh-CN": "缺少批量运行 id",

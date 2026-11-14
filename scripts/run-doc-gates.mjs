@@ -29,12 +29,15 @@ export const DOC_GATES = [
     // 便宜且稳定的静态检查优先（失败最早暴露）
     'check:doc-governance',
     'check:doc-size',
+    'check:contract-freeze',
     'check:mergify',
     'check:orphan-ids',
     'check:standards-redundant:strict',
     'check:experience-landing',
     'check:verify-chain',
     'check:docs',
+    'docs:check:guides',
+    'docs:check:mirror',
     'check:readme-i18n',
     'docs:check:i18n',
     'i18n:check:anchor',
@@ -43,6 +46,7 @@ export const DOC_GATES = [
     // 较慢的 i18n lint 与 docs 构建在后；fallback 依赖构建产物
     'lint:i18n',
     'docs:build',
+    'docs:check:anchors',
     'docs:check:fallback',
 ]
 

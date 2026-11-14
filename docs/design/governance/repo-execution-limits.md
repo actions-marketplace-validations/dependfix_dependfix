@@ -1,6 +1,6 @@
-# 仓库级执行预算与超时配置设计（设计先行稿）
+# 仓库级执行预算与超时配置设计
 
-> **状态**：🔶 设计定稿（2026-10-30，用户裁定 D1-D3）——尚未上收，实现前需进入当前阶段或追加临时待办
+> **状态**：✅ 已落地（2026-11-08，M55.4 闭环归档；实现记录见 [归档 M55.4](../../plan/archive/todo-archive-phases-m55.md)）——设计定稿 2026-10-30（用户裁定 D1-D3）；批 0 已按预算前置把 `platform.md` §10.6 外移到 [executor-process-isolation.md §9](./executor-process-isolation.md)。
 > **范围**：`apps/platform`（实体 / 迁移 / schema / API / 编排 / 队列 / 清理 / 前端表单）+ `packages/engine`（验证 / 安装 / clone 超时透传）；不改修复策略与验证链条数
 > **目标**：把「只能整平台调」的四个超时改为「仓库可覆盖 + 平台封顶」，并让生效值可见、越界可判、变更可审计
 > **上游**：[运行失败分类与筛选设计](./run-failure-taxonomy.md)（失败归因）、[平台执行模型隔离设计](./executor-process-isolation.md)（锁与取消面）、[队列僵尸任务终结与去重键释放设计](./queue-stale-recovery.md)（孤儿阈值）
@@ -47,7 +47,7 @@
 **非目标**
 
 - 不放开 24 小时量级的仓库级上限（封顶 `[30min, 240min]`，见 §6.2）。
-- 不改验证链条数 / 顺序 / 短路语义，不改归因规则（基线豁免逻辑另见 backlog「双跑成本收敛」）。
+- 不改验证链条数 / 顺序 / 短路语义，不改归因规则（基线豁免与预算夹取逻辑见 [归档 M55.2](../../plan/archive/todo-archive-phases-m55.md#m55-2-p1-🚀-运行预算夹取与双跑成本收敛-已闭环-97d92c0b-a753e2fd)，与本设计同阶段执行）。
 - 不做「全局超时在 UI 里写 env」（`lockDuration` 在 worker 启动期固定，UI 写 env 必然出现「界面显示 60、实际 30」）。
 - 不改 CLI `--commands` / `--timeout` 语义（CLI 侧继续走 env 与参数）。
 
@@ -182,10 +182,16 @@ Repository.verifyCommandTimeoutMs
 
 ```json
 { "executionTimeoutMs": 1800000, "maxExecutionTimeoutMs": 3600000,
-  "verifyCommandTimeoutMs": 600000, "installTimeoutMs": 300000, "cloneTimeoutMs": 300000 }
+  "verifyCommandTimeoutMs": 600000, "installTimeoutMs": 300000, "cloneTimeoutMs": 300000,
+  "bounds": {
+    "execution": { "minMs": 60000, "maxMs": 3600000 },
+    "verifyCommand": { "minMs": 10000, "maxMs": 1800000 },
+    "install": { "minMs": 10000, "maxMs": 1800000 },
+    "clone": { "minMs": 60000, "maxMs": 1800000 }
+  } }
 ```
 
-只返回解析后的数值，不含 token / 路径等敏感信息；不做写入口。
+返回解析后的数值与客户端校验边界（`bounds`，见 [时长输入与环境变量单位设计](./duration-input-and-env-units.md) §3.4），不含 token / 路径等敏感信息；不做写入口。
 
 ## 9. 前端交互
 
@@ -196,18 +202,18 @@ Repository.verifyCommandTimeoutMs
 ### 9.2 继承与回显
 
 - 输入留空 → 提交 `null`（继承），**占位符显示生效默认值**（数据来自 §8.3，禁止前端硬编码 30 / 10 / 5）。
-- 编辑态：仓库值非空时填入分钟数；折叠行摘要同步显示覆盖项数与最大值。
+- 编辑态：仓库值非空时填入可读单位（`30m` / `1h` / `90s`，见 [时长输入与环境变量单位设计](./duration-input-and-env-units.md)）；折叠行摘要同步显示覆盖项数与最大值。
 - 保存后重新拉取列表，回显生效值（沿用父组件 `saved` 刷新链路）。
 
 ### 9.3 校验与错误
 
-- `type="number"`、`min=1`、`step=1`，单位后缀「分钟」；空串归一为 `null`。
-- 客户端范围校验（与 §5.2 同值）+ 服务端 400 的**字段级错误**展示（现有表单只有全局 toast，需补 `fieldErrors` 映射）。
+- 文本输入接受 `30m` / `1h` / `90s` / `2.5m`，纯数字按分钟（兼容旧写法）；空串归一为 `null`。
+- 客户端范围校验（边界由 `/api/settings/execution-limits` 的 `bounds` 下发，与 §5.2 同值）+ 服务端 400 的**字段级错误**展示（issues path → 字段，红框 + 行内文案 + 顶部摘要，首个错误自动聚焦；不再上抛表格上方）。
 - 提交体改为**显式构造**（不再 `...form.value` 展开），避免夹带无关键扩大 PUT 面。
 
 ### 9.4 i18n 与可访问性
 
-`zh-CN` / `en-US` 各补 4 个字段标签 + 4 条 hint + 折叠区标题 / 摘要（项目有缺词门禁）；`label for` 绑定，hint 通过 `aria-describedby` 关联，折叠按钮用 `aria-expanded`。
+`zh-CN` / `en-US` 各补 4 个字段标签 + 范围 / 单位 hint + 校验文案 + 折叠区标题 / 摘要（项目有缺词门禁）；`label for` 绑定，hint 通过 `aria-describedby` 关联，折叠按钮用 `aria-expanded`。
 
 ### 9.5 运行回显
 

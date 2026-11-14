@@ -2,6 +2,8 @@ import type { NormalizedSecurityAlert, AlertSeverity } from '../alerts'
 import type { CiAlignmentRecord } from './ci-alignment'
 import type { CheckAttribution } from './check-attribution'
 import type { AlertFixOutcome } from './alert-outcomes'
+import type { NetworkAuditEntry } from './network-audit'
+import type { RunDelivery } from './run-delivery'
 
 /**
  * 跳过原因枚举（`alertsSkippedByReason` 的 key）。
@@ -15,9 +17,37 @@ export const SKIP_REASONS = [
     'not-fixable',
     'override-protected',
     'repeated-failure',
+    'peer-only',
 ] as const
 
 export type SkipReason = (typeof SKIP_REASONS)[number]
+
+/**
+ * 验证被主动跳过原因（`RepositoryResult.verificationSkipped`）。
+ *
+ * - `budget`：运行预算不足，终验未执行
+ * - `no-write`：本次运行对该仓库没有任何写操作（有告警但无可执行修复），后验证无对象
+ *
+ * 两者都表示「未验证」：不得渲染成验证通过，也不记 `VERIFICATION_FAILED`。
+ * 对交付的影响不同：`budget` 表示「改动未验证」→ 阻断整次运行的交付；
+ * `no-write` 表示「无改动可验证」→ 该仓库没有交付内容，不阻断同一运行内其他仓库。
+ */
+export const VERIFICATION_SKIP_REASONS = ['budget', 'no-write'] as const
+
+export type VerificationSkipReason = (typeof VERIFICATION_SKIP_REASONS)[number]
+
+/** 按原因分组的验证跳过计数；缺失 key 等价于 0。 */
+export type VerificationsSkippedByReason = Partial<Record<VerificationSkipReason, number>>
+
+/** 验证跳过原因文案表（穷举，新增原因时编译失败提醒补文案；平台 UI 用 i18n 同义键）。 */
+const VERIFICATION_SKIP_REASON_TEXT: Record<VerificationSkipReason, string> = {
+    budget: 'run budget exhausted',
+    'no-write': 'no writes (verification not needed)',
+}
+
+/** 验证跳过原因的人类可读文案（报告 / 日志）。 */
+export const formatVerificationSkipReason = (reason: VerificationSkipReason): string =>
+    VERIFICATION_SKIP_REASON_TEXT[reason]
 
 /** 按原因分组的跳过计数；缺失 key 等价于 0。 */
 export type AlertsSkippedByReason = Partial<Record<SkipReason, number>>
@@ -107,6 +137,15 @@ export interface RunSummary {
     lockfileRepairs: number
     verificationsPassed: number
     verificationsFailed: number
+    /**
+     * 验证被跳过的仓库数（预算不足 / 0 写入）。
+     *
+     * 不计入失败、不回滚；`verificationSkippedByReason` 给出按原因分组计数
+     * （`budget` 阻断交付，`no-write` 无交付内容）。
+     */
+    verificationsSkipped: number
+    /** 按原因分组的验证跳过计数；旧 summaryJson 缺失时展示层回退总数。 */
+    verificationSkippedByReason: VerificationsSkippedByReason
     /** 本次运行创建的 PR 数（fix-and-pr 恒为 0 或 1） */
     prsOpened: number
     /** 因内容指纹相同被跳过的 PR 数（已有同内容 PR） */
@@ -127,6 +166,10 @@ export interface RunSummary {
     deliverySkipIssues: number
     /** 交付降级载体创建的草稿 PR 数（`draft` 档；同时计入 `prsOpened`） */
     deliverySkipDraftPrs: number
+    /** 本次运行拦截的非白名单外联数（缺失按 0；> 0 时运行详情 / 导出必须披露，不得写成「验证通过」）。 */
+    networkViolations?: number
+    /** 本次运行记录的外联审计条数（含白名单命中；用于「allowlist 命中摘要」）。 */
+    networkAudited?: number
 }
 
 /**
@@ -154,16 +197,20 @@ export interface RepositoryResult {
      *
      * 预算跳过终验时置 `true` 但**不回滚**（门禁据 `verificationSkipped` 分流）：
      * 语义是「不能确认可交付」，不是「存在本次引入的失败」。
+     * 0 写入跳过（`no-write`）时置 `false`：工作区保持 pristine，没有可归因的失败，
+     * 该仓库也没有交付内容，因此不阻断同一运行内其他仓库的交付。
      */
     verificationBlocking?: boolean
     /**
-     * 验证被**主动跳过**的原因（当前只有运行预算不足）。
+     * 验证被**主动跳过**的原因。
      *
      * 与 `verificationPassed === undefined` 的分工：后者是「未验证」（dry-run / 未走修复链），
-     * 本字段显式说明「验证本应运行，但预算不足被跳过」——门禁据此**不交付**（保守），
-     * 且不得把该仓库渲染成「验证通过」。
+     * 本字段显式说明「验证本应运行，但被预算或 0 写入跳过」——不得把该仓库渲染成「验证通过」；
+     * 跳过**不写** `VERIFICATION_FAILED`，也不把跳过折叠为「通过」。
+     * 是否阻断交付取决于是跳过原因：`budget` 阻断（`verificationBlocking=true`，改动未验证），
+     * `no-write` 不阻断（`verificationBlocking=false`，无改动可交付）。
      */
-    verificationSkipped?: 'budget'
+    verificationSkipped?: VerificationSkipReason
     durationMs: number
 }
 
@@ -226,6 +273,13 @@ export interface FixAction {
     strategy?: string
     durationMs?: number
     diff?: string
+    /**
+     * 仅 `type === 'lockfile-repair'` 时有意义：本次修复是否**实际改写**了锁文件。
+     *
+     * 与 `noOp` 互斥组合表达三种收尾结论：`success + changed`（修复生效）、
+     * `success + noOp`（复检通过 / 已合规）、`!success`（前置失败或策略失败）。
+     */
+    changed?: boolean
     /**
      * 标记"无需修改"（code-scanning 修复时文件已合规）。
      * 不计入 fixed/failed 统计（summary 与 repoResults 口径一致）。
@@ -353,6 +407,23 @@ export interface RunResult {
      * [pr-delivery-closure.md §16](../../../../docs/design/governance/pr-delivery-closure.md)。
      */
     deliverySkips?: DeliverySkipRecord[]
+    /**
+     * 执行期外联审计记录（安装链 / 验证链 / 交付命令共用的运行级审计）。
+     *
+     * 仅记录方法与目标（host / URL），不含请求 / 响应体；`violation` 标记 deny-by-default
+     * 拦截的非白名单外联。形状与引擎 `runners/network-audit` 同源，平台据此在运行详情与导出披露。
+     */
+    networkAudit?: NetworkAuditEntry[]
+    /** 非白名单外联（`networkAudit` 的子集；非空即不得把该仓库写成「成功」） */
+    networkViolations?: NetworkAuditEntry[]
+    /**
+     * 修复交付结果（仅 fix / fix-and-pr 模式记录；report-only 无交付概念，字段缺省）。
+     *
+     * 引擎在**执行进程内**完成交付时（沙箱自包含）由引擎写入；容器路径由平台接管，
+     * 引擎只写 `{ deliveredBy: 'platform', status: 'none' }`，平台据此避免二次交付。
+     * 消费方：平台执行器映射 `runUrl` / `prNumber`、失败清理与运行详情披露。
+     */
+    delivery?: RunDelivery
 }
 
 /**
@@ -770,6 +841,8 @@ export function createEmptyRunSummary(): RunSummary {
         lockfileRepairs: 0,
         verificationsPassed: 0,
         verificationsFailed: 0,
+        verificationsSkipped: 0,
+        verificationSkippedByReason: {},
         prsOpened: 0,
         prsSkippedByFingerprint: 0,
         prsClosedAfterFailure: 0,
@@ -779,3 +852,6 @@ export function createEmptyRunSummary(): RunSummary {
         deliverySkipDraftPrs: 0,
     }
 }
+
+export type { NetworkAuditEntry, NetworkAuditSource } from './network-audit'
+export type { RunDelivery, RunDeliveryActor, RunDeliveryStatus } from './run-delivery'

@@ -21,8 +21,8 @@ const truncated = computed(() => truncatedTotal(props.summary))
 const skippedRows = computed(() => skippedBreakdown(props.summary))
 const truncatedRows = computed(() => truncatedBreakdown(props.summary))
 
-/** 无跳过 / 截断时不渲染空区块（未修复计数由上层元信息承担）。 */
-const show = computed(() => skipped.value > 0 || truncated.value > 0)
+/** 有未修复 / 跳过 / 截断时都要给出构成：仅「无写入」不足以说明告警处置结果。 */
+const show = computed(() => unfixed.value > 0 || skipped.value > 0 || truncated.value > 0)
 
 const severityLabel = (key: string) => key === 'other'
     ? t('runs.breakdown.other')
@@ -48,6 +48,7 @@ const reasonLabel = (key: string) => {
         'not-fixable': 'runs.breakdown.reason.notFixable',
         'override-protected': 'runs.breakdown.reason.overrideProtected',
         'repeated-failure': 'runs.breakdown.reason.repeatedFailure',
+        'peer-only': 'runs.breakdown.reason.peerOnly',
         other: 'runs.breakdown.other',
     }
     return t(keys[key] ?? 'runs.breakdown.other')

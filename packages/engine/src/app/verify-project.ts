@@ -26,7 +26,7 @@ import {
 } from '../runners/verification-runner'
 import { validateVerifyCommands } from '../verification/validate-commands'
 import { isInstallCommand } from './delivery'
-import { budgetAllows } from './budget'
+import { budgetAllows, MIN_STEP_BUDGET_MS, remainingBudgetMs } from './budget'
 import type { AppContext } from './helpers'
 
 /**
@@ -160,7 +160,10 @@ function resolveVerifyCommands(
  * - 采样异常（无 package.json / spawn 失败等）返回 `undefined`，调用方退回原始口径（全量归因）
  */
 export async function sampleVerificationBaseline(
-    ctx: Pick<AppContext, 'config' | 'customCommands' | 'logger' | 'workDir' | 'allErrors'>,
+    ctx: Pick<AppContext, 'config' | 'customCommands' | 'logger' | 'workDir' | 'allErrors'> & {
+        deadlineAt?: number
+        verifyCommandTimeoutMs?: number
+    },
     repo: string,
 ): Promise<CommandResult[] | undefined> {
     const { logger, workDir } = ctx
@@ -174,7 +177,24 @@ export async function sampleVerificationBaseline(
     try {
         // 完整链：首条失败后继续采样后续命令，避免 install 失败遮蔽 test 的既有失败
         // （nest-template：install 红 + jest No tests found）。
-        const result = await runVerification({ workDir, commands, stopOnFailure: false })
+        // 预算夹取：单命令超时取「剩余预算 − 交付保留」，避免基线链在预算见底后仍按
+        // 默认 10 分钟逐条启动（最坏 5 条 = 50 分钟，远超单仓上限，必然 execution_timeout）。
+        const remaining = remainingBudgetMs(ctx.deadlineAt)
+        const budgetBoundTimeout = remaining === undefined
+            ? undefined
+            : Math.max(1_000, remaining - MIN_STEP_BUDGET_MS)
+        // 仓库级验证命令超时与预算夹取取更严者：任一更严格都以它为准
+        const commandTimeoutCandidates = [budgetBoundTimeout, ctx.verifyCommandTimeoutMs]
+            .filter((value): value is number => typeof value === 'number' && value > 0)
+        const commandTimeoutMs = commandTimeoutCandidates.length > 0
+            ? Math.min(...commandTimeoutCandidates)
+            : undefined
+        const result = await runVerification({
+            workDir,
+            commands,
+            stopOnFailure: false,
+            ...(commandTimeoutMs !== undefined ? { commandTimeoutMs } : {}),
+        })
         // 基线同样走 deny-by-default 外联审计代理：拦截记录必须留痕（只 warn、不入报告错误区），
         // 否则既有状态下的越权外联会成为审计盲区
         for (const violation of result.networkViolations ?? []) {
@@ -363,7 +383,7 @@ function resolvePreExistingReason(
 }
 
 export async function verifyProject(
-    ctx: Pick<AppContext, 'config' | 'customCommands' | 'logger' | 'workDir' | 'allErrors' | 'ciAlignment' | 'deadlineAt' | 'budgetSkips'>,
+    ctx: Pick<AppContext, 'config' | 'customCommands' | 'logger' | 'workDir' | 'allErrors' | 'ciAlignment' | 'deadlineAt' | 'budgetSkips' | 'verifyCommandTimeoutMs'>,
     repo: string,
     options: VerifyProjectOptions = {},
 ): Promise<FixAction[]> {
@@ -390,6 +410,7 @@ export async function verifyProject(
         const result: VerificationResult = await runVerification({
             workDir,
             commands: plan.commands,
+            ...(ctx.verifyCommandTimeoutMs !== undefined ? { commandTimeoutMs: ctx.verifyCommandTimeoutMs } : {}),
         })
 
         // 执行期网络外联审计（备查：恶意脚本外联事故溯源；总数 info、明细 debug）

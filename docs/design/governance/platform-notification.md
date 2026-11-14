@@ -211,7 +211,7 @@ interface NotificationLog {
 
 ### 6.5 周汇总触发
 
-- 固定周期插件在每周一 09:00（`DEPENDFIX_WEEKLY_DIGEST_HOUR` 可覆盖，默认 9）触发；按进程角色只在一个进程运行（复用 M45.3 的 role 守卫），避免 HTTP / worker 双发。周报插件与 `stale-cleanup` 同列 HTTP-only——容器双进程形态下 HTTP 主进程恒存在，worker 跳过（清单见 [platform.md §10.6](../../standards/platform.md#_10-6-队列执行进程隔离-独立-worker-进程)）。
+- 固定周期插件在每周一 09:00（`DEPENDFIX_WEEKLY_DIGEST_HOUR` 可覆盖，默认 9）触发；按进程角色只在一个进程运行（复用 M45.3 的 role 守卫），避免 HTTP / worker 双发。周报插件与 `stale-cleanup` 同列 HTTP-only——容器双进程形态下 HTTP 主进程恒存在，worker 跳过（清单见 [执行进程隔离 §9](./executor-process-isolation.md#_9-队列执行进程隔离-运行时形态)）。
 - `weekKey` 按 ISO 8601 周（如 `2026-W43`）与服务器时区计算；同一用户同一 `weekKey` 只发一次（键见 §6.4 周报专用键）。
 - **触发窗口与补发**：本进程启动 30 秒后每 15 分钟检查一次；窗口为「本周一触发时刻起 24 小时」。窗口内重启会补发（周中晚些时候启动不会在工作日中途补发上周周报），窗口外等待下一周。
 - **窗口内自愈（2026-10-29 M50.3）**：本进程的同周状态按结果推进（`weekly-digest-attempt.ts`）——`sent` / 全部收件人本周已发（`skipped_duplicate`）为终态；`partial` / `failed` / `noop` 计次并退避 30 分钟重试，单周最多 6 次发信尝试；`skipped_no_recipient` 只退避不计次（窗口内开启个人开关仍可当周补发，且同周同状态在 `notification_log` 最多 1 行）；`skipped_disabled` / `skipped_org_disabled` 不占用本周，下一次节拍立即重查（**不清零**已发生的发信尝试，避免「关一下再开」绕过单周上界）；退避以上一次发送的完成时刻为基准，发送未结束时跳过节拍（重入守卫）。跨进程 / 重启的「每收件人每周一封」仍由逐用户投递键兜底。
@@ -233,7 +233,7 @@ AND fixStatus IN ('not-tried', 'failed', 'skipped')
 AND scanRunId IN (<scope run ids>)
 ```
 
-- 「未修复」包含 `not-tried` / `failed` / `skipped`（覆盖跨 major 跳过与交付跳过）；`converged` 表示「本地已满足、无需升级」，不计入引擎的 `alertsUnfixed` 口径。**明细与汇总同源（M51.1）**：引擎报告的 `alertOutcomes` 会按同一键回写 `ScanResult.fixStatus`，因此按明细聚合的通知（`security_critical` / `security_high` / `weekly_digest`）不再把 converged 告警计入活跃明细；回写规则见 [data-model.md §告警级修复结果回写](../modules/data-model.md#告警级修复结果回写m511)。
+- 「未修复」包含 `not-tried` / `failed` / `skipped`（覆盖跨 major 跳过与交付跳过）；`converged` 表示「本地已满足、无需升级」，不计入引擎的 `alertsUnfixed` 口径。**明细与汇总同源（M51.1）**：引擎报告的 `alertOutcomes` 会按同一键回写 `ScanResult.fixStatus`，因此按明细聚合的通知（`security_critical` / `security_high` / `weekly_digest`）不再把 converged 告警计入活跃明细；回写规则见 [data-model.md §告警级修复结果回写](../modules/data-model.md#告警级修复结果回写-m51-1)。
   - **触发前提**：`success` / `converged` / `failed` 只在修复链路（`fix` / `fix-and-pr`）产生；`report-only` 运行无修复动作，其告警仍按既有口径计入明细（不可修复的会落 `skipped`，与 `not-tried` 同属未修复集合），故默认 `schedule.mode` 为 `report-only` 的部署不受本口径影响（此前已有 `success` 结论的行保持原值，不被 `report-only` 重置）。
   - **`success` 口径首次真正生效**：此前生产路径恒写 `not-tried`，「已修复不计入」形同虚设；回写落地后 `fix` / `fix-and-pr` 运行一旦产出修复，该告警即退出未修复明细（即使上游尚未关闭），后续运行给出新结论时按最新结论重新判定。这是本契约的**行为变更**，发布说明需披露。
   - 存量 run（回写前落库）行仍为 `not-tried`，不回填。

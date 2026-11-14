@@ -17,6 +17,11 @@ import {
     runModeLabel,
     shortRunId,
     unfixedAlerts,
+    verificationSkipSummary,
+    networkViolations,
+    networkViolationSummary,
+    runDelivery,
+    verificationsSkipped,
 } from '~/utils/run-view'
 import { scanSeverityLabel } from '~/utils/scan-options'
 import { downloadFile } from '~/utils/download'
@@ -140,6 +145,23 @@ const canRetry = computed(() => detail.value?.failureKind === 'transient')
  * 构建期未注入（`unknown`）与存量行（null）统一按「未知」降级展示——这是诊断信息缺失的正常形态，
  * 不进入错误态、不改变任何判定。口径见 docs/standards/platform.md §10.7。
  */
+const verificationSkipSummaryText = computed(() => verificationSkipSummary(detail.value?.summary ?? null, t))
+const networkViolationText = computed(() => networkViolationSummary(detail.value?.summary ?? null, t))
+/** 自包含交付记录（branch + commit）；无记录时不渲染该项 */
+const deliveryInfo = computed(() => runDelivery(detail.value?.summary ?? null))
+const deliveryText = computed(() => {
+    const info = deliveryInfo.value
+    if (!info?.branch) {
+        return ''
+    }
+    const commit = info.commitSha ? ` @ ${info.commitSha.slice(0, 7)}` : ''
+    return `${t('runs.deliveryBranch', { branch: info.branch })}${commit}`
+})
+
+/** 失败横幅文案：已知错误码走本地化，其余保持引擎原文（附 code 便于排查）。 */
+const localizedRunError = (error: { code?: string | null, message?: string }): string =>
+    error.code === 'network_violation' ? t('runs.networkViolationFailure') : (error.message ?? '')
+
 const buildInfo = computed(() =>
     formatBuildLabel(detail.value?.buildVersion, detail.value?.buildCommit, t('runs.buildUnknown')),
 )
@@ -344,6 +366,25 @@ watch(() => props.runId, (runId) => {
                         </template>
                     </strong>
                 </div>
+                <div v-if="!isRunResultMissing(detail) && verificationsSkipped(detail.summary) > 0" class="run-detail__meta-item">
+                    <span class="run-detail__meta-label">{{ t('runs.verificationsSkippedLabel') }}</span>
+                    <strong :title="t('runs.verificationsSkippedHint')">
+                        {{ t('runs.verificationsSkipped', {count: verificationsSkipped(detail.summary)}) }}
+                        <template v-if="verificationSkipSummaryText">
+                            · {{ verificationSkipSummaryText }}
+                        </template>
+                    </strong>
+                </div>
+                <div v-if="!isRunResultMissing(detail) && networkViolations(detail.summary) > 0" class="run-detail__meta-item">
+                    <span class="run-detail__meta-label">{{ t('runs.networkViolationsLabel') }}</span>
+                    <strong :title="networkViolationText || t('runs.networkViolationsHint')">
+                        {{ t('runs.networkViolations', {count: networkViolations(detail.summary)}) }}
+                    </strong>
+                </div>
+                <div v-if="deliveryInfo?.status === 'pushed' && deliveryInfo.branch && (detail.status === 'completed' || detail.status === 'degraded')" class="run-detail__meta-item">
+                    <span class="run-detail__meta-label">{{ t('runs.deliveryLabel') }}</span>
+                    <strong>{{ deliveryText }}</strong>
+                </div>
                 <div v-if="!isRunResultMissing(detail) && environmentalFailureCount(detail) > 0" class="run-detail__meta-item">
                     <span class="run-detail__meta-label">{{ t('runs.environmentalFailuresLabel') }}</span>
                     <strong>{{ environmentalFailureCount(detail) }}</strong>
@@ -470,7 +511,7 @@ watch(() => props.runId, (runId) => {
             >
                 <strong>{{ t('runs.errorTitle', {code: detail.error?.code ?? 'UNKNOWN'}) }}</strong>
                 <p v-if="detail.error" class="run-detail__error-message">
-                    {{ detail.error.message }}
+                    {{ localizedRunError(detail.error) }}
                 </p>
                 <p v-else class="run-detail__error-message text-muted">
                     {{ t('runs.errorNoDetail') }}

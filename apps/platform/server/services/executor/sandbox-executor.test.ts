@@ -1,10 +1,16 @@
-import { mkdtemp, rm, readdir, writeFile } from 'node:fs/promises'
+import { execFileSync } from 'node:child_process'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { SandboxExecutor, sanitizeErrorMessage } from './sandbox-executor'
+import { describe, expect, it, vi } from 'vitest'
+import { SandboxExecutor, resolveDefaultSandboxImage, resolveEgressPolicy, resolveSandboxImageCandidates, shouldInjectCloneCredential } from './sandbox-executor'
 import type { ScanExecutorContext } from './types'
-import { SpyRuntimeAdapter } from './runtime-adapter'
+import {
+    SpyRuntimeAdapter,
+    type ContainerRunResult,
+    type ContainerSpec,
+    type RuntimeAdapter,
+} from './runtime-adapter'
 
 const defaultRuntimeConfig = {
     mode: 'report-only' as const,
@@ -40,10 +46,10 @@ const makeCtx = (overrides: Partial<ScanExecutorContext> = {}): ScanExecutorCont
     ...overrides,
 })
 
-/** 构造合法 RunResult(供 spy 返回,使 parseRunResult 走完整成功路径) */
-const makeLegalRunResultJson = (ctx: ScanExecutorContext, exitCode = 0): string => {
+/** 构造合法 RunResult（供结果哨兵使用，使 parseRunResult 走完整成功路径） */
+const makeLegalRunResult = (ctx: ScanExecutorContext) => {
     const repo = `${ctx.repository.owner}/${ctx.repository.name}`
-    const result = {
+    return {
         runId: ctx.runId,
         startedAt: new Date().toISOString(),
         finishedAt: new Date().toISOString(),
@@ -58,10 +64,10 @@ const makeLegalRunResultJson = (ctx: ScanExecutorContext, exitCode = 0): string 
         },
         summary: {
             repositoriesScanned: 1,
-            alertsFound: 0,
-            alertsFixable: 0,
+            alertsFound: 2,
+            alertsFixable: 2,
             alertsFixed: 0,
-            alertsUnfixed: 0,
+            alertsUnfixed: 2,
             alertsFailed: 0,
             alertsSkipped: 0,
             alertsSkippedByReason: {},
@@ -76,84 +82,109 @@ const makeLegalRunResultJson = (ctx: ScanExecutorContext, exitCode = 0): string 
         repositories: [{
             repository: repo,
             defaultBranch: ctx.repository.defaultBranch,
-            alertsCount: 0,
-            fixable: 0,
+            alertsCount: 2,
+            fixable: 2,
             fixed: 0,
             failed: 0,
             lockfileRepaired: false,
-            durationMs: 0,
+            durationMs: 10,
         }],
         alerts: [],
         actions: [],
         errors: [],
     }
-    return JSON.stringify({ exitCode, result })
+}
+
+const legalPayload = (ctx: ScanExecutorContext, exitCode = 0): string =>
+    JSON.stringify({ exitCode, result: makeLegalRunResult(ctx) })
+
+/** 模拟容器 stdout：CLI 日志 + 哨兵结果（与真实 buildCmd 输出同形） */
+const wrapWithSentinel = (payload: string, logs = '[sandbox] log line'): string =>
+    `${logs}\n__DEPENDFIX_RESULT_JSON_START__\n${payload}\n__DEPENDFIX_RESULT_JSON_END__\n`
+
+/** 真实 buildCmd 的输出顺序：资源读数哨兵在前，结果哨兵在后 */
+const wrapWithResource = (payload: string, resource: string, logs = '[sandbox] log line'): string =>
+    `${logs}\n__DEPENDFIX_RESOURCE_JSON_START__\n${resource}\n__DEPENDFIX_RESOURCE_JSON_END__\n`
+    + `__DEPENDFIX_RESULT_JSON_START__\n${payload}\n__DEPENDFIX_RESULT_JSON_END__\n`
+
+interface SimulatedAdapterOptions {
+    available?: boolean
+    stdout?: string
+    stderr?: string
+    transportExitCode?: number
+    throwError?: Error
+}
+
+class SimulatedSandboxAdapter implements RuntimeAdapter {
+    readonly name = 'simulated'
+    readonly calls: { spec: ContainerSpec, cmd: string[] }[] = []
+    private readonly options: SimulatedAdapterOptions
+
+    constructor(options: SimulatedAdapterOptions = {}) {
+        this.options = options
+    }
+
+    async isAvailable(): Promise<boolean> {
+        return this.options.available ?? true
+    }
+
+    async run(spec: ContainerSpec, cmd: string[]): Promise<ContainerRunResult> {
+        this.calls.push({ spec, cmd })
+        if (this.options.throwError) {
+            throw this.options.throwError
+        }
+        return {
+            stdout: this.options.stdout ?? '',
+            stderr: this.options.stderr ?? '',
+            exitCode: this.options.transportExitCode ?? 0,
+        }
+    }
 }
 
 describe('SandboxExecutor', () => {
-    let workRoot: string
-
-    beforeEach(async () => {
-        workRoot = await mkdtemp(join(tmpdir(), 'sandbox-exec-test-'))
-    })
-
-    afterEach(async () => {
-        await rm(workRoot, { recursive: true, force: true }).catch(() => { /* 清理失败静默 */ })
-    })
-
-    describe('kind 路由(与 ContainerExecutor 并存;详见 todo.md §M10 决策会议结论 Q6)', () => {
+    describe('kind 路由（与 ContainerExecutor 并存）', () => {
         it('declares kind as "sandbox" (distinct from "container")', () => {
-            const executor = new SandboxExecutor({ workRoot, runtimeAdapter: new SpyRuntimeAdapter() })
+            const executor = new SandboxExecutor({ runtimeAdapter: new SpyRuntimeAdapter() })
             expect(executor.kind).toBe('sandbox')
         })
 
         it('coexists with ContainerExecutor via distinct kind identifier', async () => {
-            // 验证:两个 Executor 在同一 scan-orchestrator 注册不冲突
-            const sandbox = new SandboxExecutor({ workRoot, runtimeAdapter: new SpyRuntimeAdapter() })
+            const sandbox = new SandboxExecutor({ runtimeAdapter: new SpyRuntimeAdapter() })
             const { ContainerExecutor } = await import('./container-executor')
-            const container = new ContainerExecutor({ workRoot })
+            const container = new ContainerExecutor({ workRoot: '/tmp' })
             expect(sandbox.kind).not.toBe(container.kind)
             expect(sandbox.kind).toBe('sandbox')
             expect(container.kind).toBe('container')
         })
     })
 
-    describe('isAvailable(docker host 不可用降级)', () => {
+    describe('isAvailable（docker host 不可用降级）', () => {
         it('returns true when RuntimeAdapter is available', async () => {
-            const adapter = new SpyRuntimeAdapter({ available: true })
-            const executor = new SandboxExecutor({ workRoot, runtimeAdapter: adapter })
+            const executor = new SandboxExecutor({ runtimeAdapter: new SpyRuntimeAdapter({ available: true }) })
             expect(await executor.isAvailable()).toBe(true)
         })
 
         it('returns false when RuntimeAdapter is unavailable (caller should fallback to ContainerExecutor)', async () => {
-            const adapter = new SpyRuntimeAdapter({ available: false })
-            const executor = new SandboxExecutor({ workRoot, runtimeAdapter: adapter })
+            const executor = new SandboxExecutor({ runtimeAdapter: new SpyRuntimeAdapter({ available: false }) })
             expect(await executor.isAvailable()).toBe(false)
         })
     })
 
     describe('execute() 接口契约', () => {
-        it('builds spec with workDir bind-mount (host workDir → container /work)', async () => {
-            const adapter = new SpyRuntimeAdapter()
-            const executor = new SandboxExecutor({
-                workRoot,
-                runtimeAdapter: adapter,
-                image: 'dependfix:test',
-            })
-            await executor.execute(makeCtx({ runId: 'run-bind' }))
-            expect(adapter.calls).toHaveLength(1)
+        it('uses a container-private workdir and no host mount (deployment path independent)', async () => {
+            const adapter = new SimulatedSandboxAdapter()
+            const executor = new SandboxExecutor({ runtimeAdapter: adapter, image: 'dependfix:test' })
+            await executor.execute(makeCtx())
+
             const call = adapter.calls[0]
-            expect(call).toBeDefined()
-            expect(call?.spec.workDir).toBe('/work')
-            expect(call?.spec.mounts).toEqual([
-                { src: join(workRoot, 'run-bind'), dst: '/work', readonly: false },
-            ])
+            expect(call?.spec.workDir).toBe('/tmp')
+            expect(call?.spec.mounts).toBeUndefined()
+            expect(call?.spec.image).toBe('dependfix:test')
         })
 
-        it('passes user (rootless default) and runtime through to ContainerSpec', async () => {
-            const adapter = new SpyRuntimeAdapter()
+        it('passes sandboxLimits through to ContainerSpec', async () => {
+            const adapter = new SimulatedSandboxAdapter()
             const executor = new SandboxExecutor({
-                workRoot,
                 runtimeAdapter: adapter,
                 sandboxLimits: { memoryMb: 1024, cpu: 0.5 },
             })
@@ -163,38 +194,35 @@ describe('SandboxExecutor', () => {
             expect(call?.spec.cpu).toBe(0.5)
         })
 
-        it('cgroup 限额透传——memoryMb / cpu 通过 DockerAdapter.buildRunArgs 落到 docker CLI(snapshot 验证)', async () => {
-            // 集成验证:buildSpec 输出喂给 DockerAdapter.buildRunArgs,限额参数正确出现
+        it('cgroup 限额透传——memoryMb / cpu 通过 DockerAdapter.buildRunArgs 落到 docker CLI', async () => {
             const { DockerAdapter } = await import('./runtime-adapter')
             const executor = new SandboxExecutor({
-                workRoot,
                 runtimeAdapter: new SpyRuntimeAdapter(),
                 sandboxLimits: { memoryMb: 1024, cpu: 2.0 },
                 image: 'alpine:3',
             })
-            const spec = executor.buildSpec(join(workRoot, 'run-cgroup'), makeCtx())
-            const args = new DockerAdapter().buildRunArgs(spec, ['echo', 'ok'])
+            const spec = executor.buildSpec(makeCtx())
+            const args = new DockerAdapter().buildRunArgs(spec, ['node', '/app/sandbox/bin.mjs', '--version'])
             const memIdx = args.indexOf('--memory')
             expect(args[memIdx + 1]).toBe('1024m')
             const cpuIdx = args.indexOf('--cpus')
             expect(args[cpuIdx + 1]).toBe('2')
+            expect(args.join(' ')).not.toContain(':1024')
         })
 
-        it('injects GITHUB_TOKEN via spec.env (not via cmd argv)', async () => {
-            // 安全契约:token 仅走 env,不进容器 cmd(防止 test 日志 / docker inspect / spy 调用栈泄露)
-            const adapter = new SpyRuntimeAdapter()
-            const executor = new SandboxExecutor({ workRoot, runtimeAdapter: adapter })
+        it('injects GITHUB_TOKEN and skills dir via spec.env (not via cmd argv)', async () => {
+            const adapter = new SimulatedSandboxAdapter()
+            const executor = new SandboxExecutor({ runtimeAdapter: adapter })
             await executor.execute(makeCtx({ credential: { token: 'ghp_SECRET' } }))
             const call = adapter.calls[0]
             expect(call?.spec.env?.GITHUB_TOKEN).toBe('ghp_SECRET')
-            // 验证:cmd 字段不含 token（cmd 是 spy.calls 顶层属性，非 spec.cmd）
-            const cmdStr = call?.cmd?.join(' ') ?? ''
-            expect(cmdStr).not.toContain('ghp_SECRET')
+            expect(call?.spec.env?.DEPENDFIX_SKILLS_DIR).toBe('/app/sandbox/skills')
+            expect(call?.cmd.join(' ')).not.toContain('ghp_SECRET')
         })
 
-        it('ctx.config.ai 启用时 spec.env 包含 DEPENDFIX_AI_* (todo.md §M25.2a + [platform-ai-integration.md §4.1 B](../design/governance/platform-ai-integration.md))', async () => {
-            const adapter = new SpyRuntimeAdapter()
-            const executor = new SandboxExecutor({ workRoot, runtimeAdapter: adapter })
+        it('report-only 不注入组织级 AI Key（最小注入）', async () => {
+            const adapter = new SimulatedSandboxAdapter()
+            const executor = new SandboxExecutor({ runtimeAdapter: adapter })
             await executor.execute(makeCtx({
                 config: {
                     ...defaultRuntimeConfig,
@@ -209,50 +237,16 @@ describe('SandboxExecutor', () => {
                 },
             }))
             const env = adapter.calls[0]?.spec.env ?? {}
-            expect(env.DEPENDFIX_AI).toBe('true')
-            expect(env.DEPENDFIX_AI_PROVIDER).toBe('openai-compatible')
-            expect(env.DEPENDFIX_AI_MODEL).toBe('deepseek-v4-flash')
-            expect(env.DEPENDFIX_AI_BASE_URL).toBe('https://api.deepseek.com')
-            expect(env.DEPENDFIX_AI_TRIGGER).toBe('both')
-            expect(env.DEPENDFIX_AI_API_KEY).toBe('sk-deepseek-secret')
-        })
-
-        it('Organization.aiBaseUrl 为 null 时 ai.baseUrl 兜底 https://api.deepseek.com', async () => {
-            const adapter = new SpyRuntimeAdapter()
-            const executor = new SandboxExecutor({ workRoot, runtimeAdapter: adapter })
-            await executor.execute(makeCtx({
-                config: {
-                    ...defaultRuntimeConfig,
-                    ai: {
-                        enabled: true,
-                        provider: 'openai-compatible',
-                        model: 'deepseek-v4-flash',
-                        apiKey: 'sk-test',
-                        baseUrl: 'https://api.deepseek.com',
-                        trigger: 'both',
-                    },
-                },
-            }))
-            const env = adapter.calls[0]?.spec.env ?? {}
-            expect(env.DEPENDFIX_AI_BASE_URL).toBe('https://api.deepseek.com')
-        })
-
-        it('ctx.config.ai 未启用时不注入 DEPENDFIX_AI_* env（避免空字符串覆盖默认值）', async () => {
-            const adapter = new SpyRuntimeAdapter()
-            const executor = new SandboxExecutor({ workRoot, runtimeAdapter: adapter })
-            await executor.execute(makeCtx())
-            const env = adapter.calls[0]?.spec.env ?? {}
             expect(env.DEPENDFIX_AI).toBeUndefined()
-            expect(env.DEPENDFIX_AI_PROVIDER).toBeUndefined()
             expect(env.DEPENDFIX_AI_API_KEY).toBeUndefined()
         })
 
-        it('anthropic provider 时 spec.env 包含 DEPENDFIX_AI_API_URL（Anthropic 端点覆盖）', async () => {
-            const adapter = new SpyRuntimeAdapter()
-            const executor = new SandboxExecutor({ workRoot, runtimeAdapter: adapter })
-            await executor.execute(makeCtx({
+        it('fix 模式 buildSpec 保留 AI env 注入（当前执行前被 mode 闸拒绝）', () => {
+            const executor = new SandboxExecutor({ runtimeAdapter: new SpyRuntimeAdapter() })
+            const spec = executor.buildSpec(makeCtx({
                 config: {
                     ...defaultRuntimeConfig,
+                    mode: 'fix',
                     ai: {
                         enabled: true,
                         provider: 'anthropic',
@@ -264,75 +258,492 @@ describe('SandboxExecutor', () => {
                     },
                 },
             }))
-            const env = adapter.calls[0]?.spec.env ?? {}
-            expect(env.DEPENDFIX_AI_PROVIDER).toBe('anthropic')
-            expect(env.DEPENDFIX_AI_API_URL).toBe('https://api.anthropic.com/v1/messages')
+            expect(spec.env?.DEPENDFIX_AI).toBe('true')
+            expect(spec.env?.DEPENDFIX_AI_PROVIDER).toBe('anthropic')
+            expect(spec.env?.DEPENDFIX_AI_API_URL).toBe('https://api.anthropic.com/v1/messages')
         })
 
-        it('sets network to none for report-only mode (zero trust default)', async () => {
-            const adapter = new SpyRuntimeAdapter()
-            const executor = new SandboxExecutor({ workRoot, runtimeAdapter: adapter })
-            await executor.execute(makeCtx({ config: { ...makeCtx().config, mode: 'report-only' } }))
-            expect(adapter.calls[0]?.spec.network).toBe('none')
-        })
-
-        it('sets network to bridge for fix/fix-and-pr mode (git clone needs network)', async () => {
-            const adapter = new SpyRuntimeAdapter()
-            const executor = new SandboxExecutor({ workRoot, runtimeAdapter: adapter })
-            await executor.execute(makeCtx({ config: { ...makeCtx().config, mode: 'fix-and-pr' } }))
+        it('report-only 使用 bridge：GitHub API 拉取告警需要出站', async () => {
+            const adapter = new SimulatedSandboxAdapter()
+            const executor = new SandboxExecutor({ runtimeAdapter: adapter })
+            await executor.execute(makeCtx())
             expect(adapter.calls[0]?.spec.network).toBe('bridge')
         })
 
-        it('parses legal RunResult JSON as structured success result', async () => {
+        it('parses sentinel-delimited result as structured success result', async () => {
             const ctx = makeCtx()
-            const adapter = new SpyRuntimeAdapter({
-                result: {
-                    stdout: makeLegalRunResultJson(ctx),
-                    stderr: '',
-                    exitCode: 0,
-                },
-            })
-            const executor = new SandboxExecutor({ workRoot, runtimeAdapter: adapter })
+            const adapter = new SimulatedSandboxAdapter({ stdout: wrapWithSentinel(legalPayload(ctx)) })
+            const executor = new SandboxExecutor({ runtimeAdapter: adapter })
             const result = await executor.execute(ctx)
             expect(result.exitCode).toBe(0)
             expect(result.result?.repositories[0]?.repository).toBe('owner-a/repo-b')
+            expect(result.result?.summary.alertsFound).toBe(2)
             expect(result.error).toBeUndefined()
-            expect(result.startedAt).toBeTruthy()
-            expect(result.finishedAt).toBeTruthy()
+            expect(result.logsJson).toContain('log line')
+            expect(result.logsJson).not.toContain('__DEPENDFIX_RESULT_JSON')
+        })
+
+        it('attaches the cgroup resource snapshot and strips its sentinel from logs', async () => {
+            const ctx = makeCtx()
+            const resource = JSON.stringify({
+                memoryMaxBytes: 2 * 1024 ** 3,
+                peakRssBytes: 64 * 1024 * 1024,
+                oomKilled: false,
+                samples: 21,
+                source: 'cgroup-v2',
+                limitReason: '',
+            })
+            const adapter = new SimulatedSandboxAdapter({ stdout: wrapWithResource(legalPayload(ctx), resource) })
+            const result = await new SandboxExecutor({ runtimeAdapter: adapter }).execute(ctx)
+            expect(result.resource).toMatchObject({
+                memoryMaxBytes: 2 * 1024 ** 3,
+                peakRssBytes: 64 * 1024 * 1024,
+                oomKilled: false,
+                samples: 21,
+                source: 'cgroup-v2',
+            })
+            expect(result.resource?.degradedReason).toBeUndefined()
+            expect(result.logsJson ?? '').not.toContain('DEPENDFIX_RESOURCE_JSON')
+        })
+
+        it('marks missing resource readings as unavailable instead of zero', async () => {
+            const ctx = makeCtx()
+            const adapter = new SimulatedSandboxAdapter({ stdout: wrapWithSentinel(legalPayload(ctx)) })
+            const result = await new SandboxExecutor({ runtimeAdapter: adapter }).execute(ctx)
+            expect(result.resource).toMatchObject({
+                memoryMaxBytes: null,
+                peakRssBytes: null,
+                oomKilled: null,
+                source: 'none',
+            })
+            expect(result.resource?.degradedReason).toContain('cgroup')
+        })
+
+        it('treats a malformed resource payload as unavailable', async () => {
+            const ctx = makeCtx()
+            const adapter = new SimulatedSandboxAdapter({ stdout: wrapWithResource(legalPayload(ctx), 'not-json') })
+            const result = await new SandboxExecutor({ runtimeAdapter: adapter }).execute(ctx)
+            expect(result.exitCode).toBe(0)
+            expect(result.resource?.source).toBe('none')
+            expect(result.resource?.degradedReason).toMatch(/cgroup|采样/)
+        })
+
+        it('sanitizes credentials in logsJson (stdout/stderr tail)', async () => {
+            const ctx = makeCtx()
+            const adapter = new SimulatedSandboxAdapter({
+                stdout: wrapWithSentinel(legalPayload(ctx), 'fetch https://x-access-token:SECRET@github.com/o/r.git failed'),
+                stderr: 'Authorization: token ghp_LOGSECRET',
+            })
+            const executor = new SandboxExecutor({ runtimeAdapter: adapter })
+            const result = await executor.execute(ctx)
+            expect(result.logsJson).not.toContain('SECRET')
+            expect(result.logsJson).not.toContain('ghp_LOGSECRET')
+        })
+
+        it('returns partial failure exitCode with result when CLI exits 1', async () => {
+            const ctx = makeCtx()
+            const adapter = new SimulatedSandboxAdapter({
+                stdout: wrapWithSentinel(legalPayload(ctx, 1)),
+                transportExitCode: 1,
+            })
+            const executor = new SandboxExecutor({ runtimeAdapter: adapter })
+            const result = await executor.execute(ctx)
+            expect(result.exitCode).toBe(1)
+            expect(result.result?.summary.alertsFound).toBe(2)
+            expect(result.error).toBeUndefined()
+        })
+
+        it('requests commit + push for fix mode (self-contained delivery)', () => {
+            const script = new SandboxExecutor({ runtimeAdapter: new SpyRuntimeAdapter() })
+                .buildCmd(makeCtx({ config: { ...defaultRuntimeConfig, mode: 'fix' } })).join(' ')
+            expect(script).toContain('--commit')
+            expect(script).toContain('--push')
+            // 容器内 push 复用 env token：credential helper 只写命令、限定 github.com，不含密钥
+            expect(script).toContain('credential.https://github.com.helper')
+            expect(script).toContain('$GITHUB_TOKEN')
+        })
+
+        it('does not request push for non-GitHub clone sources (no push credential)', () => {
+            const script = new SandboxExecutor({
+                runtimeAdapter: new SpyRuntimeAdapter(),
+                cloneBaseUrl: 'https://gitlab.com',
+                egress: { allowlist: ['gitlab.com'] },
+            }).buildCmd(makeCtx({ config: { ...defaultRuntimeConfig, mode: 'fix' } })).join(' ')
+            expect(script).toContain('--commit')
+            expect(script).not.toContain('--push')
+            expect(script).not.toContain('credential.https://github.com.helper')
+        })
+
+        it('does not request commit/push for report-only or fix-and-pr', () => {
+            const build = (mode: 'report-only' | 'fix-and-pr') => new SandboxExecutor({ runtimeAdapter: new SpyRuntimeAdapter() })
+                .buildCmd(makeCtx({ config: { ...defaultRuntimeConfig, mode } })).join(' ')
+            expect(build('report-only')).not.toContain('--commit')
+            expect(build('fix-and-pr')).not.toContain('--commit')
+            // fix-and-pr 由引擎在容器内 push + 建 PR：同样需要 credential helper
+            expect(build('fix-and-pr')).toContain('credential.https://github.com.helper')
+            expect(build('report-only')).not.toContain('credential.helper')
+        })
+
+        it('maps a self-contained PR delivery to runUrl and prNumber', async () => {
+            const ctx = makeCtx({ config: { ...defaultRuntimeConfig, mode: 'fix-and-pr' } })
+            const payload = JSON.stringify({
+                exitCode: 0,
+                result: {
+                    ...makeLegalRunResult(ctx),
+                    delivery: {
+                        deliveredBy: 'engine',
+                        status: 'pr-created',
+                        branch: 'dependfix/auto-fix-abcd1234',
+                        commitSha: 'deadbeef',
+                        prUrl: 'https://github.com/owner-a/repo-b/pull/9',
+                        prNumber: 9,
+                    },
+                },
+            })
+            const executor = new SandboxExecutor({ runtimeAdapter: new SimulatedSandboxAdapter({ stdout: wrapWithSentinel(payload) }) })
+            const result = await executor.execute(ctx)
+            expect(result.runUrl).toBe('https://github.com/owner-a/repo-b/pull/9')
+            expect(result.prNumber).toBe(9)
+        })
+
+        it('maps a pushed branch delivery to the branch page', async () => {
+            const ctx = makeCtx({ config: { ...defaultRuntimeConfig, mode: 'fix' } })
+            const payload = JSON.stringify({
+                exitCode: 0,
+                result: {
+                    ...makeLegalRunResult(ctx),
+                    delivery: { deliveredBy: 'engine', status: 'pushed', branch: 'main', commitSha: 'deadbeef' },
+                },
+            })
+            const executor = new SandboxExecutor({ runtimeAdapter: new SimulatedSandboxAdapter({ stdout: wrapWithSentinel(payload) }) })
+            const result = await executor.execute(ctx)
+            expect(result.runUrl).toBe('https://github.com/owner-a/repo-b/tree/main')
+            expect(result.prNumber).toBeUndefined()
+        })
+
+        it('leaves runUrl empty when the result carries no delivery record', async () => {
+            const ctx = makeCtx()
+            const executor = new SandboxExecutor({ runtimeAdapter: new SimulatedSandboxAdapter({ stdout: wrapWithSentinel(legalPayload(ctx)) }) })
+            const result = await executor.execute(ctx)
+            expect(result.runUrl).toBeUndefined()
+        })
+
+        it('builds CLI command with explicit result contract, sentinel and no credentials in argv', () => {
+            const executor = new SandboxExecutor({
+                runtimeAdapter: new SpyRuntimeAdapter(),
+                entry: '/app/sandbox/bin.mjs',
+            })
+            const cmd = executor.buildCmd(makeCtx())
+            const script = cmd.join(' ')
+            expect(cmd[0]).toBe('sh')
+            expect(cmd[1]).toBe('-c')
+            expect(script).toContain('/app/sandbox/bin.mjs')
+            expect(script).toContain('report-only')
+            expect(script).toContain('--repo')
+            expect(script).toContain('owner-a/repo-b')
+            expect(script).toContain('--result-json')
+            expect(script).toContain('/tmp/result.json')
+            expect(script).toContain('__DEPENDFIX_RESULT_JSON_START__')
+            // 资源采样：cgroup v2 / v1 双路径 + 停止标记 + 读数哨兵
+            expect(script).toContain('/sys/fs/cgroup/memory.current')
+            expect(script).toContain('/sys/fs/cgroup/memory/memory.usage_in_bytes')
+            expect(script).toContain('/tmp/dependfix-resource.stop')
+            expect(script).toContain('__DEPENDFIX_RESOURCE_JSON_START__')
+            expect(script).not.toContain('ghp_')
+            expect(script).not.toContain('dependfix-reports')
+        })
+    })
+
+    describe('fix 模式的出站策略与容器内 bootstrap', () => {
+        it('injects the allowlist env for fix mode', () => {
+            const executor = new SandboxExecutor({
+                runtimeAdapter: new SpyRuntimeAdapter(),
+                egress: { enabled: true, allowlist: ['github.com', 'registry.example.com'] },
+            })
+            const spec = executor.buildSpec(makeCtx({ config: { ...defaultRuntimeConfig, mode: 'fix' } }))
+            expect(spec.env?.DEPENDFIX_ALLOWED_DOMAINS).toContain('github.com')
+            expect(spec.env?.DEPENDFIX_ALLOWED_DOMAINS).toContain('registry.example.com')
+        })
+
+        it('does not inject the allowlist env for report-only', () => {
+            const executor = new SandboxExecutor({ runtimeAdapter: new SpyRuntimeAdapter() })
+            const spec = executor.buildSpec(makeCtx())
+            expect(spec.env?.DEPENDFIX_ALLOWED_DOMAINS).toBeUndefined()
+        })
+
+        it('clones into the container-private repo dir before running the CLI', () => {
+            const executor = new SandboxExecutor({
+                runtimeAdapter: new SpyRuntimeAdapter(),
+                entry: '/app/sandbox/bin.mjs',
+            })
+            const script = executor.buildCmd(makeCtx({ config: { ...defaultRuntimeConfig, mode: 'fix' } })).join(' ')
+
+            expect(script).toContain('clone --depth 1')
+            expect(script).toContain('https://github.com/owner-a/repo-b.git')
+            expect(script).toContain('/tmp/repo')
+            expect(script).toContain('cd /tmp/repo')
+            // 凭据不进 argv / 脚本明文：只从 env 读取后转成 basic header
+            expect(script).not.toContain('ghp_')
+            expect(script).toContain('$GITHUB_TOKEN')
+            // 采样必须先于 bootstrap：窗口覆盖容器内 clone；bootstrap 失败也先回传读数
+            expect(script.indexOf('/sys/fs/cgroup/memory.current')).toBeLessThan(script.indexOf('clone --depth 1'))
+            expect(script).toContain('|| { touch /tmp/dependfix-resource.stop')
+        })
+
+        it.skipIf(process.platform === 'win32')('produces a valid resource JSON when the sampler runs under a real shell', () => {
+            const root = mkdtempSync(join(tmpdir(), 'sandbox-cgroup-'))
+            try {
+                const cgroup = join(root, 'cgroup')
+                mkdirSync(cgroup)
+                writeFileSync(join(cgroup, 'memory.current'), '12345678\n')
+                writeFileSync(join(cgroup, 'memory.max'), 'max\n')
+                writeFileSync(join(cgroup, 'memory.events'), 'low 0\nhigh 0\noom 0\noom_kill 0\n')
+                const resourcePath = join(root, 'resource.json')
+                const stopPath = join(root, 'resource.stop')
+
+                const executor = new SandboxExecutor({ runtimeAdapter: new SpyRuntimeAdapter() })
+                const script = executor.buildCmd(makeCtx())[2]!
+                    .split('\n')
+                    // 只验证采样器本身：CLI 行替换为固定睡眠
+                    .map((line) => line.includes('\'--result-json\'') ? 'sleep 0.5' : line)
+                    .join('\n')
+                    .replaceAll('/sys/fs/cgroup', cgroup)
+                    .replaceAll('/tmp/dependfix-resource.json', resourcePath)
+                    .replaceAll('/tmp/dependfix-resource.stop', stopPath)
+
+                execFileSync('sh', ['-c', script], { stdio: 'ignore', timeout: 15_000 })
+                const raw = JSON.parse(readFileSync(resourcePath, 'utf8')) as Record<string, unknown>
+                expect(raw).toMatchObject({
+                    memoryMaxBytes: null,
+                    peakRssBytes: 12345678,
+                    oomKilled: false,
+                    source: 'cgroup-v2',
+                    limitReason: 'unlimited',
+                })
+                expect(raw.samples as number).toBeGreaterThan(0)
+            } finally {
+                rmSync(root, { recursive: true, force: true })
+            }
+        })
+
+        it('does not clone in report-only mode', () => {
+            const executor = new SandboxExecutor({ runtimeAdapter: new SpyRuntimeAdapter() })
+            const script = executor.buildCmd(makeCtx()).join(' ')
+            expect(script).not.toContain('clone')
+        })
+
+        it('only injects the credential header for https github.com sources', () => {
+            const build = (baseUrl: string) => new SandboxExecutor({
+                runtimeAdapter: new SpyRuntimeAdapter(),
+                cloneBaseUrl: baseUrl,
+            }).buildCmd(makeCtx({ config: { ...defaultRuntimeConfig, mode: 'fix' } })).join(' ')
+
+            // 非 GitHub 源：匿名 clone（脚本里没有 extraheader 分支）
+            expect(build('https://gitlab.com')).not.toContain('extraheader')
+            expect(build('https://gitlab.com')).toContain('git clone --depth 1')
+            // GitHub 源：注入 basic header，且 token 只从 env 读取
+            expect(build('https://github.com')).toContain('extraheader')
+            expect(build('https://github.com')).toContain('$GITHUB_TOKEN')
+        })
+
+        it('decides credential injection from protocol + hostname only', () => {
+            expect(shouldInjectCloneCredential('https://github.com')).toBe(true)
+            expect(shouldInjectCloneCredential('https://github.com/')).toBe(true)
+            expect(shouldInjectCloneCredential('http://github.com')).toBe(false)
+            expect(shouldInjectCloneCredential('https://gitlab.com')).toBe(false)
+            expect(shouldInjectCloneCredential('https://github.com.evil.example')).toBe(false)
+            expect(shouldInjectCloneCredential('not-a-url')).toBe(false)
+        })
+
+        it('rejects a clone base outside the allowlist (fail-closed)', async () => {
+            const adapter = new SimulatedSandboxAdapter()
+            const executor = new SandboxExecutor({
+                runtimeAdapter: adapter,
+                cloneBaseUrl: 'https://evil.example.com',
+            })
+            const result = await executor.execute(makeCtx({ config: { ...defaultRuntimeConfig, mode: 'fix' } }))
+            expect(result.error?.code).toBe('sandbox_clone_host_not_allowed')
+            expect(adapter.calls).toHaveLength(0)
+        })
+
+        it('rejects a plaintext http clone base (fail-closed)', async () => {
+            const adapter = new SimulatedSandboxAdapter()
+            const executor = new SandboxExecutor({
+                runtimeAdapter: adapter,
+                cloneBaseUrl: 'http://github.com',
+            })
+            const result = await executor.execute(makeCtx({ config: { ...defaultRuntimeConfig, mode: 'fix' } }))
+            expect(result.error?.code).toBe('sandbox_clone_host_not_allowed')
+            expect(adapter.calls).toHaveLength(0)
+        })
+
+        it('rejects an invalid clone base URL (fail-closed)', async () => {
+            const adapter = new SimulatedSandboxAdapter()
+            const executor = new SandboxExecutor({
+                runtimeAdapter: adapter,
+                cloneBaseUrl: 'not-a-url',
+            })
+            const result = await executor.execute(makeCtx({ config: { ...defaultRuntimeConfig, mode: 'fix' } }))
+            expect(result.error?.code).toBe('sandbox_clone_host_not_allowed')
+            expect(adapter.calls).toHaveLength(0)
+        })
+
+        it('never injects the credential header for non-https github sources', () => {
+            const script = new SandboxExecutor({
+                runtimeAdapter: new SpyRuntimeAdapter(),
+                cloneBaseUrl: 'http://github.com',
+            }).buildCmd(makeCtx({ config: { ...defaultRuntimeConfig, mode: 'fix' } })).join(' ')
+            // 明文 http 源整体走匿名 clone，脚本里连 token 都不出现
+            expect(script).not.toContain('extraheader')
+            expect(script).not.toContain('$GITHUB_TOKEN')
+        })
+
+        it('matches wildcard allowlist entries by suffix only', async () => {
+            const cases = [
+                { base: 'https://gitlab.example.com', allowlist: ['*.example.com'], allowed: true },
+                { base: 'https://example.com', allowlist: ['*.example.com'], allowed: false },
+                { base: 'https://evilexample.com', allowlist: ['*.example.com'], allowed: false },
+            ]
+            for (const item of cases) {
+                const adapter = new SimulatedSandboxAdapter()
+                const executor = new SandboxExecutor({
+                    runtimeAdapter: adapter,
+                    cloneBaseUrl: item.base,
+                    egress: { allowlist: item.allowlist },
+                })
+                const result = await executor.execute(makeCtx({ config: { ...defaultRuntimeConfig, mode: 'fix' } }))
+                if (item.allowed) {
+                    expect(result.error?.code).not.toBe('sandbox_clone_host_not_allowed')
+                    expect(adapter.calls).toHaveLength(1)
+                } else {
+                    expect(result.error?.code).toBe('sandbox_clone_host_not_allowed')
+                    expect(adapter.calls).toHaveLength(0)
+                }
+            }
+        })
+
+        it('ignores the port when matching the clone host against the allowlist', async () => {
+            const adapter = new SimulatedSandboxAdapter()
+            const executor = new SandboxExecutor({
+                runtimeAdapter: adapter,
+                cloneBaseUrl: 'https://github.com:443',
+                egress: { allowlist: ['github.com'] },
+            })
+            const result = await executor.execute(makeCtx({ config: { ...defaultRuntimeConfig, mode: 'fix' } }))
+            expect(result.error?.code).not.toBe('sandbox_clone_host_not_allowed')
+            expect(adapter.calls).toHaveLength(1)
+        })
+
+        it('resolveEgressPolicy merges required domains and honors the audit switch', () => {
+            vi.stubEnv('DEPENDFIX_ALLOWED_DOMAINS', 'registry.example.com')
+            try {
+                const policy = resolveEgressPolicy()
+                expect(policy.allowlist).toEqual(expect.arrayContaining([
+                    'github.com', 'api.github.com', '*.npmjs.org', 'registry.example.com',
+                ]))
+            } finally {
+                vi.unstubAllEnvs()
+            }
+            expect(resolveEgressPolicy({ enabled: false }).enabled).toBe(false)
+            // 显式白名单（含空数组）以其为准：操作方清空 → 第二道闸拒绝 fix
+            expect(resolveEgressPolicy({ allowlist: [] }).allowlist).toEqual([])
         })
     })
 
     describe('execute() fail-closed 错误分类', () => {
-        it('returns execution_failed when stdout is not valid JSON (defensive parse)', async () => {
-            const adapter = new SpyRuntimeAdapter({
-                result: { stdout: 'this is not JSON', stderr: '', exitCode: 0 },
+        it('returns sandbox_fix_requires_egress_policy when the egress policy is disabled (no adapter call)', async () => {
+            const adapter = new SimulatedSandboxAdapter()
+            const executor = new SandboxExecutor({
+                runtimeAdapter: adapter,
+                egress: { enabled: false, allowlist: ['github.com'] },
             })
-            const executor = new SandboxExecutor({ workRoot, runtimeAdapter: adapter })
-            const result = await executor.execute(makeCtx())
+            const result = await executor.execute(makeCtx({
+                config: { ...defaultRuntimeConfig, mode: 'fix' },
+            }))
             expect(result.exitCode).toBe(2)
+            expect(result.error?.code).toBe('sandbox_fix_requires_egress_policy')
+            expect(adapter.calls).toHaveLength(0)
+        })
+
+        it('returns sandbox_fix_requires_egress_policy when the allowlist is empty', async () => {
+            const adapter = new SimulatedSandboxAdapter()
+            const executor = new SandboxExecutor({
+                runtimeAdapter: adapter,
+                egress: { enabled: true, allowlist: [] },
+            })
+            const result = await executor.execute(makeCtx({
+                config: { ...defaultRuntimeConfig, mode: 'fix' },
+            }))
+            expect(result.error?.code).toBe('sandbox_fix_requires_egress_policy')
+            expect(adapter.calls).toHaveLength(0)
+        })
+
+        it('runs fix mode inside the sandbox when the egress policy is in place', async () => {
+            const adapter = new SimulatedSandboxAdapter({ available: true })
+            const executor = new SandboxExecutor({ runtimeAdapter: adapter })
+            const result = await executor.execute(makeCtx({
+                config: { ...defaultRuntimeConfig, mode: 'fix' },
+            }))
+            // 适配器返回空 stdout：结果缺失按 execution_failed 归类（关键断言是「已调用适配器」）
+            expect(adapter.calls).toHaveLength(1)
             expect(result.error?.code).toBe('execution_failed')
         })
 
-        it('returns execution_failed when stdout contains credentials in URL (sanitize in error message)', async () => {
-            const maliciousStdout = 'fatal: cannot clone https://x-access-token:SECRET@github.com/o/r.git: not found'
-            const adapter = new SpyRuntimeAdapter({
-                result: { stdout: maliciousStdout, stderr: '', exitCode: 0 },
+        it('returns sandbox_alert_source_unsupported for pnpm-audit (would execute repo code)', async () => {
+            const adapter = new SimulatedSandboxAdapter()
+            const executor = new SandboxExecutor({ runtimeAdapter: adapter })
+            const result = await executor.execute(makeCtx({
+                config: { ...defaultRuntimeConfig, alertSource: 'pnpm-audit' },
+            }))
+            expect(result.exitCode).toBe(2)
+            expect(result.error?.code).toBe('sandbox_alert_source_unsupported')
+            expect(adapter.calls).toHaveLength(0)
+        })
+
+        it('returns sandbox_image_unavailable when docker cannot find the image (exit 125)', async () => {
+            const adapter = new SimulatedSandboxAdapter({
+                transportExitCode: 125,
+                stderr: 'docker: Error response from daemon: manifest unknown',
             })
-            const executor = new SandboxExecutor({ workRoot, runtimeAdapter: adapter })
+            const executor = new SandboxExecutor({ runtimeAdapter: adapter })
+            const result = await executor.execute(makeCtx())
+            expect(result.exitCode).toBe(2)
+            expect(result.error?.code).toBe('sandbox_image_unavailable')
+        })
+
+        it('returns execution_failed when result sentinel is missing', async () => {
+            const adapter = new SimulatedSandboxAdapter({ stdout: 'plain logs only', stderr: 'boom' })
+            const executor = new SandboxExecutor({ runtimeAdapter: adapter })
+            const result = await executor.execute(makeCtx())
+            expect(result.exitCode).toBe(2)
+            expect(result.error?.code).toBe('execution_failed')
+            expect(result.error?.message).toContain('未回传显式结果')
+        })
+
+        it('sanitizes credentials in stdout/stderr when result is missing', async () => {
+            const malicious = 'fatal: cannot access https://x-access-token:SECRET@github.com/o/r.git'
+            const adapter = new SimulatedSandboxAdapter({ stdout: malicious, stderr: malicious })
+            const executor = new SandboxExecutor({ runtimeAdapter: adapter })
             const result = await executor.execute(makeCtx())
             expect(result.error?.code).toBe('execution_failed')
-            // 错误消息中不能泄露 token
             expect(result.error?.message).not.toContain('SECRET')
             expect(result.error?.message).toContain('https://***@')
         })
 
+        it('returns execution_failed when sentinel payload is not valid JSON', async () => {
+            const adapter = new SimulatedSandboxAdapter({ stdout: wrapWithSentinel('this is not JSON') })
+            const executor = new SandboxExecutor({ runtimeAdapter: adapter })
+            const result = await executor.execute(makeCtx())
+            expect(result.exitCode).toBe(2)
+            expect(result.error?.code).toBe('execution_failed')
+            expect(result.error?.message).toContain('非 JSON')
+        })
+
         it('returns execution_failed when payload result is malformed (missing required fields)', async () => {
-            // 合法 JSON 但 result 缺 runId/summary
-            const malformedJson = JSON.stringify({ exitCode: 0, result: { repositories: [] } })
-            const adapter = new SpyRuntimeAdapter({
-                result: { stdout: malformedJson, stderr: '', exitCode: 0 },
+            const adapter = new SimulatedSandboxAdapter({
+                stdout: wrapWithSentinel(JSON.stringify({ exitCode: 0, result: { repositories: [] } })),
             })
-            const executor = new SandboxExecutor({ workRoot, runtimeAdapter: adapter })
+            const executor = new SandboxExecutor({ runtimeAdapter: adapter })
             const result = await executor.execute(makeCtx())
             expect(result.exitCode).toBe(2)
             expect(result.error?.code).toBe('execution_failed')
@@ -341,14 +752,11 @@ describe('SandboxExecutor', () => {
 
         it('returns execution_failed when transport exitCode != 0 but payload exitCode === 0 (forgery detection)', async () => {
             const ctx = makeCtx()
-            const adapter = new SpyRuntimeAdapter({
-                result: {
-                    stdout: makeLegalRunResultJson(ctx, 0), // payload 声称成功
-                    stderr: 'daemon warning',
-                    exitCode: 1, // 但 transport 退出码非 0
-                },
+            const adapter = new SimulatedSandboxAdapter({
+                stdout: wrapWithSentinel(legalPayload(ctx, 0)),
+                transportExitCode: 1,
             })
-            const executor = new SandboxExecutor({ workRoot, runtimeAdapter: adapter })
+            const executor = new SandboxExecutor({ runtimeAdapter: adapter })
             const result = await executor.execute(ctx)
             expect(result.exitCode).toBe(2)
             expect(result.error?.code).toBe('execution_failed')
@@ -356,15 +764,8 @@ describe('SandboxExecutor', () => {
         })
 
         it('returns execution_timeout when adapter returns exitCode 124', async () => {
-            const adapter = new SpyRuntimeAdapter({
-                result: {
-                    stdout: '',
-                    stderr: '[docker] execution timeout',
-                    exitCode: 124,
-                    truncated: true,
-                },
-            })
-            const executor = new SandboxExecutor({ workRoot, runtimeAdapter: adapter, timeoutMs: 5_000 })
+            const adapter = new SimulatedSandboxAdapter({ transportExitCode: 124, stderr: '[docker] execution timeout' })
+            const executor = new SandboxExecutor({ runtimeAdapter: adapter, timeoutMs: 5_000 })
             const result = await executor.execute(makeCtx())
             expect(result.exitCode).toBe(2)
             expect(result.error?.code).toBe('execution_timeout')
@@ -372,18 +773,16 @@ describe('SandboxExecutor', () => {
         })
 
         it('returns execution_timeout when outer withTimeout triggers (adapter never resolves)', async () => {
-            // 模拟外层超时:永不 resolve 的 adapter + 极短 timeoutMs
-            class NeverResolveAdapter {
+            class NeverResolveAdapter implements RuntimeAdapter {
                 readonly name = 'never-resolve'
                 async isAvailable() { return true }
-                async run(): Promise<{ stdout: string, stderr: string, exitCode: number }> {
+                async run(): Promise<ContainerRunResult> {
                     return new Promise(() => { /* never resolve */ })
                 }
             }
             const executor = new SandboxExecutor({
-                workRoot,
                 runtimeAdapter: new NeverResolveAdapter(),
-                timeoutMs: 50, // 50ms 外层超时
+                timeoutMs: 50,
             })
             const result = await executor.execute(makeCtx())
             expect(result.exitCode).toBe(2)
@@ -393,10 +792,10 @@ describe('SandboxExecutor', () => {
 
         it('returns sandbox_unavailable for ENOENT/ENOTCONN/EACCES/ECONNREFUSED errno', async () => {
             for (const errno of ['ENOENT', 'ENOTCONN', 'EACCES', 'ECONNREFUSED']) {
-                const adapter = new SpyRuntimeAdapter({
-                    result: Object.assign(new Error(`docker daemon ${errno}`), { code: errno }),
+                const adapter = new SimulatedSandboxAdapter({
+                    throwError: Object.assign(new Error(`docker daemon ${errno}`), { code: errno }),
                 })
-                const executor = new SandboxExecutor({ workRoot, runtimeAdapter: adapter })
+                const executor = new SandboxExecutor({ runtimeAdapter: adapter })
                 const result = await executor.execute(makeCtx())
                 expect(result.exitCode).toBe(2)
                 expect(result.error?.code).toBe('sandbox_unavailable')
@@ -404,105 +803,184 @@ describe('SandboxExecutor', () => {
         })
 
         it('returns execution_failed (not sandbox_unavailable) for other adapter errors', async () => {
-            const adapter = new SpyRuntimeAdapter({
-                result: Object.assign(new Error('manifest unknown'), { code: 'EBADRPC' }),
+            const adapter = new SimulatedSandboxAdapter({
+                throwError: Object.assign(new Error('manifest unknown'), { code: 'EBADRPC' }),
             })
-            const executor = new SandboxExecutor({ workRoot, runtimeAdapter: adapter })
+            const executor = new SandboxExecutor({ runtimeAdapter: adapter })
             const result = await executor.execute(makeCtx())
             expect(result.exitCode).toBe(2)
             expect(result.error?.code).toBe('execution_failed')
-        })
-
-        it('returns execution_failed when mkdir fails (EACCES on workDir parent)', async () => {
-            // 构造 EACCES:把 workRoot 替换为已存在的普通文件,mkdir 无法在其下创建子目录
-            const blockingFile = join(workRoot, 'block.txt')
-            await writeFile(blockingFile, 'block')
-            const executor = new SandboxExecutor({ workRoot: blockingFile, runtimeAdapter: new SpyRuntimeAdapter() })
-            const result = await executor.execute(makeCtx())
-            expect(result.exitCode).toBe(2)
-            expect(result.error?.code).toBe('execution_failed')
-            // 不能误报为 sandbox_unavailable(文件系统错误 ≠ daemon 错误)
-            expect(result.error?.code).not.toBe('sandbox_unavailable')
         })
 
         it('returns execution_failed when runId contains path traversal characters', async () => {
             const adapter = new SpyRuntimeAdapter()
-            const executor = new SandboxExecutor({ workRoot, runtimeAdapter: adapter })
-            // 路径穿越尝试
+            const executor = new SandboxExecutor({ runtimeAdapter: adapter })
             const result = await executor.execute(makeCtx({ runId: '../etc/passwd' }))
             expect(result.exitCode).toBe(2)
             expect(result.error?.code).toBe('execution_failed')
-            // adapter 不应被调用
             expect(adapter.calls).toHaveLength(0)
-        })
-    })
-
-    describe('execute() workDir cleanup', () => {
-        it('cleans up workDir after successful execution', async () => {
-            const ctx = makeCtx()
-            const adapter = new SpyRuntimeAdapter({
-                result: { stdout: makeLegalRunResultJson(ctx), stderr: '', exitCode: 0 },
-            })
-            const executor = new SandboxExecutor({ workRoot, runtimeAdapter: adapter })
-            await executor.execute(ctx)
-            const entries = await readdir(workRoot)
-            expect(entries).not.toContain(ctx.runId)
-        })
-
-        it('cleans up workDir after execution failure (best-effort cleanup)', async () => {
-            const ctx = makeCtx()
-            const adapter = new SpyRuntimeAdapter({
-                result: Object.assign(new Error('fail'), { code: 'EBADRPC' }),
-            })
-            const executor = new SandboxExecutor({ workRoot, runtimeAdapter: adapter })
-            await executor.execute(ctx)
-            const entries = await readdir(workRoot)
-            expect(entries).not.toContain(ctx.runId)
         })
     })
 })
 
-describe('sanitizeErrorMessage', () => {
-    it('masks credentials inlined in URLs', () => {
-        const input = 'fatal: unable to access https://x-access-token:SECRET@github.com/o/r.git'
-        const output = sanitizeErrorMessage(input)
-        expect(output).not.toContain('SECRET')
-        expect(output).toContain('https://***@github.com')
+describe('resolveSandboxImageCandidates', () => {
+    it('follows the platform image registry first, then publishes fallbacks', () => {
+        const candidates = resolveSandboxImageCandidates({
+            DEPENDFIX_IMAGE: 'registry.cn-hangzhou.aliyuncs.com/caomeiyouren/dependfix:platform-2.0.0',
+        } as NodeJS.ProcessEnv)
+        // 平台走 ACR → 沙箱先走 ACR；回退依次 Docker Hub、ghcr（ACR 置末且与首项去重）
+        expect(candidates).toEqual([
+            'registry.cn-hangzhou.aliyuncs.com/caomeiyouren/dependfix-sandbox:2.0.0',
+            'caomeiyouren/dependfix-sandbox:2.0.0',
+            'ghcr.io/dependfix/dependfix-sandbox:2.0.0',
+        ])
     })
 
-    it('masks Authorization header values', () => {
-        const input = 'fatal: Authorization: basic TOP_SECRET_TOKEN_VALUE_HERE'
-        const output = sanitizeErrorMessage(input)
-        expect(output).not.toContain('TOP_SECRET_TOKEN_VALUE_HERE')
-        expect(output).toContain('Authorization: basic ***')
+    it('follows a ghcr platform and keeps ACR as the last fallback', () => {
+        const candidates = resolveSandboxImageCandidates({
+            DEPENDFIX_IMAGE: 'ghcr.io/dependfix/dependfix:platform-2.0.0',
+        } as NodeJS.ProcessEnv)
+        expect(candidates).toEqual([
+            'ghcr.io/dependfix/dependfix-sandbox:2.0.0',
+            'caomeiyouren/dependfix-sandbox:2.0.0',
+            'registry.cn-hangzhou.aliyuncs.com/caomeiyouren/dependfix-sandbox:2.0.0',
+        ])
     })
 
-    it('masks Authorization: token scheme (legacy GitHub PAT)', () => {
-        // C53-后-B：GitHub REST API 兼容 `Authorization: token ghp_xxx`（legacy 形式）
-        const input = 'fatal: Authentication failed: Authorization: token ghp_TOP_SECRET_PAT_12345'
-        const output = sanitizeErrorMessage(input)
-        expect(output).not.toContain('ghp_TOP_SECRET_PAT_12345')
-        expect(output).toContain('Authorization: token ***')
+    it('uses a single explicit image when SANDBOX_IMAGE is set', () => {
+        expect(resolveSandboxImageCandidates({
+            SANDBOX_IMAGE: 'local/sandbox:1',
+            DEPENDFIX_IMAGE: 'ghcr.io/dependfix/dependfix:latest',
+        } as NodeJS.ProcessEnv)).toEqual(['local/sandbox:1'])
     })
 
-    it('masks Authorization: Bearer scheme (GitHub REST API v3+)', () => {
-        // C53-后-B：GitHub REST API v3+ 推荐 `Authorization: Bearer ghp_xxx`
-        const input = 'fatal: 401 Unauthorized: Authorization: Bearer ghp_TOP_SECRET_BEARER_99999'
-        const output = sanitizeErrorMessage(input)
-        expect(output).not.toContain('ghp_TOP_SECRET_BEARER_99999')
-        expect(output).toContain('Authorization: Bearer ***')
+    it('does not derive from a local platform image name', () => {
+        const candidates = resolveSandboxImageCandidates({
+            DEPENDFIX_IMAGE: 'dependfix-platform:local',
+            SANDBOX_IMAGE_TAG: 'edge',
+        } as NodeJS.ProcessEnv)
+        expect(candidates).toEqual([
+            'caomeiyouren/dependfix-sandbox:edge',
+            'ghcr.io/dependfix/dependfix-sandbox:edge',
+            'registry.cn-hangzhou.aliyuncs.com/caomeiyouren/dependfix-sandbox:edge',
+        ])
     })
 
-    it('masks Authorization header case-insensitively', () => {
-        // 防御：调用方 / git CLI 可能输出小写 authorization 或大写 TOKEN/BEARER
-        const input = 'error: authorization: TOKEN ghp_case_insensitive_secret'
-        const output = sanitizeErrorMessage(input)
-        expect(output).not.toContain('ghp_case_insensitive_secret')
-        expect(output).toContain('authorization: TOKEN ***')
+    it('resolves the pull timeout from env with a safe fallback', async () => {
+        const { resolveImagePullTimeoutMs } = await import('./sandbox-image')
+        expect(resolveImagePullTimeoutMs({ SANDBOX_IMAGE_PULL_TIMEOUT_MS: '45000' } as NodeJS.ProcessEnv)).toBe(45_000)
+        expect(resolveImagePullTimeoutMs({ SANDBOX_IMAGE_PULL_TIMEOUT_MS: 'nope' } as NodeJS.ProcessEnv)).toBe(300_000)
+        expect(resolveImagePullTimeoutMs({} as NodeJS.ProcessEnv)).toBe(300_000)
     })
 
-    it('leaves clean messages unchanged', () => {
-        const input = 'fatal: repository not found'
-        expect(sanitizeErrorMessage(input)).toBe(input)
+    it('ignores non-published platform tags (local / dev) and falls back to latest', () => {
+        const candidates = resolveSandboxImageCandidates({
+            DEPENDFIX_IMAGE: 'ghcr.io/team/dependfix:local',
+        } as NodeJS.ProcessEnv)
+        expect(candidates[0]).toBe('ghcr.io/team/dependfix-sandbox:latest')
+    })
+})
+
+describe('deriveSandboxRepoFromPlatformImage', () => {
+    it('maps published platform images in any registry', async () => {
+        const { deriveSandboxRepoFromPlatformImage } = await import('./sandbox-image')
+        expect(deriveSandboxRepoFromPlatformImage('ghcr.io/dependfix/dependfix:latest'))
+            .toBe('ghcr.io/dependfix/dependfix-sandbox')
+        expect(deriveSandboxRepoFromPlatformImage('registry.example.com:5000/team/dependfix-platform:platform-1.0.0'))
+            .toBe('registry.example.com:5000/team/dependfix-sandbox')
+        expect(deriveSandboxRepoFromPlatformImage(`dependfix/dependfix@sha256:${'a'.repeat(64)}`))
+            .toBe('dependfix/dependfix-sandbox')
+    })
+
+    it('ignores local names and unrelated repositories', async () => {
+        const { deriveSandboxRepoFromPlatformImage } = await import('./sandbox-image')
+        expect(deriveSandboxRepoFromPlatformImage('dependfix-platform:local')).toBeNull()
+        expect(deriveSandboxRepoFromPlatformImage('ghcr.io/team/my-app:1')).toBeNull()
+        expect(deriveSandboxRepoFromPlatformImage(undefined)).toBeNull()
+    })
+})
+
+describe('resolveDefaultSandboxImage', () => {
+    it('prefers an explicit SANDBOX_IMAGE', () => {
+        expect(resolveDefaultSandboxImage({ SANDBOX_IMAGE: ' local/sandbox:1 ' } as NodeJS.ProcessEnv))
+            .toBe('local/sandbox:1')
+    })
+
+    it('builds the published sandbox image from repo + platform version', () => {
+        expect(resolveDefaultSandboxImage({
+            SANDBOX_IMAGE_REPO: 'registry.example.com/team/dependfix-sandbox',
+            NUXT_BUILD_VERSION: '2.3.4',
+        } as NodeJS.ProcessEnv)).toBe('registry.example.com/team/dependfix-sandbox:2.3.4')
+        expect(resolveDefaultSandboxImage({ NUXT_BUILD_VERSION: '2.3.4' } as NodeJS.ProcessEnv))
+            .toBe('caomeiyouren/dependfix-sandbox:2.3.4')
+    })
+
+    it('treats blank values as unset and tolerates a trailing slash on the repo', () => {
+        expect(resolveDefaultSandboxImage({
+            SANDBOX_IMAGE: '',
+            SANDBOX_IMAGE_REPO: 'registry.example.com/team/dependfix-sandbox/',
+            NUXT_BUILD_VERSION: '2.3.4',
+        } as NodeJS.ProcessEnv)).toBe('registry.example.com/team/dependfix-sandbox:2.3.4')
+        expect(resolveDefaultSandboxImage({
+            SANDBOX_IMAGE: '   ',
+            NUXT_BUILD_VERSION: '',
+        } as NodeJS.ProcessEnv)).toBe('caomeiyouren/dependfix-sandbox:latest')
+    })
+
+    it('falls back to latest when the build version is unknown, and honors an explicit tag', () => {
+        expect(resolveDefaultSandboxImage({ NUXT_BUILD_VERSION: 'unknown' } as NodeJS.ProcessEnv))
+            .toBe('caomeiyouren/dependfix-sandbox:latest')
+        expect(resolveDefaultSandboxImage({ NUXT_BUILD_VERSION: '2.3.4', SANDBOX_IMAGE_TAG: 'edge' } as NodeJS.ProcessEnv))
+            .toBe('caomeiyouren/dependfix-sandbox:edge')
+    })
+})
+
+describe('sandbox image failover', () => {
+    class ImageAwareAdapter implements RuntimeAdapter {
+        readonly name = 'image-aware'
+        readonly attempts: string[] = []
+        private readonly availability: boolean[]
+
+        constructor(availability: boolean[]) {
+            this.availability = [...availability]
+        }
+
+        async isAvailable(): Promise<boolean> {
+            return true
+        }
+
+        async ensureImage(image: string): Promise<boolean> {
+            this.attempts.push(image)
+            return this.availability.shift() ?? false
+        }
+
+        async run(spec: ContainerSpec): Promise<ContainerRunResult> {
+            this.attempts.push(`run:${spec.image}`)
+            return { stdout: '', stderr: '', exitCode: 0 }
+        }
+    }
+
+    it('falls back to the next registry when a candidate cannot be pulled', async () => {
+        const candidates = resolveSandboxImageCandidates()
+        const adapter = new ImageAwareAdapter([false, true])
+        const executor = new SandboxExecutor({
+            runtimeAdapter: adapter,
+            egress: { allowlist: ['github.com'] },
+            cloneBaseUrl: 'https://github.com',
+        })
+        await executor.execute(makeCtx())
+        // 逐源预检：首个失败 → 第二个成功 → 用第二个镜像启动容器
+        expect(adapter.attempts[0]).toBe(candidates[0])
+        expect(adapter.attempts[1]).toBe(candidates[1])
+        expect(adapter.attempts[2]).toBe(`run:${candidates[1]}`)
+    })
+
+    it('reports sandbox_image_unavailable when every candidate fails', async () => {
+        const adapter = new ImageAwareAdapter([false, false, false, false])
+        const executor = new SandboxExecutor({ runtimeAdapter: adapter })
+        const result = await executor.execute(makeCtx())
+        expect(result.error?.code).toBe('sandbox_image_unavailable')
+        expect(result.error?.message).toContain('已尝试')
+        expect(adapter.attempts.some((item) => item.startsWith('run:'))).toBe(false)
     })
 })

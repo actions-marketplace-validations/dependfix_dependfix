@@ -4,12 +4,12 @@
 
 1. CLI 参数
 2. 环境变量（`DEPENDFIX_*` + `GITHUB_TOKEN`）
-3. 配置文件（`dependfix.config.json` / `dependfix.config.yaml`，计划中 M4+）
+3. 配置文件（`dependfix.config.json` / `dependfix.config.yaml`，**尚未支持**）
 4. 默认值
 
 ## 全部配置项
 
-> **范围说明**：本节为 **CLI（`dependfix` 命令 / GitHub Action）** 的配置项。**管理平台（`apps/platform`）** 的环境变量（数据库 / 认证 / 队列 / 执行器沙箱 / 备份 / 通知等）见文末 [平台配置](#平台配置appsplatform) 段。
+> **范围说明**：本节为 **CLI（`dependfix` 命令 / GitHub Action）** 的配置项。**管理平台（`apps/platform`）** 的环境变量（数据库 / 认证 / 队列 / 执行器沙箱 / 备份 / 通知等）见文末 [平台配置](#平台配置-apps-platform) 段。
 
 | 配置项 | 环境变量 | 类型 | 默认值 | 说明 |
 |:-------|:---------|:-----|:-------|:-----|
@@ -25,6 +25,7 @@
 | `dryRun` | `DEPENDFIX_DRY_RUN` | `boolean` | `false` | 预演模式，不实际修改文件 |
 | `createPullRequest` | `DEPENDFIX_CREATE_PR` | `boolean` | `false` | 是否创建 PR（`fix-and-pr` 模式自动启用） |
 | `commit` | `DEPENDFIX_COMMIT` | `boolean` | `false` | 修复完成后在本地当前分支直接提交（仅 `fix` 模式生效；与 `--dry-run` / `--create-pr` 互斥） |
+| `push` | `DEPENDFIX_PUSH` | `boolean` | `false` | 提交后把当前分支推到远端（仅 `fix` 模式，配合 `commit`；不创建 PR）。容器路径由平台接管推送，**不要**在平台容器执行器上开启 |
 | `cleanupBranches` | `DEPENDFIX_CLEANUP_BRANCHES` | `boolean` | `false` | （fix-and-pr 模式）结束后将已合并的 dependfix 分支列入报告待清理清单（不自动删除；删除需 `cleanup-branches` 模式交互确认） |
 | `cleanupBranchesAuto` | `DEPENDFIX_CLEANUP_BRANCHES_AUTO` | `boolean` | `false` | （fix-and-pr 模式）结束后自动删除已合并/已关闭的 dependfix 分支（非交互；不删有 open PR 的分支） |
 | `githubToken` | `DEPENDFIX_GITHUB_TOKEN` / `GITHUB_TOKEN` | `string` | — | GitHub 认证 Token（`pnpm-audit` 数据源下可省略） |
@@ -32,7 +33,7 @@
 | `alertSource` | `DEPENDFIX_ALERTS_SOURCE` | `string` | `github-dependabot` | 告警数据源：`github-dependabot`（GitHub Dependabot alerts API）/ `pnpm-audit`（本地无 token 回退，扫描当前工作区 lockfile；repository 解析优先显式 `--repo` → git remote → `local` 兜底）。`pnpm-audit` 下不要求 token、不支持 `fix-and-pr` 模式与多个 `--repo`。详见 [pnpm audit fallback 设计](../design/modules/pnpm-audit-fallback.md) |
 | `codeScanningEnabled` | `DEPENDFIX_CODE_SCANNING` | `boolean` | `false` | 是否同时拉取 Code Scanning alerts（与 Dependabot **并行源**，非回退；默认关闭，行为与 M2 一致）。开启后 Dependabot + Code Scanning 并行拉取、互不覆盖；Code Scanning 告警默认不可自动修复（A/B/C 规则分层按规则启用）。需要 token 具备 `security-events: read` 权限（GITHUB_TOKEN 默认具备）；`pnpm-audit` 本地数据源下不可用。详见 [Code Scanning 设计](../design/modules/data-model.md) |
 | `overrideProtect` | `DEPENDFIX_OVERRIDE_PROTECT` | `string` | — | overrides 保护名单（**按仓库粒度**）：`repo-glob:pkg1,pkg2;repo-glob2:pkg3`。命中时 dependfix **不写入**该包的 override，并记 `OVERRIDE_PROTECTED` 审计（防历史上被人工移除的破坏性 override 复发，实证 PR #1095）。仓库 glob 与 `repo-include/exclude` 同语义（单星号不跨斜杠，全局兜底需写两段通配）。详见 [overrides 保护名单设计](../design/governance/override-protect-policy.md)；该名单也可由目标仓库在 `.github/dependfix.yml` 中声明（**中央配置优先**：中央一旦指定即整体忽略仓库声明，防目标仓库绕过；见 [修复器设计 §12.7](../design/modules/dependency-fixer-records.md)） |
-| `allowMajorUpgrade` | **无 env 通道**（仅 CLI `--allow-major-upgrade`） | `boolean` | `false` | 跨线告警（推荐版本跨大版本，当前线内无修复版本）显式授权自动升级：仅根 package.json 直接依赖（workspace 成员独占声明维持人工）且 lockfile 单版本的告警自动跨线升级，升级后复核脆弱实例消除、强制完整验证（install+lint+build+typecheck+test），失败自动回滚；间接依赖 / 多版本共存跨线告警维持人工处理。**刻意不提供 `DEPENDFIX_ALLOW_MAJOR_UPGRADE` 环境变量**（配合 action.yml 不暴露 input → GitHub Action 结构性禁用，防止 CI 自动跨线引发意外破坏）。风险详见 [quick-start.md 跨大版本升级章节](../guide/quick-start.md) |
+| `allowMajorUpgrade` | **无 env 通道**（仅 CLI `--allow-major-upgrade`；平台新建仓库默认值见 `NUXT_PUBLIC_ALLOW_MAJOR_UPGRADE_DEFAULT`（运行期）） | `boolean` | `false` | 跨线告警（推荐版本跨大版本，当前线内无修复版本）显式授权自动升级：仅根 package.json 直接依赖（workspace 成员独占声明维持人工）且 lockfile 单版本的告警自动跨线升级，升级后复核脆弱实例消除、强制完整验证（install+lint+build+typecheck+test），失败自动回滚；间接依赖 / 多版本共存跨线告警维持人工处理。**刻意不提供 `DEPENDFIX_ALLOW_MAJOR_UPGRADE` 环境变量**（配合 action.yml 不暴露 input → GitHub Action 结构性禁用，防止 CI 自动跨线引发意外破坏）。风险详见 [quick-start.md 跨大版本升级章节](../guide/quick-start.md) |
 | `maxAlertsPerRepository` | `DEPENDFIX_MAX_ALERTS_PER_REPOSITORY` | `number` | `20` | 每仓库最大告警处理数 |
 | `maxConcurrency` | `DEPENDFIX_MAX_CONCURRENCY` | `number` | `1` | 多仓库并发窗口（1-16，默认 1 保守串行）。`>1` 时输出警告（可能触发 GitHub 限流）；**仅 `report-only` 模式允许并发**——`fix` / `fix-and-pr` 共享单一 workDir，并发写存在快照覆盖 / 互踩回滚 / install 竞争，配置校验 fail-fast 拒绝 |
 | `maxRetries` | `DEPENDFIX_MAX_RETRIES` | `number` | `3` | GitHub API 限流重试次数（0-10；0=关闭）。对 429 / primary rate limit（403 + remaining=0）/ secondary rate limit（403/429 特征）指数退避重试（reset 头优先，上限 30s）；权限类 403 不重试 |
@@ -41,13 +42,13 @@
 | `commands` | — | `string[]` | — | 自定义验证命令（仅 CLI `--commands`）；**整链替换**默认链，不做合并 |
 | `rollbackGranularity` | `DEPENDFIX_ROLLBACK_GRANULARITY` | `unit` / `repo` | `unit` | 验证失败回滚粒度：`unit` 回退最近一个已通过 probe 的变更单元并重验一次（保留更早单元）；`repo` 保持整仓 `git reset --hard` 逃生语义。对应 CLI `--rollback-granularity` |
 | `mirrorCiScripts` | `DEPENDFIX_MIRROR_CI_SCRIPTS` | `boolean` | `false` | 把目标仓库 CI 独有的 `pnpm` / `npm` / `yarn` 脚本追加到验证链（CLI `--mirror-ci-scripts`；Action `mirror-ci-scripts`）。开启后在默认链**之后**执行，最多 3 条、首失败即停；`docker build` / `gh` / 任意 shell 与非单一形态片段（flag / env 赋值 / 额外参数；install 类命令视为已覆盖）只记 `mirrorSkipped` 不执行；**只校验命令形态与脚本存在性，不审计脚本体**（脚本内命令与 `pre`/`post` 钩子照常执行）；与默认链共用同一超时（`DEPENDFIX_VERIFY_TIMEOUT_MS`）与运行级取消面，并同样纳入修复前基线采样（基线已红 → 既有失败，不回滚、不改 exit code）。显式 `commands` 整链替换，**不与 mirror 叠加**；平台沿用默认关闭。详见 [对外 PR 交付闭环设计 §5](../design/governance/pr-delivery-closure.md) |
-| `retryFailed` | `DEPENDFIX_RETRY_FAILED` | `boolean` | `false` | 忽略同告警尝试上限并强制再试（CLI `--retry-failed`；Action `retry-failed`）。仅 `fix-and-pr` 生效：同一告警 / 同一目标版本 / 同一修复策略连续两次关闭后，第 3 次起**不执行升级、不建 PR**，落 `alertsSkippedByReason['repeated-failure']`（报告 `Skipped: Repeated failure`）；开启后仍执行并在报告 `Repeated Failure Attempts` 段标注 `forced (manual retry)`。计数载体是 PR 正文 HTML 注释（只计未合并的关闭 PR，最近 50 条，读取失败 fail-open）；全部命中时与零告警仓库同语义（不采样修复前基线）。详见 [对外 PR 交付闭环设计 §6](../design/governance/pr-delivery-closure.md#6-m483-同告警尝试指纹去重) |
-| `onBaselineRed` | `DEPENDFIX_ON_BASELINE_RED` | `skip` / `issue` / `draft` | `skip` | 修复后安装验证仍为既有失败（基线红）时的交付降级档位。`skip` 回滚并留痕（默认，行为与引入前一致）；`issue` 按「仓库集 + 失败命令集」指纹开 issue（同一指纹只开一次，关闭后不重开，需 `issues: write`），改动仍回滚；`draft` 不回滚，照常提交并创建**草稿** PR（正文带既有失败说明，`--wait-pr-checks` 不等待）。仅 `fix-and-pr` 生效；平台执行链只记录 `summary.deliverySkipped` 并在运行列表 / 详情展示「交付跳过」。三档均不改变 exit code（`PRE_EXISTING_FAILURE` 仍在跳过类白名单）。详见 [对外 PR 交付闭环设计 §16](../design/governance/pr-delivery-closure.md#16-m514-基线红--安装失败的交付降级2026-10-30) |
-| `waitPrChecks` | `DEPENDFIX_WAIT_PR_CHECKS` | `boolean` | `false` | 创建 PR 后等待 check 终态（CLI `--wait-pr-checks`；Action `wait-pr-checks`）。仅 `fix-and-pr` 生效：失败时默认评论失败 job 名 + URL + 尝试标记；宽限期（≥60s 且至少两轮）后仍无 check → `no_ci_detected`，**绝不判通过**；轮询 / 评论 / 关闭失败只记录，不改变修复结果与 exit code。详见 [对外 PR 交付闭环设计 §8](../design/governance/pr-delivery-closure.md#8-m485-pr-创建后-ci-回环cliaction-侧) |
+| `retryFailed` | `DEPENDFIX_RETRY_FAILED` | `boolean` | `false` | 忽略同告警尝试上限并强制再试（CLI `--retry-failed`；Action `retry-failed`）。仅 `fix-and-pr` 生效：同一告警 / 同一目标版本 / 同一修复策略连续两次关闭后，第 3 次起**不执行升级、不建 PR**，落 `alertsSkippedByReason['repeated-failure']`（报告 `Skipped: Repeated failure`）；开启后仍执行并在报告 `Repeated Failure Attempts` 段标注 `forced (manual retry)`。计数载体是 PR 正文 HTML 注释（只计未合并的关闭 PR，最近 50 条，读取失败 fail-open）；全部命中时与零告警仓库同语义（不采样修复前基线）。详见 [对外 PR 交付闭环设计 §6](../design/governance/pr-delivery-closure.md#_6-m48-3-同告警尝试指纹去重) |
+| `onBaselineRed` | `DEPENDFIX_ON_BASELINE_RED` | `skip` / `issue` / `draft` | `skip` | 修复后安装验证仍为既有失败（基线红）时的交付降级档位。`skip` 回滚并留痕（默认，行为与引入前一致）；`issue` 按「仓库集 + 失败命令集」指纹开 issue（同一指纹只开一次，关闭后不重开，需 `issues: write`），改动仍回滚；`draft` 不回滚，照常提交并创建**草稿** PR（正文带既有失败说明，`--wait-pr-checks` 不等待）。仅 `fix-and-pr` 生效；平台执行链只记录 `summary.deliverySkipped` 并在运行列表 / 详情展示「交付跳过」。三档均不改变 exit code（`PRE_EXISTING_FAILURE` 仍在跳过类白名单）。详见 [对外 PR 交付闭环设计 §16](../design/governance/pr-delivery-closure.md#_16-m51-4-基线红-安装失败的交付降级-2026-10-30) |
+| `waitPrChecks` | `DEPENDFIX_WAIT_PR_CHECKS` | `boolean` | `false` | 创建 PR 后等待 check 终态（CLI `--wait-pr-checks`；Action `wait-pr-checks`）。仅 `fix-and-pr` 生效：失败时默认评论失败 job 名 + URL + 尝试标记；宽限期（≥60s 且至少两轮）后仍无 check → `no_ci_detected`，**绝不判通过**；轮询 / 评论 / 关闭失败只记录，不改变修复结果与 exit code。详见 [对外 PR 交付闭环设计 §8](../design/governance/pr-delivery-closure.md#_8-m48-5-pr-创建后-ci-回环-cli-action-侧) |
 | `closeFailedPr` | `DEPENDFIX_CLOSE_FAILED_PR` | `boolean` | `false` | check 失败且聚合归因 `self_caused` 时关闭 PR 并删除分支（CLI `--close-failed-pr`；Action `close-failed-pr`）。需同时开启 `waitPrChecks`（配置校验拒绝单独开启）；`unknown` / `external_noise` / `pre_existing` 只评论不关闭，混合归因按 `unknown` 处理 |
-| `prCheckTimeoutMs` | `DEPENDFIX_PR_CHECK_TIMEOUT_MS` | `number` | `900000` | 单个 PR 的 check 等待上限（毫秒；60000-1800000）。超时记 `checksTimedOut`，保留 PR 交给后续运行 / 平台 |
-| `prCheckRunBudgetMs` | `DEPENDFIX_PR_CHECK_RUN_BUDGET_MS` | `number` | `1200000` | 运行级等待总预算（毫秒；60000-1800000），实际等待还受「剩余 job 预算 × 70%」约束 |
-| `jobBudgetMs` | `DEPENDFIX_JOB_BUDGET_MS` | `number` | 未设置 | job 总预算基线（毫秒；60000-7200000）。缺省只在 `GITHUB_ACTIONS=true` 时按 25 分钟套用（与 `security-auto-fix.yml` 的 `timeout-minutes` 对齐）；本地 / 平台执行不臆造 job 上限，显式设置后按其折算。注意 `startedAt` 从引擎启动计起，不含 Actions setup 步骤耗时 |
+| `prCheckTimeoutMs` | `DEPENDFIX_PR_CHECK_TIMEOUT_MS` | `number \| duration` | `900000` | 单个 PR 的 check 等待上限（毫秒；60000-1800000）。支持 `15m` 等写法。超时记 `checksTimedOut`，保留 PR 交给后续运行 / 平台 |
+| `prCheckRunBudgetMs` | `DEPENDFIX_PR_CHECK_RUN_BUDGET_MS` | `number \| duration` | `1200000` | 运行级等待总预算（毫秒；60000-1800000），支持 `20m` 等写法；实际等待还受「剩余 job 预算 × 70%」约束 |
+| `jobBudgetMs` | `DEPENDFIX_JOB_BUDGET_MS` | `number \| duration` | 未设置 | job 总预算基线（毫秒；60000-7200000），支持 `25m` / `1h` 等写法。缺省只在 `GITHUB_ACTIONS=true` 时按 25 分钟套用（与 `security-auto-fix.yml` 的 `timeout-minutes` 对齐）；本地 / 平台执行不臆造 job 上限，显式设置后按其折算。注意 `startedAt` 从引擎启动计起，不含 Actions setup 步骤耗时 |
 | `history` | —（仅 CLI `--history`） | `string` | — | 查询仓库历史运行摘要（读 `dependfix-reports/index.json`，倒序时间，计数为仓库级口径），**不执行扫描**、不要求 token/仓库配置；与运行参数并存时 history 优先、其余参数忽略 |
 
 ## GitHub 认证 Token 权限映射
@@ -121,7 +122,7 @@
 
 ### 特殊场景
 
-- **GitHub Actions 内运行**：默认 `secrets.GITHUB_TOKEN` 自带 Contents:Write + Pull requests:Write，但**无 Dependabot alerts:Read**（详见 [roadmap.md M2 段](../plan/roadmap.md)，或 [archive/todo-archive-phases-m2-m55.md G2 处置记录](../plan/archive/todo-archive-phases-m2-m55.md#g2-处置记录github_token-无法访问-dependabot-alerts)）。两种方案：
+- **GitHub Actions 内运行**：默认 `secrets.GITHUB_TOKEN` 自带 Contents:Write + Pull requests:Write，但**无 Dependabot alerts:Read**（详见 [roadmap.md M2 段](../plan/roadmap.md)，或 [archive/todo-archive-phases-m2-m55.md G2 处置记录](../plan/archive/todo-archive-phases-m2-m55.md#g2-处置记录-github-token-无法访问-dependabot-alerts)）。两种方案：
   1. 额外配置 `DEPENDFIX_ALERTS_TOKEN` 使用 Fine-grained PAT（仅 Dependabot alerts:Read，最小权限）
   2. 切换到 `pnpm-audit` 数据源（`DEPENDFIX_ALERTS_SOURCE=pnpm-audit`，不依赖 token 读 alerts）
 - **SAML SSO 组织**：classic PAT 需在 GitHub 网页对组织逐个 **Enable SSO**；Fine-grained PAT 需组织管理员在 org 设置中预授权仓库范围。私有 org 仓库仅返回 token 可见范围内的仓库——`--owner` 发现不保证覆盖全部私有仓库，需按仓库授权
@@ -166,7 +167,7 @@ curl -X POST -H "Authorization: Bearer $GITHUB_TOKEN" \
 |:---|:---|:---|
 | `403 / Resource not accessible by integration` | Token 缺 `Dependabot alerts: Read` 或仓库不在 token 范围 | 重新创建 PAT，确认勾选 Dependabot alerts:Read + 仓库授权 |
 | `401 / Bad credentials` | Token 过期 / 撤销 / 拼写错误 | 重新生成 + 核对 `ghp_xxx` / `github_pat_xxx` 前缀 |
-| `git push` 卡在 `Username for 'https://github.com':` | 缺 HTTPS credential；dependfix 用 `stdio: 'pipe'`（详见 [engine/src/github/pr-creator.ts:201](../../packages/engine/src/github/pr-creator.ts)）导致 stdin 不可达 → 永久挂起 | 设置 `GITHUB_TOKEN` 环境变量或配置 git credential helper（不推荐交互式输入） |
+| `git push` 卡在 `Username for 'https://github.com':` | 缺 HTTPS credential；dependfix 用 `stdio: 'pipe'`（详见 [engine/src/runners/process-control.ts](../../packages/engine/src/runners/process-control.ts)）导致 stdin 不可达 → 永久挂起 | 设置 `GITHUB_TOKEN` 环境变量或配置 git credential helper（不推荐交互式输入） |
 | `pulls.create` 报 `422 Validation Failed: head` | token 缺 Contents:Write 或分支已存在 | 升级 Contents:Read+write 或换不同分支名 |
 | `secondary rate limit` 403/429 | 短时间内高频 API 调用 | 调整 `DEPENDFIX_MAX_CONCURRENCY`（默认 1 保守串行）+ `DEPENDFIX_MAX_RETRIES`（默认 3 次指数退避）|
 
@@ -193,7 +194,7 @@ curl -X POST -H "Authorization: Bearer $GITHUB_TOKEN" \
 
 ## 配置文件示例
 
-> **计划中（M4+）**：配置文件支持尚未实现，当前仅支持 CLI 参数和环境变量。
+> **尚未支持**：配置文件加载器未实现、也未排期，当前仅支持 CLI 参数和环境变量。
 
 ```yaml
 # dependfix.config.yaml
@@ -216,6 +217,7 @@ export DEPENDFIX_REPOSITORIES=owner/repo-a,owner/repo-b
 export DEPENDFIX_DRY_RUN=true
 export DEPENDFIX_MAX_ALERTS_PER_REPOSITORY=20
 export DEPENDFIX_COMMIT=false
+export DEPENDFIX_PUSH=false
 export DEPENDFIX_CLEANUP_BRANCHES=false
 # M4 多仓库治理（可选）
 # owner 级自动发现（与 DEPENDFIX_REPOSITORIES 合并去重，显式优先）
@@ -245,10 +247,13 @@ export DEPENDFIX_RETRY_FAILED=false
 # 基线红（修复后安装仍既有失败）的交付降级：skip（默认）/ issue / draft
 # export DEPENDFIX_ON_BASELINE_RED=skip
 # 单条验证命令超时（默认 10 分钟；默认链与 CI 镜像脚本共用，默认链内的 pnpm install 仍按本条计时；修复器安装链超时不受影响）
-# export DEPENDFIX_VERIFY_TIMEOUT_MS=600000
+# 支持纯数字毫秒或 10m / 90s 等单位写法
+# export DEPENDFIX_VERIFY_TIMEOUT_MS=10m
 ```
 
 > `GITHUB_TOKEN` 环境变量会被自动识别，无需额外配置前缀。`DEPENDFIX_GITHUB_TOKEN` 优先级高于 `GITHUB_TOKEN`。
+
+> **沙箱自包含产物**：`DEPENDFIX_SKILLS_DIR` 指定包含 `dependfix-remediator` 的 skills 根目录（镜像内默认 `/app/sandbox/skills`）。仅供沙箱 bundle / 无 `node_modules` 环境覆盖 skill 解析，普通 CLI 安装无需设置。
 
 ## 平台配置（apps/platform）
 
@@ -259,8 +264,8 @@ export DEPENDFIX_RETRY_FAILED=false
 - **完整部署步骤**：见 [Docker 部署](./deployment.md)。
 
 > ⚠️ **注入方式（关键）**：默认 `docker-compose.yml` **无 `env_file`**，仅把一组白名单变量经 `${...}` 插值转发进容器（**compose 名 → 容器名**）：
-> `PORT` · `PUID`/`PGID` · `AUTH_SECRET`→`NUXT_AUTH_SECRET` · `DATABASE_PATH` · `DATABASE_MIGRATIONS_RUN` · `NUXT_ENCRYPTION_KEY` · `REGISTRATION_DISABLED`→`NUXT_REGISTRATION_DISABLED` · `NUXT_PUBLIC_BETTER_AUTH_URL` · `NUXT_REDIS_URL`（硬编码） · `QUEUE_ENABLED`/`QUEUE_JOB_RETRIES`/`QUEUE_BACKOFF_MS`→`NUXT_*` · `QUEUE_WORKER`→`DEPENDFIX_QUEUE_WORKER` · `IN_PROCESS_WORKER`→`NUXT_IN_PROCESS_WORKER` · `PNPM_CONFIG_STORE_DIR` · `LOG_DIR`/`LOG_LEVEL`/`LOGFILES` · `DEPENDFIX_IMAGE`/`DEPENDFIX_BUILD_IMAGE`。
-> 下方表中**白名单之外**的变量（邮件 / OAuth / OIDC / `AUTH_MODE` / `DATABASE_TYPE|URL|SSL|SYNCHRONIZE` / `BACKUP_*` / `RUN_WORK_ROOT` / `SANDBOX_*` / `DEPENDFIX_AI_*` / `ACTION_STATUS_MONITOR_ENABLED` / 通知类等）**默认不会进容器**，需自行追加到 compose 的 `environment:`（Nuxt runtimeConfig 变量须用 `NUXT_` 前缀）或用 `docker run -e` 注入。
+> `PORT` · `PUID`/`PGID` · `AUTH_SECRET`→`NUXT_AUTH_SECRET` · `DATABASE_PATH` · `DATABASE_MIGRATIONS_RUN` · `NUXT_ENCRYPTION_KEY` · `REGISTRATION_DISABLED`→`NUXT_REGISTRATION_DISABLED` · `NUXT_PUBLIC_BETTER_AUTH_URL` · `NUXT_REDIS_URL`（硬编码） · `QUEUE_ENABLED`/`QUEUE_JOB_RETRIES`/`QUEUE_BACKOFF_MS`→`NUXT_*` · `QUEUE_WORKER`→`DEPENDFIX_QUEUE_WORKER` · `DEPENDFIX_QUEUE_WORKER_SLOW_RETRY_SECONDS` · `IN_PROCESS_WORKER`→`NUXT_IN_PROCESS_WORKER` · `STALE_CLEANUP_RUNNING_GRACE_MS`/`STALE_CLEANUP_PENDING_GRACE_MS` · `PNPM_CONFIG_STORE_DIR` · `LOG_DIR`/`LOG_LEVEL`/`LOGFILES` · `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`/`SMTP_FROM`→`NUXT_SMTP_*` · `SANDBOX_IMAGE`/`SANDBOX_IMAGE_REPO`/`SANDBOX_IMAGE_TAG`/`SANDBOX_IMAGE_PULL_TIMEOUT_MS`/`SANDBOX_CLONE_BASE_URL`/`DEPENDFIX_ALLOWED_DOMAINS` · `DEPENDFIX_IMAGE`/`DEPENDFIX_BUILD_IMAGE`。
+> 下方表中**白名单之外**的变量（OAuth / OIDC / `AUTH_MODE` / `DATABASE_TYPE|URL|SSL|SYNCHRONIZE` / `BACKUP_*` / `RUN_WORK_ROOT` / `SANDBOX_RUNTIME` / `DEPENDFIX_AI_*` / `ACTION_STATUS_MONITOR_ENABLED` / 通知类等）**默认不会进容器**，需自行追加到 compose 的 `environment:`（Nuxt runtimeConfig 变量须用 `NUXT_` 前缀）或用 `docker run -e` 注入。
 >
 > ⚠️ **Nuxt 运行时覆盖前缀**：平台是 Nuxt 应用，`runtimeConfig` 运行时覆盖**只认 `NUXT_` 前缀**——compose 变量 `AUTH_SECRET` → 容器 `NUXT_AUTH_SECRET`；`REGISTRATION_DISABLED` → `NUXT_REGISTRATION_DISABLED`。构建期烘焙的 env（如 `AUTH_MODE`）运行期须用 `NUXT_` 前缀覆盖，否则静默回退默认值。直读 `process.env` 的服务端变量（`DATABASE_*` / `CLONE_*` / `DEPENDFIX_*` 等）按原名注入。
 
@@ -274,6 +279,8 @@ export DEPENDFIX_RETRY_FAILED=false
 | `NUXT_PUBLIC_BETTER_AUTH_URL` | 建议（反代 / HTTPS 必填） | `http://localhost:3000` | 对外访问地址；OAuth 回调与 better-auth `trustedOrigins` 收紧依赖它（未设置走通配兜底） |
 | `NUXT_PUBLIC_BASE_URL` | — | 空 | 兼容旧变量名（`trustedOrigins` 读取回退）；新部署统一用 `NUXT_PUBLIC_BETTER_AUTH_URL` |
 | `NUXT_PUBLIC_DEFAULT_BRANCH` / `DEFAULT_BRANCH` | — | `main` | 新建仓库默认分支（构建期注入） |
+| `NUXT_PUBLIC_ALLOW_MAJOR_UPGRADE_DEFAULT` | — | `false` | 新建仓库「允许跨大版本升级」开关默认值（**运行期**生效；需自行加入 compose `environment:`，白名单外变量不会自动转发）。仅影响新建仓库，既有仓库保持原值；不改变引擎 CLI / Action 的显式 `--allow-major-upgrade` 通道 |
+| `ALLOW_MAJOR_UPGRADE_DEFAULT` | — | `false` | 同上（仅**构建期**生效：构建镜像时注入，运行期设置无效） |
 | `MACHINE_ID` | — | 进程 PID % 1024 | 雪花 ID 机器 ID（0-1023）；多实例建议显式指定 |
 
 ### 数据库与备份
@@ -309,7 +316,12 @@ export DEPENDFIX_RETRY_FAILED=false
 
 | 变量 | 必填 | 默认值 | 说明 |
 |:---|:---:|:---|:---|
-| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` | — | 空 / `587` | 配置后启用邮箱验证与密码重置；未配置自动跳过 |
+| `SMTP_*`（compose 插值名）→ 容器 `NUXT_SMTP_*` | — | 空 / `587` | 配置后启用邮箱验证与密码重置；未配置自动跳过。**运行时覆盖只认 `NUXT_SMTP_*`**（裸 `SMTP_*` 只在构建期求值，容器内注入无效）；是否启用由 `smtpHost` 是否非空在运行时派生，无独立开关变量 |
+
+> ⚠️ **启用顺序（存量账号）**：邮箱验证一旦启用，`email_verified = false` 的存量账号登录会直接返回 `EMAIL_NOT_VERIFIED`（403）。
+> 注入 `NUXT_SMTP_HOST` 前须先二选一：① 先上线「未验证邮箱自助恢复」（登录页重发验证邮件）；② 由 DBA 备份后直接更新存量账号的 `user.email_verified`（属运维兜底，非产品能力，平台不提供手动置位）。
+> **生效前提**：新镜像 + 新 `docker-compose.yml`（5 项 `NUXT_SMTP_*` 转发）**同时到位**；只换镜像而沿用旧 compose，`.env` 里的 `SMTP_*` 仍不会进容器（表现为症状完全不变）。
+> **回滚**：移除 `NUXT_SMTP_HOST` 即回到「不强制验证」（派生值转 false）。旧镜像的开关在构建期被烘焙为 false，需重建镜像后才会按 host 派生。
 
 ### 扫描队列与 Redis
 
@@ -317,29 +329,37 @@ export DEPENDFIX_RETRY_FAILED=false
 |:---|:---:|:---|:---|
 | `REDIS_URL` | — | `redis://127.0.0.1:6379` | BullMQ 队列；Redis 可达 + 版本 ≥ 5.0 + 有消费者时异步，否则降级同步。默认 compose 将容器内 `NUXT_REDIS_URL` 硬编码为 `redis://redis:6379`（指向内置 redis），本变量仅自行编排 / 直连进程时生效 |
 | `QUEUE_ENABLED` | — | `auto` | `auto` / `true`（强制异步）/ `false`（强制同步）。compose 白名单内（→ `NUXT_QUEUE_ENABLED`） |
-| `QUEUE_JOB_RETRIES` / `QUEUE_BACKOFF_MS` | — | 空 | 队列任务重试次数 / 退避毫秒（compose 白名单内 → `NUXT_*`） |
+| `QUEUE_JOB_RETRIES` / `QUEUE_BACKOFF_MS` | — | 空 | 队列任务重试次数 / 退避时长（`5000` 或 `5s`；compose 白名单内 → `NUXT_*`） |
 | `QUEUE_WORKER` → `DEPENDFIX_QUEUE_WORKER` | — | compose `1` / 入口 `0` | 独立 worker 进程消费队列（消除 BullMQ 锁续期失败）；`0` 回退单进程。⚠️ **compose 侧名为 `QUEUE_WORKER`** |
 | `DEPENDFIX_QUEUE_WORKER_SOCKET` | — | `/tmp/dependfix-queue-worker.sock` | worker 内部 socket 路径（白名单外，容器内名） |
 | `DEPENDFIX_QUEUE_WORKER_SLOW_RETRY_SECONDS` | — | `300` | worker 连续快速失败超上限后的慢重试间隔（秒，范围 1-3600，非法 / 0 回退 300）；不永久放弃重启，避免任务无声挂起。compose 已转发 |
-| `DEPENDFIX_ROLE` | — | 入口按进程注入（worker / server） | 进程角色：`worker` 跳过 HTTP-only 插件（周期清理 / 版本戳），避免重复 DB 查询与日志噪声；单进程形态由入口归一化为 `server`（等价于未设置：不跳过任何插件）；直连进程不设置。白名单外，容器内名；口径见 [platform.md §10.6](../standards/platform.md#106-队列执行进程隔离独立-worker-进程) |
+| `DEPENDFIX_ROLE` | — | 入口按进程注入（worker / server） | 进程角色：`worker` 跳过 HTTP-only 插件（周期清理 / 版本戳），避免重复 DB 查询与日志噪声；单进程形态由入口归一化为 `server`（等价于未设置：不跳过任何插件）；直连进程不设置。白名单外，容器内名；口径见 [设计稿 §9](../design/governance/executor-process-isolation.md#_9-队列执行进程隔离-运行时形态) |
 | `IN_PROCESS_WORKER` → `NUXT_IN_PROCESS_WORKER` | — | `true`（compose）/ `false`（直连进程） | 进程内 worker（单进程部署唯一消费者）；默认值以 compose 转发为准 |
-| `STALE_CLEANUP_INTERVAL_MS` | — | `300000` | 孤儿任务清理节拍（毫秒） |
-| `STALE_CLEANUP_RUNNING_GRACE_MS` | — | `300000` | running run 超过执行超时后的宽限期（毫秒，> 0；非法 / 0 回退默认）；超过即判 `orphan_run`。compose 已转发 |
-| `STALE_CLEANUP_PENDING_GRACE_MS` | — | `300000` | pending run 在「无消费者 / job 归属终态」时进入孤儿判定前的最短等待（毫秒，> 0；非法 / 0 回退默认）；无消费者分支额外要求 job 年龄 ≥ 2× 该值。compose 已转发 |
+| `STALE_CLEANUP_INTERVAL_MS` | — | `300000` | 孤儿任务清理节拍（毫秒；支持 `5m`） |
+| `STALE_CLEANUP_RUNNING_GRACE_MS` | — | `300000` | running run 超过执行超时后的宽限期（毫秒，> 0；支持 `5m`；非法 / 0 回退默认）；超过即判 `orphan_run`。compose 已转发 |
+| `STALE_CLEANUP_PENDING_GRACE_MS` | — | `300000` | pending run 在「无消费者 / job 归属终态」时进入孤儿判定前的最短等待（毫秒，> 0；支持 `5m`；非法 / 0 回退默认）；无消费者分支额外要求 job 年龄 ≥ 2× 该值。compose 已转发 |
 
 ### 执行器 / 沙箱 / 扫描
 
 | 变量 | 必填 | 默认值 | 说明 |
 |:---|:---:|:---|:---|
 | `RUN_WORK_ROOT` | — | `data/runs` | 运行工作根目录（clone / 执行产物） |
-| `EXECUTION_TIMEOUT_MS` | — | `1800000`（30 分钟） | 单仓库执行超时；容器执行器与队列 Worker 锁时长同源联动（`resolveExecutionTimeoutMs()`）。越界（< 1 分钟 / > 24 小时）/ 非法值回退默认 |
-| `DEPENDFIX_INSTALL_TIMEOUT_MS` | — | `300000`（5 分钟） | 安装类命令超时（引擎内依赖安装与锁文件修复链共用一处解析器）；越界（< 10 秒 / > 30 分钟）/ 非法值回退默认。超时后引擎按运行级取消终止子进程树 |
-| `DEPENDFIX_VERIFY_TIMEOUT_MS` | — | `600000`（10 分钟） | 验证链单命令超时（默认链与 CI 镜像脚本共用，**默认链内的 `pnpm install` 仍按本条计时**；修复器安装链的 `DEPENDFIX_INSTALL_TIMEOUT_MS` 不受影响）；严格正整数且落在 10 秒–30 分钟，越界 / 非法回退默认 |
-| `CLONE_TIMEOUT_MS` | — | `300000` | git clone 超时（毫秒） |
+| `EXECUTION_TIMEOUT_MS` | — | `1800000`（30 分钟） | 单仓库执行**全局默认**超时，支持 `30m` / `1h` 等写法；仓库可在「执行预算（高级）」覆盖，覆盖值受 `DEPENDFIX_MAX_EXECUTION_TIMEOUT_MS` 封顶约束。越界（< 1 分钟 / > 24 小时）/ 非法值回退默认 |
+| `DEPENDFIX_MAX_EXECUTION_TIMEOUT_MS` | — | `3600000`（60 分钟） | 执行上限**封顶值**（范围 30 分钟–4 小时，支持 `1h` / `90m`；越界回退默认）；队列 Worker 锁时长按该值同源（`lockRenewTime` 取半），env 变更需重启进程 |
+| `DEPENDFIX_INSTALL_TIMEOUT_MS` | — | `300000`（5 分钟） | 安装类命令超时（引擎内依赖安装与锁文件修复链共用一处解析器），支持 `5m` / `90s`；越界（< 10 秒 / > 30 分钟）/ 非法值回退默认。超时后引擎按运行级取消终止子进程树 |
+| `DEPENDFIX_VERIFY_TIMEOUT_MS` | — | `600000`（10 分钟） | 验证链单命令超时（默认链与 CI 镜像脚本共用，**默认链内的 `pnpm install` 仍按本条计时**；修复器安装链的 `DEPENDFIX_INSTALL_TIMEOUT_MS` 不受影响）；支持 `10m` / `90s`，须落在 10 秒–30 分钟，越界 / 非法回退默认 |
+| `CLONE_TIMEOUT_MS` | — | `300000` | git clone 超时（毫秒；支持 `5m`） |
 | `CLONE_MAX_RETRIES` | — | `3` | clone 最大重试次数 |
 | `PNPM_CONFIG_STORE_DIR` | — | `/app/data/pnpm-store`（入口派生） | 目标仓库依赖安装共用的 pnpm store 目录：默认在数据卷内，跨 run / 容器重建复用。入口以**运行身份写探针**判定可用性（覆盖只读挂载）；不可用（只读 / 权限不足 / 非绝对路径）时 warn 并回退 `$HOME` 下 pnpm 默认位置（每次冷安装，不阻断）。自定义路径的父目录须对 `PUID`/`PGID` 可进入，且与 `RUN_WORK_ROOT` 同文件系统才走硬链接。清理用 `pnpm store prune`（见 [pnpm store 与依赖缓存](./deployment.md#pnpm-store-与依赖缓存)） |
 | `SANDBOX_RUNTIME` | — | `runc` | 沙箱 OCI runtime |
-| `SANDBOX_IMAGE` | — | `dependfix-platform:latest` | 沙箱镜像 |
+| `SANDBOX_IMAGE` | — | 候选首项（跟随平台 registry，回退 Docker Hub / ghcr / ACR） | 沙箱镜像完整引用（默认 slim 镜像，约 320MB；须在目标 rootless daemon 内可拉取 / 已存在）。仓库级 `sandboxImage` 优先于此值 |
+| `SANDBOX_IMAGE_REPO` | — | 跟随平台 registry，回退 Docker Hub → ghcr → ACR | 未设 `SANDBOX_IMAGE` 时的镜像仓库（固定单一源；需要源码编译回退时用 `…/dependfix-sandbox-full`）。未设置时默认跟随平台 registry，再回退 Docker Hub / ghcr / ACR（ACR 置末以减少其负荷） |
+| `SANDBOX_IMAGE_TAG` | — | 平台构建版本；未知则 `latest` | 未设 `SANDBOX_IMAGE` 时的镜像 tag |
+| `SANDBOX_IMAGE_PULL_TIMEOUT_MS` | — | `300000` | 三源预检时单个镜像拉取上限（本地缺失才拉取；失败自动尝试下一源） |
+| `SANDBOX_CLONE_BASE_URL` | — | `https://github.com` | 沙箱 fix 的 clone 基地址（企业镜像 / 自建 GitLab / Gitee 用，**必须为 https**；仅对 `https://github.com` 注入凭据头，其它源匿名 clone）。**其 host 必须同时加入 `DEPENDFIX_ALLOWED_DOMAINS`**，否则运行判 `failed`（`sandbox_clone_host_not_allowed`） |
+| `DEPENDFIX_ALLOWED_DOMAINS` | — | 空（仅默认白名单） | 出站白名单追加域（逗号分隔，支持 `*.example.com`）；默认必需域为 github.com / api.github.com / *.npmjs.org。条目只写 host（不带协议与端口，`*.example.com` 表示子域）。换 clone 源时必须把该 host 追加进来 |
+| `DEPENDFIX_SANDBOX_ENTRY` | — | `/app/sandbox/bin.mjs` | 沙箱自包含 CLI 入口（仅本地联调 / 排障用） |
+| `DEPENDFIX_SANDBOX_SKILLS_DIR` | — | `/app/sandbox/skills` | 随 bundle 复制的 skills 根目录（仅排障用） |
 | `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` | — | 空 | 出站代理（引擎验证阶段） |
 | `DEPENDFIX_SUPPRESS_LOCAL_EXECUTION_WARNING` | — | `false` | 抑制「本地非容器执行」安全警告（仅本地排障） |
 | `ACTION_STATUS_MONITOR_ENABLED` | — | `false` | 依赖更新 PR check 状态监测总开关；启用前需 PAT credential + 有 PR 活动 |

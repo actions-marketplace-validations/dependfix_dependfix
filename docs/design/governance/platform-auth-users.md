@@ -2,7 +2,7 @@
 
 > 状态：✅ 设计定稿（2026-08-09，待 Review Gate 审计）
 > 任务归属：[archive/todo-archive-phases-m6-m7-t711.md §M7.1](https://github.com/dependfix/dependfix/blob/master/docs/plan/archive/todo-archive-phases-m6-m7-t711.md#m71-认证与用户体系已归档) T701（RBAC + 用户管理 + 个人界面）与 T707（认证扩展；M7 阶段已 2026-08-12 归档）
-> 关联文档：[architecture.md 认证/国际化节](architecture-platform.md)、[security.md](security.md)、[M7 规划定稿（2026-08-09，详见 archive/todo-archive-phases-m6-m7-t711.md §M6 规划决策）](../../plan/archive/todo-archive-phases-m6-m7-t711.md#m6-最小平台-mvp已归档)
+> 关联文档：[architecture.md 认证/国际化节](architecture-platform.md)、[security.md](security.md)、[M7 规划定稿（2026-08-09，详见 archive/todo-archive-phases-m6-m7-t711.md §M6 规划决策）](../../plan/archive/todo-archive-phases-m6-m7-t711.md#m6-最小平台-mvp-已归档)
 
 ## 1. 背景与目标
 
@@ -111,7 +111,7 @@ Account / Session / Verification（better-auth 标准，不变）
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | public | Google OAuth；未配置自动隐藏 |
 | `OIDC_DISCOVERY_URL` / `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | enterprise | OIDC SSO（支持 `OIDC_ISSUER` / `OIDC_AUTHORIZATION_URL` / `OIDC_TOKEN_URL` / `OIDC_USERINFO_URL` / `OIDC_SCOPES` 覆盖，兼容无 discovery 的 IdP） |
 
-> runtimeConfig 私有侧挂载（`authMode` / `allowedEmailDomains` / `blockedEmailDomains` / `oidc.*` / `github.*` / `google.*`），与现有 `authSecret` / `smtpEnabled` / `registrationDisabled` 并列；生产禁止默认密钥校验延续 `assertAuthSecret`。
+> runtimeConfig 私有侧挂载（`authMode` / `allowedEmailDomains` / `blockedEmailDomains` / `oidc.*` / `github.*` / `google.*`），与现有 `authSecret` / `smtpHost` / `registrationDisabled` 并列；生产禁止默认密钥校验延续 `assertAuthSecret`。
 
 ## 6. API 与权限守卫
 
@@ -164,12 +164,16 @@ REGISTRATION_DISABLED=true: 拒绝所有注册渠道——邮箱密码路径由
 |---|---|
 | `login.vue` | 按 `AUTH_MODE` 展示登录方式（enterprise：邮箱密码 + OIDC 按钮；public：邮箱密码 + GitHub/Google 按钮）；未配置方式自动隐藏（服务端注入 `authOptions` 到 `useRuntimeConfig().public`） |
 | `register.vue` | 展示注册策略提示（enterprise 白名单域提示）；`REGISTRATION_DISABLED` 时隐藏入口 |
-| `users.vue` **新增** | 用户管理（admin）：列表/搜索、启用/禁用、角色分配（Dropdown：admin/org_admin/viewer）；**全部经 `authClient.admin.*` 调用 admin 插件原生端点**（listUsers / setRole / banUser / unbanUser / removeUser，路由 `/api/auth/admin/*`），不新增自建代理 API |
+| `users.vue` **新增** | 用户管理（admin）：列表/搜索、启用/禁用、角色分配（Dropdown：admin/org_admin/viewer）、未验证邮箱状态标签（不提供代他人重发，见本节末说明）；**全部经 `authClient.admin.*` 调用 admin 插件原生端点**（listUsers / setRole / banUser / unbanUser / removeUser，路由 `/api/auth/admin/*`），不新增自建代理 API |
 | `settings.vue`（个人界面）**新增** | 个人资料（name/email 展示）、修改密码、邮箱修改、第三方账号绑定状态（public 模式展示 GitHub/Google 绑定/解绑；enterprise 展示 OIDC 绑定状态）、语言偏好占位（T708 联动点）；**全部经 `authClient.*` 调用 better-auth 原生端点**（updateUser / changePassword / changeEmail / listAccounts / unlinkAccount，路由 `/api/auth/*`），不新增自建代理 API |
 | `layouts/default.vue` | 导航按角色显示（admin 可见用户管理入口）；登录用户显示头像/姓名（含登出入口） |
 | `middleware/auth.ts` | 保留未登录跳转；页面级角色守卫（`definePageMeta` 扩展 `roles`，`middleware/auth.ts` 内校验 role） |
 
 > **原生端点优先原则**：个人界面与用户管理的所有操作均优先使用 better-auth 原生 API（`authClient.*` / `authClient.admin.*`），仅当 better-auth 无法完成任务时才新增自定义 API（对齐 momei 项目实践与 better-auth 官方文档建议）。
+
+**邮箱未验证的自助恢复（2026-11-13）**：启用邮箱验证（`smtpHost` 非空）后，未验证账号登录会被 better-auth 以 `FORBIDDEN / EMAIL_NOT_VERIFIED` 拒绝。前端按错误码分流——`isEmailNotVerifiedError` 命中时显示「邮箱尚未验证」并在同一错误块给出「重新发送验证邮件」，其余失败仍显示「邮箱或密码错误」，登录路径 429 单独提示「尝试过于频繁」；重发复用 better-auth `/send-verification-email`（限流 60s / 3 次，429 提示稍后再试），不新增后端端点。服务端开启 `emailVerification.sendOnSignIn`，登录被拒时自动补发一次（失败不影响 403 返回）。**管理端不提供代他人重发**：该端点在存在会话时要求 `session.user.email === body.email`（否则 400 `EMAIL_MISMATCH`），因此用户列表只展示未验证标签，引导用户到登录页自助恢复。**2026-11-13 用户决策**：手动置位 `email_verified` 不提供（保持无入口）；带操作者审计的管理端重发延后（方案逻辑待重新推敲），登记 [backlog](../../plan/backlog.md#延期-暂缓项) 暂缓项。
+
+**第三方登录按钮 UI 约定（2026-11-01）**：图标使用目标平台官方标识——GitHub mark（单色，`currentColor` 跟随明暗主题）、Google 四色「G」（不随主题改色）、OIDC 用通用盾牌；文案用品牌官方大小写（`使用 GitHub 登录` / `使用 Google 登录`），不直接回显 provider id；按钮基座用 `secondary` 描边态，不用 `ghost`（无边界时会与下方注册文本链接混淆）。按钮显隐由 `resolveSocialProviders` 先按 `authMode` 选出候选（public：GitHub / Google；enterprise：OIDC），再以 `public.githubAvailable` / `googleAvailable` / `oidcAvailable` 过滤；视觉回归的构建期布尔前提见 [测试规范 §6.15](../../standards/testing.md#_6-15-构建期布尔-本地-env-的测试前提)。
 
 ## 8. 迁移与兼容
 

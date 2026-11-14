@@ -21,6 +21,8 @@ export function createEmptyExecutionSummary(): ExecutionSummary {
 
 export * from './types'
 export * from './alert-outcomes'
+export * from './skipped-packages'
+export * from './network-audit-target'
 export * from './check-signals'
 export * from './ci-alignment'
 export * from './check-attribution'

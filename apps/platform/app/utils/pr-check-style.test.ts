@@ -1,7 +1,15 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { checkAttributionI18nKey, checkAttributionTone, conclusionTagTone, shouldShowAttribution } from './pr-check-style'
+import {
+    PR_CHECK_CONCLUSION_VALUES,
+    checkAttributionI18nKey,
+    checkAttributionTone,
+    conclusionTagTone,
+    prStateTagTone,
+    shouldShowAttribution,
+} from './pr-check-style'
+import { PR_CHECK_CONCLUSIONS } from '#server/entities/pr-check'
 
 describe('conclusionTagTone', () => {
     describe('danger（CI 异常失败）', () => {
@@ -44,6 +52,22 @@ describe('conclusionTagTone', () => {
     })
 })
 
+describe('PR_CHECK_CONCLUSION_VALUES', () => {
+    it('与服务端结论枚举逐值一致（client 常量不漂移）', () => {
+        expect([...PR_CHECK_CONCLUSION_VALUES]).toEqual([...PR_CHECK_CONCLUSIONS])
+    })
+})
+
+describe('prStateTagTone', () => {
+    it('open → success；merged → primary；closed / unknown → neutral', () => {
+        expect(prStateTagTone('open')).toBe('success')
+        expect(prStateTagTone('merged')).toBe('primary')
+        expect(prStateTagTone('closed')).toBe('neutral')
+        expect(prStateTagTone('unknown')).toBe('neutral')
+        expect(prStateTagTone('bogus')).toBe('neutral')
+    })
+})
+
 describe('checkAttributionTone', () => {
     it('self_caused 最危险；pre_existing / unknown 需人工确认；其余解释性中性', () => {
         expect(checkAttributionTone('self_caused')).toBe('danger')
@@ -71,6 +95,14 @@ describe('checkAttributionI18nKey', () => {
                 expect(value, `${locale}:${key}`).toEqual(expect.any(String))
             }
         }
+    })
+
+    it('五类归因映射到互不相同的键（防止把某类改指到另一类的文案）', () => {
+        const attributions = ['self_caused', 'pre_existing', 'external_noise', 'cancelled', 'unknown'] as const
+        const keys = attributions.map((attribution) => checkAttributionI18nKey(attribution))
+        expect(new Set(keys).size).toBe(attributions.length)
+        expect(checkAttributionI18nKey('self_caused')).toBe('prChecks.signalAttribution.selfCaused')
+        expect(checkAttributionI18nKey('external_noise')).toBe('prChecks.signalAttribution.externalNoise')
     })
 
     it('未知归因回退 unknown 键', () => {

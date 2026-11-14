@@ -1,23 +1,28 @@
 import type { RunResult } from '@dependfix/core'
+import type { DataSource } from 'typeorm'
 import { resolveScanRunOutcome, resolveScanRunState } from './scan-run-state'
 import { isTerminalScanRunStatus } from './scan-run-status'
 import { applyFailureClassification } from './run-failure-classify'
 import { withRepoLock } from './repo-lock'
 import { decryptToken, getEncryptionKey } from './credential.service'
 import { ContainerExecutor } from './executor/container-executor'
+import { SandboxExecutor } from './executor/sandbox-executor'
 import { ActionTriggerExecutor } from './executor/action-trigger-executor'
 import { ActionResultFetcher } from './executor/action-result-fetcher'
 import type { ExecutorResourceUsage, ScanExecutorContext } from './executor/types'
-import { notifyEnvEvent } from './notification'
 import { notifyRunTerminal } from './notification/run-notification.service'
-import type { NotificationEvent } from './notification/channel'
 import { reconcileAlerts } from './scan-reconcile'
+import { persistPostCompletionOutcome } from './scan-run-post-completion'
+import { cleanupFailedSandboxDelivery } from './sandbox-delivery-cleanup'
+import { recordEnvAuditEvent } from './env-audit-event'
+import { beginScanRunExecution } from './scan-run-start'
 import { resolveAiConfig } from './ai-config-resolver'
-import { Repository, parseVerifyCommands } from '#server/entities/repository'
+import { resolveExecutionLimits } from '#server/utils/execution-limits'
+import { buildRunSummarySnapshot } from '#server/utils/run-summary-snapshot'
+import { Repository, parseSandboxLimits, parseVerifyCommands } from '#server/entities/repository'
 import { Credential } from '#server/entities/credential'
 import { ScanRun } from '#server/entities/scan-run'
 import { Organization } from '#server/entities/organization'
-import { AuditEvent, type AuditEventType } from '#server/entities/audit-event'
 import { ensureDatabaseInitialized } from '#server/database'
 import { detectSigkill, unavailableResourceUsage } from '#server/utils/resource-usage'
 import { resolveRunBuildStamp } from '#server/utils/run-build-info'
@@ -29,7 +34,7 @@ import { logger } from '#server/utils/logger'
  * 流程：
  * 1. 读取 Repository + 关联 Credential（解密仅执行时内存）
  * 2. 按 executorKind 选择执行器（container 默认 / github-action 需配置 actionWorkflowFile；
- *    sandbox 入口临时关闭 → 强制 container + degraded）
+ *    sandbox 仅 report-only 真实执行，fix / fix-and-pr 降级 container + degraded）
  * 3. 执行 → 结果落库 ScanRun + ScanResult（原子写：失败不写半截结果）
  * 4. 回填 Repository.lastScanAt
  *
@@ -136,6 +141,80 @@ export const runScanForRepository = async (
     withRepoLock(repositoryId, () => runScanInternal(repositoryId, request, options))
 
 
+/**
+ * 终态写回（条件更新：仅 pending / running 可写）。
+ *
+ * 动机：`savedRun` 是执行开始时的快照，执行期间清理侧（stale-cleanup 孤儿回收 / 超时判定）
+ * 可能已把同一 run 条件更新为 `failed`。若此处用整行 `save`，迟到的 worker 会把终态覆盖回
+ * `completed`，导致「已被判失败并通知」的运行事后变绿（口径见
+ * [queue-stale-recovery.md](../../../../docs/design/governance/queue-stale-recovery.md)）。
+ *
+ * 语义：
+ * - 只写「终态迁移列」（结果快照 / 失败分类 / 日志 / 资源 / 时间戳），不整行覆盖；
+ *   **新增终态列时必须同步追加到下方 `.set()` 清单**——整行 `save` 的影子已消失，
+ *   漏列不会被既有断言发现（`prNumber` 等由用例锁定）。
+ * - `affected = 0`（库内已非 pending / running）→ 不改库，返回库内现存行 + `written = false`，
+ *   并输出结构化告警留审计痕迹（`run_terminal_write_skipped`）；调用方据此跳过终态通知，
+ *   避免与清理侧已发出的失败通知重复；
+ * - 成功时回读一行，保证返回值与库一致（`updatedAt` 等派生列）。
+ *
+ * 「留痕走进程日志而非 `audit_event`」：`AuditEvent` 的语义边界明确排除单次 run 结果
+ * （见 `entities/audit-event.ts` 顶部说明），终态写回冲突属单次运行的并发事实，故落平台
+ * 结构化日志通道。
+ */
+const persistRunTerminalState = async (
+    ds: DataSource,
+    run: ScanRun,
+): Promise<{ run: ScanRun, written: boolean }> => {
+    const runRepo = ds.getRepository(ScanRun)
+    const update = await runRepo.createQueryBuilder()
+        .update(ScanRun)
+        .set({
+            status: run.status,
+            finishedAt: run.finishedAt ?? null,
+            summaryJson: run.summaryJson ?? null,
+            errorJson: run.errorJson ?? null,
+            runUrl: run.runUrl ?? null,
+            exitCode: run.exitCode ?? null,
+            environmentalFailureCount: run.environmentalFailureCount ?? null,
+            memoryMaxBytes: run.memoryMaxBytes ?? null,
+            peakRssBytes: run.peakRssBytes ?? null,
+            oomKilled: run.oomKilled ?? null,
+            resourceJson: run.resourceJson ?? null,
+            failureCode: run.failureCode ?? null,
+            failureStage: run.failureStage ?? null,
+            failureKind: run.failureKind ?? null,
+            logsJson: run.logsJson ?? null,
+            prNumber: run.prNumber ?? null,
+            updatedAt: new Date(),
+        })
+        .where('id = :id', { id: run.id })
+        .andWhere('status IN (:...statuses)', { statuses: ['pending', 'running'] })
+        .execute()
+    // affected 缺省（部分驱动）按成功处理——与 stale-cleanup 的既有口径一致
+    if ((update.affected ?? 1) === 0) {
+        const current = await runRepo.findOne({ where: { id: run.id } })
+        logger.warn('[scan] run_terminal_write_skipped', {
+            runId: run.id,
+            repositoryId: run.repositoryId,
+            attemptedStatus: run.status,
+            observedStatus: current?.status ?? 'missing',
+        })
+        // 行已消失（仓库级联删除）时回落内存实体，但不视为已写回
+        return current
+            ? { run: current, written: false }
+            : { run, written: false }
+    }
+    return { run: (await runRepo.findOne({ where: { id: run.id } })) ?? run, written: true }
+}
+
+const notifyTerminalSafe = (run: ScanRun): void => {
+    void notifyRunTerminal(run).catch((notifyError) => {
+        logger.error('[notification] run terminal notify failed', { error: notifyError })
+    })
+}
+
+
 const runScanInternal = async (
     repositoryId: string,
     request: ScanRequest,
@@ -179,6 +258,13 @@ const runScanInternal = async (
     // 执行器选择：显式指定优先，其次按 actionWorkflowFile 自动（B 模式）
     const executorKind = resolveExecutorKind(repository, request)
 
+    // 仓库级执行预算与超时：仓库值 > env > 内置默认，执行上限受平台封顶约束；
+    // 解析在启动执行之前完成，快照随 scan_run 落库（stale-cleanup 据此逐 run 精判）。
+    const executionLimits = resolveExecutionLimits(repository, process.env)
+    for (const warning of executionLimits.warnings) {
+        logger.warn(`[execution-limits] ${repository.owner}/${repository.name}: ${warning}`)
+    }
+
     // 预创建/续用 ScanRun（队列模式续用 pending run；同步模式新建 running run——失败时更新为 failed 保持一条记录可追溯）
     let savedRun: ScanRun
     if (options?.runId) {
@@ -192,50 +278,51 @@ const runScanInternal = async (
         if (!options.reuse && isTerminalScanRunStatus(existing.status)) {
             throw new Error(`[scan] run ${existing.id} 已处于终态 ${existing.status}，跳过重复执行`)
         }
-        existing.status = 'running'
-        existing.startedAt = existing.startedAt ?? new Date()
-        // 构建版本回执随执行者刷新：队列续跑 / 用户复用都可能跨部署发生，
-        // 记录「本次实际执行者」而不是「最初入队者」
-        existing.buildVersion = buildStamp.buildVersion
-        existing.buildCommit = buildStamp.buildCommit
-        // reuse=true 时重置终态字段：让既有 record 复用为新执行的载体（finishedAt / errorJson /
-        // summaryJson 来自上一次执行，重置以避免新执行的 summaryJson 与旧 finishedAt 时间戳错位）
-        if (options.reuse) {
-            // per-alert 模型下不再需要清空该 run 的 ScanResult：reconcile 函数
-            // 会按 upstreamId 复用现有行（上游消失时 fixStatus='success' 不被 supersede，决策 1；
-            // 告警仍活跃时按本次结论覆盖）；
-            // 而新出现的告警会 INSERT；上游消失的告警会 supersede。
-            // 旧 ScanResult 行无需删除 —— 让 reconcile 自然处理。
-            // 注意：per-alert 模型之前 `resultRepo.delete({ scanRunId })` 是为避免"按 scanRunId JOIN
-            // 出现旧 + 新并存"——但 per-alert 模型下 ScanResult 不再按 scanRunId JOIN（每行是独立告警），
-            // 此删除逻辑已无意义。
-            existing.finishedAt = null
-            existing.errorJson = null
-            existing.summaryJson = null
-            existing.runUrl = null
-            // 复用既有记录时一并清空上次执行的失败分类（避免旧 stage/kind 残留到新执行）
-            existing.failureCode = null
-            existing.failureStage = null
-            existing.failureKind = null
-            // 运行结果可信度两列同属「上一次执行」快照，复用为本次执行载体时一并清空
-            existing.exitCode = null
-            existing.environmentalFailureCount = null
-            existing.memoryMaxBytes = null
-            existing.peakRssBytes = null
-            existing.oomKilled = null
-            existing.resourceJson = null
-            // 同时更新 mode / severityThreshold 以匹配本次请求（用户从 report-only 切到 fix）
-            existing.mode = request.mode
-            existing.severityThreshold = request.severityThreshold
-            existing.executorKind = executorKind
-            // 复用既有 run 作为新执行载体时，触发者更新为本次操作者（未提供则保留历史值）
-            existing.triggeredByUserId = options.triggeredByUserId ?? existing.triggeredByUserId
-            // reuse 时也刷新 AI 配置快照（apiKey 不写入快照；hasApiKey 标记替代）
-            existing.aiConfigSnapshot = aiConfigResolution.snapshot
-                ? JSON.stringify(aiConfigResolution.snapshot)
-                : null
+        // 起点写回走条件更新（见 scan-run-start.ts）：禁止整行 save 复活已被并发清理的终态
+        const observedStatus = existing.status
+        const startPatch: Partial<ScanRun> = {
+            startedAt: existing.startedAt ?? new Date(),
+            buildVersion: buildStamp.buildVersion,
+            buildCommit: buildStamp.buildCommit,
+            executionTimeoutMs: executionLimits.executionTimeoutMs,
         }
-        savedRun = await runRepo.save(existing)
+        if (options.reuse) {
+            Object.assign(startPatch, {
+                finishedAt: null,
+                errorJson: null,
+                summaryJson: null,
+                runUrl: null,
+                failureCode: null,
+                failureStage: null,
+                failureKind: null,
+                exitCode: null,
+                environmentalFailureCount: null,
+                memoryMaxBytes: null,
+                peakRssBytes: null,
+                oomKilled: null,
+                resourceJson: null,
+                mode: request.mode,
+                severityThreshold: request.severityThreshold,
+                executorKind,
+                triggeredByUserId: options.triggeredByUserId ?? existing.triggeredByUserId,
+                aiConfigSnapshot: aiConfigResolution.snapshot
+                    ? JSON.stringify(aiConfigResolution.snapshot)
+                    : null,
+            })
+        }
+        const startWrite = await beginScanRunExecution({
+            ds,
+            runId: existing.id,
+            observedStatus,
+            allowTerminalReuse: options.reuse === true,
+            patch: startPatch,
+        })
+        if (!startWrite.started || !startWrite.run) {
+            throw new Error(
+                `[scan] run ${existing.id} 起点状态已变化（${observedStatus} → ${startWrite.currentStatus ?? 'unknown'}），跳过重复执行`,
+            )
+        }
+        savedRun = startWrite.run
     } else {
         const run = runRepo.create({
             repositoryId: repository.id,
@@ -244,6 +331,7 @@ const runScanInternal = async (
             executorKind,
             status: 'running',
             startedAt: new Date(),
+            executionTimeoutMs: executionLimits.executionTimeoutMs,
             batchRunId: options?.batchRunId ?? null,
             retriedFromRunId: options?.retriedFromRunId ?? null,
             triggeredByUserId: options?.triggeredByUserId ?? null,
@@ -298,7 +386,8 @@ const runScanInternal = async (
             alertSource: 'github-dependabot',
             codeScanningEnabled: false,
             codeQualityEnabled: false,
-            allowMajorUpgrade: false,
+            // 仓库级跨大版本授权（默认关闭）：关闭时跨 major 告警记 cross-major 跳过
+            allowMajorUpgrade: repository.allowMajorUpgrade,
             // 验证失败回滚粒度（默认 unit）：平台不经过 resolveRuntimeConfig，需在此贯通 env 逃生开关
             rollbackGranularity,
             // 构建版本回执透传给引擎启动日志（`[build]` 行）：与落库两列同源
@@ -318,6 +407,13 @@ const runScanInternal = async (
 
     // 执行窗口资源快照：catch-all 也需保留已采集的真实值（不因后续落库失败清空审计事实）
     let resource: ExecutorResourceUsage | undefined
+    // 执行日志（container 由 MemoryLogger 输出 / sandbox 由 stdout+stderr 尾部回传）：声明在 try 外，
+    // 使 catch-all（reconcile / 落库抛错）也能把已采集的日志落库
+    let logsJson: string | undefined | null
+    let decision: ReturnType<typeof resolveScanRunState> | undefined
+    let decidedResult: RunResult | undefined
+    let decidedRunUrl: string | null = null
+    let degradedReason: { code: string, message: string } | undefined
     try {
         // 执行器路由
         let result: RunResult | undefined
@@ -327,18 +423,13 @@ const runScanInternal = async (
         // 引擎交付类 category 识别之外的进程级兜底（exitCode=2 + result 存在 → 标记 failed）。
         // B 模式（github-action）executor 不会透传 exitCode，保持 undefined。
         let exitCode: number | undefined
-        // 降级信号（todo.md §M11 T1005-C）：sandbox 启动时不可用 → 自动降级 ContainerExecutor → degradedReason 记录原 sandbox_unavailable
-        // 范围：try 块顶层，确保 decision 处理块可见（degraded 状态机决策的输入）
-        let degradedReason: { code: string, message: string } | undefined
-        // 执行日志（MemoryLogger 输出，仅 container 执行器支持）
-        let logsJson: string | undefined | null
-
         if (executorKind === 'github-action') {
             const executor = new ActionTriggerExecutor(token ?? '')
             const execResult = await executor.execute(ctx)
             result = execResult.result
             error = execResult.error
             runUrl = execResult.runUrl ?? null
+            resource = execResult.resource
 
             // 触发成功且定位到 run → 等待 action 完成并拉取报告回填（结果回填见 docs/design/governance/executor-sandbox.md §4）
             if (!error && execResult.runId) {
@@ -358,35 +449,59 @@ const runScanInternal = async (
                 }
             }
         } else {
+            // sandbox 路由：report-only 与 fix / fix-and-pr 都在容器内执行（fix 由容器内 CLI 的
+            // 运行级审计代理约束出站）；daemon 不可用时仍降级 container 并留 `sandbox_unavailable`。
+            let sandboxHandled = false
             if (executorKind === 'sandbox') {
-                // 2026-10-27 起 sandbox 入口临时关闭（用户裁定方案 A）：
-                // `SandboxExecutor.buildCmd` 仍为最小占位（回显 RunResult，不启动引擎），
-                // 直接调用会在 rootless Docker 可用时返回 0 告警假成功。这里强制降级到
-                // ContainerExecutor，并记录 degradedReason；真实引擎执行闭环后删除本分支、
-                // 恢复 sandbox 路由（docs/plan/backlog.md P1）。
-                degradedReason = {
-                    code: 'sandbox_entry_disabled',
-                    message: `独立沙箱容器暂不可用（真实执行尚未闭环），已自动降级到平台容器（${repository.owner}/${repository.name}）`,
+                const sandbox = new SandboxExecutor({
+                    // 仓库级镜像 > SANDBOX_IMAGE > 三源候选（平台 registry → Docker Hub → ghcr → ACR）
+                    ...(repository.sandboxImage?.trim() ? { image: repository.sandboxImage.trim() } : {}),
+                    sandboxLimits: parseSandboxLimits(repository.sandboxLimits),
+                    timeoutMs: executionLimits.executionTimeoutMs,
+                })
+                if (await sandbox.isAvailable()) {
+                    const execResult = await sandbox.execute(ctx)
+                    result = execResult.result
+                    error = execResult.error
+                    exitCode = execResult.exitCode
+                    logsJson = execResult.logsJson ?? null
+                    // 沙箱内自包含交付：runUrl / PR 编号来自结果契约（fix 直推为分支页，fix-and-pr 为 PR 地址）
+                    runUrl = execResult.runUrl ?? null
+                    savedRun.prNumber = execResult.prNumber ?? null
+                    resource = execResult.resource
+                    sandboxHandled = true
+                } else {
+                    degradedReason = {
+                        code: 'sandbox_unavailable',
+                        message: `沙箱执行器启动时不可用（无 rootless daemon / user namespace 受限），已自动降级到平台容器（${repository.owner}/${repository.name}）`,
+                    }
                 }
             }
-            const executor = new ContainerExecutor({
-                workRoot: process.env.RUN_WORK_ROOT ?? 'data/runs',
-            })
-            // 执行环境健康探测：container 无更底层回退，工作根不可写（磁盘满 / 只读 FS）
-            // 属「环境不可用」而非单次运行结果 → 记 container_unavailable 环境事件（recordEnvAuditEvent）
-            // 并让该 run failed（不进入 execute，避免以 execution_failed 掩盖环境根因）。
-            const execResult = await runContainerExecutor(executor, ctx)
-            result = execResult.result
-            error = execResult.error
-            exitCode = execResult.exitCode
-            resource = execResult.resource
-            // A 模式（container）：fix / fix-and-pr 完成后 executor 端推送修复分支，
-            // runUrl 指向 GitHub branch tree 页（参见 container-executor.pushFixBranch 后置）
-            runUrl = execResult.runUrl
-            // PR 回环反馈的观察态锚点（fix-and-pr 交付时非空，见 pr-feedback-loop.md §3）
-            savedRun.prNumber = execResult.prNumber ?? null
-            // 捕获执行日志（MemoryLogger 输出）
-            logsJson = execResult.logsJson
+            if (!sandboxHandled) {
+                const executor = new ContainerExecutor({
+                    workRoot: process.env.RUN_WORK_ROOT ?? 'data/runs',
+                    // 有效执行上限 / 验证命令 / 安装 / clone 超时：仓库值 > env > 默认，且已按封顶夹取
+                    timeoutMs: executionLimits.executionTimeoutMs,
+                    verifyCommandTimeoutMs: executionLimits.verifyCommandTimeoutMs,
+                    installTimeoutMs: executionLimits.installTimeoutMs,
+                    cloneTimeoutMs: executionLimits.cloneTimeoutMs,
+                })
+                // 执行环境健康探测：container 无更底层回退，工作根不可写（磁盘满 / 只读 FS）
+                // 属「环境不可用」而非单次运行结果 → 记 container_unavailable 环境事件（recordEnvAuditEvent）
+                // 并让该 run failed（不进入 execute，避免以 execution_failed 掩盖环境根因）。
+                const execResult = await runContainerExecutor(executor, ctx)
+                result = execResult.result
+                error = execResult.error
+                exitCode = execResult.exitCode
+                resource = execResult.resource
+                // A 模式（container）：fix / fix-and-pr 完成后 executor 端推送修复分支，
+                // runUrl 指向 GitHub branch tree 页（参见 container-executor.pushFixBranch 后置）
+                runUrl = execResult.runUrl
+                // PR 回环反馈的观察态锚点（fix-and-pr 交付时非空，见 pr-feedback-loop.md §3）
+                savedRun.prNumber = execResult.prNumber ?? null
+                // 捕获执行日志（MemoryLogger 输出）
+                logsJson = execResult.logsJson
+            }
         }
 
         // 落库（状态机决策见 scan-run-state.ts 纯函数）：
@@ -396,7 +511,9 @@ const runScanInternal = async (
         //   仅触发级失败（workflow 未配置/不存在/无权限等，action 未运行）→ failed
         // - sandbox 启动时降级（A 场景，详见 executor-sandbox-implementation.md §7.8）：degraded + summaryJson + runUrl + errorJson
         //   （业务结果完整，路径偏离；errorJson 保留 sandbox_unavailable 错误码便于审计）
-        const decision = resolveScanRunState(executorKind, error, result, degradedReason, exitCode)
+        decision = resolveScanRunState(executorKind, error, result, degradedReason, exitCode)
+        decidedResult = result
+        decidedRunUrl = runUrl
         // 运行结果可信度落库（纯函数映射）：exit_code 独立于终态；环境性失败计数只在有 result 时写，
         // 无 result 的失败保持 null，供 UI 判「结果缺失」而不是显示误导性的「告警 0」。
         const outcome = resolveScanRunOutcome(result, exitCode)
@@ -407,7 +524,7 @@ const runScanInternal = async (
         if (executorKind === 'container') {
             resourceNote = 'container executor did not return resource usage'
         } else if (executorKind === 'sandbox') {
-            resourceNote = 'container fallback (sandbox entry disabled) did not return resource usage'
+            resourceNote = 'sandbox 执行未产出资源读数（执行前拒绝 / 采样不可用）'
         }
         const resourceSnapshot = resource ?? unavailableResourceUsage(resourceNote)
         if (!resourceSnapshot.sigkillDetected) {
@@ -423,6 +540,10 @@ const runScanInternal = async (
         // 失败分类落库（单一事实源 run-failure-classify）：failed / dispatched 写三列，其余清空。
         // errorJson 口径与下方落库一致（优先状态机决策的 errorJson，回退执行器 error）；
         // engineCategories 供「errorJson 缺失但引擎已产出 result.errors」时回退细分。
+        // 沙箱交付失败 / 取消：清理结果声明的远端 dependfix/ 分支（默认分支不在范围）
+        if (executorKind === 'sandbox' && decision.status === 'failed') {
+            await cleanupFailedSandboxDelivery(repository, savedRun, result, token)
+        }
         applyFailureClassification(savedRun, {
             status: decision.status,
             error: decision.errorJson ?? error ?? null,
@@ -457,7 +578,7 @@ const runScanInternal = async (
                 const found = typeof result.summary.alertsFound === 'number' ? result.summary.alertsFound : 0
                 const converged = typeof result.summary.alertsConverged === 'number' ? result.summary.alertsConverged : 0
                 savedRun.summaryJson = JSON.stringify({
-                    ...result.summary,
+                    ...buildRunSummarySnapshot(result),
                     alertsFixed: 0,
                     alertsUnfixed: Math.max(0, found - converged),
                 })
@@ -468,14 +589,14 @@ const runScanInternal = async (
             savedRun.finishedAt = new Date()
             savedRun.errorJson = decision.errorJson ? JSON.stringify(decision.errorJson) : null
             if (result) {
-                savedRun.summaryJson = JSON.stringify(result.summary)
+                savedRun.summaryJson = JSON.stringify(buildRunSummarySnapshot(result))
                 savedRun.runUrl = runUrl
                 await reconcileRunResult(repository, savedRun.id, result as RunResult)
             }
         } else if (result) {
             savedRun.status = 'completed'
             savedRun.finishedAt = new Date()
-            savedRun.summaryJson = JSON.stringify(result.summary)
+            savedRun.summaryJson = JSON.stringify(buildRunSummarySnapshot(result))
             savedRun.runUrl = runUrl
             await reconcileRunResult(repository, savedRun.id, result as RunResult)
         }
@@ -489,7 +610,8 @@ const runScanInternal = async (
             savedRun.logsJson = logsJson
         }
 
-        const persistedRun = await runRepo.save(savedRun)
+        // 终态写回走条件更新：清理侧已置终态时不得被迟到 worker 覆盖（见 persistRunTerminalState）
+        const { run: persistedRun, written } = await persistRunTerminalState(ds, savedRun)
 
         // 环境事件审计（fire-and-forget）：
         // - A 场景 sandbox 启动降级 → sandbox_degraded 事件
@@ -497,13 +619,29 @@ const runScanInternal = async (
         // 不阻塞扫描主流程：失败仅日志 + audit_event 落库
         await recordEnvAuditEvent(persistedRun, decision, degradedReason, error)
 
-        // 业务通知 fire-and-forget：批次内 run 由批次终态合并；失败不阻断扫描
-        void notifyRunTerminal(persistedRun).catch((notifyError) => {
-            logger.error('[notification] run terminal notify failed', { error: notifyError })
-        })
+        // 业务通知 fire-and-forget：批次内 run 由批次终态合并；失败不阻断扫描。
+        // 未写回（清理侧已置终态）时跳过——清理侧已就同一 run 发过失败通知，避免重复投递。
+        if (written) {
+            notifyTerminalSafe(persistedRun)
+        }
 
         return persistedRun
     } catch (error) {
+        if (decision && (decision.status === 'completed' || decision.status === 'degraded') && decidedResult) {
+            const completed = decision
+            return await persistPostCompletionOutcome({
+                ds, run: savedRun, status: completed.status === 'degraded' ? 'degraded' : 'completed',
+                result: decidedResult, runUrl: decidedRunUrl,
+                resource, logsJson, error,
+                errorJson: completed.status === 'degraded' ? (completed.errorJson ?? null) : null,
+                persist: persistRunTerminalState, notify: notifyTerminalSafe, logger,
+                onPersisted: async (persisted) => {
+                    await recordEnvAuditEvent(persisted, completed, degradedReason, undefined)
+                    repository.lastScanAt = new Date()
+                    await repoRepo.save(repository)
+                },
+            })
+        }
         savedRun.status = 'failed'
         savedRun.finishedAt = new Date()
         const orchestrationFailure = {
@@ -516,12 +654,18 @@ const runScanInternal = async (
         savedRun.peakRssBytes = resourceSnapshot.peakRssBytes
         savedRun.oomKilled = resourceSnapshot.oomKilled
         savedRun.resourceJson = JSON.stringify(resourceSnapshot)
+        // 编排 catch-all 也要保留执行日志（logsJson 在 try 外声明并已赋值）：
+        // 否则 reconcile / 落库抛错时日志全丢，运行详情只剩「（无执行日志）」
+        if (logsJson) {
+            savedRun.logsJson = logsJson
+        }
         // 编排 catch-all 失败同样落失败分类（与状态机失败路径同源）
         applyFailureClassification(savedRun, { status: 'failed', error: orchestrationFailure })
-        const persisted = await runRepo.save(savedRun)
-        void notifyRunTerminal(persisted).catch((notifyError) => {
-            logger.error('[notification] run terminal notify failed', { error: notifyError })
-        })
+        // 编排 catch-all 同样走条件更新：与正常终态写回同一守卫
+        const { run: persisted, written } = await persistRunTerminalState(ds, savedRun)
+        if (written) {
+            notifyTerminalSafe(persisted)
+        }
         return persisted
     }
 }
@@ -568,105 +712,6 @@ async function runContainerExecutor(
         prNumber: execResult.prNumber,
         logsJson: execResult.logsJson ?? null,
         resource: execResult.resource,
-    }
-}
-
-/**
- * 环境事件审计：执行器 / 执行环境异常时落 AuditEvent + fire-and-forget 通知。
- *
- * 触发场景（与「运行失败分类」边界见 audit-event.ts 类型注释）：
- * - A 场景（sandbox 入口关闭 / 启动降级）→ sandbox_degraded / warn（入口关闭期间只落库、不通知）
- * - B 场景（sandbox 运行时失败）→ sandbox_unavailable / error
- * - C 场景（container 执行器环境不可用）→ container_unavailable / error
- *
- * 单次运行结果类错误（execution_timeout / clone_timeout / execution_failed 等）
- * 不在此落事件——它们由 failure_code / failure_stage / failure_kind 承载。
- *
- * 设计要点：
- * - 不抛错（fail-closed）：审计失败仅日志，不影响扫描主流程
- * - 通知 fire-and-forget：notifyEnvEvent 内部已捕获 channel 异常 + 按类型策略判定（policy.ts）
- * - A 场景沙箱降级但业务结果完整（degraded），B / C 场景环境不可用（failed）
- */
-async function recordEnvAuditEvent(
-    persistedRun: ScanRun,
-    decision: ReturnType<typeof resolveScanRunState>,
-    degradedReason: { code: string, message: string } | undefined,
-    error: { code: string, message: string } | undefined,
-): Promise<void> {
-    let eventType: AuditEventType | null = null
-    let severity: 'info' | 'warn' | 'error' | 'critical' = 'warn'
-    let payload: Record<string, unknown> = {}
-
-    if (decision.status === 'degraded' && (degradedReason?.code === 'sandbox_unavailable' || degradedReason?.code === 'sandbox_entry_disabled')) {
-        // sandbox 入口临时关闭 / 启动时不可用，已自动降级 ContainerExecutor（业务完整）
-        eventType = 'sandbox_degraded'
-        severity = 'warn'
-        payload = {
-            degradedReason,
-            fallback: 'container',
-            // 入口关闭期间的预期配置状态不通知；payload 显式标记，便于 /env-events 筛选区分
-            notificationSuppressed: degradedReason?.code === 'sandbox_entry_disabled',
-        }
-    } else if (decision.status === 'failed' && error?.code === 'container_unavailable') {
-        // C 场景：container 执行器环境不可用（工作根不可写 / 磁盘满 / 只读 FS）——默认部署下的环境健康信号
-        eventType = 'container_unavailable'
-        severity = 'error'
-        payload = { code: error.code, executor: 'container', message: error.message }
-    } else if (decision.status === 'failed' && error?.code === 'sandbox_unavailable') {
-        // B 场景：sandbox 运行时偶发故障，不静默降级（避免掩盖真实错误）
-        eventType = 'sandbox_unavailable'
-        severity = 'error'
-        // payload 包含 errno + code + adapter + message 便于事故溯源
-        // adapter 当前固定 docker（唯一已实现的 RuntimeAdapter；未来加 sysbox/kata 时按 executor 注入）
-        payload = {
-            errno: error.code,
-            code: error.code,
-            adapter: 'docker',
-            message: error.message,
-        }
-    }
-
-    if (!eventType) {
-        return
-    }
-
-    try {
-        const ds = await ensureDatabaseInitialized()
-        const eventRepo = ds.getRepository(AuditEvent)
-        const audit = await eventRepo.save(eventRepo.create({
-            type: eventType,
-            severity,
-            repositoryId: persistedRun.repositoryId,
-            scanRunId: persistedRun.id,
-            payloadJson: JSON.stringify(payload),
-            notified: false,
-            notifiedVia: null,
-        }))
-
-        // 触发通知（fire-and-forget，不 await，避免阻塞扫描主流程）
-        // sandbox_entry_disabled 是入口关闭期间的预期配置状态：只落库、不通知，
-        // 避免存量仓库每次扫描都占用共享通知配额、稀释 container_unavailable 等真实环境事故信号。
-        // 注意仅对 sandbox_degraded 事件生效；降级目标 container 不可用时仍按 container_unavailable 通知。
-        if (eventType === 'sandbox_degraded' && degradedReason?.code === 'sandbox_entry_disabled') {
-            return
-        }
-        const notificationEvent: NotificationEvent = {
-            id: audit.id,
-            type: eventType,
-            severity,
-            message: (payload.degradedReason as { message?: string } | undefined)?.message
-                ?? (payload.message as string | undefined)
-                ?? `${eventType} for ${persistedRun.repositoryId}`,
-            scanRunId: persistedRun.id,
-            payload,
-            createdAt: audit.createdAt,
-        }
-        // 异步触发：失败由 notifyEnvEvent 内部捕获（fail-closed）
-        notifyEnvEvent(notificationEvent).catch((e) => {
-            logger.error(`[scan-orchestrator] notifyEnvEvent fire-and-forget failed for audit ${audit.id}`, { error: e })
-        })
-    } catch (e) {
-        logger.error('[scan-orchestrator] failed to record env audit event', { error: e })
     }
 }
 
