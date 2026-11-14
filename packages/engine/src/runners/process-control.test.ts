@@ -7,7 +7,7 @@
 import { readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it, beforeEach } from 'vitest'
+import { describe, expect, it, beforeEach, vi } from 'vitest'
 import {
     getAbortReason,
     resolveTrackedCommandEnv,
@@ -397,9 +397,59 @@ describe('resolveTrackedCommandEnv', () => {
         expect(env?.HTTPS_PROXY).toBe('http://user-proxy:8080')
     })
 
+    it('keeps a caller-provided NO_PROXY when injecting the proxy', () => {
+        const env = resolveTrackedCommandEnv({ PATH: '/usr/bin', NO_PROXY: 'corp.example.com', no_proxy: 'corp.example.com' }, proxyEnv)
+        expect(env?.NO_PROXY).toBe('corp.example.com')
+        expect(env?.no_proxy).toBe('corp.example.com')
+        expect(env?.HTTPS_PROXY).toBe('http://127.0.0.1:1')
+    })
+
     it('leaves the environment untouched when no proxy is active', () => {
         expect(resolveTrackedCommandEnv(undefined, undefined)).toBeUndefined()
         const explicit = { PATH: '/usr/bin' }
         expect(resolveTrackedCommandEnv(explicit, undefined)).toBe(explicit)
+    })
+})
+
+describe('runTrackedCommand 的代理 env 注入', () => {
+    const PROXY_KEYS = ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy'] as const
+
+    it.skipIf(process.platform === 'win32')('keeps the base environment when injecting the audit proxy', async () => {
+        // 宿主自带代理时调用方代理分支会短路，需先隔离，否则用例退化为「只验证继承」
+        const saved = PROXY_KEYS.map((key) => [key, process.env[key]] as const)
+        for (const key of PROXY_KEYS) {
+            delete process.env[key]
+        }
+        vi.resetModules()
+        vi.doMock('./egress-audit', () => ({
+            getEgressProxyEnv: () => ({
+                HTTP_PROXY: 'http://127.0.0.1:1',
+                HTTPS_PROXY: 'http://127.0.0.1:1',
+                // MARKER 自证 mock 生效：静默失效时断言立刻红，不会退化成空跑
+                MARKER: 'audit',
+            }),
+        }))
+        try {
+            const mod = await import('./process-control')
+            const result = await mod.runTrackedCommand({
+                binary: 'sh',
+                args: ['-c', 'printf "%s|%s" "${HOME:-}" "${MARKER:-}"'],
+                cwd: tmpdir(),
+                timeoutMs: 10_000,
+            })
+            // 旧实现（代理 env 当完整 env）下 HOME 为空且无 MARKER：pnpm 会以 uv_os_homedir 崩溃
+            expect(result.stdout).toBe(`${process.env.HOME ?? ''}|audit`)
+            expect(result.stdout).not.toBe('|audit')
+        } finally {
+            vi.doUnmock('./egress-audit')
+            vi.resetModules()
+            for (const [key, value] of saved) {
+                if (value === undefined) {
+                    delete process.env[key]
+                } else {
+                    process.env[key] = value
+                }
+            }
+        }
     })
 })

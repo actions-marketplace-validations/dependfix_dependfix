@@ -47,7 +47,17 @@ export function resolveTrackedCommandEnv(
         base.HTTP_PROXY || base.HTTPS_PROXY || base.ALL_PROXY
         || base.http_proxy || base.https_proxy || base.all_proxy,
     )
-    return callerHasProxy ? { ...base } : { ...base, ...proxyEnv }
+    if (callerHasProxy) {
+        return { ...base }
+    }
+    const merged: NodeJS.ProcessEnv = { ...base, ...proxyEnv }
+    // 调用方自带的 NO_PROXY 优先：审计代理只补回环地址，不应抹掉用户已配置的直连域
+    for (const key of ['NO_PROXY', 'no_proxy'] as const) {
+        if (base[key] !== undefined) {
+            merged[key] = base[key]
+        }
+    }
+    return merged
 }
 
 /** 单流捕获上限（与 `execSync` 默认 `maxBuffer` 同量级）：超限后继续 drain 但不再累积。 */
@@ -261,7 +271,12 @@ export interface TrackedCommandParams {
     args: string[]
     cwd: string
     timeoutMs: number
-    /** 显式 env（缺省继承父进程环境——与既有 `execFileSync` 语义一致） */
+    /**
+     * 显式 env（缺省继承父进程环境——与既有 `execFileSync` 语义一致）。
+     *
+     * 传入即视为**完整环境**，不会自动并入父进程变量：只补个别变量时须自行展开 `process.env`，
+     * 否则子进程会丢失 `PATH` / `HOME` 等基础变量。
+     */
     env?: NodeJS.ProcessEnv
     /** 显式覆盖 shell 行为（缺省按平台：Windows 经 shell，其余平台直接 spawn） */
     shell?: boolean
